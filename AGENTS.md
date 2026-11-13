@@ -109,6 +109,14 @@ flutter build macos --debug
 - macOS Runner 已关闭 App Sandbox（本地 Python 子进程 + `~/.nondesign`）；不要随手加回
   sandbox 而不补 network client / app container。
 - 窗口：`MainFlutterWindow.swift` 固定在主显示器居中，避免 macOS 恢复离线显示器坐标。
+- **动效与控件一致性（2026-11-13）**：时长/曲线只取 `NonMotion`
+  （fast 120 / base 180 / slow 240ms，easeOutCubic）——不要散落裸 Duration。
+  对话框统一 `showNonDialog`（fade+scale 入场，barrierColor 可覆盖）；下拉统一
+  `nonSelect(context, …)`（菜单配色/圆角 10/高度上限 280/箭头一处定义，
+  inspector/settings 全部 DropdownButtonFormField 走它）；右键菜单与浮层走
+  popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
+  再写一份局部样式。
+
 - **渲染性能（2026-11-13）**：① SSE 思考/文档流式增量一律走 80ms 合帧
   （`_deltaBuffer`/`_thinkingBuffer` + Timer，事件头 `_handleAgentEvent` 入口与
   finally 双处冲刷）——逐片 notifyListeners 是全树重建放大器，别再手写直推。

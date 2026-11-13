@@ -349,6 +349,18 @@ class _TimelineRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    // 新行淡入（180ms）——流式运行时时间线频繁追加，瞬显会闪。
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: NonMotion.base,
+      curve: NonMotion.curve,
+      builder: (context, opacity, child) =>
+          Opacity(opacity: opacity, child: child),
+      child: _buildRow(context, p),
+    );
+  }
+
+  Widget _buildRow(BuildContext context, NonPalette p) {
     switch (entry.kind) {
       case 'user':
         return Align(

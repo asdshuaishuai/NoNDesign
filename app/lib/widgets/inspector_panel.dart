@@ -276,9 +276,8 @@ class _InspectorState extends State<Inspector> {
       Row(
         children: [
           Expanded(
-            child: DropdownButtonFormField<String>(
+            child: nonSelect<String>(context,
               value: _flowTarget,
-              isDense: true,
               decoration: const InputDecoration(hintText: '连接到画板…', contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
               items: [
                 for (final b in store.render.artboards.where((b) => b.id != store.activeBoard))
@@ -353,9 +352,8 @@ class _InspectorState extends State<Inspector> {
           _NumField(label: 'H', value: board.height, onCommit: (v) => store.applyOp('resize-canvas ${board.id} ${board.width.round()} ${v.round()}')),
           const SizedBox(width: 8),
           Expanded(
-            child: DropdownButtonFormField<String>(
+            child: nonSelect<String>(context,
               value: _theme,
-              isDense: true,
               decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
               items: const [
                 DropdownMenuItem(value: 'light', child: Text('light', style: TextStyle(fontSize: 11))),
@@ -517,7 +515,6 @@ class _NumFieldState extends State<_NumField> {
             prefixText: '${widget.label} ',
             prefixStyle: TextStyle(fontSize: 9, fontFamily: 'Menlo', color: p.ink4),
             contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            isDense: true,
           ),
           onSubmitted: (_) => _commit(),
           onTapOutside: (_) => _commit(),
@@ -651,10 +648,9 @@ class _SelectField extends StatelessWidget {
       children: [
         Text(label, style: TextStyle(fontSize: 9.5, color: p.ink4)),
         const SizedBox(height: 2),
-        DropdownButtonFormField<String>(
+        nonSelect<String>(context,
           value: options.contains(value) ? value : options.first,
-          isDense: true,
-          decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 7, vertical: 6)),
+            decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 7, vertical: 6)),
           items: [
             for (final o in options)
               DropdownMenuItem(value: o, child: Text(o, style: TextStyle(fontSize: 10.5, color: p.ink2))),
@@ -1461,10 +1457,9 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
           children: [
             SizedBox(
               width: 108,
-              child: DropdownButtonFormField<String>(
+              child: nonSelect<String>(context,
                 value: _trigger,
-                isDense: true,
-                decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+                  decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
                 items: [
                   for (final t in ['tap', 'long_press', 'swipe_left', 'swipe_right', 'swipe_up', 'swipe_down', 'scroll_end', 'key_enter', 'focus', 'blur'])
                     DropdownMenuItem(value: t, child: Text(t, style: TextStyle(fontSize: 10.5))),
@@ -1474,10 +1469,9 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
             ),
             const SizedBox(width: 5),
             Expanded(
-              child: DropdownButtonFormField<String>(
+              child: nonSelect<String>(context,
                 value: _action,
-                isDense: true,
-                decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+                  decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
                 items: [
                   for (final t in ['show_toast', 'navigate_to', 'set_text', 'set_state', 'toggle_state', 'haptic', 'play_sound', 'back'])
                     DropdownMenuItem(value: t, child: Text(_actionLabel(t), style: const TextStyle(fontSize: 10.5))),
@@ -1500,9 +1494,8 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
         if (_action == 'set_text') ...[
           Padding(
             padding: const EdgeInsets.only(top: 5),
-            child: DropdownButtonFormField<String>(
+            child: nonSelect<String>(context,
               value: _targetNode,
-              isDense: true,
               hint: const Text('目标节点', style: TextStyle(fontSize: 10.5)),
               items: [
                 for (final n in (board?.nodes ?? const <CanvasNode>[]))

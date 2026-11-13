@@ -98,7 +98,67 @@ class _LogoPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-class IconAction extends StatelessWidget {
+/// 统一对话框入口：fade + 轻微 scale 入场（240ms easeOutCubic），替代裸
+/// showDialog 的瞬显。全应用对话框一律走这里。
+Future<T?> showNonDialog<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool barrierDismissible = true,
+  String? barrierLabel,
+  Color? barrierColor,
+}) {
+  return showGeneralDialog<T>(
+    context: context,
+    barrierDismissible: barrierDismissible,
+    barrierLabel: barrierLabel ?? 'dialog',
+    barrierColor: barrierColor ?? Colors.black.withValues(alpha: 0.55),
+    transitionDuration: NonMotion.slow,
+    pageBuilder: (_, __, ___) => builder(context),
+    transitionBuilder: (context, anim, __, child) {
+      final curved = CurvedAnimation(parent: anim, curve: NonMotion.curve);
+      return FadeTransition(
+        opacity: curved,
+        child: ScaleTransition(
+          scale: Tween(begin: 0.965, end: 1.0).animate(curved),
+          child: child,
+        ),
+      );
+    },
+  );
+}
+
+/// 统一下拉（inspector/settings 全部 DropdownButtonFormField 走这里）：
+/// 菜单配色/圆角/最大高度/箭头一处定义，调用方只管 value/items/onChanged/decoration。
+DropdownButtonFormField<T> nonSelect<T>(
+  BuildContext context, {
+  required T? value,
+  required List<DropdownMenuItem<T>> items,
+  required ValueChanged<T?> onChanged,
+  InputDecoration? decoration,
+  Widget? hint,
+  bool expanded = false,
+}) {
+  final p = context.palette;
+  return DropdownButtonFormField<T>(
+    value: value,
+    hint: hint,
+    isDense: true,
+    isExpanded: expanded,
+    icon: Icon(Icons.expand_more, size: 14, color: p.ink4),
+    iconEnabledColor: p.ink4,
+    iconDisabledColor: p.ink4,
+    dropdownColor: p.panel2,
+    elevation: 14,
+    borderRadius: BorderRadius.circular(10),
+    menuMaxHeight: 280,
+    style: TextStyle(fontSize: 11.5, color: p.ink2),
+    decoration: decoration,
+    items: items,
+    onChanged: onChanged,
+  );
+}
+
+class IconAction extends StatefulWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback? onTap;
@@ -117,20 +177,40 @@ class IconAction extends StatelessWidget {
   });
 
   @override
+  State<IconAction> createState() => _IconActionState();
+}
+
+class _IconActionState extends State<IconAction> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
     final p = context.palette;
     return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: active ? p.accentSoft : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: onTap,
-          child: SizedBox(
-            width: size,
-            height: size,
-            child: Icon(icon, size: size * 0.52, color: active ? p.accent : (color ?? p.ink3)),
+      message: widget.tooltip,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: AnimatedContainer(
+          duration: NonMotion.fast,
+          curve: NonMotion.curve,
+          decoration: BoxDecoration(
+            color: widget.active
+                ? p.accentSoft
+                : _hover
+                    ? p.line.withValues(alpha: 0.32)
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: widget.onTap,
+            child: SizedBox(
+              width: widget.size,
+              height: widget.size,
+              child: Icon(widget.icon, size: widget.size * 0.52,
+                  color: widget.active ? p.accent : (widget.color ?? p.ink3)),
+            ),
           ),
         ),
       ),

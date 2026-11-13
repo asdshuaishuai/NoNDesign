@@ -165,6 +165,14 @@ extension NonThemeX on BuildContext {
   NonPalette get palette => Theme.of(this).extension<NonPalette>() ?? NonPalette.dark;
 }
 
+/// 统一动效语言：所有动画时长/曲线只从这里取，不要散落裸 Duration。
+abstract final class NonMotion {
+  static const fast = Duration(milliseconds: 120);
+  static const base = Duration(milliseconds: 180);
+  static const slow = Duration(milliseconds: 240);
+  static const Curve curve = Curves.easeOutCubic;
+}
+
 class AppTheme {
   static ThemeData build({bool dark = true}) {
     final p = dark ? NonPalette.dark : NonPalette.light;
@@ -248,6 +256,28 @@ class AppTheme {
         thumbColor: WidgetStatePropertyAll(p.lineStrong),
         radius: const Radius.circular(8),
         thickness: const WidgetStatePropertyAll(6),
+      ),
+      textSelectionTheme: TextSelectionThemeData(
+        cursorColor: p.accent,
+        selectionColor: p.accent.withValues(alpha: 0.25),
+        selectionHandleColor: p.accent,
+      ),
+      // 右键菜单 / PopupMenuButton：统一深色浮层（画布右键、面板菜单共用）。
+      popupMenuTheme: PopupMenuThemeData(
+        color: p.panel2,
+        surfaceTintColor: Colors.transparent,
+        elevation: 14,
+        shadowColor: Colors.black.withValues(alpha: 0.45),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: p.line.withValues(alpha: 0.6))),
+        textStyle: TextStyle(fontSize: 11.5, color: p.ink2),
+        menuPadding: const EdgeInsets.symmetric(vertical: 4),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: p.panel,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: p.line.withValues(alpha: 0.7))),
+        titleTextStyle: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: p.ink),
+        contentTextStyle: TextStyle(fontSize: 12, color: p.ink2),
       ),
       extensions: [p],
     );

@@ -279,7 +279,7 @@ class _CanvasViewState extends State<CanvasView> {
 
   Future<void> _editText(AppStore store, CanvasNode node) async {
     final controller = TextEditingController(text: node.text);
-    final value = await showDialog<String>(
+    final value = await showNonDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('编辑文本', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),

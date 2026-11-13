@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../core/api.dart';
 import '../core/models.dart';
 import '../core/store.dart';
+import '../core/theme.dart';
 import 'canvas_view.dart';
 import 'common.dart';
 
@@ -186,44 +187,70 @@ class _PlayViewState extends State<PlayView> {
                                       onTap: () => _onZoneTap(zone, board.id),
                                     ),
                                   ),
-                                if (_toast != null)
-                                  Positioned(
-                                    left: 0,
-                                    right: 0,
-                                    bottom: 16,
-                                    child: Center(
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withValues(alpha: 0.82),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Text(
-                                          _toast!,
-                                          style: const TextStyle(fontSize: 12, color: Colors.white),
-                                        ),
+                                // toast：淡入 + 上滑入场，切换文案平滑过渡。
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 16,
+                                  child: AnimatedSwitcher(
+                                    duration: NonMotion.base,
+                                    switchInCurve: NonMotion.curve,
+                                    switchOutCurve: NonMotion.curve.flipped,
+                                    transitionBuilder: (child, anim) => FadeTransition(
+                                      opacity: anim,
+                                      child: SlideTransition(
+                                        position: Tween(begin: const Offset(0, 0.4), end: Offset.zero).animate(anim),
+                                        child: child,
                                       ),
                                     ),
+                                    child: _toast == null
+                                        ? const SizedBox(height: 0)
+                                        : Container(
+                                            key: ValueKey(_toast),
+                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(alpha: 0.82),
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            child: Text(
+                                              _toast!,
+                                              style: const TextStyle(fontSize: 12, color: Colors.white),
+                                            ),
+                                          ),
                                   ),
-                                if (_badge != null)
-                                  Positioned(
-                                    left: 0,
-                                    right: 0,
-                                    top: 16,
-                                    child: Center(
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xD97C8CFF),
-                                          borderRadius: BorderRadius.circular(999),
-                                        ),
-                                        child: Text(
-                                          _badge!,
-                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
-                                        ),
+                                ),
+                                // 手势徽标：下落 + 淡入。
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  top: 16,
+                                  child: AnimatedSwitcher(
+                                    duration: NonMotion.fast,
+                                    switchInCurve: NonMotion.curve,
+                                    switchOutCurve: NonMotion.curve.flipped,
+                                    transitionBuilder: (child, anim) => FadeTransition(
+                                      opacity: anim,
+                                      child: SlideTransition(
+                                        position: Tween(begin: const Offset(0, -0.5), end: Offset.zero).animate(anim),
+                                        child: child,
                                       ),
                                     ),
+                                    child: _badge == null
+                                        ? const SizedBox(height: 0)
+                                        : Container(
+                                            key: ValueKey(_badge),
+                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xD97C8CFF),
+                                              borderRadius: BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              _badge!,
+                                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                                            ),
+                                          ),
                                   ),
+                                ),
                               ],
                             ),
                           ),

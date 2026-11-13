@@ -100,19 +100,33 @@ class _WorkspaceState extends State<Workspace> {
   }
 
   Widget _center(AppStore store) {
-    switch (store.view) {
-      case 'docs':
-        return const DocsView();
-      case 'source':
-        return const _SourceView();
-      default:
-        return Column(
-          children: [
-            const _BoardTabs(),
-            const Expanded(child: CanvasView()),
-          ],
-        );
-    }
+    // 视图切换过渡：fade + 8px 上滑（180ms）。KeyedSubtree 按 view 键控，
+    // 同视图内 store 变化不会触发重播。
+    return AnimatedSwitcher(
+      duration: NonMotion.base,
+      switchInCurve: NonMotion.curve,
+      switchOutCurve: NonMotion.curve.flipped,
+      transitionBuilder: (child, anim) => FadeTransition(
+        opacity: anim,
+        child: SlideTransition(
+          position: Tween(begin: const Offset(0, 0.012), end: Offset.zero).animate(anim),
+          child: child,
+        ),
+      ),
+      child: KeyedSubtree(
+        key: ValueKey(store.view),
+        child: switch (store.view) {
+          'docs' => const DocsView(),
+          'source' => const _SourceView(),
+          _ => Column(
+              children: [
+                const _BoardTabs(),
+                const Expanded(child: CanvasView()),
+              ],
+            ),
+        },
+      ),
+    );
   }
 
   Future<void> _command() async {
@@ -130,7 +144,7 @@ class _WorkspaceState extends State<Workspace> {
   }
 
   Future<void> _shortcuts() async {
-    await showDialog<void>(context: context, builder: (context) => const _ShortcutsDialog());
+    await showNonDialog(context: context, builder: (context) => const _ShortcutsDialog());
   }
 
   Future<void> _newProject() => showNewProjectFlow(context);
@@ -142,7 +156,7 @@ class _WorkspaceState extends State<Workspace> {
 }
 
 Future<void> showNewProjectFlow(BuildContext context) async {
-  final result = await showDialog<NewProjectResult>(
+  final result = await showNonDialog<NewProjectResult>(
     context: context,
     builder: (context) => const NewProjectDialog(),
   );
@@ -183,7 +197,7 @@ Future<void> openProjectFlow(BuildContext context, String path) async {
   var result = await store.openProjectPath(target);
   var attempt = 0;
   while (result == OpenResult.needPassword && attempt < 3 && context.mounted) {
-    final pw = await showDialog<String>(
+    final pw = await showNonDialog<String>(
       context: context,
       builder: (context) => PasswordDialog(path: target, retry: attempt > 0),
     );
@@ -199,7 +213,7 @@ Future<void> openProjectFlow(BuildContext context, String path) async {
 Future<String?> showOpenProjectSheet(BuildContext context) async {
   context.read<AppStore>().refreshProjects();
   if (!context.mounted) return null;
-  return showDialog<String>(
+  return showNonDialog<String>(
     context: context,
     builder: (context) => const _OpenProjectDialog(),
   );

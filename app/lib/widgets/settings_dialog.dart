@@ -8,7 +8,7 @@ import '../core/theme.dart';
 import 'common.dart';
 
 Future<void> showSettingsDialog(BuildContext context) async {
-  await showDialog<void>(
+  await showNonDialog<void>(
     context: context,
     builder: (context) => const _SettingsDialog(),
   );
@@ -145,10 +145,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           Row(
             children: [
               Expanded(
-                child: _labeled(context, '服务商', DropdownButtonFormField<String>(
+                child: _labeled(context, '服务商', nonSelect<String>(context,
                   value: store.settings.providerId,
-                  isDense: true,
-                  items: [
+                      items: [
                     for (final id in store.registry.providerIds)
                       DropdownMenuItem(value: id, child: Text(store.registry.provider(id)?['name']?.toString() ?? id, style: const TextStyle(fontSize: 12))),
                   ],

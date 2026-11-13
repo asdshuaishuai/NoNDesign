@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../core/keys.dart';
 import '../core/store.dart';
+import 'common.dart';
 import '../core/theme.dart';
 
 Future<void> showCommandPalette(
@@ -12,7 +13,7 @@ Future<void> showCommandPalette(
   required VoidCallback onSettings,
   required VoidCallback onShortcuts,
 }) async {
-  await showDialog<void>(
+  await showNonDialog<void>(
     context: context,
     barrierColor: Colors.black.withValues(alpha: 0.5),
     builder: (context) => _CommandPalette(
