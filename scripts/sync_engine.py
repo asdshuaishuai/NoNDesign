@@ -16,6 +16,7 @@ import json
 import sys
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 ENGINE_DIR = ROOT / "engine"
@@ -83,10 +84,14 @@ def main() -> None:
         raise SystemExit(f"template registry shrank: {len(templates)}")
     if len(components) < 40:
         raise SystemExit(f"component registry shrank: {len(components)}")
+    build_line = probe_engine_02(host, seed)
     MANIFEST.write_text(
         json.dumps(
             {
                 "version": version.get("version"),
+                # 引擎自报版本可能滞后于 dev 构建（0.2 dev 自报 0.1.11）——
+                # build_line 是行为探针判定的事实，别拿 version 当能力面依据。
+                "build_line": build_line,
                 "source": source,
                 "sha512": digest,
                 "bytes": len(data),
@@ -99,9 +104,71 @@ def main() -> None:
         "utf-8",
     )
     print(
-        f"[sync_engine] ✓ {version.get('version')} · {len(templates)} templates / "
+        f"[sync_engine] ✓ {version.get('version')} ({build_line}) · {len(templates)} templates / "
         f"{len(components)} components / render ok"
     )
+
+
+def _apply(host: Any, doc: str, op: str) -> str:
+    out = host.session("session_apply_human", doc, op)
+    if not out.get("ok"):
+        raise SystemExit(f"engine-0.2 probe: op {op!r} rejected: {out.get('error')}")
+    return out["mbt"]
+
+
+def probe_engine_02(host: Any, seed: str) -> str:
+    """Behavior anchors for the engine-0.2 capability face. A true 0.1.11
+    release wasm fails here — this repo runs the 0.2 line, and the self-reported
+    version string may lag the dev build (probed: 0.2 dev self-reports 0.1.11).
+    Every anchor below was verified against the real artifact before being
+    pinned."""
+    import json as _json
+    import re as _re
+
+    # 1) session_event export face.
+    if not host.has_export("session_event_in"):
+        raise SystemExit("engine-0.2 probe: session_event_in export missing (0.1.x wasm?)")
+
+    # 2) spec style preset → frontmatter theme (needs the complete spec shape;
+    #    a bare {"style":...} is silently ignored by the engine).
+    spec = _json.dumps(
+        {
+            "v": 1,
+            "style": "apple",
+            "palette": {"primary": "#2F6B4F", "background": "#FFFFFF", "surface": "#F2F7F4",
+                        "text": "#14201A", "muted": "#5F7A6B", "danger": "#DC2626", "success": "#16A34A"},
+            "typography": {"h1": 30, "body": 14, "caption": 12},
+            "spacing": [4, 8, 12, 16, 24, 32],
+            "radius": {"sm": 8, "md": 12, "lg": 16},
+        }
+    )
+    gen = host.generate(seed, "探针页 as probe_page", "probe_page", spec)
+    if not gen.get("ok"):
+        raise SystemExit(f"engine-0.2 probe: generate failed: {gen.get('error')}")
+    if not _re.search(r"theme:\s*apple", gen.get("mbt", "")):
+        raise SystemExit("engine-0.2 probe: spec style preset did not land (theme: apple missing)")
+
+    # 3) gesture end-to-end: long_press on an interact marker navigates boards.
+    doc = _apply(host, seed, "create probe_detail")
+    doc = _apply(host, doc, "place __seed button probe_btn - 30 110 140 44 text=下一页")
+    doc = _apply(host, doc, "flow __seed probe_detail probe_btn")
+    doc = _apply(host, doc, "interact __seed probe_btn long_press navigate_to:probe_detail")
+    ev = host.event(doc, "__seed", "long_press:100:130:500")
+    if not (ev.get("ok") and ev.get("current") == "probe_detail"):
+        raise SystemExit(f"engine-0.2 probe: gesture long_press did not navigate: {ev}")
+
+    # 4) flow transition vocabulary: frontmatter `transition:` is accepted and
+    #    surfaced by session_flows; an unknown value is rejected at render.
+    doc_fade = _re.sub(r"([ ]+trigger: tap:\S+)", r"\1\n      transition: fade", doc, count=1)
+    flows = host.session("session_flows", doc_fade)
+    edges = (flows.get("data") or []) if isinstance(flows, dict) else []
+    if not any(e.get("transition") == "fade" for e in edges):
+        raise SystemExit(f"engine-0.2 probe: transition:fade not honored: {flows}")
+    doc_bad = _re.sub(r"([ ]+trigger: tap:\S+)", r"\1\n      transition: bogus_xyz", doc, count=1)
+    if host.render(doc_bad).get("ok"):
+        raise SystemExit("engine-0.2 probe: unknown transition was NOT rejected")
+
+    return "0.2-dev"
 
 
 if __name__ == "__main__":

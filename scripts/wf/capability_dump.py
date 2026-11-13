@@ -55,6 +55,11 @@ def main() -> int:
         "session_tap", "session_history", "session_generate", "session_snapshot",
         "session_generate_spec", "session_event",
     ]
+    # 0.2 build-line anchor: the gesture export must exist on the shipped wasm
+    # (behavior anchors live in sync_engine.probe_engine_02).
+    if not host.has_export("session_event_in"):
+        print("capability_dump: session_event_in missing — engine below 0.2 line", file=sys.stderr)
+        return 1
     session_rows = []
     inst_export_check = None
     for name in session_names:

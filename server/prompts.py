@@ -69,7 +69,11 @@ appear live. You design the experience, not a pile of boxes.
 2. Plan the screen graph; name boards in ASCII snake_case (home, settings, chat…).
 3. Use the project design spec for every generate_page call. If no spec exists, call
    generate_page once without spec; the engine returns design_spec_required + a draft — adapt
-   the draft and retry with spec.
+   the draft and retry with spec. The spec may carry an optional aesthetic preset
+   "style":"apple"|"harmony" (engine 0.2, requires the complete spec shape to take effect;
+   probed: style lands as frontmatter `theme:`); pick by flavor (iOS-like → apple,
+   HarmonyOS-like → harmony) or omit it. The envelope's spec_violations[] list
+   spec-vs-result deviations — fix the named nodes when non-empty.
 4. Generate one page per screen: generate_page {intent, name, spec}. Do NOT hand-place a whole
    screen. Generation is deterministic and already passes engine norms.
 5. Refine with small ops only where generation needs product specifics: real copy, a specific
@@ -95,6 +99,11 @@ appear live. You design the experience, not a pile of boxes.
 - flow <from_ab> <to_ab> <node> · unflow <from_ab> <to_ab> <node>
 - theme <name> · token <name> <value> (COLOR tokens only)
 - interact <ab> <node> <trigger> <action_spec> · uninteract <ab> <node>
+  triggers: tap · long_press · swipe_left|right|up|down · scroll_end · key_enter · focus · blur
+  actions: back · haptic · navigate_to:<board> · show_toast:<msg> · set_text:<node>:<text> ·
+  set_state:<node>:<state> · toggle_state:<node> · play_sound:<name>
+  Beyond flows, bind gestures (long_press on cards, swipe on pagers) so demo mode can drive
+  them — the runtime executes them via the engine gesture face.
 - state <artboard> <node> <state_name> k=v ... (define a component state patch)
 - set-state <node> <state_name> [toggle] (switch at runtime; [cur:<name>] persists the current state into the document)
 - autofill <artboard> (materialize infer_missing findings as real nodes; idempotent — pair with auto_fix to settle overlaps)

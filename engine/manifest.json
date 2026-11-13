@@ -1,5 +1,6 @@
 {
   "version": "0.1.11",
+  "build_line": "0.2-dev",
   "source": "existing engine/moonviz.wasm",
   "sha512": "sha512-W4aOY6PyUVLHxcMc5BPKYH+4sUNcHuQ8oRP+fFBT+T4D6DW/miZtihk0En6pQxJZeH76Je7SNAjqI2gRlDt9zw==",
   "bytes": 805952,

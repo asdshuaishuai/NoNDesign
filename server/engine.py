@@ -54,7 +54,10 @@ NO_ARG_SESSION = {
     "session_save",
     "session_library_snapshot",
     "session_snapshot",
-    "session_generate_spec",
+    # session_generate_spec 不在此列（probed on the 0.2 dev build）：它要
+    # artboard/name/spec 三个 UTF-16 指针直参，无参调用是错误契约。spec 驱动
+    # 生成走 generate()（session_generate_in，spec→in 槽），0.2 的 style 预设
+    # 已在该面实测生效（完整 spec + style:apple → frontmatter theme: apple）。
 }
 
 
@@ -243,6 +246,11 @@ class EngineHost:
     def list_components(self) -> list[Any]:
         return list(self.components)
 
+    def has_export(self, name: str) -> bool:
+        with self.lock:
+            self._ensure()
+            return name in self.exports
+
     def validate(self, mbt: str) -> dict[str, Any]:
         with self.lock:
             self._ensure()
@@ -388,8 +396,14 @@ class EngineHost:
 
     def event(self, mbt: str, artboard: str, spec: str) -> dict[str, Any]:
         """session_event dual-slot (arg=artboard, in=spec). `spec` is the raw
-        event token, not JSON — probed: `key_enter` (ok) vs {"type":"key",...}
-        (unknown_event). Envelope matches tap: {ok, changes[], current, mbt}."""
+        event token, not JSON. Vocabulary probed against the shipped 0.2 build
+        (end-to-end: interact long_press → event → nav_push + artboard_changed):
+          accepted — `long_press:<x>:<y>:<ms>` (ms field required),
+            `swipe_left|right|up|down` (bare) and `swipe_...:<x>:<y>` (start
+            point), `key_enter`, `key:up|down|left|right`;
+          rejected as unknown_event — bare arrows like `key_up`, `focus`,
+            `long_press` without ms, JSON payloads like {"type":"key",...}.
+        Envelope matches tap: {ok, changes[], current, mbt}."""
         with self.lock:
             self._ensure()
             try:
