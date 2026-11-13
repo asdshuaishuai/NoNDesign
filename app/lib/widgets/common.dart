@@ -143,6 +143,9 @@ DropdownButtonFormField<T> nonSelect<T>(
     value: value,
     hint: hint,
     isDense: true,
+    // 菜单行高收敛：DropdownMenuItem 默认 48px（kMinInteractiveDimension），
+    // 密集工具界面里显得巨大；32px 行高 + 280px 上限 ≈ 8 行视口。
+    itemHeight: 32,
     isExpanded: expanded,
     icon: Icon(Icons.expand_more, size: 14, color: p.ink4),
     iconEnabledColor: p.ink4,

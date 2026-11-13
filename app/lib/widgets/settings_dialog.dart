@@ -269,7 +269,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                                   Flexible(child: Text(m.name, overflow: TextOverflow.ellipsis,
                                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: p.ink))),
                                   const SizedBox(width: 5),
-                                  if (m.toolCall) const Pill(label: 'tools', color: Color(0xFF3DDC97)),
+                                  if (m.toolCall) Pill(label: 'tools', color: p.success),
                                   if (m.reasoning) Pill(label: 'thinking', color: p.accent),
                                 ],
                               ),
@@ -290,57 +290,89 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(10)),
+              // 左右两列：左列标题+思考等级；右列元数据（context/步数）独立
+              // 成栏、右缘互相对齐——原来两个右对齐碎片散在两行，视觉孤立。
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Icon(Icons.auto_awesome, size: 13, color: p.accent),
-                      const SizedBox(width: 5),
-                      Text(store.model!.name, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
-                      const Spacer(),
-                      Text('${formatTokens(store.model!.context)} context', style: TextStyle(fontSize: 10, color: p.ink4)),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Text('思考等级', style: TextStyle(fontSize: 10, color: p.ink3)),
-                      const SizedBox(width: 6),
-                      for (final level in _levels(store.model!))
-                        Padding(
-                          padding: const EdgeInsets.only(right: 3),
-                          child: InkWell(
-                            onTap: () async {
-                              store.settings.thinkingLevel = level;
-                              await store.saveSettings();
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: store.settings.thinkingLevel == level ? p.accent : p.panel3,
-                                borderRadius: BorderRadius.circular(5),
-                              ),
-                              child: Text(level,
-                                  style: TextStyle(fontSize: 10, color: store.settings.thinkingLevel == level ? Colors.white : p.ink3)),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.auto_awesome, size: 13, color: p.accent),
+                                const SizedBox(width: 5),
+                                Flexible(
+                                  child: Text(store.model!.name,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
+                                ),
+                              ],
                             ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Text('思考等级', style: TextStyle(fontSize: 10, color: p.ink3)),
+                                const SizedBox(width: 6),
+                                for (final level in _levels(store.model!))
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 3),
+                                    child: InkWell(
+                                      onTap: () async {
+                                        store.settings.thinkingLevel = level;
+                                        await store.saveSettings();
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: store.settings.thinkingLevel == level ? p.accent : p.panel3,
+                                          borderRadius: BorderRadius.circular(5),
+                                        ),
+                                        child: Text(level,
+                                            style: TextStyle(
+                                                fontSize: 10,
+                                                color: store.settings.thinkingLevel == level ? Colors.white : p.ink3)),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text('${formatTokens(store.model!.context)} context',
+                              style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                          const SizedBox(height: 6),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('步数', style: TextStyle(fontSize: 10, color: p.ink3)),
+                              const SizedBox(width: 4),
+                              SizedBox(
+                                width: 54,
+                                height: 24,
+                                child: TextFormField(
+                                  initialValue: store.settings.maxSteps.toString(),
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink),
+                                  decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 3)),
+                                  onFieldSubmitted: (v) async {
+                                    store.settings.maxSteps = (int.tryParse(v) ?? 60).clamp(4, 200);
+                                    await store.saveSettings();
+                                  },
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                      const Spacer(),
-                      Text('步数', style: TextStyle(fontSize: 10, color: p.ink3)),
-                      const SizedBox(width: 4),
-                      SizedBox(
-                        width: 54,
-                        height: 26,
-                        child: TextFormField(
-                          initialValue: store.settings.maxSteps.toString(),
-                          style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink),
-                          decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 3)),
-                          onFieldSubmitted: (v) async {
-                            store.settings.maxSteps = (int.tryParse(v) ?? 60).clamp(4, 200);
-                            await store.saveSettings();
-                          },
-                        ),
+                        ],
                       ),
                     ],
                   ),
