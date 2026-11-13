@@ -283,7 +283,7 @@ class _CanvasViewState extends State<CanvasView> {
     final value = await showNonDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('编辑文本', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+        title: const Text('编辑文本', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
         content: SizedBox(
           width: 360,
           child: TextField(
@@ -357,6 +357,7 @@ class _CanvasViewState extends State<CanvasView> {
                             boards: boards,
                             positions: layout.positions,
                             flows: source.flows,
+                            accent: p.accent,
                               zoom: _controller.value.getMaxScaleOnAxis(),
                             ),
                           ),
@@ -408,7 +409,7 @@ class _CanvasViewState extends State<CanvasView> {
                         children: [
                           Container(width: 5, height: 5, decoration: BoxDecoration(color: p.accent, shape: BoxShape.circle)),
                           const SizedBox(width: 5),
-                          Text('LIVE · NoN 正在工作', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w600, color: p.accent)),
+                          Text('LIVE · NoN 正在工作', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
                         ],
                       ),
                     ),
@@ -421,7 +422,7 @@ class _CanvasViewState extends State<CanvasView> {
                     ),
                     child: Text(
                       '${boards.length} 画板 · space 拖动 · ${modCombo('⌘')}滚轮缩放',
-                      style: TextStyle(fontSize: 9, color: p.ink4),
+                      style: TextStyle(fontSize: 10, color: p.ink4),
                     ),
                   ),
                 ],
@@ -464,7 +465,7 @@ class _CanvasViewState extends State<CanvasView> {
                 ),
                 const SizedBox(width: 6),
                 Text('${board.width.round()}×${board.height.round()}',
-                    style: TextStyle(fontSize: 9.5, fontFamily: 'monospace', color: p.ink4)),
+                    style: TextStyle(fontSize: 10, fontFamily: 'monospace', color: p.ink4)),
               ],
             ),
           ),
@@ -495,6 +496,7 @@ class _CanvasViewState extends State<CanvasView> {
                           child: CustomPaint(
                             painter: ArtboardPainter(
                             nodes: board.nodes,
+                            accent: p.accent,
                             selectedId: active ? store.selectedNode : null,
                             selectedIds: active ? store.selectedNodes : const [],
                             hoverId: null,
@@ -738,6 +740,8 @@ class _CanvasViewState extends State<CanvasView> {
 
 class ArtboardPainter extends CustomPainter {
   final List<CanvasNode> nodes;
+  /// 品牌强调色（palette.accent）——painter 无 BuildContext，由调用方传入。
+  final Color accent;
   final String? selectedId;
   final List<String> selectedIds;
   final String? hoverId;
@@ -748,6 +752,7 @@ class ArtboardPainter extends CustomPainter {
 
   ArtboardPainter({
     required this.nodes,
+    required this.accent,
     this.selectedId,
     this.selectedIds = const [],
     this.hoverId,
@@ -820,9 +825,9 @@ class ArtboardPainter extends CustomPainter {
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.5
-            ..color = const Color(0xFF7C8CFF),
+            ..color = accent,
         );
-        final handle = Paint()..color = const Color(0xFF7C8CFF);
+        final handle = Paint()..color = accent;
         // 8 个手柄点与 _selectionHandles 的命中区一一对应。
         for (final point in [
           rect.topLeft,
@@ -842,7 +847,7 @@ class ArtboardPainter extends CustomPainter {
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1
-            ..color = const Color(0x997C8CFF),
+            ..color = accent.withValues(alpha: 0.60),
         );
       } else if (node.id == hoverId) {
         canvas.drawRRect(
@@ -850,7 +855,7 @@ class ArtboardPainter extends CustomPainter {
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1
-            ..color = const Color(0x887C8CFF),
+            ..color = accent.withValues(alpha: 0.53),
         );
       }
     }
@@ -957,13 +962,14 @@ class FlowPainter extends CustomPainter {
   final List<Flow> flows;
   final double zoom;
 
-  FlowPainter({required this.boards, required this.positions, required this.flows, required this.zoom});
+  FlowPainter({required this.boards, required this.positions, required this.flows, required this.zoom, required this.accent});
+  final Color accent;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (flows.isEmpty) return;
     final stroke = Paint()
-      ..color = const Color(0xFF7C8CFF).withValues(alpha: 0.55)
+      ..color = accent.withValues(alpha: 0.55)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5 / math.max(0.2, zoom)
       ..strokeCap = StrokeCap.round;
@@ -1003,7 +1009,7 @@ class FlowPainter extends CustomPainter {
         ..lineTo(end.dx - len * math.cos(angle - 0.45), end.dy - len * math.sin(angle - 0.45))
         ..lineTo(end.dx - len * math.cos(angle + 0.45), end.dy - len * math.sin(angle + 0.45))
         ..close();
-      canvas.drawPath(arrow, Paint()..color = const Color(0xFF7C8CFF).withValues(alpha: 0.8));
+      canvas.drawPath(arrow, Paint()..color = accent.withValues(alpha: 0.8));
     }
   }
 
@@ -1043,7 +1049,7 @@ class _EmptyCanvas extends StatelessWidget {
                   height: 36,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(11),
-                    gradient: const LinearGradient(colors: [Color(0xFF7C8CFF), Color(0xFFB58CFF)]),
+                    gradient: LinearGradient(colors: [p.accent, p.accent2]),
                   ),
                   child: const Icon(Icons.auto_awesome, size: 17, color: Colors.white),
                 ),
@@ -1051,7 +1057,7 @@ class _EmptyCanvas extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('从一句话开始', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: p.ink)),
+                    Text('从一句话开始', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
                     Text('NoN 先写产品文档与设计规范，再把原型画到画布上。',
                         style: TextStyle(fontSize: 11, color: p.ink3)),
                   ],
@@ -1120,7 +1126,7 @@ class _CanvasHud extends StatelessWidget {
                 width: 48,
                 child: Text('${(zoom * 100).round()}%',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 10.5, fontFamily: 'monospace', color: p.ink2)),
+                    style: TextStyle(fontSize: 11, fontFamily: 'monospace', color: p.ink2)),
               ),
               IconAction(icon: Icons.add, tooltip: '放大', size: 26, onTap: onZoomIn),
               Container(width: 1, height: 16, color: p.line),

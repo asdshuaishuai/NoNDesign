@@ -112,7 +112,7 @@ class _BootScreenState extends State<_BootScreen> with SingleTickerProviderState
               },
             ),
             const SizedBox(height: 18),
-            Text('NoNDesign', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3)),
+            Text('NoNDesign', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3)),
             const SizedBox(height: 16),
             SizedBox(
               width: 168,
@@ -128,7 +128,7 @@ class _BootScreenState extends State<_BootScreen> with SingleTickerProviderState
               animation: _c,
               builder: (context, _) {
                 final dots = '.' * (1 + ((_c.value * 3).floor() % 3));
-                return Text('正在就绪$dots', style: TextStyle(fontSize: 10.5, color: p.ink3));
+                return Text('正在就绪$dots', style: TextStyle(fontSize: 11, color: p.ink3));
               },
             ),
           ],
@@ -197,7 +197,7 @@ class _BootError extends StatelessWidget {
               const SizedBox(height: 10),
               Text('启动失败', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
               const SizedBox(height: 6),
-              SelectableText(message, style: TextStyle(fontSize: 10.5, height: 1.5, fontFamily: 'Menlo', color: p.ink3)),
+              SelectableText(message, style: TextStyle(fontSize: 11, height: 1.5, fontFamily: 'Menlo', color: p.ink3)),
               const SizedBox(height: 14),
               Text('检查 .venv 依赖与 server/main.py；或设置 NONDESIGN_SERVER 指向已运行的服务。',
                   textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: p.ink4)),

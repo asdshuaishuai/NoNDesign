@@ -85,6 +85,7 @@ class _PlayViewState extends State<PlayView> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
+    final p = context.palette;
     final render = _live ?? store.render;
     final board = render.board(_activeBoard ?? store.activeBoard);
     if (board == null) {
@@ -120,13 +121,13 @@ class _PlayViewState extends State<PlayView> {
                   children: [
                     IconAction(icon: Icons.close, tooltip: '退出演示 Esc', size: 28, onTap: () => store.setView('design')),
                     const SizedBox(width: 6),
-                    const Pill(label: '演示模式', color: Color(0xFF7C8CFF), background: Color(0x247C8CFF)),
+                    Pill(label: '演示模式', color: p.accent, background: p.accent.withValues(alpha: 0.14)),
                     const SizedBox(width: 8),
                     Text(board.name.isEmpty ? board.id : board.name,
                         style: const TextStyle(fontSize: 12, color: Color(0xFFA6ADBD))),
                     const SizedBox(width: 6),
                     Text('${render.artboards.indexWhere((b) => b.id == board.id) + 1} / ${render.artboards.length}',
-                        style: const TextStyle(fontSize: 9.5, fontFamily: 'Menlo', color: Color(0xFF737B8D))),
+                        style: const TextStyle(fontSize: 10, fontFamily: 'Menlo', color: Color(0xFF737B8D))),
                     const Spacer(),
                     IconAction(icon: Icons.chevron_left, tooltip: '返回上一页 ←', size: 28, onTap: _goBack),
                     IconAction(
@@ -170,7 +171,7 @@ class _PlayViewState extends State<PlayView> {
                             child: Stack(
                               children: [
                                 Positioned.fill(
-                                  child: CustomPaint(painter: ArtboardPainter(nodes: board.nodes)),
+                                  child: CustomPaint(painter: ArtboardPainter(nodes: board.nodes, accent: p.accent)),
                                 ),
                                 for (final zone in hotzones)
                                   Positioned(
@@ -237,7 +238,7 @@ class _PlayViewState extends State<PlayView> {
                                             key: ValueKey(_badge),
                                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                                             decoration: BoxDecoration(
-                                              color: const Color(0xD97C8CFF),
+                                              color: p.accent.withValues(alpha: 0.85),
                                               borderRadius: BorderRadius.circular(999),
                                             ),
                                             child: Text(
@@ -261,7 +262,7 @@ class _PlayViewState extends State<PlayView> {
                 alignment: Alignment.center,
                 decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0x14FFFFFF)))),
                 child: Text('Esc 退出 · ← 返回 · 点按/长按/滑动/按键均由引擎驱动',
-                    style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.35))),
+                    style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.35))),
               ),
             ],
           ),
@@ -724,6 +725,7 @@ class _HotspotState extends State<_Hotspot> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
@@ -732,9 +734,9 @@ class _HotspotState extends State<_Hotspot> {
         onTap: widget.onTap,
         child: Container(
           decoration: BoxDecoration(
-            border: Border.all(color: _hover ? const Color(0xB37C8CFF) : Colors.transparent, width: 2),
+            border: Border.all(color: _hover ? p.accent.withValues(alpha: 0.70) : Colors.transparent, width: 2),
             borderRadius: BorderRadius.circular(3),
-            color: _hover ? const Color(0x1A7C8CFF) : Colors.transparent,
+            color: _hover ? p.accent.withValues(alpha: 0.10) : Colors.transparent,
           ),
           child: _hover
               ? Align(
@@ -743,7 +745,7 @@ class _HotspotState extends State<_Hotspot> {
                     margin: const EdgeInsets.only(bottom: 2),
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                     decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(3)),
-                    child: Text(widget.label, style: const TextStyle(fontSize: 8, color: Colors.white)),
+                    child: Text(widget.label, style: const TextStyle(fontSize: 10, color: Colors.white)),
                   ),
                 )
               : null,

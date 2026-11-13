@@ -80,7 +80,7 @@ class RightPanel extends StatelessWidget {
             const SizedBox(width: 5),
             Text(label,
                 style: TextStyle(
-                    fontSize: 11.5,
+                    fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: active ? p.ink : p.ink3)),
           ],

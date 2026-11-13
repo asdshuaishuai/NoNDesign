@@ -98,7 +98,7 @@ class _ProjectPanel extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text((t['name'] ?? t['id']).toString(), style: TextStyle(fontSize: 12, color: p.ink2)),
-                      Text((t['id'] ?? '').toString(), style: TextStyle(fontSize: 9, fontFamily: 'Menlo', color: p.ink4)),
+                      Text((t['id'] ?? '').toString(), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                     ],
                   ),
                 ),
@@ -118,7 +118,7 @@ class _ProjectPanel extends StatelessWidget {
               if (store.render.artboards.isEmpty)
                 Padding(
                   padding: const EdgeInsets.all(12),
-                  child: Text('还没有画板。用 NoN 生成，或点右上角 +。',
+                  child: Text('还没有画板——让 NoN 生成，或点面板顶部 ＋ 新建。',
                       style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4)),
                 ),
               if (board != null) ...[
@@ -147,7 +147,7 @@ class _ProjectPanel extends StatelessWidget {
                           Expanded(
                             child: Text('${flow.from} → ${flow.to}',
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 10.5, color: p.ink3)),
+                                style: TextStyle(fontSize: 11, color: p.ink3)),
                           ),
                         ],
                       ),
@@ -167,7 +167,7 @@ class _ProjectPanel extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
                       child: Text((r['name'] ?? '').toString(),
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 10.5, color: p.ink4)),
+                          style: TextStyle(fontSize: 11, color: p.ink4)),
                     ),
                   ),
               ],
@@ -231,7 +231,7 @@ class _BoardRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text('${board.width.round()}×${board.height.round()} · ${board.nodes.length} 节点',
-                        style: TextStyle(fontSize: 9.5, fontFamily: 'Menlo', color: p.ink4)),
+                        style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                   ],
                 ),
               ),
@@ -468,7 +468,7 @@ class _DocsPanel extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 9.5, height: 1.35, color: p.ink4)),
+                      style: TextStyle(fontSize: 10, height: 1.35, color: p.ink4)),
                 ],
               ),
             ),
@@ -490,7 +490,7 @@ class _DocsPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(value, style: TextStyle(fontSize: 13, fontFamily: 'Menlo', fontWeight: FontWeight.w600, color: p.ink)),
-            Text(label, style: TextStyle(fontSize: 9, color: p.ink4)),
+            Text(label, style: TextStyle(fontSize: 10, color: p.ink4)),
           ],
         ),
       ),
@@ -600,7 +600,7 @@ class _SpecPanelState extends State<_SpecPanel> {
                       const SizedBox(width: 6),
                       SizedBox(
                         width: 70,
-                        child: Text(entry.key, style: TextStyle(fontSize: 10.5, color: p.ink3)),
+                        child: Text(entry.key, style: TextStyle(fontSize: 11, color: p.ink3)),
                       ),
                       Expanded(
                         child: _CommitField(
@@ -654,7 +654,7 @@ class _SpecPanelState extends State<_SpecPanel> {
               ],
               const SizedBox(height: 12),
               SectionLabel('画板', trailing: Text(store.activeBoard ?? '—',
-                  style: TextStyle(fontSize: 9, fontFamily: 'Menlo', color: p.ink4))),
+                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4))),
               const SizedBox(height: 6),
               _PanelActionButton(
                 icon: Icons.devices_outlined,
@@ -676,7 +676,7 @@ class _SpecPanelState extends State<_SpecPanel> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(item.$1, style: TextStyle(fontSize: 8.5, color: p.ink4)),
+                            Text(item.$1, style: TextStyle(fontSize: 10, color: p.ink4)),
                             _CommitField(
                               value: item.$2.round().toString(),
                               monospace: true,
@@ -729,7 +729,7 @@ class _SpecPanelState extends State<_SpecPanel> {
                     children: [
                       Icon(Icons.check, size: 10, color: p.success),
                       const SizedBox(width: 5),
-                      Expanded(child: Text(rule, style: TextStyle(fontSize: 10.5, height: 1.4, color: p.ink3))),
+                      Expanded(child: Text(rule, style: TextStyle(fontSize: 11, height: 1.4, color: p.ink3))),
                     ],
                   ),
                 ),
@@ -849,7 +849,7 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                             Text('$boards 板 · ${(() { final cleaned = mbt.replaceAll(RegExp(r'\s+'), ' '); return cleaned.length > 40 ? cleaned.substring(0, 40) : cleaned; })()}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 8.5, fontFamily: 'Menlo', color: p.ink4)),
+                                style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                           ],
                         ),
                       ),
@@ -869,7 +869,7 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Text(
                     '目标画板：${store.activeBoard ?? '（未选择）'} · ${_initializedBoard.isEmpty ? '未初始化' : '已初始化 $_initializedBoard'}',
-                    style: TextStyle(fontSize: 9.5, fontFamily: 'Menlo', color: p.ink4),
+                    style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -933,7 +933,7 @@ class _HistoryPanelState extends State<_HistoryPanel> {
         ),
         child: Text(label,
             style: TextStyle(
-                fontSize: 10.5, fontWeight: FontWeight.w600, color: active ? p.accent : p.ink3)),
+                fontSize: 11, fontWeight: FontWeight.w600, color: active ? p.accent : p.ink3)),
       ),
     );
   }
@@ -1055,11 +1055,11 @@ class ExtractCompareView extends StatelessWidget {
       children: [
         Text(
           '颜色 ${summary['total_colors'] ?? tokens.length} · 尺寸组 ${summary['total_sizes'] ?? '—'} · 节点 ${summary['total_nodes'] ?? '—'}',
-          style: TextStyle(fontSize: 9.5, fontFamily: 'Menlo', color: p.ink4),
+          style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
         ),
         const SizedBox(height: 7),
         if (tokens.isEmpty)
-          Text('该画板没有提取到颜色 token。', style: TextStyle(fontSize: 10.5, color: p.ink4))
+          Text('该画板没有提取到颜色 token。', style: TextStyle(fontSize: 11, color: p.ink4))
         else
           for (final t in tokens) _tokenRow(context, design, t),
         if (tokens.isNotEmpty) ...[
@@ -1108,7 +1108,7 @@ class ExtractCompareView extends StatelessWidget {
                 Text(same ? value : '$value → ${current ?? '新增'}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 8.5, fontFamily: 'Menlo', color: same ? p.ink4 : p.ink2)),
+                    style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: same ? p.ink4 : p.ink2)),
               ],
             ),
           ),
@@ -1119,7 +1119,7 @@ class ExtractCompareView extends StatelessWidget {
             child: Text(
               '${usage != null ? '×$usage' : ''}${confidence != null ? ' · $confidence%' : ''}',
               textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 8.5, fontFamily: 'Menlo', color: p.ink4),
+              style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
             ),
           ),
         ],
@@ -1265,7 +1265,7 @@ class _BenchmarkStripState extends State<_BenchmarkStrip> {
           children: [
             SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.2, color: p.ink4)),
             const SizedBox(width: 6),
-            Text('引擎基准测试…', style: TextStyle(fontSize: 9.5, color: p.ink4)),
+            Text('引擎基准测试…', style: TextStyle(fontSize: 10, color: p.ink4)),
           ],
         ),
       );
@@ -1294,7 +1294,7 @@ class _BenchmarkStripState extends State<_BenchmarkStrip> {
               '${nodes ?? '—'} 节点 · ${_fmtBytes(data['total_memory'])}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 9.5, fontFamily: 'Menlo', color: p.ink4),
+              style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
             ),
           ),
           IconAction(icon: Icons.refresh, tooltip: '重跑引擎基准', size: 20, onTap: _fetch),

@@ -256,7 +256,7 @@ class _OpenProjectDialog extends StatelessWidget {
                           children: [
                             SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 1.6, color: p.accent)),
                             const SizedBox(width: 9),
-                            Text('正在扫描工作区与桌面…', style: TextStyle(fontSize: 11.5, color: p.ink3)),
+                            Text('正在扫描工作区与桌面…', style: TextStyle(fontSize: 12, color: p.ink3)),
                           ],
                         ),
                       )
@@ -288,7 +288,7 @@ class _OpenProjectDialog extends StatelessWidget {
                   children: [
                     Icon(Icons.folder_open_outlined, size: 15, color: p.ink4),
                     const SizedBox(width: 8),
-                    Expanded(child: Text('从文件选择…', style: TextStyle(fontSize: 11.5, color: p.ink2))),
+                    Expanded(child: Text('从文件选择…', style: TextStyle(fontSize: 12, color: p.ink2))),
                     Icon(Icons.chevron_right, size: 13, color: p.ink4),
                   ],
                 ),
@@ -309,7 +309,7 @@ class _OpenProjectDialog extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.only(top: 6, bottom: 3),
-          child: Text(label, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
+          child: Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
         ),
         for (final s in items)
           InkWell(
@@ -337,7 +337,7 @@ class _OpenProjectDialog extends StatelessWidget {
                         ),
                         Text(
                           relativeTime(s['modified'] is num ? (s['modified'] as num).toInt() * 1000 : null),
-                          style: TextStyle(fontSize: 9, color: p.ink4),
+                          style: TextStyle(fontSize: 10, color: p.ink4),
                         ),
                       ],
                     ),
@@ -397,7 +397,7 @@ class _BoardTabs extends StatelessWidget {
                                   b.name.isEmpty ? b.id : b.name,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: 11.5,
+                                    fontSize: 12,
                                     fontWeight: FontWeight.w500,
                                     color: store.activeBoard == b.id ? p.ink : p.ink3,
                                   ),
@@ -405,7 +405,7 @@ class _BoardTabs extends StatelessWidget {
                               ),
                               const SizedBox(width: 4),
                               Text('${b.nodes.length}',
-                                  style: TextStyle(fontSize: 8.5, fontFamily: 'Menlo', color: p.ink4)),
+                                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                             ],
                           ),
                         ),
@@ -443,7 +443,7 @@ class _BoardTabs extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text((t['name'] ?? t['id']).toString(), style: TextStyle(fontSize: 12, color: p.ink2)),
-                              Text((t['id'] ?? '').toString(), style: TextStyle(fontSize: 9, fontFamily: 'Menlo', color: p.ink4)),
+                              Text((t['id'] ?? '').toString(), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                             ],
                           ),
                         ),
@@ -460,7 +460,7 @@ class _BoardTabs extends StatelessWidget {
           TextButton.icon(
             onPressed: () => store.setView('docs'),
             icon: Icon(Icons.auto_awesome, size: 11, color: p.accent),
-            label: const Text('文档', style: TextStyle(fontSize: 10.5)),
+            label: const Text('文档', style: TextStyle(fontSize: 11)),
           ),
         ],
       ),
@@ -491,7 +491,7 @@ class _SourceView extends StatelessWidget {
                   icon: const Icon(Icons.chevron_left, size: 14),
                   label: const Text('画布'),
                 ),
-                Text('MBT 源码', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500, color: p.ink2)),
+                Text('MBT 源码', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: p.ink2)),
                 const SizedBox(width: 6),
                 Pill(label: 'canonical · ${lines.length} 行'),
                 const Spacer(),
@@ -528,7 +528,7 @@ class _SourceView extends StatelessWidget {
               padding: const EdgeInsets.all(14),
               child: SelectableText(
                 lines.asMap().entries.map((e) => '${(e.key + 1).toString().padLeft(4)}  ${e.value}').join('\n'),
-                style: TextStyle(fontSize: 10.5, height: 1.7, fontFamily: 'Menlo', color: p.ink2),
+                style: TextStyle(fontSize: 11, height: 1.7, fontFamily: 'Menlo', color: p.ink2),
               ),
             ),
           ),
@@ -570,7 +570,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(name, style: TextStyle(fontSize: 10.5, fontFamily: 'Menlo', color: p.ink4)),
+            Text(name, style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink4)),
             const SizedBox(height: 10),
             TextField(
               controller: _controller,
@@ -633,11 +633,11 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('项目名', style: TextStyle(fontSize: 10.5, color: p.ink3)),
+            Text('项目名', style: TextStyle(fontSize: 11, color: p.ink3)),
             const SizedBox(height: 4),
             TextField(controller: _name, decoration: const InputDecoration(hintText: '例如：invoice-studio')),
             const SizedBox(height: 12),
-            Text('设备', style: TextStyle(fontSize: 10.5, color: p.ink3)),
+            Text('设备', style: TextStyle(fontSize: 11, color: p.ink3)),
             const SizedBox(height: 4),
             Row(
               children: [
@@ -645,7 +645,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                   Padding(
                     padding: const EdgeInsets.only(right: 6),
                     child: ChoiceChip(
-                      label: Text(item.$2, style: const TextStyle(fontSize: 10.5)),
+                      label: Text(item.$2, style: const TextStyle(fontSize: 11)),
                       selected: _device == item.$1,
                       onSelected: (_) => setState(() => _device = item.$1),
                     ),
@@ -653,7 +653,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
               ],
             ),
             const SizedBox(height: 12),
-            Text('起始画板', style: TextStyle(fontSize: 10.5, color: p.ink3)),
+            Text('起始画板', style: TextStyle(fontSize: 11, color: p.ink3)),
             const SizedBox(height: 4),
             DropdownButtonFormField<String?>(
               value: _template,
@@ -689,7 +689,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                     controller: _brief,
                     minLines: 2,
                     maxLines: 4,
-                    style: const TextStyle(fontSize: 11.5),
+                    style: const TextStyle(fontSize: 12),
                     decoration: const InputDecoration(hintText: '描述产品目标与页面范围；留空则只创建项目。'),
                   ),
                 ],
@@ -745,7 +745,7 @@ class _ShortcutsDialog extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(group.key, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 1, color: p.ink4)),
+                    Text(group.key, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1, color: p.ink4)),
                     const SizedBox(height: 6),
                     for (final row in group.value)
                       Padding(
@@ -753,7 +753,7 @@ class _ShortcutsDialog extends StatelessWidget {
                         child: Row(
                           children: [
                             Expanded(child: Text(row.$1, style: TextStyle(fontSize: 11, color: p.ink3))),
-                            Text(row.$2, style: TextStyle(fontSize: 9.5, fontFamily: 'Menlo', color: p.ink4)),
+                            Text(row.$2, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                           ],
                         ),
                       ),

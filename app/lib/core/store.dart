@@ -317,7 +317,7 @@ class AppStore extends ChangeNotifier {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
             if (detail != null && detail.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 3),

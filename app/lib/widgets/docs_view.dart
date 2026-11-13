@@ -103,7 +103,7 @@ class _DocsViewState extends State<DocsView> {
           children: [
             Icon(icon, size: 12, color: active ? p.accent : p.ink4),
             const SizedBox(width: 5),
-            Text(label, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500, color: active ? p.ink : p.ink3)),
+            Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: active ? p.ink : p.ink3)),
             if (done)
               Padding(
                 padding: const EdgeInsets.only(left: 5),
@@ -128,7 +128,7 @@ class _DocsViewState extends State<DocsView> {
               height: 44,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
-                gradient: const LinearGradient(colors: [Color(0xFF7C8CFF), Color(0xFFB58CFF)]),
+                gradient: LinearGradient(colors: [p.accent, p.accent2]),
               ),
               child: Icon(kind == 'prd' ? Icons.description_outlined : Icons.layers_outlined, color: Colors.white, size: 20),
             ),
@@ -137,7 +137,7 @@ class _DocsViewState extends State<DocsView> {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: p.ink)),
             const SizedBox(height: 5),
             Text('描述目标用户、核心流程和页面范围。NoN 会写成可施工的${kind == 'prd' ? ' PRD' : ' UI 说明'}。',
-                textAlign: TextAlign.center, style: TextStyle(fontSize: 11.5, height: 1.55, color: p.ink3)),
+                textAlign: TextAlign.center, style: TextStyle(fontSize: 12, height: 1.55, color: p.ink3)),
             const SizedBox(height: 18),
             Container(
               padding: const EdgeInsets.all(8),
@@ -152,7 +152,7 @@ class _DocsViewState extends State<DocsView> {
                     controller: _brief,
                     minLines: 3,
                     maxLines: 5,
-                    style: TextStyle(fontSize: 12.5, height: 1.5, color: p.ink),
+                    style: TextStyle(fontSize: 13, height: 1.5, color: p.ink),
                     decoration: const InputDecoration(
                       hintText: '例如：一个面向独立设计师的项目管理工具，核心是项目列表、任务看板、成员与通知设置。',
                       border: InputBorder.none,
@@ -164,7 +164,7 @@ class _DocsViewState extends State<DocsView> {
                   ),
                   Row(
                     children: [
-                      Text('${modCombo('⌘↵')} 生成', style: TextStyle(fontSize: 9.5, color: p.ink4)),
+                      Text('${modCombo('⌘↵')} 生成', style: TextStyle(fontSize: 10, color: p.ink4)),
                       const Spacer(),
                       FilledButton(
                         style: FilledButton.styleFrom(backgroundColor: p.accent, foregroundColor: Colors.white),
@@ -172,7 +172,7 @@ class _DocsViewState extends State<DocsView> {
                           final brief = _brief.text.trim();
                           if (brief.isNotEmpty) store.runPlan(brief);
                         },
-                        child: const Text('让 NoN 撰写', style: TextStyle(fontSize: 11.5)),
+                        child: const Text('让 NoN 撰写', style: TextStyle(fontSize: 12)),
                       ),
                     ],
                   ),
@@ -229,10 +229,10 @@ class _DocsViewState extends State<DocsView> {
                     child: MarkdownBody(
                       data: source,
                       styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-                        p: TextStyle(fontSize: 12.5, height: 1.7, color: p.ink2),
+                        p: TextStyle(fontSize: 13, height: 1.7, color: p.ink2),
                         h1: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: p.ink),
-                        h2: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: p.ink),
-                        h3: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: p.ink),
+                        h2: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink),
+                        h3: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink),
                       ),
                     ),
                   )
@@ -240,7 +240,7 @@ class _DocsViewState extends State<DocsView> {
                     controller: _editor,
                     minLines: 20,
                     maxLines: null,
-                    style: TextStyle(fontSize: 12.5, height: 1.7, fontFamily: 'Menlo', color: p.ink2),
+                    style: TextStyle(fontSize: 13, height: 1.7, fontFamily: 'Menlo', color: p.ink2),
                     decoration: InputDecoration(
                       filled: true,
                       fillColor: p.panel.withValues(alpha: 0.5),
@@ -263,9 +263,9 @@ class _DocsViewState extends State<DocsView> {
           child: Row(
             children: [
               Text('Markdown · 存在 .mbt.md 的 nondesign 标记里，随 DDP 一起走',
-                  style: TextStyle(fontSize: 9, color: p.ink4)),
+                  style: TextStyle(fontSize: 10, color: p.ink4)),
               const Spacer(),
-              Text('${modCombo('⌘↵')} 生成原型', style: TextStyle(fontSize: 9, color: p.ink4)),
+              Text('${modCombo('⌘↵')} 生成原型', style: TextStyle(fontSize: 10, color: p.ink4)),
             ],
           ),
         ),
@@ -288,7 +288,7 @@ class _DocsViewState extends State<DocsView> {
           children: [
             Icon(icon, size: 11, color: active ? p.ink2 : p.ink4),
             const SizedBox(width: 3),
-            Text(label, style: TextStyle(fontSize: 10.5, color: active ? p.ink2 : p.ink4)),
+            Text(label, style: TextStyle(fontSize: 11, color: active ? p.ink2 : p.ink4)),
           ],
         ),
       ),
@@ -355,7 +355,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
           ),
           const SizedBox(height: 4),
           Text('配色、字体、间距与圆角从这份规范派生，约束每一块画板。',
-              style: TextStyle(fontSize: 11.5, color: p.ink3)),
+              style: TextStyle(fontSize: 12, color: p.ink3)),
           const SizedBox(height: 22),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -383,7 +383,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(7)),
-                  child: Text(rule, style: TextStyle(fontSize: 10.5, color: p.ink2)),
+                  child: Text(rule, style: TextStyle(fontSize: 11, color: p.ink2)),
                 ),
             ],
           )),
@@ -396,7 +396,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
                   children: [
                     Expanded(
                       child: Text('引擎从画板 ${_extractAb ?? ''} 提取的颜色使用统计，与现规范对比。',
-                          style: TextStyle(fontSize: 10.5, color: p.ink3)),
+                          style: TextStyle(fontSize: 11, color: p.ink3)),
                     ),
                     IconAction(
                       icon: Icons.close,
@@ -447,7 +447,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
+          Text(title, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
           const SizedBox(height: 12),
           child,
         ],
@@ -476,8 +476,8 @@ class _SpecPreviewState extends State<_SpecPreview> {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(entry.key, style: TextStyle(fontSize: 9.5, color: p.ink3)),
-                Text(entry.value, style: TextStyle(fontSize: 8, fontFamily: 'Menlo', color: p.ink4)),
+                Text(entry.key, style: TextStyle(fontSize: 10, color: p.ink3)),
+                Text(entry.value, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
               ],
             ),
           ),
@@ -496,7 +496,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
             style: TextStyle(fontSize: design.body, color: p.ink2, height: 1.6)),
         const SizedBox(height: 6),
         Text('H1 ${design.h1.round()} · H2 ${design.h2.round()} · BODY ${design.body.round()}',
-            style: TextStyle(fontSize: 8.5, fontFamily: 'Menlo', color: p.ink4)),
+            style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
       ],
     );
   }
@@ -520,7 +520,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
                     decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(3)),
                   ),
                   const SizedBox(height: 3),
-                  Text(s.round().toString(), style: TextStyle(fontSize: 8, fontFamily: 'Menlo', color: p.ink4)),
+                  Text(s.round().toString(), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                 ],
               ),
             ),
@@ -548,7 +548,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text('${item.$1} · ${item.$2.round()}', style: TextStyle(fontSize: 8.5, color: p.ink4)),
+                Text('${item.$1} · ${item.$2.round()}', style: TextStyle(fontSize: 10, color: p.ink4)),
               ],
             ),
           ),

@@ -125,7 +125,7 @@ class TitleBar extends StatelessWidget {
                         children: [
                           Icon(Icons.search, size: 14, color: p.ink4),
                           const SizedBox(width: 7),
-                          Text('问 NoN，或运行一个命令…', style: TextStyle(fontSize: 11.5, color: p.ink3)),
+                          Text('问 NoN，或运行一个命令…', style: TextStyle(fontSize: 12, color: p.ink3)),
                           const Spacer(),
                           _Kbd(modCombo('⌘K')),
                         ],
@@ -159,7 +159,7 @@ class TitleBar extends StatelessWidget {
                             : store.agentPhase == 'refining'
                                 ? '调整中'
                                 : '停止中',
-                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: p.accent),
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: p.accent),
                   ),
                   IconButton(
                     tooltip: '停止',
@@ -187,8 +187,8 @@ class TitleBar extends StatelessWidget {
                   children: [
                     Text(model?.name ?? '未选择模型', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
                     Text('${model?.providerName ?? ''} · ${model?.id ?? ''}',
-                        style: TextStyle(fontSize: 9.5, color: p.ink4)),
-                    Text('上下文 ${formatTokens(model?.context)}', style: TextStyle(fontSize: 9.5, color: p.ink4)),
+                        style: TextStyle(fontSize: 10, color: p.ink4)),
+                    Text('上下文 ${formatTokens(model?.context)}', style: TextStyle(fontSize: 10, color: p.ink4)),
                   ],
                 ),
               ),
@@ -209,7 +209,7 @@ class TitleBar extends StatelessWidget {
                         style: TextStyle(fontSize: 11, color: p.ink2, fontWeight: FontWeight.w500)),
                   ),
                   const SizedBox(width: 4),
-                  Text(formatTokens(model?.context), style: TextStyle(fontSize: 9.5, fontFamily: 'Menlo', color: p.ink4)),
+                  Text(formatTokens(model?.context), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                 ],
               ),
             ),
@@ -240,7 +240,7 @@ class TitleBar extends StatelessWidget {
           Icon(icon, size: 14, color: p.ink4),
           const SizedBox(width: 8),
           Expanded(child: Text(label, style: TextStyle(fontSize: 12, color: p.ink2))),
-          if (shortcut.isNotEmpty) Text(shortcut, style: TextStyle(fontSize: 9.5, fontFamily: 'Menlo', color: p.ink4)),
+          if (shortcut.isNotEmpty) Text(shortcut, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
         ],
       ),
     );
@@ -260,7 +260,7 @@ class _Kbd extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         border: Border.all(color: p.line),
       ),
-      child: Text(label, style: TextStyle(fontSize: 9, fontFamily: 'Menlo', color: p.ink3)),
+      child: Text(label, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink3)),
     );
   }
 }

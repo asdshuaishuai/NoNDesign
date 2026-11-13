@@ -53,7 +53,7 @@ class Rail extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(item.$3,
                             style: TextStyle(
-                                fontSize: 9,
+                                fontSize: 10,
                                 fontWeight: FontWeight.w500,
                                 color: store.panel == item.$1 ? p.accent : p.ink3)),
                       ],

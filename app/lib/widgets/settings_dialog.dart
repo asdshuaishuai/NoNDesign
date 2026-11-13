@@ -124,7 +124,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           children: [
             Icon(icon, size: 14, color: active ? p.accent : p.ink4),
             const SizedBox(width: 7),
-            Text(label, style: TextStyle(fontSize: 11.5, color: active ? p.ink : p.ink3)),
+            Text(label, style: TextStyle(fontSize: 12, color: active ? p.ink : p.ink3)),
           ],
         ),
       ),
@@ -267,14 +267,14 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                               Row(
                                 children: [
                                   Flexible(child: Text(m.name, overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500, color: p.ink))),
+                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: p.ink))),
                                   const SizedBox(width: 5),
                                   if (m.toolCall) const Pill(label: 'tools', color: Color(0xFF3DDC97)),
-                                  if (m.reasoning) const Pill(label: 'thinking', color: Color(0xFF7C8CFF)),
+                                  if (m.reasoning) Pill(label: 'thinking', color: p.accent),
                                 ],
                               ),
                               Text('${m.id} · ${formatTokens(m.context)} ctx',
-                                  style: TextStyle(fontSize: 8.5, fontFamily: 'Menlo', color: p.ink4)),
+                                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                             ],
                           ),
                         ),
@@ -299,7 +299,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       const SizedBox(width: 5),
                       Text(store.model!.name, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
                       const Spacer(),
-                      Text('${formatTokens(store.model!.context)} context', style: TextStyle(fontSize: 9, color: p.ink4)),
+                      Text('${formatTokens(store.model!.context)} context', style: TextStyle(fontSize: 10, color: p.ink4)),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -322,7 +322,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                                 borderRadius: BorderRadius.circular(5),
                               ),
                               child: Text(level,
-                                  style: TextStyle(fontSize: 9.5, color: store.settings.thinkingLevel == level ? Colors.white : p.ink3)),
+                                  style: TextStyle(fontSize: 10, color: store.settings.thinkingLevel == level ? Colors.white : p.ink3)),
                             ),
                           ),
                         ),
@@ -348,7 +348,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Text('该服务商为非 OpenAI 兼容协议，当前不可用；请选择 OpenAI 兼容端点。',
-                          style: TextStyle(fontSize: 9.5, color: p.warn)),
+                          style: TextStyle(fontSize: 10, color: p.warn)),
                     ),
                 ],
               ),
@@ -428,7 +428,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(
                 children: [
-                  Expanded(child: Text(row.$1, style: TextStyle(fontSize: 11.5, color: p.ink3))),
+                  Expanded(child: Text(row.$1, style: TextStyle(fontSize: 12, color: p.ink3))),
                   Text(row.$2, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                 ],
               ),
@@ -438,7 +438,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(10)),
             child: Text('界面语言：简体中文 · 后续接入英文与更多语言。',
-                style: TextStyle(fontSize: 10.5, color: p.ink3)),
+                style: TextStyle(fontSize: 11, color: p.ink3)),
           ),
         ],
       ),
@@ -466,12 +466,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     const SizedBox(width: 5),
                     Text('前缀缓存分层', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
                     const SizedBox(width: 6),
-                    const Pill(label: 'append-only', color: Color(0xFF7C8CFF)),
+                    Pill(label: 'append-only', color: p.accent),
                   ],
                 ),
                 const SizedBox(height: 6),
                 Text('上下文按「稳定 → 易变」排序；变更以追加方式进入最新 tool 结果，不重写历史。',
-                    style: TextStyle(fontSize: 10.5, height: 1.5, color: p.ink3)),
+                    style: TextStyle(fontSize: 11, height: 1.5, color: p.ink3)),
                 const SizedBox(height: 10),
                 for (final row in [
                   ('L0', '静态指令 + 工具 schema', '逐字节稳定'),
@@ -483,9 +483,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Row(
                       children: [
-                        SizedBox(width: 18, child: Text(row.$1, style: TextStyle(fontSize: 9, fontFamily: 'Menlo', color: p.accent))),
+                        SizedBox(width: 18, child: Text(row.$1, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.accent))),
                         Expanded(child: Text(row.$2, style: TextStyle(fontSize: 10, color: p.ink3))),
-                        Text(row.$3, style: TextStyle(fontSize: 9, color: p.ink4)),
+                        Text(row.$3, style: TextStyle(fontSize: 10, color: p.ink4)),
                       ],
                     ),
                   ),
@@ -526,7 +526,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             children: [
               Expanded(
                 child: Text('删除本项目的对话记忆；画布与文档不受影响。',
-                    style: TextStyle(fontSize: 10.5, color: p.ink3)),
+                    style: TextStyle(fontSize: 11, color: p.ink3)),
               ),
               OutlinedButton.icon(
                 onPressed: () => store.clearAgentSession(),
@@ -542,7 +542,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('确定性上下文治理', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: p.ink)),
+                Text('确定性上下文治理', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
                 const SizedBox(height: 6),
                 for (final line in [
                   '工具结果剥离 canonical 与 SVG，只保留摘要 + 最新 state',
@@ -572,7 +572,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(value, style: TextStyle(fontSize: 13, fontFamily: 'Menlo', fontWeight: FontWeight.w600, color: p.ink)),
-            Text(label, style: TextStyle(fontSize: 8.5, color: p.ink4)),
+            Text(label, style: TextStyle(fontSize: 10, color: p.ink4)),
           ],
         ),
       ),
@@ -592,11 +592,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('NoNDesign', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
-                Text('AI-native product design studio', style: TextStyle(fontSize: 10.5, color: p.ink3)),
+                Text('AI-native product design studio', style: TextStyle(fontSize: 11, color: p.ink3)),
               ],
             ),
             const Spacer(),
-            const Pill(label: 'v0.1', color: Color(0xFF7C8CFF)),
+            Pill(label: 'v0.1', color: p.accent),
           ],
         ),
         const SizedBox(height: 16),
@@ -610,14 +610,14 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             padding: const EdgeInsets.only(bottom: 7),
             child: Row(
               children: [
-                SizedBox(width: 72, child: Text(row.$1, style: TextStyle(fontSize: 10.5, color: p.ink4))),
-                Expanded(child: Text(row.$2, style: TextStyle(fontSize: 10.5, fontFamily: 'Menlo', color: p.ink2))),
+                SizedBox(width: 72, child: Text(row.$1, style: TextStyle(fontSize: 11, color: p.ink4))),
+                Expanded(child: Text(row.$2, style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink2))),
               ],
             ),
           ),
         const SizedBox(height: 12),
         Text('唯一事实源是一份 canonical .mbt.md；人类与 Agent 的每次修改都经引擎门校验后回写同一份文档。DDP 只是它的认证加密容器。',
-            style: TextStyle(fontSize: 10.5, height: 1.55, color: p.ink3)),
+            style: TextStyle(fontSize: 11, height: 1.55, color: p.ink3)),
         const Spacer(),
         Text('模型与端点来自 models.dev 快照；上下文与缓存策略在本地确定性执行。',
             style: TextStyle(fontSize: 10, color: p.ink4)),

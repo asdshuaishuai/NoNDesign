@@ -151,7 +151,7 @@ DropdownButtonFormField<T> nonSelect<T>(
     elevation: 14,
     borderRadius: BorderRadius.circular(10),
     menuMaxHeight: 280,
-    style: TextStyle(fontSize: 11.5, color: p.ink2),
+    style: TextStyle(fontSize: 12, color: p.ink2),
     decoration: decoration,
     items: items,
     onChanged: onChanged,
@@ -259,7 +259,7 @@ class SectionLabel extends StatelessWidget {
         Expanded(
           child: Text(
             text.toUpperCase(),
-            style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4),
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4),
           ),
         ),
         if (trailing != null) trailing!,
@@ -297,7 +297,7 @@ class EmptyHint extends StatelessWidget {
               child: Icon(icon, size: 18, color: p.ink3),
             ),
             const SizedBox(height: 12),
-            Text(title, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.ink)),
+            Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
             if (detail != null) ...[
               const SizedBox(height: 4),
               Text(detail!, textAlign: TextAlign.center, style: TextStyle(fontSize: 11, height: 1.5, color: p.ink3)),

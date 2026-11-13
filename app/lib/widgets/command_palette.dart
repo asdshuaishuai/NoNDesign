@@ -184,7 +184,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                     decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
-                    child: Text('esc', style: TextStyle(fontSize: 9, fontFamily: 'Menlo', color: p.ink4)),
+                    child: Text('esc', style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                   ),
                 ],
               ),
@@ -203,7 +203,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
                         Padding(
                           padding: const EdgeInsets.fromLTRB(9, 6, 9, 3),
                           child: Text(action.group.toUpperCase(),
-                              style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w700, letterSpacing: 1, color: p.ink4)),
+                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1, color: p.ink4)),
                         ),
                       InkWell(
                         borderRadius: BorderRadius.circular(8),
@@ -217,7 +217,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
                               const SizedBox(width: 8),
                               Expanded(child: Text(action.label, style: TextStyle(fontSize: 12, color: p.ink2))),
                               if (action.shortcut.isNotEmpty)
-                                Text(action.shortcut, style: TextStyle(fontSize: 9.5, fontFamily: 'Menlo', color: p.ink4)),
+                                Text(action.shortcut, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                             ],
                           ),
                         ),
@@ -232,9 +232,9 @@ class _CommandPaletteState extends State<_CommandPalette> {
               decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
               child: Row(
                 children: [
-                  Text('↑ ↓ 选择 · ↵ 执行', style: TextStyle(fontSize: 9, color: p.ink4)),
+                  Text('↑ ↓ 选择 · ↵ 执行', style: TextStyle(fontSize: 10, color: p.ink4)),
                   const Spacer(),
-                  Text('NoNDesign Command', style: TextStyle(fontSize: 9, color: p.ink4)),
+                  Text('NoNDesign Command', style: TextStyle(fontSize: 10, color: p.ink4)),
                 ],
               ),
             ),

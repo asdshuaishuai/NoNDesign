@@ -94,7 +94,7 @@ class _AgentPanelState extends State<AgentPanel> {
                           store.streamText.length > 4000
                               ? store.streamText.substring(store.streamText.length - 4000)
                               : store.streamText,
-                          style: TextStyle(fontSize: 11.5, height: 1.55, color: p.ink2),
+                          style: TextStyle(fontSize: 12, height: 1.55, color: p.ink2),
                         ),
                       ],
                     ),
@@ -106,7 +106,7 @@ class _AgentPanelState extends State<AgentPanel> {
                       tilePadding: EdgeInsets.zero,
                       childrenPadding: const EdgeInsets.only(bottom: 6),
                       leading: Icon(Icons.psychology_outlined, size: 14, color: p.ink4),
-                      title: Text('思考过程', style: TextStyle(fontSize: 10.5, color: p.ink4)),
+                      title: Text('思考过程', style: TextStyle(fontSize: 11, color: p.ink4)),
                       children: [
                         Container(
                           width: double.infinity,
@@ -146,7 +146,7 @@ class _AgentPanelState extends State<AgentPanel> {
                       focusNode: _inputFocus,
                       minLines: 2,
                       maxLines: 5,
-                      style: TextStyle(fontSize: 12.5, height: 1.5, color: p.ink),
+                      style: TextStyle(fontSize: 13, height: 1.5, color: p.ink),
                       decoration: InputDecoration(
                         hintText: _mode == 'plan'
                             ? '描述产品目标，NoN 会写 PRD / UI 说明 / 设计规范…'
@@ -226,10 +226,10 @@ class _AgentPanelState extends State<AgentPanel> {
                     child: Text(
                       '${store.model?.name ?? '未选择模型'} · ${formatTokens(store.model?.context)} ctx',
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 9.5, color: p.ink4),
+                      style: TextStyle(fontSize: 10, color: p.ink4),
                     ),
                   ),
-                  Text('${modCombo('⌘↵')} 发送', style: TextStyle(fontSize: 9, color: p.ink4)),
+                  Text('${modCombo('⌘↵')} 发送', style: TextStyle(fontSize: 10, color: p.ink4)),
                 ],
               ),
             ],
@@ -262,7 +262,7 @@ class _ModeChip extends StatelessWidget {
         ),
         child: Text(label,
             style: TextStyle(
-                fontSize: 10.5, fontWeight: FontWeight.w600, color: active ? p.ink : p.ink4)),
+                fontSize: 11, fontWeight: FontWeight.w600, color: active ? p.ink : p.ink4)),
       ),
     );
   }
@@ -284,13 +284,13 @@ class _AgentIntro extends StatelessWidget {
             height: 42,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
-              gradient: const LinearGradient(colors: [Color(0xFF7C8CFF), Color(0xFFB58CFF)]),
-              boxShadow: const [BoxShadow(color: Color(0x557C8CFF), blurRadius: 22, offset: Offset(0, 8))],
+              gradient: LinearGradient(colors: [p.accent, p.accent2]),
+              boxShadow: [BoxShadow(color: p.accent.withValues(alpha: 0.33), blurRadius: 22, offset: const Offset(0, 8))],
             ),
             child: const Icon(Icons.auto_awesome, size: 19, color: Colors.white),
           ),
           const SizedBox(height: 12),
-          Text('嗨，我是 NoN', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: p.ink)),
+          Text('嗨，我是 NoN', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
           const SizedBox(height: 4),
           Text('描述目标，我会先规划页面与交互，再把它们画到画布上。也可以让我修改选中节点。',
               textAlign: TextAlign.center,
@@ -419,17 +419,17 @@ class _TimelineRow extends StatelessWidget {
                 color: entry.running ? p.accent : entry.error != null ? p.danger : p.success,
               ),
               title: Text(_toolLabel(entry.tool ?? ''),
-                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500, color: p.ink2)),
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: p.ink2)),
               subtitle: _toolSubtitle(entry, p),
               trailing: Text(entry.ms != null ? '${entry.ms}ms' : '',
-                  style: TextStyle(fontSize: 9, fontFamily: 'Menlo', color: p.ink4)),
+                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
               children: [
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(7),
                   decoration: BoxDecoration(color: p.bgElevated, borderRadius: BorderRadius.circular(6)),
                   child: SelectableText(entry.error ?? entry.preview ?? '—',
-                      style: TextStyle(fontSize: 9, fontFamily: 'Menlo', height: 1.45, color: p.ink4)),
+                      style: TextStyle(fontSize: 10, fontFamily: 'Menlo', height: 1.45, color: p.ink4)),
                 ),
               ],
             ),
@@ -479,7 +479,7 @@ class _TimelineRow extends StatelessWidget {
               MarkdownBody(
                 data: entry.text,
                 styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-                  p: TextStyle(fontSize: 11.5, height: 1.55, color: p.ink2),
+                  p: TextStyle(fontSize: 12, height: 1.55, color: p.ink2),
                 ),
               ),
             ],
@@ -503,14 +503,14 @@ class _TimelineRow extends StatelessWidget {
                       size: 12, color: entry.ok ? p.success : p.danger),
                   const SizedBox(width: 5),
                   Text(entry.title ?? (entry.ok ? '完成' : '异常结束'),
-                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: entry.ok ? p.success : p.danger)),
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: entry.ok ? p.success : p.danger)),
                   const Spacer(),
-                  Text(formatTime(entry.ts), style: TextStyle(fontSize: 9, color: p.ink4)),
+                  Text(formatTime(entry.ts), style: TextStyle(fontSize: 10, color: p.ink4)),
                 ],
               ),
               if (entry.text.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                Text(entry.text, style: TextStyle(fontSize: 10.5, height: 1.45, color: p.ink3)),
+                Text(entry.text, style: TextStyle(fontSize: 11, height: 1.45, color: p.ink3)),
               ],
             ],
           ),
@@ -532,7 +532,7 @@ class _TimelineRow extends StatelessWidget {
     };
     if (text == null || text.isEmpty) return null;
     return Text(text, maxLines: 1, overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 9, fontFamily: 'Menlo', color: p.ink4));
+        style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4));
   }
 
   String _toolLabel(String tool) => switch (tool) {

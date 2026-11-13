@@ -102,7 +102,7 @@ class _WelcomeState extends State<Welcome> {
                       children: [
                         Text('NoNDesign', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
                         Text('AI PRODUCT DESIGN STUDIO',
-                            style: TextStyle(fontSize: 8, letterSpacing: 1.6, color: p.ink4)),
+                            style: TextStyle(fontSize: 10, letterSpacing: 1.6, color: p.ink4)),
                       ],
                     ),
                     const Spacer(),
@@ -155,8 +155,8 @@ class _WelcomeState extends State<Welcome> {
                                 ),
                                 const SizedBox(height: 14),
                                 ShaderMask(
-                                  shaderCallback: (bounds) => const LinearGradient(
-                                    colors: [Color(0xFF7C8CFF), Color(0xFFB58CFF), Color(0xFFFF9BD2)],
+                                  shaderCallback: (bounds) => LinearGradient(
+                                    colors: [p.accent, p.accent2, p.danger.withValues(alpha: 0.85)],
                                   ).createShader(bounds),
                                   child: const Text('把想法变成\n可以点的产品',
                                       style: TextStyle(
@@ -171,7 +171,7 @@ class _WelcomeState extends State<Welcome> {
                                 Text(
                                   '描述目标用户和核心流程。NoN 会先写 PRD、UI 说明与设计规范，再把每一屏画到画布上，'
                                   '连线、状态、交互都经 MoonViz 引擎校验。',
-                                  style: TextStyle(fontSize: 12.5, height: 1.65, color: p.ink3),
+                                  style: TextStyle(fontSize: 13, height: 1.65, color: p.ink3),
                                 ),
                                 if (store.recovery != null) ...[
                                   const SizedBox(height: 12),
@@ -184,10 +184,10 @@ class _WelcomeState extends State<Welcome> {
                                     ),
                                     child: Row(
                                       children: [
-                                        Text('检测到上次未保存的工作', style: TextStyle(fontSize: 10.5, color: p.warn)),
+                                        Text('检测到上次未保存的工作', style: TextStyle(fontSize: 11, color: p.warn)),
                                         const Spacer(),
-                                        TextButton(onPressed: store.restoreRecovery, child: const Text('恢复', style: TextStyle(fontSize: 10.5))),
-                                        TextButton(onPressed: store.discardRecovery, child: const Text('忽略', style: TextStyle(fontSize: 10.5))),
+                                        TextButton(onPressed: store.restoreRecovery, child: const Text('恢复', style: TextStyle(fontSize: 11))),
+                                        TextButton(onPressed: store.discardRecovery, child: const Text('忽略', style: TextStyle(fontSize: 11))),
                                       ],
                                     ),
                                   ),
@@ -210,7 +210,7 @@ class _WelcomeState extends State<Welcome> {
                                         style: TextStyle(fontSize: 13, height: 1.55, color: p.ink),
                                         decoration: InputDecoration(
                                           hintText: '例如：做一个面向自由职业者的发票工具。需要登录、发票列表、新建发票、客户管理和设置；风格专业、克制，移动端优先。',
-                                          hintStyle: TextStyle(fontSize: 12.5, height: 1.55, color: p.ink4),
+                                          hintStyle: TextStyle(fontSize: 13, height: 1.55, color: p.ink4),
                                           border: InputBorder.none,
                                           enabledBorder: InputBorder.none,
                                           focusedBorder: InputBorder.none,
@@ -230,7 +230,7 @@ class _WelcomeState extends State<Welcome> {
                                                 child: Container(
                                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                                                   decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(5)),
-                                                  child: Text(example, style: TextStyle(fontSize: 9.5, color: p.ink3)),
+                                                  child: Text(example, style: TextStyle(fontSize: 10, color: p.ink3)),
                                                 ),
                                               ),
                                             ),
@@ -255,16 +255,16 @@ class _WelcomeState extends State<Welcome> {
                                 const SizedBox(height: 10),
                                 Row(
                                   children: [
-                                    Text('${modCombo('⌘↵')} 开始', style: TextStyle(fontSize: 9, color: p.ink4)),
+                                    Text('${modCombo('⌘↵')} 开始', style: TextStyle(fontSize: 10, color: p.ink4)),
                                     const SizedBox(width: 10),
                                     InkWell(
                                       onTap: () => showNewProjectFlow(context),
-                                      child: Text('空白项目', style: TextStyle(fontSize: 9, color: p.ink4)),
+                                      child: Text('空白项目', style: TextStyle(fontSize: 10, color: p.ink4)),
                                     ),
                                     const SizedBox(width: 10),
                                     InkWell(
                                       onTap: () => openProjectFlow(context, ''),
-                                      child: Text('打开 DDP', style: TextStyle(fontSize: 9, color: p.ink4)),
+                                      child: Text('打开 DDP', style: TextStyle(fontSize: 10, color: p.ink4)),
                                     ),
                                   ],
                                 ),
@@ -304,7 +304,7 @@ class _WelcomeState extends State<Welcome> {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
                 child: Text('NoNDesign v0.1 · MoonViz engine · 模型与端点来自 models.dev · 所有操作可撤销',
-                    style: TextStyle(fontSize: 9, color: p.ink4)),
+                    style: TextStyle(fontSize: 10, color: p.ink4)),
               ),
             ],
           ),
@@ -327,11 +327,11 @@ class _WelcomeState extends State<Welcome> {
         children: [
           Row(
             children: [
-              Text('最近项目', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
+              Text('最近项目', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
               const Spacer(),
               InkWell(
                 onTap: () => openProjectFlow(context, ''),
-                child: Text('打开…', style: TextStyle(fontSize: 9.5, color: p.ink4)),
+                child: Text('打开…', style: TextStyle(fontSize: 10, color: p.ink4)),
               ),
             ],
           ),
@@ -366,9 +366,9 @@ class _WelcomeState extends State<Welcome> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(r['name']?.toString() ?? '', style: TextStyle(fontSize: 11.5, color: p.ink2)),
+                          Text(r['name']?.toString() ?? '', style: TextStyle(fontSize: 12, color: p.ink2)),
                           Text(relativeTime(r['ts'] is int ? r['ts'] as int : null),
-                              style: TextStyle(fontSize: 9, color: p.ink4)),
+                              style: TextStyle(fontSize: 10, color: p.ink4)),
                         ],
                       ),
                     ),
@@ -383,7 +383,7 @@ class _WelcomeState extends State<Welcome> {
               padding: const EdgeInsets.symmetric(horizontal: 6),
               child: Row(
                 children: [
-                  Text('工作区与桌面', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
+                  Text('工作区与桌面', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
                   const Spacer(),
                   InkWell(
                     onTap: () => store.refreshProjects(),
@@ -415,10 +415,10 @@ class _WelcomeState extends State<Welcome> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(s['name']?.toString() ?? '', style: TextStyle(fontSize: 11.5, color: p.ink2)),
+                            Text(s['name']?.toString() ?? '', style: TextStyle(fontSize: 12, color: p.ink2)),
                             Text(
                               relativeTime(s['modified'] is num ? (s['modified'] as num).toInt() * 1000 : null),
-                              style: TextStyle(fontSize: 9, color: p.ink4),
+                              style: TextStyle(fontSize: 10, color: p.ink4),
                             ),
                           ],
                         ),
@@ -445,7 +445,7 @@ class _WelcomeState extends State<Welcome> {
         color: color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(5),
       ),
-      child: Text(desktop ? '桌面' : '工作区', style: TextStyle(fontSize: 8.5, color: color)),
+      child: Text(desktop ? '桌面' : '工作区', style: TextStyle(fontSize: 10, color: color)),
     );
   }
 
@@ -460,7 +460,7 @@ class _WelcomeState extends State<Welcome> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('NON 的工作方式', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
+          Text('NON 的工作方式', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
           const SizedBox(height: 9),
           for (final row in [
             ('01', '理解', '从 brief 推导页面图与核心流程'),
@@ -473,13 +473,13 @@ class _WelcomeState extends State<Welcome> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(width: 16, child: Text(row.$1, style: TextStyle(fontSize: 8.5, fontFamily: 'Menlo', color: p.accent))),
+                  SizedBox(width: 16, child: Text(row.$1, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.accent))),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(row.$2, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500, color: p.ink2)),
-                        Text(row.$3, style: TextStyle(fontSize: 9, height: 1.4, color: p.ink4)),
+                        Text(row.$2, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: p.ink2)),
+                        Text(row.$3, style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4)),
                       ],
                     ),
                   ),
