@@ -238,11 +238,12 @@ class NoNDesignApi {
       final payload = line.substring(5).trim();
       if (payload.isEmpty) continue;
       try {
+        // dart:convert 对 JSON 对象本来就产出 Map<String, dynamic>——
+        // 直接窄化，别再做整表拷贝（思考/文档流式每秒几十个分片）。
         final value = jsonDecode(payload);
-        if (value is Map) {
-          final event = Map<String, dynamic>.from(value);
-          yield event;
-          if (event['type'] == 'done' || event['type'] == 'failed') return;
+        if (value is Map<String, dynamic>) {
+          yield value;
+          if (value['type'] == 'done' || value['type'] == 'failed') return;
         }
       } catch (_) {
         // ignore malformed SSE line

@@ -44,6 +44,56 @@ class _AgentPanelState extends State<AgentPanel> {
     }
   }
 
+  Widget _buildStreamRow(BuildContext context, AppStore store, NonPalette p) {
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: p.panel2.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: p.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(Icons.auto_awesome, size: 10, color: p.accent),
+            const SizedBox(width: 4),
+            Text('NoN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
+          ]),
+          const SizedBox(height: 5),
+          SelectableText(
+            store.streamText.length > 4000 ? store.streamText.substring(store.streamText.length - 4000) : store.streamText,
+            style: TextStyle(fontSize: 12, height: 1.55, color: p.ink2),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThinkingTile(BuildContext context, AppStore store, NonPalette p) {
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 6),
+        leading: Icon(Icons.psychology_outlined, size: 14, color: p.ink4),
+        title: Text('思考过程', style: TextStyle(fontSize: 11, color: p.ink4)),
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
+            child: Text(store.thinkingText,
+                maxLines: 20,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
@@ -58,69 +108,41 @@ class _AgentPanelState extends State<AgentPanel> {
         Expanded(
           child: GestureDetector(
             onTap: () => _inputFocus.requestFocus(),
-            child: ListView(
+            // builder 惰性构建：长运行时间线可达数百行，ListView(children:)
+            // 会在每次合帧通知时重建全部行。
+            child: ListView.builder(
               controller: _scroll,
               padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-              children: [
-                if (store.timeline.isEmpty && store.streamText.isEmpty)
-                  _AgentIntro(onPick: (mode, text) {
+              itemCount: (store.timeline.isEmpty && store.streamText.isEmpty ? 1 : 0) +
+                  store.timeline.length +
+                  (store.streamText.isNotEmpty ? 1 : 0) +
+                  (store.thinkingText.isNotEmpty ? 1 : 0),
+              itemBuilder: (context, i) {
+                final intro = store.timeline.isEmpty && store.streamText.isEmpty;
+                if (intro) {
+                  return _AgentIntro(onPick: (mode, text) {
                     setState(() {
                       _mode = mode;
                       _modeTouched = true;
                     });
                     _input.text = text;
                     _inputFocus.requestFocus();
-                  }),
-                for (final entry in store.timeline) _TimelineRow(entry: entry),
-                if (store.streamText.isNotEmpty)
-                  Container(
-                    margin: const EdgeInsets.only(top: 6),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: p.panel2.withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(11),
-                      border: Border.all(color: p.line),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          Icon(Icons.auto_awesome, size: 10, color: p.accent),
-                          const SizedBox(width: 4),
-                          Text('NoN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
-                        ]),
-                        const SizedBox(height: 5),
-                        SelectableText(
-                          store.streamText.length > 4000
-                              ? store.streamText.substring(store.streamText.length - 4000)
-                              : store.streamText,
-                          style: TextStyle(fontSize: 12, height: 1.55, color: p.ink2),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (store.thinkingText.isNotEmpty)
-                  Theme(
-                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                    child: ExpansionTile(
-                      tilePadding: EdgeInsets.zero,
-                      childrenPadding: const EdgeInsets.only(bottom: 6),
-                      leading: Icon(Icons.psychology_outlined, size: 14, color: p.ink4),
-                      title: Text('思考过程', style: TextStyle(fontSize: 11, color: p.ink4)),
-                      children: [
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
-                          child: Text(store.thinkingText,
-                              maxLines: 20,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4)),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
+                  });
+                }
+                var idx = i;
+                if (idx < store.timeline.length) {
+                  return _TimelineRow(
+                    entry: store.timeline[idx],
+                    animate: idx >= store.timeline.length - 3, // 只给新行淡入，旧行免重播
+                  );
+                }
+                idx -= store.timeline.length;
+                if (store.streamText.isNotEmpty) {
+                  if (idx == 0) return _buildStreamRow(context, store, p);
+                  idx -= 1;
+                }
+                return _buildThinkingTile(context, store, p);
+              },
             ),
           ),
         ),
@@ -344,14 +366,16 @@ class _AgentIntro extends StatelessWidget {
 
 class _TimelineRow extends StatelessWidget {
   final TimelineEntry entry;
-  const _TimelineRow({required this.entry});
+  /// 只对尾部新行做淡入；旧行从 1 起始，避免惰性列表滚动回看时重播动画。
+  final bool animate;
+  const _TimelineRow({required this.entry, this.animate = true});
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     // 新行淡入（180ms）——流式运行时时间线频繁追加，瞬显会闪。
     return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
+      tween: Tween(begin: animate ? 0 : 1, end: 1),
       duration: NonMotion.base,
       curve: NonMotion.curve,
       builder: (context, opacity, child) =>

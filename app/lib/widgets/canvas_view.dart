@@ -98,7 +98,10 @@ class NodeImageCache extends ChangeNotifier {
     if (_pending[node.id] == url) return; // 加载中
     _drop(node.id); // URL 变更：丢旧图重载
     _pending[node.id] = url;
-    final stream = NetworkImage(url).resolve(ImageConfiguration.empty);
+    // ResizeImage 解码上限：原图可能是 4000px 照片，节点展示只需数百 px——
+    // 全分辨率解码一次就是几十 MB 位图。宽度钳到 1024，高度按比例。
+    final stream = ResizeImage(NetworkImage(url), width: 1024, allowUpscaling: false)
+        .resolve(ImageConfiguration.empty);
     late final ImageStreamListener listener;
     listener = ImageStreamListener((info, _) {
       stream.removeListener(listener);
@@ -309,13 +312,22 @@ class _CanvasViewState extends State<CanvasView> {
     }
   }
 
+  List<Artboard>? _layoutSrc;
+  BoardLayout? _layoutCache;
+
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final p = context.palette;
     final source = store.agentBusy && store.previewRender != null ? store.previewRender! : store.render;
     final boards = source.artboards;
-    final layout = layoutBoards(boards);
+    // 布局记忆化：boards 列表随 envelope 整体替换，引用不变即布局不变——
+    // Agent 运行期间每帧 build 免去重复的网格计算。
+    if (!identical(_layoutSrc, boards) || _layoutCache == null) {
+      _layoutCache = layoutBoards(boards);
+      _layoutSrc = boards;
+    }
+    final layout = _layoutCache!;
     final activeBoard = store.activeBoard;
 
     return Focus(

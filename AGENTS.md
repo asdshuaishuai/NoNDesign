@@ -117,6 +117,14 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **综合性能面（2026-11-14）**：长列表一律 `ListView.builder` 惰性构建
+  （Agent 时间线、设置模型清单——`ListView(children:)` 每次通知重建全部行）；
+  时间线行淡入只给尾部 3 行（`animate` 参数），旧行从 1 起始，滚动回看不重播；
+  SSE 分片直接窄化 `Map<String, dynamic>`（dart:convert 本就产出该形状，
+  `Map.from` 整表拷贝是每秒几十次的白功）；NodeImageCache 经 ResizeImage
+  钳 1024px 解码宽（原图几十 MB 位图进内存只为一枚头像节点）；
+  CanvasView 的 layoutBoards 按 envelope 列表引用记忆化（identical 检查）。
+
 - **渲染性能（2026-11-13）**：① SSE 思考/文档流式增量一律走 80ms 合帧
   （`_deltaBuffer`/`_thinkingBuffer` + Timer，事件头 `_handleAgentEvent` 入口与
   finally 双处冲刷）——逐片 notifyListeners 是全树重建放大器，别再手写直推。
