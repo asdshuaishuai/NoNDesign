@@ -601,7 +601,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ),
         const SizedBox(height: 16),
         for (final row in [
-          ('运行时', 'Flutter 3.50 · Python Agents SDK'),
+          ('运行时', 'Flutter 3.50'),
           ('引擎', 'MoonViz classic wasm 0.1.11'),
           ('服务端', store.api?.baseUrl ?? '—'),
           ('数据', '~/.nondesign · DDP 单文件'),

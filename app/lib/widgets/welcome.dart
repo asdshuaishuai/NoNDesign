@@ -106,7 +106,6 @@ class _WelcomeState extends State<Welcome> {
                       ],
                     ),
                     const Spacer(),
-                    const Pill(label: 'Flutter · Python Agents SDK', color: Color(0xFF7C8CFF), background: Color(0x1A7C8CFF)),
                     const SizedBox(width: 6),
                     Pill(label: '$providerCount 服务商 · $modelCount 模型'),
                     const SizedBox(width: 6),

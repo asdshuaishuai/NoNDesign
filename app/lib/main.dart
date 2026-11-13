@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'core/store.dart';
@@ -39,58 +42,134 @@ class NonApp extends StatelessWidget {
                   // Builder：回调的 context 必须落在 MaterialApp（Navigator 子树）
                   // 之内——NonApp 自己的 context 在其上层，showDialog/流程入口
                   // 会以 "does not include a Navigator" 崩溃（2026-11-13 实证）。
-                  : Builder(
+                  : _WindowThemeSync(
+                    dark: dark,
+                    child: Builder(
                       builder: (ctx) => Welcome(
                         onNewProject: () => showNewProjectFlow(ctx),
                         onOpenPath: (path) => openProjectFlow(ctx, path),
                         onSettings: () => showSettingsDialog(ctx),
                       ),
                     ),
+                  ),
     );
   }
 }
 
-class _BootScreen extends StatelessWidget {
+/// 启动画面：品牌化加载动画——logo 呼吸 + 光晕脉动 + 细进度条，
+/// 不再出现任何运行时（Python 等）字样。
+class _BootScreen extends StatefulWidget {
   const _BootScreen();
+
+  @override
+  State<_BootScreen> createState() => _BootScreenState();
+}
+
+class _BootScreenState extends State<_BootScreen> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     return Scaffold(
       backgroundColor: p.bg,
-      body: Stack(
-        children: [
-          Positioned.fill(child: CustomPaint(painter: _BootGlow(p.accent))),
-          Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const NonLogo(size: 52),
-                const SizedBox(height: 16),
-                Text('NoNDesign', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w600, color: p.ink)),
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.6, color: p.accent)),
-                    const SizedBox(width: 8),
-                    Text('正在启动 Python 引擎与模型清单…', style: TextStyle(fontSize: 11, color: p.ink3)),
-                  ],
-                ),
-              ],
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedBuilder(
+              animation: _c,
+              builder: (context, _) {
+                // 0→1→0 呼吸：光晕随相位胀缩，logo 轻微缩放。
+                final phase = 0.5 - 0.5 * math.cos(_c.value * math.pi * 2);
+                return SizedBox(
+                  width: 160,
+                  height: 160,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Container(
+                        width: 110 + phase * 44,
+                        height: 110 + phase * 44,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(colors: [
+                            p.accent.withValues(alpha: 0.10 + 0.14 * phase),
+                            Colors.transparent,
+                          ]),
+                        ),
+                      ),
+                      Transform.scale(scale: 0.95 + 0.06 * phase, child: const NonLogo(size: 52)),
+                    ],
+                  ),
+                );
+              },
             ),
-          ),
-          Positioned(
-            bottom: 20,
-            left: 0,
-            right: 0,
-            child: Text('canonical .mbt.md · engine-gated · local-first',
-                textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: p.ink4)),
-          ),
-        ],
+            const SizedBox(height: 18),
+            Text('NoNDesign', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3)),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: 168,
+              child: LinearProgressIndicator(
+                minHeight: 2,
+                color: p.accent,
+                backgroundColor: p.line,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            AnimatedBuilder(
+              animation: _c,
+              builder: (context, _) {
+                final dots = '.' * (1 + ((_c.value * 3).floor() % 3));
+                return Text('正在就绪$dots', style: TextStyle(fontSize: 10.5, color: p.ink3));
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
+}
+
+/// 把主题同步给 macOS 原生窗口（标题栏/背景跟随深浅主题）。
+/// 非 macOS 平台没有 nc/window channel，静默跳过。
+class _WindowThemeSync extends StatefulWidget {
+  final bool dark;
+  final Widget child;
+  const _WindowThemeSync({required this.dark, required this.child});
+
+  @override
+  State<_WindowThemeSync> createState() => _WindowThemeSyncState();
+}
+
+class _WindowThemeSyncState extends State<_WindowThemeSync> {
+  static const MethodChannel _ch = MethodChannel('nc/window');
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(covariant _WindowThemeSync old) {
+    super.didUpdateWidget(old);
+    if (old.dark != widget.dark) _sync();
+  }
+
+  void _sync() {
+    _ch.invokeMethod('setTheme', {'dark': widget.dark}).catchError((_) {});
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class _BootError extends StatelessWidget {
@@ -130,18 +209,3 @@ class _BootError extends StatelessWidget {
   }
 }
 
-class _BootGlow extends CustomPainter {
-  final Color accent;
-  _BootGlow(this.accent);
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final paint = Paint()
-      ..shader = RadialGradient(colors: [accent.withValues(alpha: 0.18), Colors.transparent])
-          .createShader(Rect.fromCircle(center: center, radius: 320));
-    canvas.drawCircle(center, 320, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _BootGlow old) => old.accent != accent;
-}

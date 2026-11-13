@@ -89,7 +89,7 @@ class _PlayViewState extends State<PlayView> {
     final board = render.board(_activeBoard ?? store.activeBoard);
     if (board == null) {
       return Scaffold(
-        backgroundColor: const Color(0xFF07080B),
+        backgroundColor: context.palette.bg, // 主题背景色——演示模式不再是黑幕
         body: EmptyHint(
           icon: Icons.play_disabled_outlined,
           title: '没有可演示的画板',
@@ -109,7 +109,7 @@ class _PlayViewState extends State<PlayView> {
         autofocus: true,
         onKeyEvent: _onKeyEvent,
         child: Scaffold(
-          backgroundColor: const Color(0xFF07080B),
+          backgroundColor: context.palette.bg, // 主题背景色——演示模式不再是黑幕
           body: Column(
             children: [
               Container(
@@ -149,11 +149,7 @@ class _PlayViewState extends State<PlayView> {
                     return Stack(
                       alignment: Alignment.center,
                       children: [
-                        Container(
-                          decoration: const BoxDecoration(
-                            gradient: RadialGradient(center: Alignment(0, -0.2), radius: 0.8, colors: [Color(0x147C8CFF), Colors.transparent]),
-                          ),
-                        ),
+                        // 演示模式无背景色：留白即可，不再铺黑色渐变。
                         Listener(
                           // 整板原始指针监听（含热区上方）：只做长按/滑动识别，
                           // 不参与手势竞技场，热区 tap 不受影响。

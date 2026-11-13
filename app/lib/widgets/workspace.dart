@@ -88,7 +88,7 @@ class _WorkspaceState extends State<Workspace> {
               Expanded(
                 child: Row(
                   children: [
-                    Rail(onSettings: _settings),
+                    const Rail(),
                     const LeftPanel(),
                     Expanded(child: _center(store)),
                     const RightPanel(),

@@ -6,8 +6,7 @@ import '../core/theme.dart';
 import 'common.dart';
 
 class Rail extends StatelessWidget {
-  final VoidCallback onSettings;
-  const Rail({super.key, required this.onSettings});
+  const Rail({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +63,6 @@ class Rail extends StatelessWidget {
               ),
             ),
           const Spacer(),
-          IconAction(icon: Icons.settings_outlined, tooltip: '设置', size: 34, onTap: onSettings),
         ],
       ),
     );
