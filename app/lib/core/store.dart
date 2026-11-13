@@ -271,6 +271,9 @@ class AppStore extends ChangeNotifier {
   void selectBoard(String id) {
     activeBoard = id;
     selectedNode = null;
+    // 多选不跨板存活（与 _commit 的按活动板剪枝同语义）：跨板拖动会对
+    // 旧板外来 id 发 move op，坐标被兜底套到错误节点上。
+    selectedNodes = const [];
     if (view == 'docs' || view == 'play') view = 'design';
     notifyListeners();
   }
@@ -995,6 +998,21 @@ class AppStore extends ChangeNotifier {
         await _handleAgentEvent(event);
         if (event['type'] == 'done') success = true;
       }
+      // 终态兜底：服务端进程崩溃/被杀时 socket 正常关闭、await for 无异常
+      // 返回——没有 done 也没有 failed 事件。此时合成失败终态卡 + toast，
+      // 并把悬挂的 running 工具条目收尾，避免时间线无声结束。
+      if (!success && agentError == null) {
+        agentError = '连接中断：服务端未返回终态事件';
+        for (final item in timeline) {
+          if (item.kind == 'tool' && item.running) {
+            item.running = false;
+            item.ok = false;
+            item.error = agentError;
+          }
+        }
+        timeline.add(TimelineEntry.finish(false, 'NoN 异常结束', agentError));
+        _toast('NoN 异常结束', '连接中断，已提交的部分已保留。');
+      }
     } catch (e) {
       agentError = e.toString();
       timeline.add(TimelineEntry.finish(false, '运行失败', e.toString()));
@@ -1054,9 +1072,12 @@ class AppStore extends ChangeNotifier {
         _deltaTimer ??= Timer(const Duration(milliseconds: 80), () {
           _deltaTimer = null;
           _flushDelta();
-      _flushThinking();
+          _flushThinking();
         });
-        break;
+        // 80ms 合帧只节流字符串还不够：逐片 notifyListeners 是全树重建
+        // 放大器（30 处 context.watch + 根组件每次 build 新建 ThemeData）。
+        // 缓冲后直接返回，通知统一由 Timer 冲刷与 switch 尾部承担。
+        return;
       case 'assistant_text':
         if (event['final'] == true) {
           timeline.add(TimelineEntry.assistant((event['text'] ?? '').toString()));
@@ -1068,7 +1089,7 @@ class AppStore extends ChangeNotifier {
           _thinkingTimer = null;
           _flushThinking();
         });
-        break;
+        return; // 同 assistant_delta：缓冲后跳过 switch 尾部通知
       case 'doc_written':
         final kind = (event['kind'] ?? '').toString();
         final content = (event['content'] ?? '').toString();
@@ -1100,8 +1121,7 @@ class AppStore extends ChangeNotifier {
         }
         break;
       case 'usage':
-        usage = Map<String, dynamic>.from(event);
-        notifyListeners();
+        usage = Map<String, dynamic>.from(event); // 通知由 switch 尾部统一发，不双发
         break;
       case 'cleanup':
         final removed = event['removed'];
@@ -1115,7 +1135,15 @@ class AppStore extends ChangeNotifier {
         if (partial != null && partial.isNotEmpty && api != null) {
           final partialMbt = utf8.decode(base64Decode(partial));
           final res = await api!.render(partialMbt);
-          if (res['ok'] == true) _commit(res);
+          if (res['ok'] == true) {
+            _commit(res);
+          } else {
+            // 渲染失败也不丢已提交的 canonical：落 mbt + dirty，finally 的
+            // _persistRecovery 会把它写进 recovery.json，重启后可恢复。
+            mbt = partialMbt;
+            dirty = true;
+            _toast('画布渲染失败、文字已保留', res['error']?.toString());
+          }
         }
         if (event['docs'] is Map) docs = Docs.fromJson(event['docs']);
         timeline.add(TimelineEntry.finish(false, 'NoN 异常结束', agentError));
@@ -1125,7 +1153,15 @@ class AppStore extends ChangeNotifier {
         if (finalMbt != null && api != null) {
           final decoded = utf8.decode(base64Decode(finalMbt));
           final res = await api!.render(decoded);
-          if (res['ok'] == true) _commit(res);
+          if (res['ok'] == true) {
+            _commit(res);
+          } else {
+            // 同 failed 路径：最后一次 /engine/render 失败不能吞掉整轮提交，
+            // 采纳 decoded canonical，等下一次渲染或保存恢复画面。
+            mbt = decoded;
+            dirty = true;
+            _toast('画布渲染失败、文字已保留', res['error']?.toString());
+          }
         }
         if (event['docs'] is Map) docs = Docs.fromJson(event['docs']);
         final summary = (event['text'] ?? '').toString();
@@ -1249,6 +1285,7 @@ class AppStore extends ChangeNotifier {
   @override
   void dispose() {
     _deltaTimer?.cancel();
+    _thinkingTimer?.cancel(); // 与 _deltaTimer 对称：pending 合帧不得在 dispose 后触发
     _previewTimer?.cancel();
     _recoveryTimer?.cancel();
     _server?.dispose();

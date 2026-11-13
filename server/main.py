@@ -163,29 +163,32 @@ async def ops() -> dict[str, Any]:
 @app.post("/engine/render")
 async def render(req: RenderRequest) -> dict[str, Any]:
     try:
-        return engine().render(req.mbt)
+        # wasm 调用是同步阻塞的：直接跑在事件循环上会冻结整个服务
+        # （/agent/cancel、/health、SSE 推送一并停摆）。RLock 已保证与
+        # agent 工具线程的互斥，丢线程池执行即可。
+        return await asyncio.to_thread(engine().render, req.mbt)
     except EngineError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/engine/validate")
 async def validate(req: RenderRequest) -> dict[str, Any]:
-    return engine().validate(req.mbt)
+    return await asyncio.to_thread(engine().validate, req.mbt)
 
 
 @app.post("/engine/apply")
 async def apply(req: ApplyRequest) -> dict[str, Any]:
-    return engine().apply(req.mbt, req.op, gate=req.gate)
+    return await asyncio.to_thread(engine().apply, req.mbt, req.op, gate=req.gate)
 
 
 @app.post("/engine/session")
 async def session(req: SessionRequest) -> dict[str, Any]:
-    return engine().session(req.name, req.mbt, req.arg)
+    return await asyncio.to_thread(engine().session, req.name, req.mbt, req.arg)
 
 
 @app.post("/engine/generate")
 async def generate(req: GenerateRequest) -> dict[str, Any]:
-    return engine().generate(req.mbt, req.intent, req.name, req.spec)
+    return await asyncio.to_thread(engine().generate, req.mbt, req.intent, req.name, req.spec)
 
 
 @app.post("/engine/tap")
@@ -194,7 +197,7 @@ async def engine_tap(req: TapRequest) -> dict[str, Any]:
     ({ok, changes[], current, mbt}). Demo mode consumes it: nav via `current`,
     toast via `changes`, live re-render via a changed `mbt`. Nothing here writes
     back to the project document — runtime state lives in the session only."""
-    return engine().tap(req.mbt, req.artboard, req.x, req.y)
+    return await asyncio.to_thread(engine().tap, req.mbt, req.artboard, req.x, req.y)
 
 
 @app.post("/engine/constrain")
@@ -203,7 +206,7 @@ async def engine_constrain(req: ConstrainRequest) -> dict[str, Any]:
     natural-language phrase the engine parses (居中 | 等间距 | 网格 3 | …); a
     cannot_parse failure carries the vocabulary in `error`. Success returns the
     canonical envelope {ok, id, x, mbt} — callers re-render before committing."""
-    return engine().constrain(req.mbt, req.artboard, req.intent)
+    return await asyncio.to_thread(engine().constrain, req.mbt, req.artboard, req.intent)
 
 
 @app.post("/engine/event")
@@ -212,7 +215,7 @@ async def engine_event(req: EventRequest) -> dict[str, Any]:
     raw event token — probed: `key_enter` ok, JSON shapes rejected as
     unknown_event. Envelope matches /engine/tap ({ok, changes[], current, mbt});
     runtime state stays in the session, the project document is untouched."""
-    return engine().event(req.mbt, req.artboard, req.spec)
+    return await asyncio.to_thread(engine().event, req.mbt, req.artboard, req.spec)
 
 
 @app.post("/engine/history")
@@ -221,12 +224,12 @@ async def engine_history(req: HistoryRequest) -> dict[str, Any]:
     sub-command expression: `init <artboard>`, `commit`, `log`, `undo`, `redo`,
     `diff <from> <to>`. undo/redo success carries the jumped-to canonical mbt;
     log returns a human-readable `log` string."""
-    return engine().session("session_history", req.mbt, req.command)
+    return await asyncio.to_thread(engine().session, "session_history", req.mbt, req.command)
 
 
 @app.post("/engine/export-html")
 async def export_html(req: RenderRequest) -> dict[str, Any]:
-    return engine().export_html(req.mbt)
+    return await asyncio.to_thread(engine().export_html, req.mbt)
 
 
 @app.post("/project/save")

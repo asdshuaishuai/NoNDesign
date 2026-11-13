@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart' hide Flow;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -1008,7 +1009,10 @@ class FlowPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant FlowPainter old) =>
-      old.flows != flows || old.positions != positions || old.zoom != zoom;
+      // positions 是字段级对比：layoutBoards 每次 build 新建 Map，恒等比较
+      // 恒不等 → 流线整层跟着画布每次 rebuild 重绘，抵消 RepaintBoundary 隔离。
+      // flows/zoom 保持引用比较（render 信封未变时为同实例）。
+      old.flows != flows || !mapEquals(old.positions, positions) || old.zoom != zoom;
 }
 
 class _EmptyCanvas extends StatelessWidget {

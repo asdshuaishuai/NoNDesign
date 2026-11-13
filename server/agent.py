@@ -156,7 +156,9 @@ def _make_tools(ctx: AgentContext) -> list[Any]:
             ctx.emit({"type": "tool_start", "tool": "generate_page", "args": {"intent": intent, "name": name}})
             ctx.remote_calls += 1
             effective = spec or ctx.design_spec or {}
-            env = ctx.engine.generate(ctx.mbt, intent, name or "", effective)
+            # 同步 wasm 调用不进事件循环：generate 可达秒级，直调会冻结
+            # /agent/cancel 与 SSE 推送。RLock 保证与 REST 路由线程互斥。
+            env = await asyncio.to_thread(ctx.engine.generate, ctx.mbt, intent, name or "", effective)
             out = _commit(ctx, f"generate {intent}", env)
             ctx.emit(
                 {
@@ -195,7 +197,12 @@ def _make_tools(ctx: AgentContext) -> list[Any]:
             started = time.time()
             ctx.emit({"type": "tool_start", "tool": "design_op", "args": {"op": op}})
             ctx.remote_calls += 1
-            env = ctx.engine.apply(ctx.mbt, op, gate="agent")
+            # session_apply_agent 快路径（session API，SESSION_MUTATING 在册）：
+            # 无状态 apply 每次把整篇 canonical 按 4 字节分块重压 in 槽，成本随
+            # 文档字节线性放大；会话路径按 canonical 键控缓存、成功信封的 mbt
+            # 回写缓存。信封只带 {ok, mbt}（无 artboards 面）——compact_envelope
+            # 与 state 卡均可承接。同时丢线程池，不阻塞事件循环。
+            env = await asyncio.to_thread(ctx.engine.session, "session_apply_agent", ctx.mbt, op)
             out = _commit(ctx, op, env)
             ctx.emit(
                 {
@@ -243,7 +250,8 @@ def _make_tools(ctx: AgentContext) -> list[Any]:
             needs_board = kind in {"query_nodes", "interactions", "states", "lint", "critique", "spec", "export_svg"}
             if needs_board and not artboard:
                 return {"ok": False, "error": "artboard_required"}
-            env = ctx.engine.session(fn, ctx.mbt, artboard or "")
+            # 会话读面同样可能压整篇 canonical（首次 open），丢线程池执行。
+            env = await asyncio.to_thread(ctx.engine.session, fn, ctx.mbt, artboard or "")
             if kind == "export_svg" and isinstance(env.get("data"), dict) and isinstance(env["data"].get("svg"), str):
                 svg = env["data"]["svg"]
                 env["data"] = {"ok": True, "chars": len(svg), "preview": svg[:1200]}
@@ -554,7 +562,8 @@ def _cleanup_document(ctx: AgentContext) -> None:
         current = ctx.engine.session("session_list_artboards", ctx.mbt)
         if len((current.get("data") or [])) <= 1:
             break
-        env = ctx.engine.apply(ctx.mbt, f"delete-artboard {bid}", gate="agent")
+        # 与 design_op 同走 session_apply_agent 快路径（AgentGate 同门分发）。
+        env = ctx.engine.session("session_apply_agent", ctx.mbt, f"delete-artboard {bid}")
         if env.get("ok") and isinstance(env.get("mbt"), str):
             ctx.mbt = env["mbt"]
             ctx.cleanup.append(bid)

@@ -215,10 +215,9 @@ class _InspectorState extends State<Inspector> {
         children: [
           Text('透明度', style: TextStyle(fontSize: 10.5, color: p.ink3)),
           Expanded(
-            child: Slider(
-              value: node.style.opacity.clamp(0, 1),
-              onChanged: (v) {},
-              onChangeEnd: (v) => store.updateNode(node.id, {'opacity': double.parse(v.toStringAsFixed(2))}),
+            child: _OpacitySlider(
+              value: node.style.opacity,
+              onCommit: (v) => store.updateNode(node.id, {'opacity': v}),
             ),
           ),
           Text('${(node.style.opacity * 100).round()}%', style: TextStyle(fontSize: 9.5, fontFamily: 'Menlo', color: p.ink4)),
@@ -432,6 +431,34 @@ class _InspectorState extends State<Inspector> {
       const SizedBox(height: 10),
       _PageHealthSection(key: ValueKey('board-health-${store.activeBoard ?? ''}')),
     ];
+  }
+}
+
+/// 透明度滑块：拖动期间用本地值实时跟手（store 只在 op 提交后才更新，
+/// onChanged 空转会让滑块冻结、松手后瞬跳终值）；松手 onChangeEnd 才发
+/// 引擎 op——与 _NumField 的「本地编辑、提交回真源」同形态。
+class _OpacitySlider extends StatefulWidget {
+  final double value;
+  final ValueChanged<double> onCommit;
+  const _OpacitySlider({required this.value, required this.onCommit});
+
+  @override
+  State<_OpacitySlider> createState() => _OpacitySliderState();
+}
+
+class _OpacitySliderState extends State<_OpacitySlider> {
+  double? _drag;
+
+  @override
+  Widget build(BuildContext context) {
+    return Slider(
+      value: _drag ?? widget.value.clamp(0.0, 1.0),
+      onChanged: (v) => setState(() => _drag = v),
+      onChangeEnd: (v) {
+        setState(() => _drag = null);
+        widget.onCommit(double.parse(v.toStringAsFixed(2)));
+      },
+    );
   }
 }
 

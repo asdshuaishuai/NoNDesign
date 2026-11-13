@@ -6,6 +6,7 @@ import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
+import 'workspace.dart' show openProjectFlow;
 
 class LeftPanel extends StatelessWidget {
   const LeftPanel({super.key});
@@ -159,7 +160,9 @@ class _ProjectPanel extends StatelessWidget {
                 const SizedBox(height: 4),
                 for (final r in store.recent.take(5))
                   InkWell(
-                    onTap: () {},
+                    // 与 welcome 的最近项目列表同一入口：带路径直接打开
+                    // （免对话框，需密码时 openProjectFlow 自行追问）。
+                    onTap: () => openProjectFlow(context, r['path']?.toString() ?? ''),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
                       child: Text((r['name'] ?? '').toString(),

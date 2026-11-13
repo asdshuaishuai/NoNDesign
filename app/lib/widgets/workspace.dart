@@ -42,6 +42,10 @@ class _WorkspaceState extends State<Workspace> {
       bindings: {
       modKey(LogicalKeyboardKey.keyK): _command,
       modKey(LogicalKeyboardKey.keyS): () => store.saveProject(),
+      modKey(LogicalKeyboardKey.keyH, shift: true): () {
+        // ⇧⌘H：导出 HTML 原型——标题栏菜单同项标注的快捷键，无项目时忽略。
+        if (store.hasProject) store.exportHtml();
+      },
       modKey(LogicalKeyboardKey.keyN): _newProject,
       modKey(LogicalKeyboardKey.keyO): () => _openPath(''),
       modKey(LogicalKeyboardKey.keyZ): store.undo,
