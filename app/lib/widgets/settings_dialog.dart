@@ -154,11 +154,20 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   onChanged: (id) async {
                     if (id == null) return;
                     final pv = store.registry.provider(id);
-                    final keys = (pv?['models'] as Map?)?.keys.toList() ?? const [];
-                    final first = keys.firstWhere(
-                      (k) => ((pv?['models'] as Map?)?[k] as Map?)?['tool_call'] == true,
-                      orElse: () => keys.isEmpty ? '' : keys.first,
-                    );
+                    final models = (pv?['models'] as Map?) ?? const {};
+                    // 显式 String 归一：keys 是 List<dynamic>，firstWhere 的
+                    // orElse 闭包推断成 () => dynamic 会以子类型错误崩溃
+                    // （2026-11-13 实证：选无 tool_call 模型的服务商即炸）。
+                    var first = '';
+                    for (final k in models.keys) {
+                      if ((models[k] as Map?)?['tool_call'] == true) {
+                        first = k.toString();
+                        break;
+                      }
+                    }
+                    if (first.isEmpty && models.isNotEmpty) {
+                      first = models.keys.first.toString();
+                    }
                     store.settings
                       ..providerId = id
                       ..modelId = first

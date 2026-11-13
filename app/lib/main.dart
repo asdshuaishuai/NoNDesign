@@ -36,10 +36,15 @@ class NonApp extends StatelessWidget {
               ? const _BootScreen()
               : store.hasProject
                   ? const Workspace()
-                  : Welcome(
-                      onNewProject: () => showNewProjectFlow(context),
-                      onOpenPath: (path) => openProjectFlow(context, path),
-                      onSettings: () => showSettingsDialog(context),
+                  // Builder：回调的 context 必须落在 MaterialApp（Navigator 子树）
+                  // 之内——NonApp 自己的 context 在其上层，showDialog/流程入口
+                  // 会以 "does not include a Navigator" 崩溃（2026-11-13 实证）。
+                  : Builder(
+                      builder: (ctx) => Welcome(
+                        onNewProject: () => showNewProjectFlow(ctx),
+                        onOpenPath: (path) => openProjectFlow(ctx, path),
+                        onSettings: () => showSettingsDialog(ctx),
+                      ),
                     ),
     );
   }
