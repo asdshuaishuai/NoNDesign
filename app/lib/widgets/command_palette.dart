@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 
@@ -55,15 +56,15 @@ class _CommandPaletteState extends State<_CommandPalette> {
     final store = context.watch<AppStore>();
     final p = context.palette;
     final actions = <_Action>[
-      _Action('新建项目', '文件', Icons.add_box_outlined, '⌘N', () {
+      _Action('新建项目', '文件', Icons.add_box_outlined, modCombo('⌘N'), () {
         Navigator.pop(context);
         widget.onNewProject();
       }),
-      _Action('打开 DDP…', '文件', Icons.folder_open_outlined, '⌘O', () {
+      _Action('打开 DDP…', '文件', Icons.folder_open_outlined, modCombo('⌘O'), () {
         Navigator.pop(context);
         widget.onOpenPath('');
       }),
-      _Action('保存', '文件', Icons.save_outlined, '⌘S', () {
+      _Action('保存', '文件', Icons.save_outlined, modCombo('⌘S'), () {
         Navigator.pop(context);
         store.saveProject();
       }),
@@ -75,31 +76,31 @@ class _CommandPaletteState extends State<_CommandPalette> {
         Navigator.pop(context);
         store.exportSvg();
       }),
-      _Action('撤销', '编辑', Icons.undo, '⌘Z', () {
+      _Action('撤销', '编辑', Icons.undo, modCombo('⌘Z'), () {
         Navigator.pop(context);
         store.undo();
       }),
-      _Action('重做', '编辑', Icons.redo, '⇧⌘Z', () {
+      _Action('重做', '编辑', Icons.redo, modCombo('⇧⌘Z'), () {
         Navigator.pop(context);
         store.redo();
       }),
-      _Action('设计画布', '视图', Icons.dashboard_outlined, '⌘1', () {
+      _Action('设计画布', '视图', Icons.dashboard_outlined, modCombo('⌘1'), () {
         Navigator.pop(context);
         store.setView('design');
       }),
-      _Action('设计文档', '视图', Icons.description_outlined, '⌘2', () {
+      _Action('设计文档', '视图', Icons.description_outlined, modCombo('⌘2'), () {
         Navigator.pop(context);
         store.setView('docs');
       }),
-      _Action('MBT 源码', '视图', Icons.code, '⌘3', () {
+      _Action('MBT 源码', '视图', Icons.code, modCombo('⌘3'), () {
         Navigator.pop(context);
         store.setView('source');
       }),
-      _Action('演示模式', '视图', Icons.play_arrow_outlined, '⌘4', () {
+      _Action('演示模式', '视图', Icons.play_arrow_outlined, modCombo('⌘4'), () {
         Navigator.pop(context);
         store.setView('play');
       }),
-      _Action('适配窗口', '视图', Icons.open_in_full, '⌘0', () {
+      _Action('适配窗口', '视图', Icons.open_in_full, modCombo('⌘0'), () {
         Navigator.pop(context);
         store.setView('design');
         store.bumpFit();
@@ -118,11 +119,11 @@ class _CommandPaletteState extends State<_CommandPalette> {
         Navigator.pop(context);
         store.setRightTab('agent');
       }),
-      _Action('设置…', '应用', Icons.settings_outlined, '⌘,', () {
+      _Action('设置…', '应用', Icons.settings_outlined, modCombo('⌘,'), () {
         Navigator.pop(context);
         widget.onSettings();
       }),
-      _Action('快捷键与命令', '应用', Icons.keyboard_outlined, '⌘/', () {
+      _Action('快捷键与命令', '应用', Icons.keyboard_outlined, modCombo('⌘/'), () {
         Navigator.pop(context);
         widget.onShortcuts();
       }),

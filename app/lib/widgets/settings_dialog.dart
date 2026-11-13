@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/models.dart';
+import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
@@ -408,12 +409,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           const SectionLabel('快捷键'),
           const SizedBox(height: 8),
           for (final row in [
-            ('命令面板', '⌘K'),
-            ('保存', '⌘S'),
-            ('撤销 / 重做', '⌘Z / ⇧⌘Z'),
-            ('画布 / 文档', '⌘1 / ⌘2'),
-            ('源码 / 演示', '⌘3 / ⌘4'),
-            ('适配窗口', '⌘0'),
+            ('命令面板', modCombo('⌘K')),
+            ('保存', modCombo('⌘S')),
+            ('撤销 / 重做', modCombo('⌘Z / ⇧⌘Z')),
+            ('画布 / 文档', modCombo('⌘1 / ⌘2')),
+            ('源码 / 演示', modCombo('⌘3 / ⌘4')),
+            ('适配窗口', modCombo('⌘0')),
           ])
             Padding(
               padding: const EdgeInsets.only(bottom: 6),

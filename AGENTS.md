@@ -2,7 +2,7 @@
 
 AI 原生原型设计工具的桌面客户端。**一句话 → 产品需求设计文档 → 完整可交互原型**。
 
-**技术栈（用户决策，2026-11-13）：Flutter 3.50（macOS）+ Python OpenAI Agents SDK。
+**技术栈（用户决策，2026-11-13）：Flutter 3.50（macOS 主目标；linux/windows 平台壳已就位）+ Python OpenAI Agents SDK。
 不要重新引入 Bun、Tauri 或任何 JS 前端运行时。**
 
 ## 架构边界（改代码前先读）
@@ -92,6 +92,15 @@ flutter build macos --debug
   拖动只更新本地 ghost，松手才发 `move` op。
 - 设计令牌：`core/theme.dart` 的 `NonPalette` 是唯一颜色源；不要在 widget 里散落硬编码色。
 - 本地化：当前简体中文；文案集中在 widgets，后续接入 i18n 时再抽表。
+- **快捷键（2026-11-13 起，全平台）**：绑定与展示标签统一走 `core/keys.dart` 的
+  `modKey()`（macOS=meta/⌘，Windows/Linux=control/Ctrl）与 `modCombo()`（标签把
+  ⌘→Ctrl+、⇧⌘→Ctrl+Shift+）。**不要在 workspace/docs 里手写
+  `SingleActivator(..., meta: true)`、也不要散落硬编码 ⌘ 标签**——加新快捷键时绑定与
+  标签各取一处助手，两处缺一就是「按得动但看不见」或「看得见但按不动」。
+- 平台壳：macOS 为主开发目标；`linux/` `windows/` 由 `flutter create
+  --platforms=linux,windows` 生成（2026-11-13），窗口标题 NoNDesign，快捷键即经
+  keys.dart 自适应；跨平台构建未在本机验证（无 Linux/Windows 环境），首次在对应平台
+  构建时先补依赖再跑门禁。
 - macOS Runner 已关闭 App Sandbox（本地 Python 子进程 + `~/.nondesign`）；不要随手加回
   sandbox 而不补 network client / app container。
 - 窗口：`MainFlutterWindow.swift` 固定在主显示器居中，避免 macOS 恢复离线显示器坐标。

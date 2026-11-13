@@ -5,6 +5,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
 
 import '../core/models.dart';
+import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
@@ -314,7 +315,7 @@ class _AgentPanelState extends State<AgentPanel> {
                       style: TextStyle(fontSize: 9.5, color: p.ink4),
                     ),
                   ),
-                  Text('⌘↵ 发送', style: TextStyle(fontSize: 9, color: p.ink4)),
+                  Text('${modCombo('⌘↵')} 发送', style: TextStyle(fontSize: 9, color: p.ink4)),
                 ],
               ),
             ],

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
@@ -255,7 +256,7 @@ class _WelcomeState extends State<Welcome> {
                                 const SizedBox(height: 10),
                                 Row(
                                   children: [
-                                    Text('⌘↵ 开始', style: TextStyle(fontSize: 9, color: p.ink4)),
+                                    Text('${modCombo('⌘↵')} 开始', style: TextStyle(fontSize: 9, color: p.ink4)),
                                     const SizedBox(width: 10),
                                     InkWell(
                                       onTap: () => showNewProjectFlow(context),

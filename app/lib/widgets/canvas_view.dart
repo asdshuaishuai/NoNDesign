@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../core/models.dart';
+import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
@@ -415,7 +416,7 @@ class _CanvasViewState extends State<CanvasView> {
                       border: Border.all(color: p.line),
                     ),
                     child: Text(
-                      '${boards.length} 画板 · space 拖动 · ⌘滚轮缩放',
+                      '${boards.length} 画板 · space 拖动 · ${modCombo('⌘')}滚轮缩放',
                       style: TextStyle(fontSize: 9, color: p.ink4),
                     ),
                   ),
@@ -1112,7 +1113,7 @@ class _CanvasHud extends StatelessWidget {
               ),
               IconAction(icon: Icons.add, tooltip: '放大', size: 26, onTap: onZoomIn),
               Container(width: 1, height: 16, color: p.line),
-              IconAction(icon: Icons.open_in_full, tooltip: '适配窗口 ⌘0', size: 26, onTap: onFit),
+              IconAction(icon: Icons.open_in_full, tooltip: '适配窗口 ${modCombo('⌘0')}', size: 26, onTap: onFit),
             ],
           ),
         );

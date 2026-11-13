@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
@@ -61,11 +62,11 @@ class TitleBar extends StatelessWidget {
               }
             },
             itemBuilder: (context) => [
-              _menu(context, 'new', Icons.add_box_outlined, '新建项目', '⌘N'),
-              _menu(context, 'open', Icons.folder_open_outlined, '打开 DDP…', '⌘O'),
-              _menu(context, 'save', Icons.save_outlined, '保存', '⌘S'),
+              _menu(context, 'new', Icons.add_box_outlined, '新建项目', modCombo('⌘N')),
+              _menu(context, 'open', Icons.folder_open_outlined, '打开 DDP…', modCombo('⌘O')),
+              _menu(context, 'save', Icons.save_outlined, '保存', modCombo('⌘S')),
               const PopupMenuDivider(),
-              _menu(context, 'html', Icons.download_outlined, '导出 HTML 原型', '⇧⌘H'),
+              _menu(context, 'html', Icons.download_outlined, '导出 HTML 原型', modCombo('⇧⌘H')),
               _menu(context, 'svg', Icons.image_outlined, '导出当前画板 SVG', ''),
               const PopupMenuDivider(),
               if (store.recent.isNotEmpty) ...[
@@ -76,7 +77,7 @@ class TitleBar extends StatelessWidget {
                   ),
                 const PopupMenuDivider(),
               ],
-              _menu(context, 'shortcuts', Icons.keyboard_outlined, '快捷键与命令', '⌘/'),
+              _menu(context, 'shortcuts', Icons.keyboard_outlined, '快捷键与命令', modCombo('⌘/')),
             ],
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
@@ -126,9 +127,7 @@ class TitleBar extends StatelessWidget {
                           const SizedBox(width: 7),
                           Text('问 NoN，或运行一个命令…', style: TextStyle(fontSize: 11.5, color: p.ink3)),
                           const Spacer(),
-                          _Kbd('⌘'),
-                          const SizedBox(width: 3),
-                          _Kbd('K'),
+                          _Kbd(modCombo('⌘K')),
                         ],
                       ),
                     ),
@@ -225,7 +224,7 @@ class TitleBar extends StatelessWidget {
               await store.saveSettings();
             },
           ),
-          IconAction(icon: Icons.settings_outlined, tooltip: '设置 ⌘,', onTap: onSettings),
+          IconAction(icon: Icons.settings_outlined, tooltip: '设置 ${modCombo('⌘,')}', onTap: onSettings),
         ],
       ),
     );

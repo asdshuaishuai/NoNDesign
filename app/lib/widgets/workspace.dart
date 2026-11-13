@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'canvas_view.dart';
@@ -39,53 +40,34 @@ class _WorkspaceState extends State<Workspace> {
     if (store.view == 'play') return const PlayView();
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _command,
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true): _command,
-        const SingleActivator(LogicalKeyboardKey.keyS, meta: true): () => store.saveProject(),
-        const SingleActivator(LogicalKeyboardKey.keyS, control: true): () => store.saveProject(),
-        const SingleActivator(LogicalKeyboardKey.keyN, meta: true): _newProject,
-        const SingleActivator(LogicalKeyboardKey.keyN, control: true): _newProject,
-        const SingleActivator(LogicalKeyboardKey.keyO, meta: true): () => _openPath(''),
-        const SingleActivator(LogicalKeyboardKey.keyO, control: true): () => _openPath(''),
-        const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () {
-          final s = context.read<AppStore>();
-          if (s.selectedNode != null) s.copyNode(s.selectedNode!);
-        },
-        const SingleActivator(LogicalKeyboardKey.keyV, meta: true): () async {
-          final s = context.read<AppStore>();
-          final id = s.clipboardNodeId;
-          if (id == null) return;
-          final newId = '${id}_p${DateTime.now().millisecondsSinceEpoch % 100000}';
-          if (await s.applyOp('copy ${s.activeBoard} $id $newId 24 24')) {
-            s.selectNode(newId);
-          }
-        },
-        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): store.undo,
-        const SingleActivator(LogicalKeyboardKey.keyZ, control: true): store.undo,
-        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true): store.redo,
-        const SingleActivator(LogicalKeyboardKey.keyZ, control: true, shift: true): store.redo,
-        const SingleActivator(LogicalKeyboardKey.digit1, meta: true): () => store.setView('design'),
-        const SingleActivator(LogicalKeyboardKey.digit2, meta: true): () => store.setView('docs'),
-        const SingleActivator(LogicalKeyboardKey.digit3, meta: true): () => store.setView('source'),
-        const SingleActivator(LogicalKeyboardKey.digit4, meta: true): () => store.setView('play'),
-        const SingleActivator(LogicalKeyboardKey.digit0, meta: true): () {
-          store.setView('design');
-          store.bumpFit();
-        },
-        const SingleActivator(LogicalKeyboardKey.enter, meta: true): () {
-          // ⌘↵：文档视图下若 PRD 就绪，一键生成原型。
-          if (store.view == 'docs' &&
-              store.docs.prd.trim().isNotEmpty &&
-              !store.agentBusy) {
-            store.setView('design');
-            store.runBuild(
-                '请根据 PRD 与 UI 说明生成完整可交互原型。先规划页面连接，再逐屏生成，最后连线并自检。');
-          }
-        },
-        const SingleActivator(LogicalKeyboardKey.slash, meta: true): _shortcuts,
-        const SingleActivator(LogicalKeyboardKey.comma, meta: true): _settings,
+      modKey(LogicalKeyboardKey.keyK): _command,
+      modKey(LogicalKeyboardKey.keyS): () => store.saveProject(),
+      modKey(LogicalKeyboardKey.keyN): _newProject,
+      modKey(LogicalKeyboardKey.keyO): () => _openPath(''),
+      modKey(LogicalKeyboardKey.keyZ): store.undo,
+      modKey(LogicalKeyboardKey.keyZ, shift: true): store.redo,
+      modKey(LogicalKeyboardKey.digit1): () => store.setView('design'),
+      modKey(LogicalKeyboardKey.digit2): () => store.setView('docs'),
+      modKey(LogicalKeyboardKey.digit3): () => store.setView('source'),
+      modKey(LogicalKeyboardKey.digit4): () => store.setView('play'),
+      modKey(LogicalKeyboardKey.digit0): () {
+        store.setView('design');
+        store.bumpFit();
       },
-      child: Focus(
+      modKey(LogicalKeyboardKey.slash): _shortcuts,
+      modKey(LogicalKeyboardKey.comma): _settings,
+      modKey(LogicalKeyboardKey.enter): () {
+        // ⌘↵ / Ctrl+↵：文档视图下若 PRD 就绪，一键生成原型。
+        if (store.view == 'docs' &&
+            store.docs.prd.trim().isNotEmpty &&
+            !store.agentBusy) {
+          store.setView('design');
+          store.runBuild(
+              '请根据 PRD 与 UI 说明生成完整可交互原型。先规划页面连接，再逐屏生成，最后连线并自检。');
+        }
+      },
+    },
+    child: Focus(
         focusNode: _focus,
         autofocus: true,
         child: Scaffold(
@@ -454,8 +436,8 @@ class _BoardTabs extends StatelessWidget {
               ),
             ),
           ),
-          IconAction(icon: Icons.code, tooltip: 'MBT 源码 ⌘3', size: 26, onTap: () => store.setView('source')),
-          IconAction(icon: Icons.play_arrow_outlined, tooltip: '演示模式 ⌘4', size: 26, onTap: () => store.setView('play')),
+          IconAction(icon: Icons.code, tooltip: 'MBT 源码 ${modCombo('⌘3')}', size: 26, onTap: () => store.setView('source')),
+          IconAction(icon: Icons.play_arrow_outlined, tooltip: '演示模式 ${modCombo('⌘4')}', size: 26, onTap: () => store.setView('play')),
           const SizedBox(width: 4),
           TextButton.icon(
             onPressed: () => store.setView('docs'),
@@ -724,10 +706,10 @@ class _ShortcutsDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final groups = {
-      '全局': [('命令面板', '⌘K'), ('设置', '⌘,'), ('保存', '⌘S'), ('新建 / 打开', '⌘N / ⌘O')],
-      '画布': [('撤销 / 重做', '⌘Z / ⇧⌘Z'), ('适配窗口', '⌘0'), ('缩放', '⌘滚轮'), ('平移', 'space + 拖动')],
-      '视图': [('设计画布', '⌘1'), ('设计文档', '⌘2'), ('MBT 源码', '⌘3'), ('演示模式', '⌘4')],
-      'Agent': [('发送', '⌘↵'), ('停止', '运行胶囊停止')],
+      '全局': [('命令面板', modCombo('⌘K')), ('设置', modCombo('⌘,')), ('保存', modCombo('⌘S')), ('新建 / 打开', modCombo('⌘N / ⌘O'))],
+      '画布': [('撤销 / 重做', modCombo('⌘Z / ⇧⌘Z')), ('适配窗口', modCombo('⌘0')), ('缩放', modCombo('⌘滚轮')), ('平移', 'space + 拖动')],
+      '视图': [('设计画布', modCombo('⌘1')), ('设计文档', modCombo('⌘2')), ('MBT 源码', modCombo('⌘3')), ('演示模式', modCombo('⌘4'))],
+      'Agent': [('发送', modCombo('⌘↵')), ('停止', '运行胶囊停止')],
     };
     return AlertDialog(
       backgroundColor: p.panel,

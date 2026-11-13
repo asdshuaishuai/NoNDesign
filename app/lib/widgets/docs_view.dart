@@ -3,6 +3,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
 
 import '../core/models.dart';
+import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
@@ -163,7 +164,7 @@ class _DocsViewState extends State<DocsView> {
                   ),
                   Row(
                     children: [
-                      Text('⌘↵ 生成', style: TextStyle(fontSize: 9.5, color: p.ink4)),
+                      Text('${modCombo('⌘↵')} 生成', style: TextStyle(fontSize: 9.5, color: p.ink4)),
                       const Spacer(),
                       FilledButton(
                         style: FilledButton.styleFrom(backgroundColor: p.accent, foregroundColor: Colors.white),
@@ -264,7 +265,7 @@ class _DocsViewState extends State<DocsView> {
               Text('Markdown · 存在 .mbt.md 的 nondesign 标记里，随 DDP 一起走',
                   style: TextStyle(fontSize: 9, color: p.ink4)),
               const Spacer(),
-              Text('⌘↵ 生成原型', style: TextStyle(fontSize: 9, color: p.ink4)),
+              Text('${modCombo('⌘↵')} 生成原型', style: TextStyle(fontSize: 9, color: p.ink4)),
             ],
           ),
         ),

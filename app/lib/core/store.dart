@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'keys.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -645,7 +646,7 @@ class AppStore extends ChangeNotifier {
   /// ⌘C：把选中节点记入画布剪贴板（引用节点 id，⌘V 时用引擎 copy 落新实例）。
   void copyNode(String id) {
     clipboardNodeId = id;
-    _toast('已复制 $id', '⌘V 粘贴到画布');
+    _toast('已复制 $id', '${modCombo('⌘V')} 粘贴到画布');
   }
 
   /// ⌘V：把剪贴板节点复制一份（偏移 24,24），返回新节点 id（失败为 null）。

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/models.dart';
+import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
@@ -795,8 +796,8 @@ class _HistoryPanelState extends State<_HistoryPanel> {
     return Column(
       children: [
         _PanelHead('历史', actions: [
-          IconAction(icon: Icons.undo, tooltip: '撤销 ⌘Z（本地快照）', size: 26, onTap: store.undo),
-          IconAction(icon: Icons.redo, tooltip: '重做 ⇧⌘Z（本地快照）', size: 26, onTap: store.redo),
+          IconAction(icon: Icons.undo, tooltip: '撤销 ${modCombo('⌘Z')}（本地快照）', size: 26, onTap: store.undo),
+          IconAction(icon: Icons.redo, tooltip: '重做 ${modCombo('⇧⌘Z')}（本地快照）', size: 26, onTap: store.redo),
         ]),
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
