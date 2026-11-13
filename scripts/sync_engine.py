@@ -2,9 +2,15 @@
 """Sync / verify the MoonViz classic wasm artifact.
 
 Usage:
-  python scripts/sync_engine.py              verify engine/moonviz.wasm (download if missing)
-  python scripts/sync_engine.py --release    download the pinned GitHub Release asset
-  python scripts/sync_engine.py --local PATH copy a local dev build
+  python scripts/sync_engine.py              resolve per ENGINE_LOCAL marker (see below)
+  python scripts/sync_engine.py --local PATH copy a local dev build AND write the marker
+  python scripts/sync_engine.py --release    explicit fallback to the pinned GitHub Release asset
+
+本地集成模式（ENGINE_LOCAL 标记，gitignored）：
+  标记在场（一行 = 本地构建 wasm 路径）时，默认同步从该路径取引擎——dev 跑法
+  持续使用本地构建，rebuild 后重跑本脚本即可；不会被 Release 产物静默覆盖。
+  标记缺省才走「校验现存 / 缺失时拉 Release」。生产打包/发布一律应锚定
+  Release 产物（--release），标记在场时会醒目告警。
 """
 
 from __future__ import annotations
@@ -22,20 +28,31 @@ ROOT = Path(__file__).resolve().parent.parent
 ENGINE_DIR = ROOT / "engine"
 WASM = ENGINE_DIR / "moonviz.wasm"
 MANIFEST = ENGINE_DIR / "manifest.json"
+ENGINE_LOCAL = ENGINE_DIR / "ENGINE_LOCAL"
 RELEASE_TAG = "engine-v0.1.11"
 RELEASE_ASSET = "moonviz-wasm-classic-0.1.11.wasm"
 RELEASE_SHA512 = "sha512-3z5jItQ5FHzeQ6nGuBzBQbIOtTsDnB9JIlSs9DH0GQNT+w17sfLkgh6pnN57ut9tacBS1GKO5Jf1g0jP7PRQZA=="
 URL = f"https://github.com/asdshuaishuai/moonviz/releases/download/{RELEASE_TAG}/{RELEASE_ASSET}"
+# moonviz-dev worktree 的默认构建产物路径（与仓库同级，deepDesign 同源）。
+DEFAULT_LOCAL_BUILD = ROOT.parent / "moonviz-dev" / "_build" / "wasm" / "release" / "build" / "wasm" / "wasm.wasm"
 
 
 def sha512(data: bytes) -> str:
     return "sha512-" + base64.b64encode(hashlib.sha512(data).digest()).decode()
 
 
+def marker_path() -> Path | None:
+    """ENGINE_LOCAL 标记内容即本地构建路径；空文件回落默认构建路径。"""
+    if not ENGINE_LOCAL.exists():
+        return None
+    text = ENGINE_LOCAL.read_text("utf-8").strip()
+    return Path(text) if text else DEFAULT_LOCAL_BUILD
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--local", help="copy a local wasm build")
-    parser.add_argument("--release", action="store_true", help="download the pinned release")
+    parser.add_argument("--local", help="copy a local wasm build (writes the ENGINE_LOCAL marker)")
+    parser.add_argument("--release", action="store_true", help="download the pinned release (overrides the marker for this run)")
     args = parser.parse_args()
     ENGINE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -45,7 +62,11 @@ def main() -> None:
             raise SystemExit(f"local wasm missing: {src}")
         data = src.read_bytes()
         source = f"local: {src}"
-    elif args.release or not WASM.exists():
+        ENGINE_LOCAL.write_text(f"{src}\n", "utf-8")
+        print(f"[sync_engine] ENGINE_LOCAL marker → {src}")
+    elif args.release:
+        if ENGINE_LOCAL.exists():
+            print(f"[sync_engine] ⚠️ ENGINE_LOCAL 在场（{marker_path()}）——本次显式锚定 Release 产物；删除标记或重跑 --local 恢复本地集成模式")
         print(f"[sync_engine] downloading {URL}")
         with urllib.request.urlopen(URL, timeout=60) as response:
             data = response.read()
@@ -54,8 +75,27 @@ def main() -> None:
             raise SystemExit(f"sha512 mismatch\n  expected {RELEASE_SHA512}\n  actual   {got}")
         source = URL
     else:
-        data = WASM.read_bytes()
-        source = "existing engine/moonviz.wasm"
+        local = marker_path()
+        if local is not None:
+            if not local.exists():
+                raise SystemExit(
+                    f"ENGINE_LOCAL 指向的本地构建缺失：{local}\n"
+                    f"  先在 moonviz-dev 构建：cd {local.parents[4]} && moon build --release --target wasm wasm\n"
+                    f"  或显式回落 Release：{sys.argv[0]} --release"
+                )
+            data = local.read_bytes()
+            source = f"local: {local}"
+        elif WASM.exists():
+            data = WASM.read_bytes()
+            source = "existing engine/moonviz.wasm"
+        else:
+            print(f"[sync_engine] downloading {URL}")
+            with urllib.request.urlopen(URL, timeout=60) as response:
+                data = response.read()
+            got = sha512(data)
+            if got != RELEASE_SHA512:
+                raise SystemExit(f"sha512 mismatch\n  expected {RELEASE_SHA512}\n  actual   {got}")
+            source = URL
 
     WASM.write_bytes(data)
     digest = sha512(data)

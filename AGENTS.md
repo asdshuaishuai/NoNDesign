@@ -125,6 +125,13 @@ flutter build macos --debug
   render/apply/generate/session 冒烟。
 - DDP：Python 自身往返 + Rust `vendor` 交叉（历史验证；当前仓库不再 vendored Rust）。
 - 改引擎版本：更新 `scripts/sync_engine.py` 锚点 → 跑 sync → 跑 Python/Flutter 测试。
+- **本地集成模式（ENGINE_LOCAL 标记，2026-11-13，用户决策）**：`engine/ENGINE_LOCAL`
+  （gitignored，一行=构建路径）在场时 sync 默认取 `../moonviz-dev` 本地构建——dev 跑法
+  持续使用本地引擎，rebuild 后重跑 `scripts/sync_engine.py` 即接回；**不会被 Release
+  产物静默覆盖**。标记缺省才回落「校验现存 / 拉取 Release」；`--release` 是显式
+  发布锚定（标记在场时告警）。引擎自报版本可能滞后 dev 构建（0.2 自报 0.1.11），
+  能力面以 manifest `build_line`（行为探针判定）为准。首次设锚：
+  `.venv/bin/python scripts/sync_engine.py --local ../moonviz-dev/_build/wasm/release/build/wasm/wasm.wasm`。
 
 ## 已知限制（v0.1）
 
