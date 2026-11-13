@@ -349,12 +349,15 @@ class _CanvasViewState extends State<CanvasView> {
                   child: Stack(
                     children: [
                       Positioned.fill(
-                        child: CustomPaint(
-                          painter: FlowPainter(
+                        // RepaintBoundary：flow 连线层独立栅格化，板内重绘不连带。
+                        child: RepaintBoundary(
+                          child: CustomPaint(
+                            painter: FlowPainter(
                             boards: boards,
                             positions: layout.positions,
                             flows: source.flows,
-                            zoom: _controller.value.getMaxScaleOnAxis(),
+                              zoom: _controller.value.getMaxScaleOnAxis(),
+                            ),
                           ),
                         ),
                       ),
@@ -485,8 +488,11 @@ class _CanvasViewState extends State<CanvasView> {
                   child: Stack(
                     children: [
                       Positioned.fill(
-                        child: CustomPaint(
-                          painter: ArtboardPainter(
+                        // RepaintBoundary：每板独立图层——Agent 预览/拖拽只重绘
+                        // 活动板，其余板栅格缓存复用。
+                        child: RepaintBoundary(
+                          child: CustomPaint(
+                            painter: ArtboardPainter(
                             nodes: board.nodes,
                             selectedId: active ? store.selectedNode : null,
                             selectedIds: active ? store.selectedNodes : const [],
@@ -496,10 +502,11 @@ class _CanvasViewState extends State<CanvasView> {
                             resizeId: _resizingId,
                             resizeRect: _resizeGhost,
                             // 图片加载完成经此 listenable 触发画布重绘
-                            repaint: NodeImageCache.instance,
+                                repaint: NodeImageCache.instance,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
                       for (final node in board.nodes)
                         if (node.style.visible)
                           Positioned(

@@ -104,6 +104,12 @@ flutter build macos --debug
 - macOS Runner 已关闭 App Sandbox（本地 Python 子进程 + `~/.nondesign`）；不要随手加回
   sandbox 而不补 network client / app container。
 - 窗口：`MainFlutterWindow.swift` 固定在主显示器居中，避免 macOS 恢复离线显示器坐标。
+- **渲染性能（2026-11-13）**：① SSE 思考/文档流式增量一律走 80ms 合帧
+  （`_deltaBuffer`/`_thinkingBuffer` + Timer，事件头 `_handleAgentEvent` 入口与
+  finally 双处冲刷）——逐片 notifyListeners 是全树重建放大器，别再手写直推。
+  ② 画布两个 painter（FlowPainter 整层 + ArtboardPainter 每板）都有
+  RepaintBoundary 图层隔离；painter 的 shouldRepaint 是字段级对比，改 painter
+  参数时必须保持（新增字段记得加进对比链）。
 
 ## 测试与验收
 

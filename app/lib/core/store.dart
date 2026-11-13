@@ -85,6 +85,11 @@ class AppStore extends ChangeNotifier {
 
   String _deltaBuffer = '';
   Timer? _deltaTimer;
+  /// thinking_delta 的 80ms 合帧缓冲：SSE 思考分片可达几十 Hz，逐片
+  /// notifyListeners 会让全树（画布+左右栏）跟着重建——与 assistant_delta
+  /// 同一治理。
+  String _thinkingBuffer = '';
+  Timer? _thinkingTimer;
   Timer? _previewTimer;
   String? _previewMbt;
   Timer? _recoveryTimer;
@@ -956,6 +961,7 @@ class AppStore extends ChangeNotifier {
     streamText = '';
     thinkingText = '';
     _deltaBuffer = '';
+    _thinkingBuffer = '';
     usage = const {};
     timeline = [
       TimelineEntry.user(instruction),
@@ -994,6 +1000,7 @@ class AppStore extends ChangeNotifier {
       timeline.add(TimelineEntry.finish(false, '运行失败', e.toString()));
     } finally {
       _flushDelta();
+      _flushThinking();
       agentBusy = false;
       agentPhase = 'idle';
       runId = null;
@@ -1047,6 +1054,7 @@ class AppStore extends ChangeNotifier {
         _deltaTimer ??= Timer(const Duration(milliseconds: 80), () {
           _deltaTimer = null;
           _flushDelta();
+      _flushThinking();
         });
         break;
       case 'assistant_text':
@@ -1055,9 +1063,11 @@ class AppStore extends ChangeNotifier {
         }
         break;
       case 'thinking_delta':
-        thinkingText = (thinkingText + (event['text'] ?? '').toString());
-        if (thinkingText.length > 6000) thinkingText = thinkingText.substring(thinkingText.length - 6000);
-        notifyListeners();
+        _thinkingBuffer += (event['text'] ?? '').toString();
+        _thinkingTimer ??= Timer(const Duration(milliseconds: 80), () {
+          _thinkingTimer = null;
+          _flushThinking();
+        });
         break;
       case 'doc_written':
         final kind = (event['kind'] ?? '').toString();
@@ -1130,6 +1140,14 @@ class AppStore extends ChangeNotifier {
     if (_deltaBuffer.isEmpty) return;
     streamText += _deltaBuffer;
     _deltaBuffer = '';
+    notifyListeners();
+  }
+
+  void _flushThinking() {
+    if (_thinkingBuffer.isEmpty) return;
+    thinkingText += _thinkingBuffer;
+    if (thinkingText.length > 6000) thinkingText = thinkingText.substring(thinkingText.length - 6000);
+    _thinkingBuffer = '';
     notifyListeners();
   }
 
