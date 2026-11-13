@@ -602,8 +602,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         const SizedBox(height: 16),
         for (final row in [
           ('运行时', 'Flutter 3.50'),
-          ('引擎', 'MoonViz classic wasm 0.1.11'),
-          ('服务端', store.api?.baseUrl ?? '—'),
+          ('引擎', 'MoonViz classic wasm · 0.2 dev 构建'),
+          // 不暴露裸 URL：本地引擎服务是应用自动拉起的实现细节，
+          // 端口排障需要时看 ~/.nondesign/server.json 即可。
+          ('本地引擎服务', store.api == null ? '未连接' : '随应用自动启动 · 就绪'),
           ('数据', '~/.nondesign · DDP 单文件'),
         ])
           Padding(
