@@ -54,8 +54,6 @@ class _WelcomeState extends State<Welcome> {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final p = context.palette;
-    final providerCount = store.registry.providers.length;
-    final modelCount = store.registry.flatten().length;
     return Scaffold(
       backgroundColor: p.bg,
       body: Stack(
@@ -106,8 +104,6 @@ class _WelcomeState extends State<Welcome> {
                       ],
                     ),
                     const Spacer(),
-                    const SizedBox(width: 6),
-                    Pill(label: '$providerCount 服务商 · $modelCount 模型'),
                     const SizedBox(width: 6),
                     IconAction(
                       icon: store.settings.theme == 'light' ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
