@@ -88,6 +88,11 @@ flutter build macos --debug
 
 - 状态：`AppStore extends ChangeNotifier`（provider）。所有会改项目的异步操作串行
   经过 store；不要绕过 store 直接调 API。
+- **右栏结构（2026-11-13 拆分）**：`right_panel.dart` 只是 91 行壳（RightPanel 组合），
+  `agent_panel.dart`（Agent 面板/时间线/模式芯片）与 `inspector_panel.dart`（检查器/
+  字段件/交互/状态/页面健康）走 `part of` 共享私有类——**part 文件不得带 import**，
+  全部依赖声明在库文件（right_panel.dart）头部；往右栏加类时先问归属（Agent vs
+  Inspector），别再往任一 part 塞对方领域的东西。
 - 画布：`CanvasView` + `ArtboardPainter`；节点命中区用透明 `Positioned` 覆盖；
   拖动只更新本地 ghost，松手才发 `move` op。
 - 设计令牌：`core/theme.dart` 的 `NonPalette` 是唯一颜色源；不要在 widget 里散落硬编码色。

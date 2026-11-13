@@ -84,7 +84,7 @@ DeepSeek / GLM / Kimi / MiniMax / OpenRouter…）——MiniMax 使用其 OpenAI
 ```
 app/                 Flutter macOS 应用
   lib/core/          API / models / store / theme
-  lib/widgets/       welcome / workspace / canvas / inspector / docs / settings / play
+  lib/widgets/       welcome / workspace / canvas / agent_panel / inspector_panel / docs / settings / play
   test/              无头 widget + SSE 测试
 server/              Python 服务端
   engine.py          MoonViz wasmtime 宿主 + `_in` slot ABI
