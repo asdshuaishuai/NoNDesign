@@ -47,6 +47,19 @@ class _WorkspaceState extends State<Workspace> {
         const SingleActivator(LogicalKeyboardKey.keyN, control: true): _newProject,
         const SingleActivator(LogicalKeyboardKey.keyO, meta: true): () => _openPath(''),
         const SingleActivator(LogicalKeyboardKey.keyO, control: true): () => _openPath(''),
+        const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () {
+          final s = context.read<AppStore>();
+          if (s.selectedNode != null) s.copyNode(s.selectedNode!);
+        },
+        const SingleActivator(LogicalKeyboardKey.keyV, meta: true): () async {
+          final s = context.read<AppStore>();
+          final id = s.clipboardNodeId;
+          if (id == null) return;
+          final newId = '${id}_p${DateTime.now().millisecondsSinceEpoch % 100000}';
+          if (await s.applyOp('copy ${s.activeBoard} $id $newId 24 24')) {
+            s.selectNode(newId);
+          }
+        },
         const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): store.undo,
         const SingleActivator(LogicalKeyboardKey.keyZ, control: true): store.undo,
         const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true): store.redo,
@@ -58,6 +71,16 @@ class _WorkspaceState extends State<Workspace> {
         const SingleActivator(LogicalKeyboardKey.digit0, meta: true): () {
           store.setView('design');
           store.bumpFit();
+        },
+        const SingleActivator(LogicalKeyboardKey.enter, meta: true): () {
+          // ⌘↵：文档视图下若 PRD 就绪，一键生成原型。
+          if (store.view == 'docs' &&
+              store.docs.prd.trim().isNotEmpty &&
+              !store.agentBusy) {
+            store.setView('design');
+            store.runBuild(
+                '请根据 PRD 与 UI 说明生成完整可交互原型。先规划页面连接，再逐屏生成，最后连线并自检。');
+          }
         },
         const SingleActivator(LogicalKeyboardKey.slash, meta: true): _shortcuts,
         const SingleActivator(LogicalKeyboardKey.comma, meta: true): _settings,

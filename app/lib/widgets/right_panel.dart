@@ -633,6 +633,26 @@ class _InspectorState extends State<Inspector> {
   Map<String, dynamic>? _critique;
   String? _flowTarget;
   String _theme = 'light';
+  /// activeBoard → session_interactions 全量（按节点过滤在 build 侧做）
+  final Map<String, List<Map<String, dynamic>>> _nodeInteractions = {};
+  String _interactionsFor = '';
+
+  void _ensureNodeInteractions(AppStore store, String board) {
+    if (_interactionsFor == board) return;
+    _interactionsFor = board;
+    final api = store.api;
+    final mbt = store.mbt;
+    if (api == null || mbt.isEmpty) return;
+    api.session(mbt, 'session_interactions', board).then((res) {
+      if (!mounted) return;
+      final items = (res['data'] as List?) ?? const [];
+      _nodeInteractions[board] =
+          items.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+      if (mounted) setState(() {});
+    }).catchError((_) {
+      if (mounted) _nodeInteractions[board] = const [];
+    });
+  }
 
   @override
   void didChangeDependencies() {
@@ -650,6 +670,7 @@ class _InspectorState extends State<Inspector> {
     if (board == null) {
       return EmptyHint(icon: Icons.crop_square, title: '没有画板', detail: '创建一个画板，或让 NoN 从一句话开始。');
     }
+    if (store.activeBoard != null) _ensureNodeInteractions(store, store.activeBoard!);
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
@@ -662,7 +683,53 @@ class _InspectorState extends State<Inspector> {
     final p = context.palette;
     final flows = store.render.flows.where((f) => f.from == store.activeBoard).toList();
     final nodeFlows = flows.where((f) => f.nodeId == node.id).toList();
+    final nodeInteractions = (_nodeInteractions[store.activeBoard] ?? const [])
+        .whereType<Map>()
+        .where((m) => m['node']?.toString() == node.id)
+        .toList();
     return [
+      if (store.selectedNodes.length >= 2) ...[
+        Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(9),
+          decoration: BoxDecoration(
+            color: p.accentSoft.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: p.accent.withValues(alpha: 0.25)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('多选 · ${store.selectedNodes.length} 个节点',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: p.accent)),
+              const SizedBox(height: 7),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  for (final (label, mode) in [
+                    ('左对齐', 'left'), ('右对齐', 'right'),
+                    ('顶对齐', 'top'), ('底对齐', 'bottom'),
+                    ('水平居中', 'hcenter'), ('垂直居中', 'vcenter'),
+                  ])
+                    _MiniButton(
+                        label: label,
+                        icon: Icons.border_inner,
+                        onTap: () => store.alignNodes(store.selectedNodes, mode)),
+                  const SizedBox(width: 4),
+                  _MiniButton(label: '编组', icon: Icons.workspaces_outline, onTap: () async {
+                    final gid = 'grp_${DateTime.now().millisecondsSinceEpoch % 100000}';
+                    if (await store.groupNodes(gid, store.selectedNodes)) {
+                      store.selectNode(gid);
+                    }
+                  }),
+                  _MiniButton(label: '取消多选', icon: Icons.clear, onTap: () => store.clearNodeMultiSelection()),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
       Row(
         children: [
           Container(
@@ -813,7 +880,7 @@ class _InspectorState extends State<Inspector> {
         revision: store.render.revision,
       ),
       const SizedBox(height: 14),
-      SectionLabel('交互连线', trailing: Pill(label: '${nodeFlows.length}', color: p.ink4)),
+      SectionLabel('交互动作', trailing: Pill(label: '${nodeFlows.length + nodeInteractions.length}', color: p.ink4)),
       const SizedBox(height: 5),
       for (final flow in nodeFlows)
         Container(
@@ -855,6 +922,8 @@ class _InspectorState extends State<Inspector> {
           ),
         ],
       ),
+      const SizedBox(height: 12),
+      _NodeInteractionsEditor(key: ValueKey('interact-${node.id}-${store.activeBoard}'), node: node),
       const SizedBox(height: 14),
       _PageHealthSection(key: ValueKey('health-${store.activeBoard ?? ''}')),
     ];
@@ -1877,6 +1946,233 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
             ),
           ),
         ],
+      ],
+    );
+  }
+}
+
+
+/// 节点交互动作编辑器：列出该节点已有 interact 标记（引擎 session_interactions），
+/// 并提供 trigger + action + 参数的添加表单（写引擎 `interact` op）。
+class _NodeInteractionsEditor extends StatefulWidget {
+  final CanvasNode node;
+  const _NodeInteractionsEditor({super.key, required this.node});
+
+  @override
+  State<_NodeInteractionsEditor> createState() => _NodeInteractionsEditorState();
+}
+
+class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
+  String _trigger = 'tap';
+  String _action = 'show_toast';
+  final _message = TextEditingController();
+  String? _targetBoard;
+  String? _targetNode;
+  final _extraText = TextEditingController();
+  List<Map<String, dynamic>> _entries = [];
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  @override
+  void didUpdateWidget(covariant _NodeInteractionsEditor old) {
+    super.didUpdateWidget(old);
+    if (old.node.id != widget.node.id) _refresh();
+  }
+
+  @override
+  void dispose() {
+    _message.dispose();
+    _extraText.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    final store = context.read<AppStore>();
+    if (store.api == null || store.activeBoard == null) return;
+    final res = await store.api!
+        .session(store.mbt, 'session_interactions', store.activeBoard!)
+        .timeout(const Duration(seconds: 15));
+    if (!mounted) return;
+    final items = (res['data'] as List?) ?? const [];
+    setState(() {
+      _entries = items
+          .whereType<Map>()
+          .where((m) => m['node']?.toString() == widget.node.id)
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+    });
+  }
+
+  Future<void> _add() async {
+    final store = context.read<AppStore>();
+    if (_busy) return;
+    String spec;
+    switch (_action) {
+      case 'back':
+      case 'haptic':
+        spec = _action;
+      case 'navigate_to':
+        final t = _message.text.trim();
+        if (t.isEmpty) return;
+        spec = 'navigate_to:$t';
+      case 'show_toast':
+        final t = _message.text.trim();
+        if (t.isEmpty) return;
+        spec = 'show_toast:$t';
+      case 'set_text':
+        final target = _extraText.text.trim();
+        final t = _message.text.trim();
+        if (target.isEmpty || t.isEmpty) return;
+        spec = 'set_text:$target:$t';
+      case 'set_state':
+        final t = _message.text.trim();
+        if (t.isEmpty) return;
+        spec = 'set_state:${widget.node.id}:$t';
+      case 'toggle_state':
+        final t = _message.text.trim();
+        if (t.isEmpty) return;
+        spec = 'toggle_state:$t';
+      case 'play_sound':
+        final t = _message.text.trim();
+        if (t.isEmpty) return;
+        spec = 'play_sound:$t';
+      default:
+        return;
+    }
+    setState(() => _busy = true);
+    final ok = await store.interactNode(widget.node.id, _trigger, spec);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (ok) {
+      _message.clear();
+      _extraText.clear();
+      await _refresh();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('交互动作被引擎拒绝'), behavior: SnackBarBehavior.floating),
+      );
+    }
+  }
+
+  static String _actionLabel(String kind) => switch (kind) {
+        'show_toast' => '显示提示',
+        'navigate_to' => '跳转画板',
+        'set_text' => '改文字',
+        'set_state' => '设状态',
+        'toggle_state' => '切状态',
+        'haptic' => '震动反馈',
+        'play_sound' => '播放音效',
+        'back' => '返回',
+        _ => kind,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final board = context.watch<AppStore>().board;
+    final boards = context.watch<AppStore>().render.artboards;
+    final isBack = _action == 'back';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            SizedBox(
+              width: 108,
+              child: DropdownButtonFormField<String>(
+                value: _trigger,
+                isDense: true,
+                decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+                items: [
+                  for (final t in ['tap', 'long_press', 'swipe_left', 'swipe_right', 'swipe_up', 'swipe_down', 'scroll_end', 'key_enter', 'focus', 'blur'])
+                    DropdownMenuItem(value: t, child: Text(t, style: TextStyle(fontSize: 10.5))),
+                ],
+                onChanged: (v) => setState(() => _trigger = v ?? 'tap'),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: _action,
+                isDense: true,
+                decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+                items: [
+                  for (final t in ['show_toast', 'navigate_to', 'set_text', 'set_state', 'toggle_state', 'haptic', 'play_sound', 'back'])
+                    DropdownMenuItem(value: t, child: Text(_actionLabel(t), style: const TextStyle(fontSize: 10.5))),
+                ],
+                onChanged: (v) => setState(() => _action = v ?? 'show_toast'),
+              ),
+            ),
+          ],
+        ),
+        if (_action == 'show_toast')
+          Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: TextField(
+              controller: _message,
+              style: const TextStyle(fontSize: 11),
+              decoration: const InputDecoration(hintText: '提示文案', contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+              onSubmitted: (_) => _add(),
+            ),
+          ),
+        if (_action == 'set_text') ...[
+          Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: DropdownButtonFormField<String>(
+              value: _targetNode,
+              isDense: true,
+              hint: const Text('目标节点', style: TextStyle(fontSize: 10.5)),
+              items: [
+                for (final n in (board?.nodes ?? const <CanvasNode>[]))
+                  DropdownMenuItem(value: n.id, child: Text(n.id, style: const TextStyle(fontSize: 10.5))),
+              ],
+              onChanged: (v) => setState(() => _targetNode = v),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: TextField(
+              controller: _extraText,
+              style: const TextStyle(fontSize: 11),
+              decoration: const InputDecoration(hintText: '新文字', contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+              onSubmitted: (_) => _add(),
+            ),
+          ),
+        ],
+        if (_action == 'set_state' || _action == 'toggle_state')
+          Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: TextField(
+              controller: _message,
+              style: const TextStyle(fontSize: 11),
+              decoration: const InputDecoration(hintText: '状态名', contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+              onSubmitted: (_) => _add(),
+            ),
+          ),
+        if (_action == 'navigate_to' || _action == 'play_sound')
+          Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: TextField(
+              controller: _message,
+              style: const TextStyle(fontSize: 11),
+              decoration: InputDecoration(
+                  hintText: _action == 'navigate_to' ? '目标画板 id' : '音效名',
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+              onSubmitted: (_) => _add(),
+            ),
+          ),
+        const SizedBox(height: 6),
+        if (isBack)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text('back 动作由引擎内置返回处理，演示模式点按即生效。',
+                style: TextStyle(fontSize: 9.5, color: p.ink4)),
+          ),
       ],
     );
   }

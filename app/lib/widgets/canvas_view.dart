@@ -488,6 +488,7 @@ class _CanvasViewState extends State<CanvasView> {
                           painter: ArtboardPainter(
                             nodes: board.nodes,
                             selectedId: active ? store.selectedNode : null,
+                            selectedIds: active ? store.selectedNodes : const [],
                             hoverId: null,
                             dragId: _draggingId,
                             dragDelta: _dragDelta,
@@ -512,8 +513,15 @@ class _CanvasViewState extends State<CanvasView> {
                                 onTap: () {
                                   _canvasFocus.requestFocus();
                                   store.selectBoard(board.id);
-                                  store.selectNode(node.id);
+                                  if (HardwareKeyboard.instance.isShiftPressed) {
+                                    store.toggleNodeSelection(node.id);
+                                  } else {
+                                    store.clearNodeMultiSelection();
+                                    store.selectNode(node.id);
+                                  }
                                 },
+                                onSecondaryTapUp: (details) =>
+                                    _nodeContextMenu(context, store, board, node, details.globalPosition),
                                 onDoubleTap: () => _editText(store, node),
                                 onPanDown: (_) {
                                   if (store.agentBusy) return;
@@ -546,8 +554,16 @@ class _CanvasViewState extends State<CanvasView> {
                                     _draggingId = null;
                                     _dragDelta = Offset.zero;
                                   });
-                                  if (delta.distance > 0.5) {
-                                    await store.moveNode(node.id, node.x + delta.dx, node.y + delta.dy);
+                                  if (delta.distance <= 0.5) return;
+                                  final moving = store.selectedNodes.contains(node.id) && store.selectedNodes.length >= 2
+                                      ? store.selectedNodes
+                                      : <String>[node.id];
+                                  for (final id in moving) {
+                                    CanvasNode target = node;
+                                    for (final n2 in board.nodes) {
+                                      if (n2.id == id) target = n2;
+                                    }
+                                    await store.moveNode(id, target.x + delta.dx, target.y + delta.dy);
                                   }
                                 },
                               ),
@@ -660,11 +676,61 @@ class _CanvasViewState extends State<CanvasView> {
         ),
     ];
   }
+
+  /// 右键上下文菜单：复制 / 删除 / 置顶置底 / 多选编组 / 解组。
+  Future<void> _nodeContextMenu(
+    BuildContext context,
+    AppStore store,
+    Artboard board,
+    CanvasNode node,
+    Offset globalPosition,
+  ) async {
+    if (store.agentBusy) return;
+    final multi = store.selectedNodes.length >= 2 && store.selectedNodes.contains(node.id);
+    final parent = node.parent;
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+          globalPosition.dx, globalPosition.dy, globalPosition.dx + 1, globalPosition.dy + 1),
+      items: [
+        const PopupMenuItem(value: 'dup', height: 36, child: Text('复制节点', style: TextStyle(fontSize: 12))),
+        const PopupMenuItem(value: 'delete', height: 36, child: Text('删除节点', style: TextStyle(fontSize: 12))),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: 'front', height: 36, child: Text('置顶', style: TextStyle(fontSize: 12))),
+        const PopupMenuItem(value: 'back', height: 36, child: Text('置底', style: TextStyle(fontSize: 12))),
+        if (multi)
+          const PopupMenuItem(value: 'group', height: 36, child: Text('编组选中节点', style: TextStyle(fontSize: 12))),
+        if (parent != 'root')
+          PopupMenuItem(
+              value: 'ungroup',
+              height: 36,
+              child: Text('解组 $parent', style: TextStyle(fontSize: 12))),
+      ],
+    );
+    if (action == null || !mounted) return;
+    switch (action) {
+      case 'dup':
+        await store.duplicateNode(node.id);
+      case 'delete':
+        await store.deleteNode(node.id);
+        store.clearNodeMultiSelection();
+      case 'front':
+        await store.reorderNode(node.id, 'front');
+      case 'back':
+        await store.reorderNode(node.id, 'back');
+      case 'group':
+        await store.groupNodes(
+            'grp_${DateTime.now().millisecondsSinceEpoch % 100000}', store.selectedNodes);
+      case 'ungroup':
+        await store.ungroupNodes(parent);
+    }
+  }
 }
 
 class ArtboardPainter extends CustomPainter {
   final List<CanvasNode> nodes;
   final String? selectedId;
+  final List<String> selectedIds;
   final String? hoverId;
   final String? dragId;
   final Offset dragDelta;
@@ -674,6 +740,7 @@ class ArtboardPainter extends CustomPainter {
   ArtboardPainter({
     required this.nodes,
     this.selectedId,
+    this.selectedIds = const [],
     this.hoverId,
     this.dragId,
     this.dragDelta = Offset.zero,
@@ -760,6 +827,14 @@ class ArtboardPainter extends CustomPainter {
         ]) {
           canvas.drawRect(Rect.fromCenter(center: point, width: 6, height: 6), handle);
         }
+      } else if (selectedIds.contains(node.id)) {
+        canvas.drawRRect(
+          rrect.inflate(1),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1
+            ..color = const Color(0x997C8CFF),
+        );
       } else if (node.id == hoverId) {
         canvas.drawRRect(
           rrect.inflate(0.5),
@@ -859,6 +934,7 @@ class ArtboardPainter extends CustomPainter {
   bool shouldRepaint(covariant ArtboardPainter old) =>
       old.nodes != nodes ||
       old.selectedId != selectedId ||
+      !identical(old.selectedIds, selectedIds) ||
       old.hoverId != hoverId ||
       old.dragId != dragId ||
       old.dragDelta != dragDelta ||

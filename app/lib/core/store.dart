@@ -50,6 +50,8 @@ class AppStore extends ChangeNotifier {
   RenderEnvelope? previewRender;
   String? activeBoard;
   String? selectedNode;
+  String? clipboardNodeId;
+  List<String> selectedNodes = const [];
   String view = 'design';
   String docsTab = 'prd';
   String panel = 'project';
@@ -273,6 +275,23 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Shift-click 多选：切换一个节点在多选集合中的存在。
+  void toggleNodeSelection(String id) {
+    if (selectedNodes.contains(id)) {
+      selectedNodes = selectedNodes.where((x) => x != id).toList();
+    } else {
+      selectedNodes = [...selectedNodes, id];
+    }
+    if (selectedNodes.isNotEmpty) selectedNode = id;
+    notifyListeners();
+  }
+
+  void clearNodeMultiSelection() {
+    if (selectedNodes.isEmpty) return;
+    selectedNodes = const [];
+    notifyListeners();
+  }
+
   void bumpFit() {
     fitEpoch += 1;
     notifyListeners();
@@ -340,11 +359,17 @@ class AppStore extends ChangeNotifier {
     if (env.artboards.isNotEmpty && !env.artboards.any((b) => b.id == activeBoard)) {
       activeBoard = env.entry.isNotEmpty ? env.entry : env.artboards.first.id;
     }
-    if (activeBoard != null) {
-      final b = render.board(activeBoard);
-      if (b != null && selectedNode != null && !b.nodes.any((n) => n.id == selectedNode)) {
+    final activeB = render.board(activeBoard);
+    if (activeB != null) {
+      if (selectedNode != null && !activeB.nodes.any((n) => n.id == selectedNode)) {
         selectedNode = null;
       }
+      if (selectedNodes.isNotEmpty) {
+        selectedNodes = selectedNodes.where((id) => activeB.nodes.any((n) => n.id == id)).toList();
+      }
+    } else {
+      selectedNode = null;
+      selectedNodes = const [];
     }
     if (markDirty) dirty = true;
     notifyListeners();
@@ -617,6 +642,20 @@ class AppStore extends ChangeNotifier {
     );
   }
 
+  /// ⌘C：把选中节点记入画布剪贴板（引用节点 id，⌘V 时用引擎 copy 落新实例）。
+  void copyNode(String id) {
+    clipboardNodeId = id;
+    _toast('已复制 $id', '⌘V 粘贴到画布');
+  }
+
+  /// ⌘V：把剪贴板节点复制一份（偏移 24,24），返回新节点 id（失败为 null）。
+  Future<String?> pasteNode() async {
+    if (clipboardNodeId == null || activeBoard == null) return null;
+    final newId = '${clipboardNodeId}_p${DateTime.now().millisecondsSinceEpoch % 100000}';
+    final ok = await applyOp('copy $activeBoard $clipboardNodeId $newId 24 24');
+    return ok ? newId : null;
+  }
+
   Future<bool> deleteNode(String id) async {
     if (activeBoard == null) return false;
     final ok = await applyOp('delete $activeBoard $id');
@@ -660,6 +699,35 @@ class AppStore extends ChangeNotifier {
   /// Switch a node's current state with a toggle (persists a [cur:<name>]
   /// marker). The set-state op takes no artboard: `set-state <node> <state> toggle`.
   Future<bool> toggleNodeState(String id, String state) => applyOp('set-state $id $state toggle');
+
+  /// 引擎对齐：left/right/top/bottom/hcenter/vcenter，≥2 节点。
+  Future<bool> alignNodes(List<String> ids, String mode) {
+    if (activeBoard == null || ids.length < 2) return Future.value(false);
+    return applyOp('align $activeBoard $mode ${ids.join(' ')}');
+  }
+
+  Future<bool> groupNodes(String groupId, List<String> ids) {
+    if (activeBoard == null || ids.length < 2) return Future.value(false);
+    return applyOp('group $activeBoard $groupId ${ids.join(' ')}');
+  }
+
+  Future<bool> ungroupNodes(String groupId) {
+    if (activeBoard == null) return Future.value(false);
+    return applyOp('ungroup $activeBoard $groupId');
+  }
+
+  /// 交互标记：actionSpec 形如 back / haptic / navigate_to:<board> /
+  /// show_toast:<msg> / set_text:<node>:<text> / set_state:<node>:<state> /
+  /// toggle_state:<node> / play_sound:<name>。含空格时引擎可容忍（探针过）。
+  Future<bool> interactNode(String node, String trigger, String actionSpec) {
+    if (activeBoard == null) return Future.value(false);
+    return applyOp('interact $activeBoard $node $trigger $actionSpec');
+  }
+
+  Future<bool> uninteractNode(String node) {
+    if (activeBoard == null) return Future.value(false);
+    return applyOp('uninteract $activeBoard $node');
+  }
 
   Future<bool> connectFlow(String target) async {
     if (activeBoard == null || selectedNode == null) return false;

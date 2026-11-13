@@ -110,7 +110,7 @@ flutter build macos --debug
 
 - 单一 OpenAI 兼容路径（用户决策 2026-11-13：撤掉 LiteLLM/Anthropic 桥；MiniMax 走 OpenAI 兼容 /v1）。非 openai 协议在 store 与 agent.py 双层拦截。
 - API Key 明文存本机 SharedPreferences；Keychain 未接。
-- 画布图片节点只画占位符（网络图片加载未接）。
+- 画布图片节点已支持网络图（cover 裁切，异步缓存）。
 - 演示模式使用 flow + 内置返回；尚未接 `session_event` 手势全量状态机。
 - 本地服务无鉴权，仅绑定 loopback；不要暴露到局域网。
 - App Sandbox 关闭；正式分发需重新设计 App Container/entitlement。
