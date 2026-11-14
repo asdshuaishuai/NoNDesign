@@ -1480,6 +1480,41 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // 已有交互：session_interactions 拉回的本节点绑定（trigger → action），
+        // 按触发方式分组展示，右侧「解绑」走 uninteract op（引擎按节点整体解绑，
+        // 不支持按单条解绑——同节点多条绑定会一并移除，与引擎 op 语义一致）。
+        if (_entries.isNotEmpty) ...[
+          for (final e in _entries)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                children: [
+                  Icon(Icons.bolt, size: 11, color: p.accent),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      '${e['trigger'] ?? ''} → ${(e['action_spec'] ?? e['action'] ?? '').toString()}',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 10.5, fontFamily: 'Menlo', color: p.ink3),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: _busy
+                        ? null
+                        : () async {
+                            setState(() => _busy = true);
+                            await context.read<AppStore>().uninteractNode(widget.node.id);
+                            if (!mounted) return;
+                            setState(() => _busy = false);
+                            await _refresh();
+                          },
+                    child: Text('解绑', style: TextStyle(fontSize: 10, color: p.danger)),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 4),
+        ],
         Row(
           children: [
             SizedBox(

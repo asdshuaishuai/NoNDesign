@@ -124,14 +124,21 @@ flutter build macos --debug
 
 - **字阶与文案（2026-11-14）**：全应用 8 档字阶 10/11/12/13/15/18/22/34，
   10px 可读性地板（17 档→8 档已重映射 254 处）；加文案先查这档表。运行时栈名
-  （Flutter/Python 等）不进产品文案。已知缺口（深度优化轮分诊 deferred，勿丢）：
+  （Flutter/Python 等）不进产品文案。已知缺口（深度优化轮分诊 deferred，审查轮
+  2026-11-14 复核：③ 已修，⑦⑧ 新增 to_thread 遗漏已修，其余仍成立，勿丢）：
   ① `applyOp` 无在飞排队——HTTP 在飞窗口内第二个 op 以陈旧 mbt 提交并覆盖
   （resize 在飞+方向键可复现，high）；② `_jumpHistory` 无在飞守卫（连按 ⌘Z
-  合并成一步，与①同根应随队列一并做）；③ `_NodeInteractionsEditor._entries`
-  拉回从未渲染（先裁决补渲染还是删冗余拉取）；④ SSE 事件契约零测试锚点
-  （建议单开测试轮）；⑤ 多选拖拽 N 次串行 HTTP（正解是引擎批量 move op，
-  上游提 issue）；⑥ 门禁加固（capability/ddp 不验 sha、compileall 只查语法、
-  ddp_check 依赖本机文件路径）。
+  合并成一步，与①同根应随队列一并做）；~~③ `_NodeInteractionsEditor._entries`
+  拉回从未渲染~~（已修，2026-11-14：补渲染 + 解绑按钮；父级 `_ensureNodeInteractions`
+  与本组件各自独立拉取 session_interactions 仍是重复请求，未合并——数据流改动
+  留给专门一轮）；④ SSE 事件契约零测试锚点（已部分缓解：`test/store_test.dart`
+  覆盖 applyOp/undo/redo 核心路径，`/agent/run` SSE 事件契约本身仍无锚点）；
+  ⑤ 多选拖拽 N 次串行 HTTP（正解是引擎批量 move op，上游提 issue）；⑥ 门禁加固
+  （capability/ddp 不验 sha、compileall 只查语法、ddp_check 依赖本机文件路径）；
+  ~~⑦ `list_templates`/`list_themes` 两端点 + agent compose 阶段 + `_list_templates`
+  工具函数未经 `to_thread`~~（已修，2026-11-14）；~~⑧ `_cleanup_document` 三处
+  `engine.session` 同步调用，每轮 run 收尾必经路径~~（已修，2026-11-14：函数改
+  `async def` + 逐处 `to_thread`）。
 
 - **语义树全局关闭（2026-11-14，崩溃报告实证）**：Flutter macOS 引擎的
   AccessibilityBridge 在 macOS 27.2 上被 AX 客户端激活后，逐帧语义更新触发

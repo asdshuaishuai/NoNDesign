@@ -262,7 +262,7 @@ def _make_tools(ctx: AgentContext) -> list[Any]:
 
         async def _list_templates() -> dict[str, Any]:
             """List engine page templates (id, name, description, device)."""
-            return {"ok": True, "templates": ctx.engine.list_templates()}
+            return {"ok": True, "templates": await asyncio.to_thread(ctx.engine.list_templates)}
 
         async def _list_components() -> dict[str, Any]:
             """List engine components with categories and descriptions."""
@@ -400,12 +400,13 @@ class AgentRun:
         self.ctx = ctx
 
         project_map = compose_project_map(engine, mbt)
+        templates = await asyncio.to_thread(engine.list_templates)
         cfg = {
             "mode": req.mode,
             "instruction": req.instruction,
             "docs": docs,
             "design_spec": design_spec,
-            "templates": engine.list_templates(),
+            "templates": templates,
             "components": [c.get("id") for c in engine.list_components() if isinstance(c, dict)],
         }
         instructions = compose_instructions(cfg, project_map)
@@ -505,7 +506,7 @@ class AgentRun:
                     "stopReason": "failed",
                 }
                 return
-            _cleanup_document(ctx)
+            await _cleanup_document(ctx)
             final_text = ctx.finished["summary"] or "".join(text_parts)
             stop_reason = ctx.finished["stop_reason"] if ctx.finished["value"] else ("text_only" if req.mode != "plan" and ctx.remote_calls == 0 else "done")
             yield {"type": "usage", **usage, "contextWindow": req.context_window}
@@ -536,8 +537,8 @@ class AgentRun:
             }
 
 
-def _cleanup_document(ctx: AgentContext) -> None:
-    boards = ctx.engine.session("session_list_artboards", ctx.mbt)
+async def _cleanup_document(ctx: AgentContext) -> None:
+    boards = await asyncio.to_thread(ctx.engine.session, "session_list_artboards", ctx.mbt)
     data = boards.get("data") or [] if isinstance(boards, dict) else []
     if len(data) <= 1:
         return
@@ -559,11 +560,11 @@ def _cleanup_document(ctx: AgentContext) -> None:
         if bid == SEED_BOARD or nodes <= 1:
             targets.append(bid)
     for bid in targets:
-        current = ctx.engine.session("session_list_artboards", ctx.mbt)
+        current = await asyncio.to_thread(ctx.engine.session, "session_list_artboards", ctx.mbt)
         if len((current.get("data") or [])) <= 1:
             break
         # 与 design_op 同走 session_apply_agent 快路径（AgentGate 同门分发）。
-        env = ctx.engine.session("session_apply_agent", ctx.mbt, f"delete-artboard {bid}")
+        env = await asyncio.to_thread(ctx.engine.session, "session_apply_agent", ctx.mbt, f"delete-artboard {bid}")
         if env.get("ok") and isinstance(env.get("mbt"), str):
             ctx.mbt = env["mbt"]
             ctx.cleanup.append(bid)

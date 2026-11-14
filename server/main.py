@@ -142,7 +142,7 @@ async def models_refresh() -> dict[str, Any]:
 
 @app.get("/engine/templates")
 async def templates() -> dict[str, Any]:
-    return {"ok": True, "templates": engine().list_templates()}
+    return {"ok": True, "templates": await asyncio.to_thread(engine().list_templates)}
 
 
 @app.get("/engine/components")
@@ -152,7 +152,7 @@ async def components() -> dict[str, Any]:
 
 @app.get("/engine/themes")
 async def themes() -> dict[str, Any]:
-    return {"ok": True, "themes": engine().list_themes()}
+    return {"ok": True, "themes": await asyncio.to_thread(engine().list_themes)}
 
 
 @app.get("/engine/ops")
