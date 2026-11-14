@@ -51,7 +51,15 @@ python3 -m venv .venv
 # 4) 启动桌面端（会自动拉起 Python 服务，使用临时端口）
 cd app
 flutter run -d macos
+
+# 评估流畅度请用 profile（AOT）——debug 是 JIT + 断言 + 调试绘制税，
+# 实测帧均 7.7ms vs 1.1ms（2026-11-14 VM Service 探针）：
+./scripts/dev.sh --profile
 ```
+
+引擎产物默认锚定仓库自带 wasm；本地集成模式（ENGINE_LOCAL 标记）下
+sync_engine 取 `../moonviz-dev` 本地构建，能力面以 manifest `build_line`
+（行为探针判定）为准——引擎自报版本可能滞后 dev 构建。
 
 也可以手动启动服务（调试 / 远程前端）：
 
@@ -78,14 +86,21 @@ DeepSeek / GLM / Kimi / MiniMax / OpenRouter…）——MiniMax 使用其 OpenAI
 - **上下文与缓存**：稳定前缀分层、项目地图、live state、tool 结果整形、确定性会话压缩、
   缓存命中遥测（`input_tokens_details.cached_tokens`）
 - **引擎门**：HumanGate / AgentGate 分离，只读命令走检视路由，不直改文档
+- **交互完备**：多选/对齐/编组、右键菜单、⌘C⌘V、interact 编辑器（长按/滑动/按键）、
+  组件状态、演示模式引擎驱动手势（0.2 session_event）与 flow 过渡
+- **全平台快捷键**：`core/keys.dart` 一处绑定（macOS=⌘，Windows/Linux=Ctrl），
+  标签经 `modCombo` 自适应
+- **UI 一致性**：NonMotion 动效令牌（120/180/240ms）、8 档字阶（10px 可读地板）、
+  M3 DropdownMenu 统一下拉、品牌强调色全量令牌化、原生标题栏随主题（nc/window）
 
 ## 目录
 
 ```
 app/                 Flutter macOS 应用
-  lib/core/          API / models / store / theme
+  lib/core/          API / models / store / theme / keys（平台自适应快捷键）
   lib/widgets/       welcome / workspace / canvas / agent_panel / inspector_panel / docs / settings / play
-  test/              无头 widget + SSE 测试
+  test/              无头 widget + SSE + 下拉回归测试
+scripts/wf/          门禁：analyze / test / compileall / capability_dump / ddp_check
 server/              Python 服务端
   engine.py          MoonViz wasmtime 宿主 + `_in` slot ABI
   agent.py           OpenAI Agents SDK loop + tools
@@ -107,17 +122,26 @@ cd app && flutter analyze && flutter test
 
 当前测试覆盖：DDP 1/2 往返与 Rust 交叉兼容、引擎 render/apply/generate/session、
 Agents SDK plan/build 两种 run（mock LLM SSE）、sidecar→引擎→canonical 全链路、
-Flutter Welcome/Canvas/Workspace/Docs 无头渲染、Dart SSE 解析。
+Flutter Welcome/Canvas/Workspace/Docs 无头渲染、Dart SSE 解析、下拉菜单开合与选择
+（锚住 DropdownButton 的 48px 运行时断言迁移）。
+
+完整门禁一次跑齐：
+
+```bash
+./scripts/wf/analyze.sh && ./scripts/wf/test.sh && ./scripts/wf/compileall.sh
+.venv/bin/python scripts/wf/capability_dump.py     # 引擎 0.2 能力面锚定
+.venv/bin/python scripts/wf/ddp_check.py <真实 .ddp>  # 解密+渲染探针
+```
 
 ## 安全与边界
 
 - 服务端只绑定 `127.0.0.1`，无远程监听；这是本地桌面工具的信任边界。
-- API Key 存在本机 `SharedPreferences`（明文），与当前桌面单用户场景匹配；
-  OS Keychain 是后续增强项。
+- API Key 存在本机 `SharedPreferences`，并镜像 `~/.nondesign/settings.json`
+  （探针/e2e 读取口）；明文，与当前桌面单用户场景匹配，OS Keychain 是后续增强项。
 - macOS Runner 的 App Sandbox 已关闭（本地 Python 子进程 + `~/.nondesign` 工作目录需要）；
   正式分发可改为 App Container + 受限 entitlement。
 - DDP 与 deepDesign Studio 的容器格式**字节兼容**（Rust 交叉验证通过）。
 
 ## 版本
 
-`0.1.0` · 2026-11-13
+`0.1.0` · 2026-11-14

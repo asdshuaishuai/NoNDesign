@@ -122,6 +122,17 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **字阶与文案（2026-11-14）**：全应用 8 档字阶 10/11/12/13/15/18/22/34，
+  10px 可读性地板（17 档→8 档已重映射 254 处）；加文案先查这档表。运行时栈名
+  （Flutter/Python 等）不进产品文案。已知缺口（深度优化轮分诊 deferred，勿丢）：
+  ① `applyOp` 无在飞排队——HTTP 在飞窗口内第二个 op 以陈旧 mbt 提交并覆盖
+  （resize 在飞+方向键可复现，high）；② `_jumpHistory` 无在飞守卫（连按 ⌘Z
+  合并成一步，与①同根应随队列一并做）；③ `_NodeInteractionsEditor._entries`
+  拉回从未渲染（先裁决补渲染还是删冗余拉取）；④ SSE 事件契约零测试锚点
+  （建议单开测试轮）；⑤ 多选拖拽 N 次串行 HTTP（正解是引擎批量 move op，
+  上游提 issue）；⑥ 门禁加固（capability/ddp 不验 sha、compileall 只查语法、
+  ddp_check 依赖本机文件路径）。
+
 - **语义树全局关闭（2026-11-14，崩溃报告实证）**：Flutter macOS 引擎的
   AccessibilityBridge 在 macOS 27.2 上被 AX 客户端激活后，逐帧语义更新触发
   `doesNotRecognizeSelector` → SIGABRT（MacOSEventsFromAXEvent）。应用根级

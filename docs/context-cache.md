@@ -16,7 +16,9 @@ NoNDesign 的 Agent 上下文按 **稳定 → 易变** 排序，目标不是"塞
 - 提示词中**没有时间戳**、没有随机排序、没有每次 run 变化的 id；`compose_project_map`
   按文档顺序输出，节点 id 截断 24/板。
 - 工具结果只保留摘要 + `state`；canonical 与 SVG 剥离，旧 `read_mbt`/`inspect` 结果
-  由会话压缩替换为占位摘要（supercede）。
+  由会话压缩替换为占位摘要（supercede）；`read_docs` 内容上限 12K 字符。
+- 变更 op 走 `session_apply_agent` 会话快路径（mbt 键控缓存）；服务端引擎调用
+  `asyncio.to_thread` 化，不阻塞事件循环（2026-11-14）。
 - 变更不改写历史：模型看到的是"追加的最新状态"，而不是被重写的前缀——这是前缀缓存
   能持续命中的前提。
 
