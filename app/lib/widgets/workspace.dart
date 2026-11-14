@@ -276,13 +276,13 @@ class _OpenProjectDialog extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             InkWell(
-              borderRadius: BorderRadius.circular(9),
+              borderRadius: BorderRadius.circular(8),
               onTap: () => Navigator.pop(context, '__file__'),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
                 decoration: BoxDecoration(
                   color: p.panel2.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(9),
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: p.line),
                 ),
                 child: Row(
@@ -314,7 +314,7 @@ class _OpenProjectDialog extends StatelessWidget {
         ),
         for (final s in items)
           InkWell(
-            borderRadius: BorderRadius.circular(9),
+            borderRadius: BorderRadius.circular(8),
             onTap: () => Navigator.pop(context, s['path']?.toString() ?? ''),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
@@ -323,7 +323,7 @@ class _OpenProjectDialog extends StatelessWidget {
                   Container(
                     width: 28,
                     height: 28,
-                    decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(7)),
+                    decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
                     child: Icon(Icons.layers_outlined, size: 14, color: p.ink4),
                   ),
                   const SizedBox(width: 9),
@@ -378,14 +378,14 @@ class _BoardTabs extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(right: 2),
                       child: InkWell(
-                        borderRadius: BorderRadius.circular(7),
+                        borderRadius: BorderRadius.circular(8),
                         onTap: () => store.selectBoard(b.id),
                         child: Container(
                           height: 28,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                           decoration: BoxDecoration(
                             color: store.activeBoard == b.id ? p.panel2 : Colors.transparent,
-                            borderRadius: BorderRadius.circular(7),
+                            borderRadius: BorderRadius.circular(8),
                           ),
                           child: Row(
                             children: [
@@ -528,7 +528,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
     final name = widget.path.split(RegExp(r'[\\/]')).last;
     return AlertDialog(
       backgroundColor: p.panel,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: p.lineStrong)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.lineStrong)),
       title: const Text('打开受保护的项目', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
       content: SizedBox(
         width: 360,
@@ -704,7 +704,7 @@ class _ShortcutsDialog extends StatelessWidget {
     };
     return AlertDialog(
       backgroundColor: p.panel,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: p.lineStrong)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.lineStrong)),
       title: const Text('快捷键与命令', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
       content: SizedBox(
         width: 560,

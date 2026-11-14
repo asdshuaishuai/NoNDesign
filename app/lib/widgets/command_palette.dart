@@ -186,7 +186,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
       onKeyEvent: _handleKey,
       child: Dialog(
       backgroundColor: p.panel,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: p.lineStrong)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.lineStrong)),
       child: SizedBox(
         width: 620,
         height: 520,

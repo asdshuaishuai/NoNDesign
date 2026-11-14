@@ -144,14 +144,14 @@ class _DocsViewState extends State<DocsView> {
     final p = context.palette;
     final active = store.docsTab == id;
     return InkWell(
-      borderRadius: BorderRadius.circular(7),
+      borderRadius: BorderRadius.circular(8),
       onTap: () => store.setDocsTab(id),
       child: Container(
         height: 28,
         padding: const EdgeInsets.symmetric(horizontal: 9),
         decoration: BoxDecoration(
           color: active ? p.panel2 : Colors.transparent,
-          borderRadius: BorderRadius.circular(7),
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
           children: [
@@ -181,7 +181,7 @@ class _DocsViewState extends State<DocsView> {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
                 gradient: LinearGradient(colors: [p.accent, p.accent2]),
               ),
               child: Icon(kind == 'prd' ? Icons.description_outlined : Icons.layers_outlined, color: Colors.white, size: 20),
@@ -197,7 +197,7 @@ class _DocsViewState extends State<DocsView> {
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 color: p.panel2.withValues(alpha: 0.6),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: p.lineStrong),
               ),
               child: Column(
@@ -298,7 +298,7 @@ class _DocsViewState extends State<DocsView> {
                     decoration: InputDecoration(
                       filled: true,
                       fillColor: p.panel.withValues(alpha: 0.5),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: p.line)),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: p.line)),
                       contentPadding: const EdgeInsets.all(20),
                     ),
                     onChanged: (v) => _stageCommit(kind, v),
@@ -432,7 +432,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
               for (final rule in design.rules)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(7)),
+                  decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
                   child: Text(rule, style: TextStyle(fontSize: 11, color: p.ink2)),
                 ),
             ],
@@ -491,7 +491,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: p.panel.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: p.line),
       ),
       child: Column(
@@ -521,7 +521,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
                   height: 42,
                   decoration: BoxDecoration(
                     color: parseHex(entry.value),
-                    borderRadius: BorderRadius.circular(9),
+                    borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
                   ),
                 ),
@@ -567,7 +567,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
                   Container(
                     width: 14,
                     height: (s * 1.6).clamp(4, 44),
-                    decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(3)),
+                    decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(4)),
                   ),
                   const SizedBox(height: 3),
                   Text(s.round().toString(), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),

@@ -21,6 +21,9 @@ class _AgentPanelState extends State<AgentPanel> {
   bool _follow = true;
   bool _userScrolling = false;
   bool _showJumpPill = false;
+  // 首次挂载/切回 tab 的贴底是瞬时定位（IM 惯例），不走 180ms 动画——
+  // 动画从顶部滑到底落点还取首帧估计。后续仍按现规则（离散行动画、流式 jump）。
+  bool _firstFollow = true;
   static const double _followSlack = 80;
 
   @override
@@ -88,7 +91,7 @@ class _AgentPanelState extends State<AgentPanel> {
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: p.panel2.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(11),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(color: p.line),
       ),
       child: Column(
@@ -148,7 +151,9 @@ class _AgentPanelState extends State<AgentPanel> {
       _lastThinkLen = store.thinkingText.length;
       // 手势拖拽进行中（_userScrolling）不贴底——与手指抢滚动条。
       if (_follow && !_userScrolling) {
-        _followBottom(animate: tlChanged && !streamChanged && !thinkChanged);
+        final first = _firstFollow;
+        _firstFollow = false;
+        _followBottom(animate: !first && tlChanged && !streamChanged && !thinkChanged);
       }
     }
     return Column(
@@ -165,12 +170,12 @@ class _AgentPanelState extends State<AgentPanel> {
                   child: ListView.builder(
                     controller: _scroll,
                     padding: const EdgeInsets.all(12),
-                    itemCount: (store.timeline.isEmpty && store.streamText.isEmpty ? 1 : 0) +
+                    itemCount: (store.timeline.isEmpty && store.streamText.isEmpty && store.thinkingText.isEmpty ? 1 : 0) +
                         store.timeline.length +
                         (store.streamText.isNotEmpty ? 1 : 0) +
                         (store.thinkingText.isNotEmpty ? 1 : 0),
                     itemBuilder: (context, i) {
-                      final intro = store.timeline.isEmpty && store.streamText.isEmpty;
+                      final intro = store.timeline.isEmpty && store.streamText.isEmpty && store.thinkingText.isEmpty;
                       if (intro) {
                         return _AgentIntro(onPick: (mode, text) {
                           setState(() {
@@ -247,7 +252,7 @@ class _AgentPanelState extends State<AgentPanel> {
                     Expanded(
                       child: Text('外部智能体 · ${store.settings.acpAgentId}（ACP）— 模式芯片不参与，消息直达该 CLI',
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 9.5, color: p.ink3)),
+                          style: TextStyle(fontSize: 10, color: p.ink3)),
                     ),
                   ]),
                 ),
@@ -321,15 +326,21 @@ class _AgentPanelState extends State<AgentPanel> {
                             label: const Text('停止', style: TextStyle(fontSize: 11)),
                           )
                         else
-                          FilledButton.icon(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: p.accent,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+                          // TextEditingController 本身是 Listenable：按钮行单独
+                          // 监听输入文本，启用态随打字即时更新（此前只有 store
+                          // 通知才刷新，打字后按钮滞留禁用态）。
+                          ListenableBuilder(
+                            listenable: _input,
+                            builder: (_, __) => FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: p.accent,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+                              ),
+                              onPressed: _input.text.trim().isEmpty ? null : () => _send(store),
+                              icon: const Icon(Icons.arrow_upward, size: 12),
+                              label: const Text('发送', style: TextStyle(fontSize: 11)),
                             ),
-                            onPressed: _input.text.trim().isEmpty ? null : () => _send(store),
-                            icon: const Icon(Icons.arrow_upward, size: 12),
-                            label: const Text('发送', style: TextStyle(fontSize: 11)),
                           ),
                       ],
                     ),
@@ -402,7 +413,7 @@ class _AgentIntro extends StatelessWidget {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
               gradient: LinearGradient(colors: [p.accent, p.accent2]),
               boxShadow: [BoxShadow(color: p.accent.withValues(alpha: 0.33), blurRadius: 22, offset: const Offset(0, 8))],
             ),
@@ -446,7 +457,7 @@ class _AgentIntro extends StatelessWidget {
             Container(
               margin: const EdgeInsets.only(top: 8),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              decoration: BoxDecoration(color: p.warn.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(7)),
+              decoration: BoxDecoration(color: p.warn.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
               child: Row(
                 children: [
                   Icon(Icons.warning_amber_rounded, size: 12, color: p.warn),
@@ -492,10 +503,10 @@ class _TimelineRow extends StatelessWidget {
             decoration: BoxDecoration(
               color: p.panel2.withValues(alpha: 0.75),
               borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(11),
+                topLeft: Radius.circular(12),
                 topRight: Radius.circular(4),
-                bottomLeft: Radius.circular(11),
-                bottomRight: Radius.circular(11),
+                bottomLeft: Radius.circular(12),
+                bottomRight: Radius.circular(12),
               ),
               border: Border.all(color: p.line),
             ),

@@ -98,7 +98,6 @@ class Artboard {
   final double width;
   final double height;
   final List<CanvasNode> nodes;
-  final String svg;
 
   const Artboard({
     required this.id,
@@ -106,7 +105,6 @@ class Artboard {
     required this.width,
     required this.height,
     required this.nodes,
-    required this.svg,
   });
 
   factory Artboard.fromJson(Map<String, dynamic> m) => Artboard(
@@ -118,7 +116,6 @@ class Artboard {
             .whereType<Map>()
             .map((e) => CanvasNode.fromJson(Map<String, dynamic>.from(e)))
             .toList(),
-        svg: (m['svg'] ?? '').toString(),
       );
 }
 

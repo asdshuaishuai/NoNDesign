@@ -112,7 +112,7 @@ class _InspectorState extends State<Inspector> {
           Container(
             width: 32,
             height: 32,
-            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(9)),
+            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
             child: Icon(Icons.crop_square, size: 14, color: p.accent),
           ),
           const SizedBox(width: 8),
@@ -262,13 +262,13 @@ class _InspectorState extends State<Inspector> {
         Container(
           margin: const EdgeInsets.only(bottom: 4),
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-          decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(7)),
+          decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(8)),
           child: Row(
             children: [
               Icon(Icons.link, size: 10, color: p.accent),
               const SizedBox(width: 5),
               Expanded(child: Text('→ ${flow.to}', style: TextStyle(fontSize: 11, color: p.ink3))),
-              IconAction(icon: Icons.close, tooltip: '移除', size: 20, onTap: () => store.disconnectFlow(flow.to)),
+              IconAction(icon: Icons.close, tooltip: '移除', size: 24, onTap: () => store.disconnectFlow(flow.to)),
             ],
           ),
         ),
@@ -314,7 +314,7 @@ class _InspectorState extends State<Inspector> {
           Container(
             width: 32,
             height: 32,
-            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(9)),
+            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
             child: Icon(Icons.layers_outlined, size: 14, color: p.accent),
           ),
           const SizedBox(width: 8),
@@ -473,13 +473,13 @@ class _MiniButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return InkWell(
-      borderRadius: BorderRadius.circular(7),
+      borderRadius: BorderRadius.circular(8),
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
         decoration: BoxDecoration(
           color: accent ? p.accentSoft : p.panel2,
-          borderRadius: BorderRadius.circular(7),
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -592,7 +592,7 @@ class _ColorRowState extends State<_ColorRow> {
           height: 24,
           decoration: BoxDecoration(
             color: parseHex(widget.value),
-            borderRadius: BorderRadius.circular(5),
+            borderRadius: BorderRadius.circular(4),
             border: Border.all(color: p.lineStrong),
           ),
         ),
@@ -1016,7 +1016,7 @@ class _NodeStatesSectionState extends State<_NodeStatesSection> {
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
                 decoration: BoxDecoration(
                   color: state == _current ? p.accentSoft : p.panel2.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(7),
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: state == _current ? p.accent.withValues(alpha: 0.4) : Colors.transparent),
                 ),
                 child: Row(
@@ -1292,7 +1292,7 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                        decoration: BoxDecoration(color: p.panel3, borderRadius: BorderRadius.circular(5)),
+                        decoration: BoxDecoration(color: p.panel3, borderRadius: BorderRadius.circular(4)),
                         child: Text((item['element'] ?? '').toString(),
                             style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink3)),
                       ),
@@ -1370,6 +1370,9 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
   String? _targetNode;
   final _extraText = TextEditingController();
   List<Map<String, dynamic>> _entries = [];
+  // 最近一次 session_interactions 拉取失败的原因；失败保留旧 _entries，
+  // 行内提示（不再让超时/网络错冒成未处理 async 异常）。
+  String? _refreshError;
   bool _busy = false;
 
   @override
@@ -1394,18 +1397,24 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
   Future<void> _refresh() async {
     final store = context.read<AppStore>();
     if (store.api == null || store.activeBoard == null) return;
-    final res = await store.api!
-        .session(store.mbt, 'session_interactions', store.activeBoard!)
-        .timeout(const Duration(seconds: 15));
-    if (!mounted) return;
-    final items = (res['data'] as List?) ?? const [];
-    setState(() {
-      _entries = items
-          .whereType<Map>()
-          .where((m) => m['node']?.toString() == widget.node.id)
-          .map((m) => Map<String, dynamic>.from(m))
-          .toList();
-    });
+    try {
+      final res = await store.api!
+          .session(store.mbt, 'session_interactions', store.activeBoard!)
+          .timeout(const Duration(seconds: 15));
+      if (!mounted) return;
+      final items = (res['data'] as List?) ?? const [];
+      setState(() {
+        _entries = items
+            .whereType<Map>()
+            .where((m) => m['node']?.toString() == widget.node.id)
+            .map((m) => Map<String, dynamic>.from(m))
+            .toList();
+        _refreshError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _refreshError = e.toString());
+    }
   }
 
   Future<void> _add() async {
@@ -1417,8 +1426,8 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
       case 'haptic':
         spec = _action;
       case 'navigate_to':
-        final t = _message.text.trim();
-        if (t.isEmpty) return;
+        final t = _targetBoard;
+        if (t == null || t.isEmpty) return;
         spec = 'navigate_to:$t';
       case 'show_toast':
         final t = _message.text.trim();
@@ -1483,6 +1492,13 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
         // 已有交互：session_interactions 拉回的本节点绑定（trigger → action），
         // 按触发方式分组展示，右侧「解绑」走 uninteract op（引擎按节点整体解绑，
         // 不支持按单条解绑——同节点多条绑定会一并移除，与引擎 op 语义一致）。
+        if (_refreshError != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text('交互列表刷新失败：$_refreshError',
+                maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10, color: p.warn)),
+          ),
         if (_entries.isNotEmpty) ...[
           for (final e in _entries)
             Padding(
@@ -1495,7 +1511,7 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
                     child: Text(
                       '${e['trigger'] ?? ''} → ${(e['action_spec'] ?? e['action'] ?? '').toString()}',
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 10.5, fontFamily: 'Menlo', color: p.ink3),
+                      style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink3),
                     ),
                   ),
                   InkWell(
@@ -1586,19 +1602,43 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
               onSubmitted: (_) => _add(),
             ),
           ),
-        if (_action == 'navigate_to' || _action == 'play_sound')
+        if (_action == 'navigate_to')
+          Padding(
+            padding: const EdgeInsets.only(top: 5),
+            // 画板下拉（nonSelect）：替代手输画板 id——boards/_targetBoard
+            // 由这里消费，_add 的 navigate_to 分支取 _targetBoard。
+            child: nonSelect<String>(context,
+              value: _targetBoard,
+              hint: const Text('目标画板', style: TextStyle(fontSize: 11)),
+              items: [
+                for (final b in boards)
+                  DropdownMenuItem(value: b.id, child: Text(b.name.isEmpty ? b.id : b.name, style: const TextStyle(fontSize: 11))),
+              ],
+              onChanged: (v) => setState(() => _targetBoard = v),
+            ),
+          ),
+        if (_action == 'play_sound')
           Padding(
             padding: const EdgeInsets.only(top: 5),
             child: TextField(
               controller: _message,
               style: const TextStyle(fontSize: 11),
-              decoration: InputDecoration(
-                  hintText: _action == 'navigate_to' ? '目标画板 id' : '音效名',
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+              decoration: const InputDecoration(
+                  hintText: '音效名',
+                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
               onSubmitted: (_) => _add(),
             ),
           ),
         const SizedBox(height: 6),
+        // 统一提交入口：back / haptic 无参数框，此前没有任何提交控件，
+        // 动作永远加不上——所有动作都可经此按钮提交。
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: _busy ? null : _add,
+            child: const Text('添加', style: TextStyle(fontSize: 11)),
+          ),
+        ),
         if (isBack)
           Padding(
             padding: const EdgeInsets.only(bottom: 4),

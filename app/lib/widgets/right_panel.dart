@@ -66,14 +66,14 @@ class RightPanel extends StatelessWidget {
     final p = context.palette;
     final active = store.rightTab == id;
     return InkWell(
-      borderRadius: BorderRadius.circular(7),
+      borderRadius: BorderRadius.circular(8),
       onTap: () => store.setRightTab(id),
       child: Container(
         height: 28,
         padding: const EdgeInsets.symmetric(horizontal: 9),
         decoration: BoxDecoration(
           color: active ? p.panel2 : Colors.transparent,
-          borderRadius: BorderRadius.circular(7),
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
           children: [

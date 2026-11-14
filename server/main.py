@@ -167,9 +167,19 @@ async def render(req: RenderRequest) -> dict[str, Any]:
         # wasm 调用是同步阻塞的：直接跑在事件循环上会冻结整个服务
         # （/agent/cancel、/health、SSE 推送一并停摆）。RLock 已保证与
         # agent 工具线程的互斥，丢线程池执行即可。
-        return await asyncio.to_thread(engine().render, req.mbt)
+        env = await asyncio.to_thread(engine().render, req.mbt)
     except EngineError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    # 每板 svg 字符串全 app 零消费（导出走 store 的 session_export_svg）：
+    # 逐板剥掉，省 ~12% 响应体积的跨 HTTP 拉取与常驻内存
+    # （写法与 compact_envelope 的剥 svg 同型，engine.py）。
+    boards = env.get("artboards")
+    if isinstance(boards, list):
+        env["artboards"] = [
+            {k: v for k, v in b.items() if k != "svg"} if isinstance(b, dict) else b
+            for b in boards
+        ]
+    return env
 
 
 @app.post("/engine/validate")

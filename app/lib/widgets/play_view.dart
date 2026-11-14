@@ -120,7 +120,7 @@ class _PlayViewState extends State<PlayView> {
                 decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
                 child: Row(
                   children: [
-                    IconAction(icon: Icons.close, tooltip: '退出演示 Esc', size: 28, onTap: () => store.setView('design')),
+                    IconAction(icon: Icons.close, tooltip: '退出演示 Esc', size: 26, onTap: () => store.setView('design')),
                     const SizedBox(width: 6),
                     Pill(label: '演示模式', color: p.accent, background: p.accent.withValues(alpha: 0.14)),
                     const SizedBox(width: 8),
@@ -130,11 +130,11 @@ class _PlayViewState extends State<PlayView> {
                     Text('${render.artboards.indexWhere((b) => b.id == board.id) + 1} / ${render.artboards.length}',
                         style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink3)),
                     const Spacer(),
-                    IconAction(icon: Icons.chevron_left, tooltip: '返回上一页 ←', size: 28, onTap: _goBack),
+                    IconAction(icon: Icons.chevron_left, tooltip: '返回上一页 ←', size: 26, onTap: _goBack),
                     IconAction(
                       icon: Icons.restart_alt,
                       tooltip: '重新开始',
-                      size: 28,
+                      size: 26,
                       onTap: _restart,
                     ),
                   ],
@@ -736,7 +736,7 @@ class _HotspotState extends State<_Hotspot> {
         child: Container(
           decoration: BoxDecoration(
             border: Border.all(color: _hover ? p.accent.withValues(alpha: 0.70) : Colors.transparent, width: 2),
-            borderRadius: BorderRadius.circular(3),
+            borderRadius: BorderRadius.circular(4),
             color: _hover ? p.accent.withValues(alpha: 0.10) : Colors.transparent,
           ),
           child: _hover
@@ -745,7 +745,7 @@ class _HotspotState extends State<_Hotspot> {
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 2),
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                    decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(3)),
+                    decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(4)),
                     child: Text(widget.label, style: const TextStyle(fontSize: 10, color: Colors.white)),
                   ),
                 )

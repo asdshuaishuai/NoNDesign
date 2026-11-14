@@ -466,7 +466,7 @@ class _DocsPanel extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(right: 4),
         padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 6),
-        decoration: BoxDecoration(color: p.panel3.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(7)),
+        decoration: BoxDecoration(color: p.panel3.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(8)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -695,7 +695,7 @@ class _SpecPanelState extends State<_SpecPanel> {
                   for (final s in design.spacing)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                      decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(5)),
+                      decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
                       child: Text(s.round().toString(), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink3)),
                     ),
                 ],
@@ -719,7 +719,7 @@ class _SpecPanelState extends State<_SpecPanel> {
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: p.accentSoft.withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(9),
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: p.accent.withValues(alpha: 0.2)),
                 ),
                 child: Text('规范随每次 Agent run 注入上下文，保持全局视觉一致。',
@@ -805,13 +805,13 @@ class _HistoryPanelState extends State<_HistoryPanel> {
               final boards = RegExp(r'<!-- moonviz:artboard').allMatches(mbt).length;
               return InkWell(
                 onTap: () => store.jumpHistory(index),
-                borderRadius: BorderRadius.circular(7),
+                borderRadius: BorderRadius.circular(8),
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 7),
                   margin: const EdgeInsets.only(bottom: 2),
                   decoration: BoxDecoration(
                     color: active ? p.accentSoft : Colors.transparent,
-                    borderRadius: BorderRadius.circular(7),
+                    borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
                     children: [
@@ -1073,7 +1073,7 @@ class ExtractCompareView extends StatelessWidget {
             height: 18,
             decoration: BoxDecoration(
               color: parseHex(value),
-              borderRadius: BorderRadius.circular(5),
+              borderRadius: BorderRadius.circular(4),
               border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
             ),
           ),

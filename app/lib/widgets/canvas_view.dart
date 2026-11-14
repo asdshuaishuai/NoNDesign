@@ -421,7 +421,7 @@ class _CanvasViewState extends State<CanvasView> {
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                       decoration: BoxDecoration(
                         color: p.accentSoft,
-                        borderRadius: BorderRadius.circular(7),
+                        borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: p.accent.withValues(alpha: 0.3)),
                       ),
                       child: Row(
@@ -436,7 +436,7 @@ class _CanvasViewState extends State<CanvasView> {
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                     decoration: BoxDecoration(
                       color: p.bgElevated.withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(7),
+                      borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: p.line),
                     ),
                     child: Text(
@@ -502,13 +502,13 @@ class _CanvasViewState extends State<CanvasView> {
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(3),
+                  borderRadius: BorderRadius.circular(4),
                   boxShadow: active
                       ? [BoxShadow(color: p.accent.withValues(alpha: 0.55), spreadRadius: 2, blurRadius: 0)]
                       : [BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 26, offset: const Offset(0, 14))],
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(3),
+                  borderRadius: BorderRadius.circular(4),
                   child: Stack(
                     children: [
                       Positioned.fill(
@@ -1021,7 +1021,8 @@ class FlowPainter extends CustomPainter {
   /// paint 时现读，缩放中/后流线描边与箭头补偿即时跟随。
   final TransformationController controller;
 
-  FlowPainter({required this.boards, required this.positions, required this.flows, required this.controller, required this.accent});
+  FlowPainter({required this.boards, required this.positions, required this.flows, required this.controller, required this.accent})
+      : super(repaint: controller);
   final Color accent;
 
   @override
@@ -1095,7 +1096,7 @@ class _EmptyCanvas extends StatelessWidget {
         padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
           color: p.panel.withValues(alpha: 0.94),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: p.lineStrong),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 50, offset: const Offset(0, 20))],
         ),
@@ -1109,7 +1110,7 @@ class _EmptyCanvas extends StatelessWidget {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(11),
+                    borderRadius: BorderRadius.circular(12),
                     gradient: LinearGradient(colors: [p.accent, p.accent2]),
                   ),
                   child: const Icon(Icons.auto_awesome, size: 17, color: Colors.white),

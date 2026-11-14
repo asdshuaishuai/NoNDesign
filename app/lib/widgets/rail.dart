@@ -32,9 +32,9 @@ class Rail extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 4),
               child: Material(
                 color: store.panel == item.$1 ? p.accentSoft : Colors.transparent,
-                borderRadius: BorderRadius.circular(11),
+                borderRadius: BorderRadius.circular(10),
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(11),
+                  borderRadius: BorderRadius.circular(10),
                   onTap: () {
                     store.setPanel(item.$1);
                     if (item.$1 == 'docs' || item.$1 == 'spec') {

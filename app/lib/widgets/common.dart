@@ -292,7 +292,7 @@ class IconAction extends StatefulWidget {
     required this.tooltip,
     this.onTap,
     this.active = false,
-    this.size = 28,
+    this.size = 26,
     this.color,
   });
 
@@ -328,7 +328,7 @@ class _IconActionState extends State<IconAction> {
             child: SizedBox(
               width: widget.size,
               height: widget.size,
-              child: Icon(widget.icon, size: widget.size * 0.52,
+              child: Icon(widget.icon, size: (widget.size * 0.52).roundToDouble(),
                   color: widget.active ? p.accent : (widget.color ?? p.ink3)),
             ),
           ),
@@ -391,7 +391,7 @@ class SectionLabel extends StatelessWidget {
 class ThinDivider extends StatelessWidget {
   const ThinDivider({super.key});
   @override
-  Widget build(BuildContext context) => Divider(height: 1, thickness: 1, color: context.palette.line);
+  Widget build(BuildContext context) => Divider(height: 1, thickness: 0.5, color: context.palette.line);
 }
 
 class EmptyHint extends StatelessWidget {

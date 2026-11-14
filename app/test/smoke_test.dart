@@ -67,7 +67,6 @@ void main() {
           name: 'home',
           width: 390,
           height: 844,
-          svg: '',
           nodes: [
             CanvasNode(
               id: 'title',
@@ -119,7 +118,7 @@ void main() {
       revision: 1,
       mbt: store.mbt,
       artboards: [
-        Artboard(id: 'home', name: 'home', width: 390, height: 844, svg: '', nodes: const []),
+        Artboard(id: 'home', name: 'home', width: 390, height: 844, nodes: const []),
       ],
     );
     await tester.pumpWidget(ChangeNotifierProvider<AppStore>.value(

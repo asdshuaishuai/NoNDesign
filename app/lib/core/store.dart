@@ -437,6 +437,9 @@ class AppStore extends ChangeNotifier {
         agentBusy = false;
         agentPhase = 'idle';
         timeline = [];
+        // 上一项目 run 的流式/思考残留不进新项目面板（孤立 stream 行 + thinking tile）。
+        streamText = '';
+        thinkingText = '';
         notifyListeners();
         return true;
       }
@@ -461,6 +464,9 @@ class AppStore extends ChangeNotifier {
       agentBusy = false;
       agentPhase = 'idle';
       timeline = [];
+      // 上一项目 run 的流式/思考残留不进新项目面板（孤立 stream 行 + thinking tile）。
+      streamText = '';
+      thinkingText = '';
       history = [];
       _commit(res);
       _toast('项目已创建', '$projectName · ${size[0]}×${size[1]}');
@@ -498,6 +504,10 @@ class AppStore extends ChangeNotifier {
       view = 'design';
       panel = 'project';
       rightTab = 'agent';
+      // 上一项目 run 的流式/思考残留不进新项目面板（timeline 是否同清属
+      // 「轨迹全局唯一时间线」语义拍板，本轮不动）。
+      streamText = '';
+      thinkingText = '';
       history = [];
       _commit(rendered, recordHistory: false, markDirty: false);
       dirty = false;

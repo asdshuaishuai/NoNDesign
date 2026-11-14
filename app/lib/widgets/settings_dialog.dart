@@ -26,6 +26,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   late final TextEditingController _keyController;
   late final TextEditingController _baseController;
   List<AcpAgentInfo> _acpAgents = const [];
+  // ACP 探测失败原因（含「本地服务未连接」）；null = 正常或未探测。
+  String? _acpError;
 
   @override
   void initState() {
@@ -38,11 +40,23 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   Future<void> _loadAcpAgents() async {
     final api = context.read<AppStore>().api;
-    if (api == null) return;
+    if (api == null) {
+      if (mounted) setState(() => _acpError = '本地服务未连接');
+      return;
+    }
     try {
       final agents = await api.acpAgents().timeout(const Duration(seconds: 8));
-      if (mounted) setState(() => _acpAgents = agents);
-    } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _acpAgents = agents;
+          _acpError = null;
+        });
+      }
+    } catch (e) {
+      // 失败显性呈现（_acp 顶部错误行 + 重试），不再静默吞掉——
+      // 服务未连上时用户要能分辨「没装 CLI」与「探测失败」。
+      if (mounted) setState(() => _acpError = '检测失败：$e');
+    }
   }
 
   @override
@@ -74,7 +88,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   const SizedBox(width: 8),
                   Text('模型、外观与 Agent 上下文策略', style: TextStyle(fontSize: 11, color: p.ink3)),
                   const Spacer(),
-                  IconAction(icon: Icons.close, tooltip: '关闭', size: 28, onTap: () => Navigator.pop(context)),
+                  IconAction(icon: Icons.close, tooltip: '关闭', size: 26, onTap: () => Navigator.pop(context)),
                 ],
               ),
             ),
@@ -104,6 +118,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       child: switch (_tab) {
                         'appearance' => _appearance(context, store),
                         'agent' => _agent(context, store),
+                        'acp' => _acp(context, store),
                         'about' => _about(context, store),
                         _ => _models(context, store),
                       },
@@ -265,7 +280,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
                       color: active ? p.accentSoft : Colors.transparent,
-                      border: Border(bottom: BorderSide(color: p.line)),
+                      // 0.5px hairline；末行免画——末行底线与容器 Border.all
+                      // 叠成 2px 假粗线（hairline 分隔线策略）。
+                      border: i < models.length - 1
+                          ? Border(bottom: BorderSide(color: p.line, width: 0.5))
+                          : null,
                     ),
                     child: Row(
                       children: [
@@ -342,7 +361,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                                         decoration: BoxDecoration(
                                           color: store.settings.thinkingLevel == level ? p.accent : p.panel3,
-                                          borderRadius: BorderRadius.circular(5),
+                                          borderRadius: BorderRadius.circular(4),
                                         ),
                                         child: Text(level,
                                             style: TextStyle(
@@ -432,7 +451,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               for (final item in [('dark', '深色', Icons.dark_mode_outlined), ('light', '浅色', Icons.light_mode_outlined)])
                 Expanded(
                   child: InkWell(
-                    borderRadius: BorderRadius.circular(11),
+                    borderRadius: BorderRadius.circular(10),
                     onTap: () async {
                       store.settings.theme = item.$1;
                       await store.saveSettings();
@@ -442,7 +461,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: store.settings.theme == item.$1 ? p.accentSoft : p.panel2.withValues(alpha: 0.45),
-                        borderRadius: BorderRadius.circular(11),
+                        borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: store.settings.theme == item.$1 ? p.accent : p.line),
                       ),
                       child: Row(
@@ -611,7 +630,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(color: p.bgElevated.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(7)),
+        decoration: BoxDecoration(color: p.bgElevated.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(8)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -676,12 +695,33 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final selected = store.settings.acpAgentId;
     return ListView(
       children: [
-        Text('外部智能体（ACP 协议）', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: p.ink)),
+        Text('外部智能体（ACP 协议）', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
         const SizedBox(height: 4),
         Text('自动检测本机已安装的支持 ACP 的智能体 CLI（Claude Code / Codex / Kimi / Gemini / Qwen 等）。'
             '选中后右侧输入框的消息将发给该智能体，流式回显进时间线；NoN 内置管线保持可用。',
-            style: TextStyle(fontSize: 10.5, height: 1.5, color: p.ink3)),
+            style: TextStyle(fontSize: 11, height: 1.5, color: p.ink3)),
         const SizedBox(height: 12),
+        if (_acpError != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: p.warn.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: p.warn.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(child: Text(_acpError!, style: TextStyle(fontSize: 11, color: p.warn))),
+                  TextButton(
+                    onPressed: _loadAcpAgents,
+                    child: const Text('重试', style: TextStyle(fontSize: 11)),
+                  ),
+                ],
+              ),
+            ),
+          ),
         _acpOption(context, store, null, 'NoN 内置管线', '一句话 → 文档 → 原型（默认）', true, false, ''),
         for (final a in _acpAgents)
           _acpOption(
@@ -750,7 +790,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                           decoration: BoxDecoration(color: p.panel3, borderRadius: BorderRadius.circular(4)),
                           child: Text('即将接入',
-                              style: TextStyle(fontSize: 9, color: p.ink4)),
+                              style: TextStyle(fontSize: 10, color: p.ink4)),
                         ),
                       ],
                     ]),
@@ -761,7 +801,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               ),
               const SizedBox(width: 8),
               Text(detail,
-                  style: TextStyle(fontSize: 9.5, fontFamily: 'Menlo', color: p.ink4)),
+                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
             ],
           ),
         ),

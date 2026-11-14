@@ -221,11 +221,11 @@ class _WelcomeState extends State<Welcome> {
                                             Padding(
                                               padding: const EdgeInsets.only(right: 4),
                                               child: InkWell(
-                                                borderRadius: BorderRadius.circular(5),
+                                                borderRadius: BorderRadius.circular(4),
                                                 onTap: () => _brief.text = '做一个$example：先写 PRD 与 UI 说明，再生成完整可交互原型。移动端优先，风格现代克制。',
                                                 child: Container(
                                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                                  decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(5)),
+                                                  decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
                                                   child: Text(example, style: TextStyle(fontSize: 10, color: p.ink3)),
                                                 ),
                                               ),
@@ -315,7 +315,7 @@ class _WelcomeState extends State<Welcome> {
       padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
         color: p.panel.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: p.line),
       ),
       child: Column(
@@ -338,7 +338,7 @@ class _WelcomeState extends State<Welcome> {
               padding: const EdgeInsets.symmetric(vertical: 18),
               decoration: BoxDecoration(
                 border: Border.all(color: p.line, style: BorderStyle.solid),
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(8),
               ),
               child: Text('还没有项目。上面输入一句话，马上开始。',
                   textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: p.ink4)),
@@ -354,7 +354,7 @@ class _WelcomeState extends State<Welcome> {
                     Container(
                       width: 27,
                       height: 27,
-                      decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(7)),
+                      decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
                       child: Icon(Icons.layers_outlined, size: 13, color: p.ink4),
                     ),
                     const SizedBox(width: 8),
@@ -403,7 +403,7 @@ class _WelcomeState extends State<Welcome> {
                       Container(
                         width: 27,
                         height: 27,
-                        decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(7)),
+                        decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
                         child: Icon(Icons.folder_outlined, size: 13, color: p.ink4),
                       ),
                       const SizedBox(width: 8),
@@ -441,7 +441,7 @@ class _WelcomeState extends State<Welcome> {
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(4),
       ),
       child: Text(desktop ? '桌面' : '工作区', style: TextStyle(fontSize: 10, color: color)),
     );
@@ -452,7 +452,7 @@ class _WelcomeState extends State<Welcome> {
       padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
         color: p.panel.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: p.line),
       ),
       child: Column(

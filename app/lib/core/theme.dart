@@ -235,7 +235,7 @@ class AppTheme {
           foregroundColor: p.bg,
           textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -252,7 +252,7 @@ class AppTheme {
           foregroundColor: p.ink3,
           textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
       ),
       iconButtonTheme: IconButtonThemeData(
@@ -286,7 +286,7 @@ class AppTheme {
       dialogTheme: DialogThemeData(
         backgroundColor: p.panel,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: p.line.withValues(alpha: 0.7))),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.line.withValues(alpha: 0.7))),
         titleTextStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink),
         contentTextStyle: TextStyle(fontSize: 12, color: p.ink2),
       ),
