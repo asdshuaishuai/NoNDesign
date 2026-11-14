@@ -122,6 +122,15 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **实测与模式纪律（2026-11-14，VM Service 探针实证）**：性能判断先跑
+  `/tmp` 式探针（websockets 连 VM Service：getMemoryUsage + setVMTimelineFlags
+  'all' + getVMTimeline 的 B/E 配对时长），别靠感觉。debug（JIT）与
+  profile（AOT）实测差距：帧均 7.7ms→1.1ms、p90 6.4→0.6ms、堆 122MB→16MB、
+  单消息尖峰 1660ms→53ms——**「卡」的第一嫌疑永远是 debug 模式本身**，
+  `./scripts/dev.sh --profile` 是真实手感。仍待查：空闲期 ~20fps 的
+  BeginFrame 泵（profile 下 1.1ms/帧无害，但来源未定位）；SEMANTICS 每帧
+  走查（canvas 已 ExcludeSemantics，面板未包）。
+
 - **综合性能面（2026-11-14）**：长列表一律 `ListView.builder` 惰性构建
   （Agent 时间线、设置模型清单——`ListView(children:)` 每次通知重建全部行）；
   时间线行淡入只给尾部 3 行（`animate` 参数），旧行从 1 起始，滚动回看不重播；

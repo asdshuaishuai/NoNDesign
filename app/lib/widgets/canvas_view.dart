@@ -356,10 +356,13 @@ class _CanvasViewState extends State<CanvasView> {
                 maxScale: 4,
                 panEnabled: !_nodePressed && !_handlePressed,
                 trackpadScrollCausesScale: true,
-                child: SizedBox(
-                  width: layout.total.width + 160,
-                  height: layout.total.height + 160,
-                  child: Stack(
+                child: ExcludeSemantics(
+                  // 画布是自绘 CustomPaint + 热区覆盖——语义树对它只有成本没有
+                  // 价值（OS AX 层激活时 SEMANTICS 每帧走查全树）。
+                  child: SizedBox(
+                    width: layout.total.width + 160,
+                    height: layout.total.height + 160,
+                    child: Stack(
                     children: [
                       Positioned.fill(
                         // RepaintBoundary：flow 连线层独立栅格化，板内重绘不连带。
@@ -377,7 +380,8 @@ class _CanvasViewState extends State<CanvasView> {
                       ),
                       for (final b in boards)
                         _boardWidget(store, b, layout.positions[b.id]!.topLeft + const Offset(80, 80), activeBoard == b.id),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
