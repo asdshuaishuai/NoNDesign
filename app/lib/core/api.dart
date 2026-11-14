@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'models.dart';
+
 import 'package:http/http.dart' as http;
 
 class ServerHandle {
@@ -148,6 +150,58 @@ class NoNDesignApi {
         .post(_uri(path), headers: {'content-type': 'application/json'}, body: jsonEncode(body))
         .timeout(const Duration(seconds: 30));
     return _decode(res);
+  }
+
+
+  // ---- ACP 外部智能体 ----
+
+  Future<List<AcpAgentInfo>> acpAgents() async {
+    final res = await getJson('/acp/agents');
+    return ((res['agents'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => AcpAgentInfo.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> acpNewSession(String agent, String? cwd) =>
+      postJson('/acp/session', {'agent': agent, if (cwd != null) 'cwd': cwd});
+
+  /// ACP prompt 的 SSE 流——事件形状与 /agent/run 同族（assistant_delta /
+  /// thinking_delta / tool_start / tool_end / note / done / failed）。
+  Stream<Map<String, dynamic>> acpPrompt(String sessionId, String text) async* {
+    final request = http.Request('POST', _uri('/acp/prompt'))
+      ..headers['accept'] = 'text/event-stream'
+      ..body = jsonEncode({'session_id': sessionId, 'text': text});
+    final response = await _client.send(request).timeout(const Duration(seconds: 660));
+    if (response.statusCode != 200) {
+      yield {'type': 'failed', 'error': 'acp_http_${response.statusCode}', 'stopReason': 'failed'};
+      return;
+    }
+    final lines = response.stream.transform(utf8.decoder).transform(const LineSplitter());
+    await for (final line in lines) {
+      if (!line.startsWith('data:')) continue;
+      final payload = line.substring(5).trim();
+      if (payload.isEmpty) continue;
+      try {
+        final value = jsonDecode(payload);
+        if (value is Map<String, dynamic>) {
+          yield value;
+          if (value['type'] == 'done' || value['type'] == 'failed') return;
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<void> acpCancel(String sessionId) async {
+    try {
+      await postJson('/acp/cancel', {'session_id': sessionId});
+    } catch (_) {}
+  }
+
+  Future<void> acpClose(String sessionId) async {
+    try {
+      await postJson('/acp/close', {'session_id': sessionId});
+    } catch (_) {}
   }
 
   Map<String, dynamic> _decode(http.Response res) {

@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 SERVER_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SERVER_DIR))
 
+from acp_bridge import AcpRegistry, detect_agents  # noqa: E402
 from agent import AgentRunManager, AgentRunRequest  # noqa: E402
 from context import clear_session_file, parse_metadata, with_metadata  # noqa: E402
 from ddp import DdpError, decrypt_ddp, encrypt_ddp  # noqa: E402
@@ -299,6 +300,80 @@ async def agent_cancel(req: CancelRequest) -> dict[str, Any]:
 @app.post("/agent/session/clear")
 async def clear_session(req: ClearSessionRequest) -> dict[str, Any]:
     return {"ok": True, "removed": clear_session_file(SESSION_DIR, req.key)}
+
+
+# ---------- ACP 外部智能体 ----------
+
+acp_registry = AcpRegistry()
+
+
+class AcpNewSessionRequest(BaseModel):
+    agent: str
+    cwd: str | None = None
+
+
+class AcpPromptRequest(BaseModel):
+    session_id: str
+    text: str
+
+
+class AcpCancelRequest(BaseModel):
+    session_id: str
+
+
+@app.get("/acp/agents")
+async def acp_agents() -> dict[str, Any]:
+    return {"ok": True, "agents": detect_agents()}
+
+
+@app.post("/acp/session")
+async def acp_new_session(req: AcpNewSessionRequest) -> dict[str, Any]:
+    workspace = req.cwd or str(Path.home() / "Documents" / "NoNDesign")
+    workspace_path = Path(workspace)
+    if not workspace_path.exists():
+        workspace_path.mkdir(parents=True, exist_ok=True)
+    return await acp_registry.create(req.agent, str(workspace_path))
+
+
+@app.post("/acp/prompt")
+async def acp_prompt(req: AcpPromptRequest) -> StreamingResponse:
+    session = acp_registry.get(req.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    pending = await session.prompt(req.text)
+
+    async def stream() -> AsyncIterator[str]:
+        try:
+            while True:
+                event = await asyncio.wait_for(pending.queue.get(), timeout=600)
+                yield _sse(event)
+                if event.get("type") in ("done", "failed"):
+                    break
+        except asyncio.TimeoutError:
+            yield _sse({"type": "failed", "error": "prompt_timeout", "stopReason": "failed"})
+        except asyncio.CancelledError:
+            yield _sse({"type": "failed", "error": "cancelled", "stopReason": "cancelled"})
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@app.post("/acp/cancel")
+async def acp_cancel(req: AcpCancelRequest) -> dict[str, Any]:
+    session = acp_registry.get(req.session_id)
+    if session is None:
+        return {"ok": False, "error": "session not found"}
+    session.cancel()
+    return {"ok": True}
+
+
+@app.post("/acp/close")
+async def acp_close(req: AcpCancelRequest) -> dict[str, Any]:
+    await acp_registry.close(req.session_id)
+    return {"ok": True}
 
 
 def _sse(event: dict[str, Any]) -> str:

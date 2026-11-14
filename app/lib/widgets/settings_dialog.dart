@@ -25,6 +25,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   String _query = '';
   late final TextEditingController _keyController;
   late final TextEditingController _baseController;
+  List<AcpAgentInfo> _acpAgents = const [];
 
   @override
   void initState() {
@@ -32,6 +33,16 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final store = context.read<AppStore>();
     _keyController = TextEditingController(text: store.settings.apiKey);
     _baseController = TextEditingController(text: store.settings.baseUrl);
+    _loadAcpAgents();
+  }
+
+  Future<void> _loadAcpAgents() async {
+    final api = context.read<AppStore>().api;
+    if (api == null) return;
+    try {
+      final agents = await api.acpAgents().timeout(const Duration(seconds: 8));
+      if (mounted) setState(() => _acpAgents = agents);
+    } catch (_) {}
   }
 
   @override
@@ -82,6 +93,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                         _nav(context, 'models', Icons.memory, '模型与端点'),
                         _nav(context, 'appearance', Icons.palette_outlined, '外观与交互'),
                         _nav(context, 'agent', Icons.speed, '上下文与缓存'),
+                        _nav(context, 'acp', Icons.hub_outlined, '外部智能体'),
                         _nav(context, 'about', Icons.info_outline, '关于'),
                       ],
                     ),
@@ -656,6 +668,104 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         Text('模型与端点来自 models.dev 快照；上下文与缓存策略在本地确定性执行。',
             style: TextStyle(fontSize: 10, color: p.ink4)),
       ],
+    );
+  }
+
+  Widget _acp(BuildContext context, AppStore store) {
+    final p = context.palette;
+    final selected = store.settings.acpAgentId;
+    return ListView(
+      children: [
+        Text('外部智能体（ACP 协议）', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: p.ink)),
+        const SizedBox(height: 4),
+        Text('自动检测本机已安装的支持 ACP 的智能体 CLI（Claude Code / Codex / Kimi / Gemini / Qwen 等）。'
+            '选中后右侧输入框的消息将发给该智能体，流式回显进时间线；NoN 内置管线保持可用。',
+            style: TextStyle(fontSize: 10.5, height: 1.5, color: p.ink3)),
+        const SizedBox(height: 12),
+        _acpOption(context, store, null, 'NoN 内置管线', '一句话 → 文档 → 原型（默认）', true, false, ''),
+        for (final a in _acpAgents)
+          _acpOption(
+            context,
+            store,
+            a.id,
+            a.name,
+            a.note,
+            a.installed && !a.grayed,
+            a.grayed,
+            a.installed ? (a.executable ?? '') : '未安装',
+          ),
+        const SizedBox(height: 10),
+        Text('检测基于 PATH 探测；适配器类（claude-code-acp 等）需先全局安装。'
+            '权限请求自动放行并记录在时间线；文件读写限制在工作区目录内。',
+            style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4)),
+      ],
+    );
+  }
+
+  Widget _acpOption(BuildContext context, AppStore store, String? id, String name, String note, bool selectable, bool grayed, String detail) {
+    final p = context.palette;
+    final selected = store.settings.acpAgentId == id;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: !selectable
+            ? null
+            : () async {
+                store.settings.acpAgentId = id;
+                await store.saveSettings();
+                if (mounted) setState(() {});
+              },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: selected ? p.accentSoft : p.panel2.withValues(alpha: 0.35),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: selected ? p.accent.withValues(alpha: 0.5) : p.line),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                selected ? Icons.radio_button_checked : Icons.radio_button_off,
+                size: 14,
+                color: selectable ? (selected ? p.accent : p.ink4) : p.ink4.withValues(alpha: 0.5),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Flexible(
+                        child: Text(name,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: selectable ? p.ink : p.ink4)),
+                      ),
+                      if (grayed) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(color: p.panel3, borderRadius: BorderRadius.circular(4)),
+                          child: Text('即将接入',
+                              style: TextStyle(fontSize: 9, color: p.ink4)),
+                        ),
+                      ],
+                    ]),
+                    const SizedBox(height: 2),
+                    Text(note, style: TextStyle(fontSize: 10, color: selectable ? p.ink3 : p.ink4)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(detail,
+                  style: TextStyle(fontSize: 9.5, fontFamily: 'Menlo', color: p.ink4)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

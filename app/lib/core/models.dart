@@ -386,6 +386,8 @@ class AppSettings {
   String thinkingLevel;
   int maxSteps;
   String theme;
+  /// 外部智能体（ACP）：null 或空 = NoN 内置管线；否则发给该 ACP agent。
+  String? acpAgentId;
 
   AppSettings({
     this.providerId = 'deepseek',
@@ -395,6 +397,7 @@ class AppSettings {
     this.thinkingLevel = 'auto',
     this.maxSteps = 300,
     this.theme = 'dark',
+    this.acpAgentId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -405,6 +408,7 @@ class AppSettings {
         'thinkingLevel': thinkingLevel,
         'maxSteps': maxSteps,
         'theme': theme,
+        'acpAgentId': acpAgentId,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> m) => AppSettings(
@@ -415,6 +419,34 @@ class AppSettings {
         thinkingLevel: (m['thinkingLevel'] ?? 'auto').toString(),
         maxSteps: (m['maxSteps'] is num) ? (m['maxSteps'] as num).toInt() : 300,
         theme: (m['theme'] ?? 'dark').toString(),
+        acpAgentId: m['acpAgentId']?.toString(),
+      );
+}
+
+/// ACP 目录项（服务端 /acp/agents 探测结果）。
+class AcpAgentInfo {
+  final String id;
+  final String name;
+  final bool installed;
+  final String? executable;
+  final bool grayed;
+  final String note;
+  const AcpAgentInfo({
+    required this.id,
+    required this.name,
+    required this.installed,
+    this.executable,
+    required this.grayed,
+    required this.note,
+  });
+
+  factory AcpAgentInfo.fromJson(Map<String, dynamic> m) => AcpAgentInfo(
+        id: (m['id'] ?? '').toString(),
+        name: (m['name'] ?? '').toString(),
+        installed: m['installed'] == true,
+        executable: m['executable']?.toString(),
+        grayed: m['grayed'] == true,
+        note: (m['note'] ?? '').toString(),
       );
 }
 

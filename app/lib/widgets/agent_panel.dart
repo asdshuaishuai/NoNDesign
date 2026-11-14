@@ -35,6 +35,12 @@ class _AgentPanelState extends State<AgentPanel> {
     final text = _input.text.trim();
     if (text.isEmpty || store.agentBusy) return;
     _input.clear();
+    // 外部智能体（ACP）接管发送：模式芯片无意义，文本直达该 CLI。
+    final external = store.settings.acpAgentId;
+    if (external != null && external.isNotEmpty) {
+      await store.runAcp(text);
+      return;
+    }
     if (_mode == 'plan') {
       await store.runPlan(text);
     } else if (_mode == 'build') {
@@ -154,6 +160,19 @@ class _AgentPanelState extends State<AgentPanel> {
           ),
           child: Column(
             children: [
+              if (store.settings.acpAgentId != null && store.settings.acpAgentId!.isNotEmpty)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  child: Row(children: [
+                    Icon(Icons.hub_outlined, size: 10, color: p.accent),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text('外部智能体 · ${store.settings.acpAgentId}（ACP）— 模式芯片不参与，消息直达该 CLI',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 9.5, color: p.ink3)),
+                    ),
+                  ]),
+                ),
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(

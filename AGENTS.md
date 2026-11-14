@@ -122,6 +122,19 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **外部智能体 ACP（2026-11-14）**：`server/acp_bridge.py`——模块名**不能叫
+  acp.py**（会遮蔽 site-packages 的 SDK 包 `acp`，ImportError circular）。
+  官方 SDK `agent-client-protocol`（导入名 acp）路由按 **kwargs 直传 hook
+  参数（`session_update(session_id, update)` / `fs_write_text_file(session_id,
+  path, content)`），`on_connect` 是同步调用；SDK 的 Client 钩子事件必须桥进
+  prompt 的 sink 队列（曾因双队列丢失全部 delta——单会话串行 prompt，一个
+  sink 即可）。权限自动放行（选第一个 allow 选项）+ fs 读写限制在工作区。
+  目录在 `AGENT_CATALOG`（Claude Code/Codex/Kimi/Pi/StepCode/MiniMax/OMP/
+  Pivot(置灰)/Gemini/Qwen/Cline），PATH 探测即可见；锚点
+  `scripts/wf/test_acp_client.py`（fake agent 裸 JSON-RPC over stdio）。
+  Flutter：设置 → 外部智能体选 agent（acpAgentId 持久化），AgentPanel 发送
+  分流 `store.runAcp`，会话按 projectPath+agent 幂等，切项目/新建即失效重建。
+
 - **tool 配对消毒（2026-11-14，真机 400 实证）**：压缩（`_compact`/`_budget`）
   按条目数切历史会把 `function_call` 与 `function_call_output` 切散 → chat wire
   上就是 `role 'tool' must be a response to a preceding message with

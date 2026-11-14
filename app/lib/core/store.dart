@@ -97,6 +97,10 @@ class AppStore extends ChangeNotifier {
   /// 崩溃/意外退出后重启可识别「半程任务」并保留文档与画布进度。
   String? _runInstruction;
   String _runStartedAt = '';
+  /// ACP 外部智能体会话句柄（与 projectPath+agentId 绑定）。
+  String? _acpSessionId;
+  String? _acpSessionAgent;
+  String? _acpSessionProject;
   /// 最近一次成功渲染的 preview canonical（run 期间的实时画布进度）。
   String? _liveCanonical;
   Timer? _recoveryTimer;
@@ -410,6 +414,7 @@ class AppStore extends ChangeNotifier {
     if (api == null) return false;
     final sizes = {'mobile': [390, 844], 'web': [1280, 800], 'desktop': [1440, 900]};
     final size = sizes[device] ?? sizes['mobile']!;
+    _invalidateAcpSession(); // 新项目 → 新工作区 → ACP 会话重建
     try {
       if (empty) {
         hasProject = true;
@@ -468,6 +473,7 @@ class AppStore extends ChangeNotifier {
 
   Future<OpenResult> openProjectPath(String path, {String password = ''}) async {
     if (api == null) return OpenResult.failed;
+    _invalidateAcpSession(); // 切项目 → ACP 会话重建
     try {
       var res = await api!.openProject(path, password: password);
       if (res['need_password'] == true) return OpenResult.needPassword;
@@ -928,6 +934,122 @@ class AppStore extends ChangeNotifier {
 
   Future<bool> runRefine(String instruction) => _runAgent('refine', instruction);
 
+  /// 发消息给外部 ACP 智能体（设置里选择后生效）。会话幂等：同一
+  /// 项目+agent 复用已建立的连接；事件形状与 NoN 管线同族，时间线直接复用。
+  Future<bool> runAcp(String text) async {
+    if (api == null || agentBusy) {
+      if (agentBusy) _toast('NoN 正在工作', '等这一轮结束再发。');
+      return false;
+    }
+    final agentId = settings.acpAgentId;
+    if (agentId == null || agentId.isEmpty) {
+      _toast('未选择外部智能体', '设置 → 外部智能体 里选择。');
+      return false;
+    }
+    runId = DateTime.now().microsecondsSinceEpoch % 0x7fffffff;
+    agentBusy = true;
+    agentPhase = 'external';
+    agentError = null;
+    streamText = '';
+    thinkingText = '';
+    _deltaBuffer = '';
+    _thinkingBuffer = '';
+    _runInstruction = text;
+    _runStartedAt = DateTime.now().toIso8601String();
+    _liveCanonical = null;
+    usage = const {};
+    timeline = [
+      TimelineEntry.user(text),
+      TimelineEntry(kind: 'phase', text: '外部智能体 · $agentId（ACP）'),
+    ];
+    rightTab = 'agent';
+    unawaited(_persistRecovery(force: true));
+    notifyListeners();
+
+    var success = false;
+    try {
+      // 会话幂等：项目或 agent 变了就重建。
+      final project = projectPath ?? '~';
+      if (_acpSessionId == null || _acpSessionAgent != agentId || _acpSessionProject != project) {
+        final res = await api!.acpNewSession(agentId, projectPath);
+        if (res['ok'] != true) {
+          throw Exception('${res['error'] ?? 'session failed'}${res['note'] != null ? ' · ${res['note']}' : ''}');
+        }
+        _acpSessionId = res['sessionId']?.toString();
+        _acpSessionAgent = agentId;
+        _acpSessionProject = project;
+      }
+      await for (final ev in api!.acpPrompt(_acpSessionId!, text)) {
+        switch ((ev['type'] ?? '').toString()) {
+          case 'assistant_delta':
+            _deltaBuffer += (ev['text'] ?? '').toString();
+            _deltaTimer ??= Timer(const Duration(milliseconds: 80), () {
+              _deltaTimer = null;
+              _flushDelta();
+            });
+            break;
+          case 'thinking_delta':
+            _thinkingBuffer += (ev['text'] ?? '').toString();
+            _thinkingTimer ??= Timer(const Duration(milliseconds: 80), () {
+              _thinkingTimer = null;
+              _flushThinking();
+            });
+            break;
+          case 'tool_start':
+            _flushDelta();
+            _flushThinking();
+            timeline.add(TimelineEntry(
+              kind: 'tool',
+              tool: (ev['tool'] ?? 'tool').toString(),
+              running: true,
+            ));
+            notifyListeners();
+            break;
+          case 'tool_end':
+            for (var i = timeline.length - 1; i >= 0; i--) {
+              if (timeline[i].kind == 'tool' && timeline[i].running) {
+                timeline[i].running = false;
+                timeline[i].ok = ev['ok'] != false;
+                break;
+              }
+            }
+            notifyListeners();
+            break;
+          case 'note':
+            timeline.add(TimelineEntry.note((ev['label'] ?? '').toString(), (ev['detail'] ?? '').toString()));
+            notifyListeners();
+            break;
+          case 'done':
+            success = true;
+            break;
+          case 'failed':
+            agentError = (ev['error'] ?? '').toString();
+            break;
+        }
+        if (ev['type'] == 'done' || ev['type'] == 'failed') break;
+      }
+      _flushDelta();
+      _flushThinking();
+      timeline.add(success
+          ? TimelineEntry.finish(true, '外部智能体完成', 'agent: $agentId · ACP')
+          : TimelineEntry.finish(false, '外部智能体异常结束', agentError ?? 'unknown'));
+    } catch (e) {
+      agentError = e.toString();
+      _flushDelta();
+      _flushThinking();
+      timeline.add(TimelineEntry.finish(false, '外部智能体连接失败', e.toString()));
+    } finally {
+      agentBusy = false;
+      agentPhase = 'idle';
+      runId = null;
+      previewRender = null;
+      _runInstruction = null;
+      notifyListeners();
+      unawaited(_persistRecovery(force: true));
+    }
+    return success;
+  }
+
   Future<bool> generateFromBrief(String brief) async {
     if (agentBusy) return false;
     if (settings.apiKey.trim().isEmpty) {
@@ -1248,6 +1370,14 @@ class AppStore extends ChangeNotifier {
             : null,
       }));
     } catch (_) {}
+  }
+
+  void _invalidateAcpSession() {
+    final sid = _acpSessionId;
+    _acpSessionId = null;
+    _acpSessionAgent = null;
+    _acpSessionProject = null;
+    if (sid != null && api != null) unawaited(api!.acpClose(sid));
   }
 
   Future<void> restoreRecovery() async {
