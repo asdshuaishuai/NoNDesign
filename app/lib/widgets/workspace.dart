@@ -84,6 +84,7 @@ class _WorkspaceState extends State<Workspace> {
                 onNewProject: _newProject,
                 onOpenProject: () => _openPath(''),
                 onShortcuts: _shortcuts,
+                onOpenRecent: (path) => _openPath(path),
               ),
               Expanded(
                 child: Row(

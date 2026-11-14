@@ -122,6 +122,14 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **半程任务恢复（2026-11-14）**：`recovery.json` 在运行期也落盘——run 起点
+  （force）、每次 doc_written、每次 preview canonical 渲染成功、终态 finally
+  各写一档；快照新增 `run:{phase,instruction,startedAt,partialMbt}`，非空即
+  「上次运行未正常结束」。重启后 `restoreRecovery` **优先用 partialMbt**
+  （构建进度）并提示阶段（撰写文档/构建原型/调整原型）。改恢复路径时守住：
+  ① doc_written 不置 dirty，别把 guard 收回 `dirty` 条件；② 终态快照必须
+  force（agentBusy=false 后 run 标记随之清空）。
+
 - **字阶与文案（2026-11-14）**：全应用 8 档字阶 10/11/12/13/15/18/22/34，
   10px 可读性地板（17 档→8 档已重映射 254 处）；加文案先查这档表。运行时栈名
   （Flutter/Python 等）不进产品文案。已知缺口（深度优化轮分诊 deferred，审查轮

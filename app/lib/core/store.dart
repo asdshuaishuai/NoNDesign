@@ -92,6 +92,13 @@ class AppStore extends ChangeNotifier {
   Timer? _thinkingTimer;
   Timer? _previewTimer;
   String? _previewMbt;
+  // ---- 中断恢复：运行进度落盘（2026-11-14）----
+  /// 当前 run 的指令与起始时间；agentBusy 期间写入 recovery.json，
+  /// 崩溃/意外退出后重启可识别「半程任务」并保留文档与画布进度。
+  String? _runInstruction;
+  String _runStartedAt = '';
+  /// 最近一次成功渲染的 preview canonical（run 期间的实时画布进度）。
+  String? _liveCanonical;
   Timer? _recoveryTimer;
 
   ModelInfo? get model {
@@ -969,6 +976,10 @@ class AppStore extends ChangeNotifier {
     runId = DateTime.now().microsecondsSinceEpoch % 0x7fffffff;
     agentBusy = true;
     agentPhase = mode == 'plan' ? 'planning' : mode == 'refine' ? 'refining' : 'building';
+    _runInstruction = instruction;
+    _runStartedAt = DateTime.now().toIso8601String();
+    _liveCanonical = null;
+    unawaited(_persistRecovery(force: true)); // 运行起点的第一份进度快照
     agentError = null;
     streamText = '';
     thinkingText = '';
@@ -1033,7 +1044,7 @@ class AppStore extends ChangeNotifier {
       runId = null;
       previewRender = null;
       notifyListeners();
-      await _persistRecovery();
+      unawaited(_persistRecovery(force: true)); // 终态快照（run 标记已清）
     }
     return success;
   }
@@ -1104,6 +1115,7 @@ class AppStore extends ChangeNotifier {
         final content = (event['content'] ?? '').toString();
         if (kind == 'prd') docs.prd = content;
         if (kind == 'ui') docs.ui = content;
+        unawaited(_persistRecovery()); // PLAN 半程崩溃也要保住已写文档
         notifyListeners();
         break;
       case 'design_spec_written':
@@ -1123,6 +1135,8 @@ class AppStore extends ChangeNotifier {
               final res = await api!.render(target);
               if (res['ok'] == true && agentBusy) {
                 previewRender = RenderEnvelope.fromJson(res);
+                _liveCanonical = target;
+                unawaited(_persistRecovery()); // 构建进度即时落盘
                 notifyListeners();
               }
             } catch (_) {}
@@ -1209,8 +1223,10 @@ class AppStore extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> _persistRecovery() async {
-    if (!hasProject || !dirty) return;
+  Future<void> _persistRecovery({bool force = false}) async {
+    // 运行期间（agentBusy）即使未置 dirty 也要写：中途崩溃时文档
+    //（doc_written）与画布进度（preview canonical）都靠这份快照恢复。
+    if (!hasProject || (!dirty && !agentBusy && !force)) return;
     try {
       final dir = '${Platform.environment['HOME']}/.nondesign';
       await Directory(dir).create(recursive: true);
@@ -1220,6 +1236,16 @@ class AppStore extends ChangeNotifier {
         'name': projectName,
         'path': projectPath,
         'ts': DateTime.now().millisecondsSinceEpoch,
+        // 半程任务标记：非空即「上次运行未正常结束」；partialMbt 是
+        // run 中实时 preview 的最新 canonical（构建进度）。
+        'run': agentBusy
+            ? {
+                'phase': agentPhase,
+                'instruction': _runInstruction ?? '',
+                'startedAt': _runStartedAt,
+                'partialMbt': _liveCanonical ?? '',
+              }
+            : null,
       }));
     } catch (_) {}
   }
@@ -1228,8 +1254,16 @@ class AppStore extends ChangeNotifier {
     final rec = recovery;
     if (rec == null || api == null) return;
     try {
-      final mbtValue = rec['mbt'].toString();
-      final res = await api!.render(mbtValue);
+      // 中断运行优先用 partial canonical（构建进度），无则回落已提交 mbt。
+      final run = rec['run'];
+      final partial = (run is Map ? (run['partialMbt'] ?? '') : '').toString();
+      var mbtValue = rec['mbt'].toString();
+      if (partial.isNotEmpty) mbtValue = partial;
+      var res = await api!.render(mbtValue);
+      if (res['ok'] != true && partial.isNotEmpty) {
+        mbtValue = rec['mbt'].toString(); // partial 坏掉时回落到已提交版本
+        res = await api!.render(mbtValue);
+      }
       if (res['ok'] != true) {
         _toast('恢复失败', res['error']?.toString());
         return;
@@ -1243,7 +1277,13 @@ class AppStore extends ChangeNotifier {
       _commit(res, recordHistory: false);
       recovery = null;
       await _clearRecovery();
-      _toast('已恢复未保存的工作');
+      if (run is Map && (run['phase'] ?? '').toString().isNotEmpty) {
+        final phase = (run['phase'] ?? '').toString();
+        final label = switch (phase) { 'planning' => '撰写文档', 'building' => '构建原型', 'refining' => '调整原型', _ => phase };
+        _toast('已恢复中断的$label进度', '文档与画布均已保留，可让 NoN 接着继续。');
+      } else {
+        _toast('已恢复未保存的工作');
+      }
     } catch (e) {
       _toast('恢复失败', e.toString());
     }

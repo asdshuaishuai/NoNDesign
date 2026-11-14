@@ -12,6 +12,8 @@ class TitleBar extends StatelessWidget {
   final VoidCallback onNewProject;
   final VoidCallback onOpenProject;
   final VoidCallback onShortcuts;
+  /// 最近项目行按各自路径直接打开（此前所有行都落到通用打开对话框，真 bug）。
+  final void Function(String path) onOpenRecent;
 
   const TitleBar({
     super.key,
@@ -20,6 +22,7 @@ class TitleBar extends StatelessWidget {
     required this.onNewProject,
     required this.onOpenProject,
     required this.onShortcuts,
+    required this.onOpenRecent,
   });
 
   @override
@@ -57,8 +60,10 @@ class TitleBar extends StatelessWidget {
                   await store.exportSvg();
                 case 'shortcuts':
                   onShortcuts();
-                case 'recent':
-                  onOpenProject();
+                default:
+                  if (value.startsWith('recent:')) {
+                    onOpenRecent(value.substring('recent:'.length));
+                  }
               }
             },
             itemBuilder: (context) => [
@@ -68,15 +73,19 @@ class TitleBar extends StatelessWidget {
               const PopupMenuDivider(),
               _menu(context, 'html', Icons.download_outlined, '导出 HTML 原型', modCombo('⇧⌘H')),
               _menu(context, 'svg', Icons.image_outlined, '导出当前画板 SVG', ''),
-              const PopupMenuDivider(),
               if (store.recent.isNotEmpty) ...[
-                for (final r in store.recent.take(5))
-                  PopupMenuItem<String>(
-                    value: 'recent',
-                    child: Text('最近：${r['name']}', style: TextStyle(fontSize: 12, color: p.ink2)),
-                  ),
                 const PopupMenuDivider(),
+                _sectionLabel(context, '最近项目'),
+                for (final r in store.recent.take(4))
+                  _menu(
+                    context,
+                    'recent:${r['path']}',
+                    Icons.history,
+                    (r['name'] ?? '').toString(),
+                    '',
+                  ),
               ],
+              const PopupMenuDivider(),
               _menu(context, 'shortcuts', Icons.keyboard_outlined, '快捷键与命令', modCombo('⌘/')),
             ],
             child: Padding(
@@ -230,18 +239,44 @@ class TitleBar extends StatelessWidget {
     );
   }
 
+  /// 菜单统一宽度（弹层宽度 = 最宽项）：固定 236，避免长文件名把菜单撑爆。
+  static const double _menuWidth = 236;
+
   PopupMenuItem<String> _menu(BuildContext context, String value, IconData icon, String label, String shortcut) {
     final p = context.palette;
     return PopupMenuItem<String>(
       value: value,
-      height: 38,
-      child: Row(
-        children: [
-          Icon(icon, size: 14, color: p.ink4),
-          const SizedBox(width: 8),
-          Expanded(child: Text(label, style: TextStyle(fontSize: 12, color: p.ink2))),
-          if (shortcut.isNotEmpty) Text(shortcut, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
-        ],
+      height: 34,
+      child: SizedBox(
+        width: _menuWidth,
+        child: Row(
+          children: [
+            Icon(icon, size: 14, color: p.ink4),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: p.ink2)),
+            ),
+            if (shortcut.isNotEmpty)
+              Text(shortcut,
+                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 分节标签（不可交互）。
+  PopupMenuItem<String> _sectionLabel(BuildContext context, String label) {
+    final p = context.palette;
+    return PopupMenuItem<String>(
+      enabled: false,
+      height: 24,
+      child: SizedBox(
+        width: _menuWidth,
+        child: Text(label,
+            style: TextStyle(fontSize: 10, letterSpacing: 0.6, color: p.ink4)),
       ),
     );
   }
