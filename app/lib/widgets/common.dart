@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../core/models.dart';
+import '../core/store.dart';
 import '../core/theme.dart';
 
 Color parseHex(String raw, {Color fallback = const Color(0xFF888888)}) {
@@ -191,6 +192,90 @@ DropdownMenu<T> nonSelect<T>(
     dropdownMenuEntries: entries,
     onSelected: onChanged,
   );
+}
+
+/// 新建画板菜单（左栏「画板」头与画板页签的 ＋ 共用同一份实现）。
+/// 紧凑形态：固定宽 248，模板列表内嵌滚动（面板高 300），单行 30px——
+/// 此前两处各自维护 40px 双行 ×20 项，弹层撑满整屏（2026-11-14 截图实证）。
+class BoardTemplateMenu extends StatelessWidget {
+  final AppStore store;
+  final Widget child;
+  final Offset offset;
+  const BoardTemplateMenu({super.key, required this.store, required this.child, this.offset = const Offset(0, 32)});
+
+  static const double _width = 248;
+  static const double _listHeight = 300;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final templates = store.templates.whereType<Map>().take(30).toList();
+    return PopupMenuButton<String>(
+      tooltip: '新建画板',
+      offset: offset,
+      color: p.panel,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: p.lineStrong)),
+      onSelected: (value) {
+        if (value == '__blank__') {
+          store.createBoard();
+        } else if (value.isNotEmpty) {
+          store.createBoard(templateId: value, name: value);
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem<String>(
+          value: '__blank__',
+          height: 34,
+          child: SizedBox(
+            width: _width,
+            child: Row(children: [
+              Icon(Icons.crop_square, size: 14, color: p.ink4),
+              const SizedBox(width: 8),
+              Text('空白画板', style: TextStyle(fontSize: 12, color: p.ink2)),
+            ]),
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem<String>(
+          value: '',
+          height: _listHeight + 8,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          // 单个可滚动面板：模板再多菜单也不撑高；每行点按直接带模板 id 弹回。
+          child: SizedBox(
+            width: _width - 12,
+            height: _listHeight,
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              itemCount: templates.length,
+              itemBuilder: (context, i) {
+                final t = templates[i];
+                final id = t['id']?.toString() ?? '';
+                return InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () => Navigator.pop(context, id),
+                  child: SizedBox(
+                    height: 30,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text((t['name'] ?? id).toString(),
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 12, color: p.ink2)),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(id, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+      child: child,
+    );
+  }
 }
 
 class IconAction extends StatefulWidget {

@@ -66,43 +66,9 @@ class _ProjectPanel extends StatelessWidget {
     return Column(
       children: [
         _PanelHead('画板', actions: [
-          PopupMenuButton<String?>(
-            tooltip: '新建画板',
+          BoardTemplateMenu(
+            store: store,
             offset: const Offset(0, 34),
-            color: p.panel,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: p.lineStrong)),
-            onSelected: (value) {
-              if (value == null) return;
-              if (value == '__blank__') {
-                store.createBoard();
-              } else {
-                store.createBoard(templateId: value, name: value);
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem<String?>(
-                value: '__blank__',
-                height: 36,
-                child: Row(children: [
-                  Icon(Icons.crop_square, size: 14, color: p.ink4),
-                  const SizedBox(width: 8),
-                  Text('空白画板', style: TextStyle(fontSize: 12, color: p.ink2)),
-                ]),
-              ),
-              const PopupMenuDivider(),
-              for (final t in store.templates.whereType<Map>().take(20))
-                PopupMenuItem<String?>(
-                  value: t['id']?.toString(),
-                  height: 40,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text((t['name'] ?? t['id']).toString(), style: TextStyle(fontSize: 12, color: p.ink2)),
-                      Text((t['id'] ?? '').toString(), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
-                    ],
-                  ),
-                ),
-            ],
             child: SizedBox(
               width: 26,
               height: 26,
