@@ -122,6 +122,15 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **tool 配对消毒（2026-11-14，真机 400 实证）**：压缩（`_compact`/`_budget`）
+  按条目数切历史会把 `function_call` 与 `function_call_output` 切散 → chat wire
+  上就是 `role 'tool' must be a response to a preceding message with
+  'tool_calls'` 的 400。`context.py::_sanitize_tool_pairing` 在 `_load` 与
+  `get_items` 出口只保留 call_id 双向齐全的配对（孤立调用=中断未执行、孤立结果=
+  调用被压缩，一并剔除），旧会话文件自动自愈。**改压缩逻辑时不要去掉这层消毒**；
+  锚点：`scripts/wf/test_context_sanitize.py`。默认步数 300（server 默认、
+  Dart 默认、UI clamp 4–600）。
+
 - **半程任务恢复（2026-11-14）**：`recovery.json` 在运行期也落盘——run 起点
   （force）、每次 doc_written、每次 preview canonical 渲染成功、终态 finally
   各写一档；快照新增 `run:{phase,instruction,startedAt,partialMbt}`，非空即

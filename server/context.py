@@ -218,6 +218,49 @@ def _item_text(item: Any) -> str:
     return ""
 
 
+def _sanitize_tool_pairing(items: list[Any]) -> list[Any]:
+    """去掉不成对的 function_call / function_call_output。
+
+    压缩（_compact/_budget）按条目数切历史时可能把调用与结果切散，
+    转成 chat wire 后就是 ``role 'tool' must be a response to a preceding
+    message with 'tool_calls'`` 的 400（2026-11-14 真机实证）。这里只保留
+    call_id 双向齐全的配对：孤立的调用（运行中断未执行）与孤立的结果
+    （其调用已被压缩）一并剔除。
+    """
+    calls: set[str] = set()
+    outputs: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("type")
+        if kind == "function_call":
+            cid = item.get("call_id") or item.get("id")
+            if isinstance(cid, str):
+                calls.add(cid)
+        elif kind == "function_call_output":
+            cid = item.get("call_id")
+            if isinstance(cid, str):
+                outputs.add(cid)
+    paired = calls & outputs
+    out: list[Any] = []
+    for item in items:
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        kind = item.get("type")
+        if kind == "function_call":
+            cid = item.get("call_id") or item.get("id")
+            if isinstance(cid, str) and cid in paired:
+                out.append(item)
+        elif kind == "function_call_output":
+            cid = item.get("call_id")
+            if isinstance(cid, str) and cid in paired:
+                out.append(item)
+        else:
+            out.append(item)
+    return out
+
+
 class CompactingSession(Session):
     """JSON-file session with deterministic compaction.
 
@@ -246,6 +289,7 @@ class CompactingSession(Session):
             self._items = raw.get("items") or []
         except Exception:
             self._items = []
+        self._items = _sanitize_tool_pairing(self._items)
 
     def _save(self) -> None:
         tmp = self._path.with_suffix(".tmp")
@@ -304,6 +348,7 @@ class CompactingSession(Session):
             items = self._budget(self._items)
             if limit and limit > 0 and len(items) > limit:
                 items = items[-limit:]
+            items = _sanitize_tool_pairing(items)
             if not self._summary:
                 return items
             summary_item = {

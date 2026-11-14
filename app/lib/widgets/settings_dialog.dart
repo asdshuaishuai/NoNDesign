@@ -365,7 +365,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                                   style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink),
                                   decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 3)),
                                   onFieldSubmitted: (v) async {
-                                    store.settings.maxSteps = (int.tryParse(v) ?? 60).clamp(4, 200);
+                                    store.settings.maxSteps = (int.tryParse(v) ?? 300).clamp(4, 600);
                                     await store.saveSettings();
                                   },
                                 ),
@@ -541,7 +541,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 initialValue: store.settings.maxSteps.toString(),
                 style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink),
                 onFieldSubmitted: (v) async {
-                  store.settings.maxSteps = (int.tryParse(v) ?? 60).clamp(4, 200);
+                  store.settings.maxSteps = (int.tryParse(v) ?? 300).clamp(4, 600);
                   await store.saveSettings();
                 },
               ))),

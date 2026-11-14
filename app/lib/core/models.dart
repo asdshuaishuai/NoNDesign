@@ -393,7 +393,7 @@ class AppSettings {
     this.baseUrl = '',
     this.apiKey = '',
     this.thinkingLevel = 'auto',
-    this.maxSteps = 60,
+    this.maxSteps = 300,
     this.theme = 'dark',
   });
 
@@ -413,7 +413,7 @@ class AppSettings {
         baseUrl: (m['baseUrl'] ?? '').toString(),
         apiKey: (m['apiKey'] ?? '').toString(),
         thinkingLevel: (m['thinkingLevel'] ?? 'auto').toString(),
-        maxSteps: (m['maxSteps'] is num) ? (m['maxSteps'] as num).toInt() : 60,
+        maxSteps: (m['maxSteps'] is num) ? (m['maxSteps'] as num).toInt() : 300,
         theme: (m['theme'] ?? 'dark').toString(),
       );
 }

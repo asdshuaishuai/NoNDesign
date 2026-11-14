@@ -48,7 +48,7 @@ class AgentRunRequest(BaseModel):
     api_key: str = ""
     protocol: str = "openai"
     thinking_level: str = "auto"
-    max_steps: int = 60
+    max_steps: int = 300
     session_key: str = "unsaved"
     context_window: int = 128000
 
@@ -435,7 +435,7 @@ class AgentRun:
             result = Runner.run_streamed(
                 agent,
                 input=prompt,
-                max_turns=max(4, min(200, req.max_steps or 60)),
+                max_turns=max(4, min(600, req.max_steps or 300)),
                 session=session,
                 run_config=RunConfig(tracing_disabled=True),
             )
