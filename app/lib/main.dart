@@ -33,8 +33,14 @@ class NonApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: rootMessengerKey,
       theme: AppTheme.build(dark: dark),
-      home: store.bootError != null
-          ? _BootError(message: store.bootError!)
+      // 应用级 ExcludeSemantics：Flutter macOS 引擎的无障碍桥在 macOS 27.2
+      // 上被 AX 客户端激活后，逐帧语义更新经 AccessibilityBridgeMac 触发
+      // doesNotRecognizeSelector → SIGABRT（2026-11-14 崩溃报告实证）。语义树
+      // 对本工具无价值纯成本，整树排除后引擎侧不再产生 AX 事件，崩溃路径
+      // 不可达；待上游修复后移除。
+      home: ExcludeSemantics(
+        child: store.bootError != null
+            ? _BootError(message: store.bootError!)
           : !store.ready
               ? const _BootScreen()
               : store.hasProject
@@ -52,6 +58,7 @@ class NonApp extends StatelessWidget {
                       ),
                     ),
                   ),
+        ),
     );
   }
 }

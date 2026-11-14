@@ -122,6 +122,16 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **语义树全局关闭（2026-11-14，崩溃报告实证）**：Flutter macOS 引擎的
+  AccessibilityBridge 在 macOS 27.2 上被 AX 客户端激活后，逐帧语义更新触发
+  `doesNotRecognizeSelector` → SIGABRT（MacOSEventsFromAXEvent）。应用根级
+  `ExcludeSemantics`（main.dart）整树排除——引擎侧不再产生 AX 事件，崩溃
+  不可达；副作用是被 AX 激活驱动的 ~20fps 空闲泵帧同步消失（216 帧/10s →
+  21 帧/10s）。上游修复前不要移除；若要恢复 a11y，先在 macOS 27 上真机回归
+  崩溃面。设置镜像：`saveSettings` 双写 `~/.nondesign/settings.json`
+  （含 apiKey，本机单用户）——SharedPreferences 落 plist，探针/e2e 从镜像
+  文件读。
+
 - **实测与模式纪律（2026-11-14，VM Service 探针实证）**：性能判断先跑
   `/tmp` 式探针（websockets 连 VM Service：getMemoryUsage + setVMTimelineFlags
   'all' + getVMTimeline 的 B/E 配对时长），别靠感觉。debug（JIT）与

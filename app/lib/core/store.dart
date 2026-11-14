@@ -242,8 +242,17 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> saveSettings() async {
+    final encoded = jsonEncode(settings.toJson());
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('nondesign.settings', jsonEncode(settings.toJson()));
+    await prefs.setString('nondesign.settings', encoded);
+    // 镜像到 ~/.nondesign/settings.json：SharedPreferences 落在 macOS plist，
+    // 测试探针/e2e 不便直读；镜像文件是服务端与工具链的读取口（含 apiKey，
+    // 本机单用户，与 plist 同级安全模型）。
+    try {
+      final dir = '${Platform.environment['HOME']}/.nondesign';
+      await Directory(dir).create(recursive: true);
+      await File('$dir/settings.json').writeAsString(encoded);
+    } catch (_) {}
     notifyListeners();
   }
 
