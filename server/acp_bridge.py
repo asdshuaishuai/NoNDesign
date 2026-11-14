@@ -70,7 +70,7 @@ def detect_agents() -> list[dict[str, Any]]:
                 "name": entry.name,
                 "installed": found is not None,
                 "executable": found,
-                "command": [found if a == "{exe}" else a for a in entry.argv] if found else entry.argv,
+                "command": [found if a == "{exe}" else a for a in entry.argv] if found else [],
                 "note": entry.note,
                 "grayed": entry.grayed,
             }
