@@ -129,7 +129,7 @@ Future<T?> showNonDialog<T>({
 
 /// 统一下拉（inspector/settings 全部 DropdownButtonFormField 走这里）：
 /// 菜单配色/圆角/最大高度/箭头一处定义，调用方只管 value/items/onChanged/decoration。
-DropdownButtonFormField<T> nonSelect<T>(
+DropdownMenu<T> nonSelect<T>(
   BuildContext context, {
   required T? value,
   required List<DropdownMenuItem<T>> items,
@@ -139,25 +139,57 @@ DropdownButtonFormField<T> nonSelect<T>(
   bool expanded = false,
 }) {
   final p = context.palette;
-  return DropdownButtonFormField<T>(
-    value: value,
-    hint: hint,
-    isDense: true,
-    // 菜单行高收敛：DropdownMenuItem 默认 48px（kMinInteractiveDimension），
-    // 密集工具界面里显得巨大；32px 行高 + 280px 上限 ≈ 8 行视口。
-    itemHeight: 32,
-    isExpanded: expanded,
-    icon: Icon(Icons.expand_more, size: 14, color: p.ink4),
-    iconEnabledColor: p.ink4,
-    iconDisabledColor: p.ink4,
-    dropdownColor: p.panel2,
-    elevation: 14,
-    borderRadius: BorderRadius.circular(10),
-    menuMaxHeight: 280,
-    style: TextStyle(fontSize: 12, color: p.ink2),
-    decoration: decoration,
-    items: items,
-    onChanged: onChanged,
+  // M3 DropdownMenu：菜单行是 MenuItemButton，行高可经 entry style 收敛到
+  // 32px——经典 DropdownButton 有运行时断言 itemHeight >= 48（2026-11-14
+  // 红屏实证），无法做紧凑菜单。
+  final entries = <DropdownMenuEntry<T>>[
+    for (final it in items)
+      DropdownMenuEntry<T>(
+        value: it.value as T,
+        label: it.child is Text ? ((it.child as Text).data ?? '') : '',
+        style: MenuItemButton.styleFrom(
+          // 高度对必须规范化：fromWidth 的隐含高度是 Infinity，
+          // 与 maximumSize 高 32 组成 min>max 即崩溃。
+          minimumSize: const Size(64, 0),
+          maximumSize: const Size.fromHeight(32),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          foregroundColor: p.ink2,
+          textStyle: TextStyle(fontSize: 12, color: p.ink2),
+        ),
+      ),
+  ];
+  return DropdownMenu<T>(
+    initialSelection: value,
+    hintText: decoration?.hintText ?? (hint is Text ? hint.data : null),
+    enableFilter: false,
+    enableSearch: false,
+    trailingIcon: Icon(Icons.expand_more, size: 14, color: p.ink4),
+    selectedTrailingIcon: Icon(Icons.expand_more, size: 14, color: p.ink4),
+    textStyle: TextStyle(fontSize: 12, color: p.ink2),
+    menuStyle: MenuStyle(
+      backgroundColor: WidgetStatePropertyAll(p.panel2),
+      surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+      elevation: const WidgetStatePropertyAll(14),
+      shadowColor: WidgetStatePropertyAll(Colors.black.withValues(alpha: 0.45)),
+      shape: WidgetStatePropertyAll(RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: p.line.withValues(alpha: 0.6)),
+      )),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 4)),
+      maximumSize: const WidgetStatePropertyAll(Size(double.infinity, 300)),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      isDense: true,
+      filled: true,
+      fillColor: p.panel2,
+      contentPadding: decoration?.contentPadding ?? const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      hintStyle: decoration?.hintStyle ?? TextStyle(color: p.ink4, fontSize: 12),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: p.line)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: p.line)),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: p.accent.withValues(alpha: 0.7))),
+    ),
+    dropdownMenuEntries: entries,
+    onSelected: onChanged,
   );
 }
 

@@ -111,7 +111,12 @@ flutter build macos --debug
 - 窗口：`MainFlutterWindow.swift` 固定在主显示器居中，避免 macOS 恢复离线显示器坐标。
 - **动效与控件一致性（2026-11-13）**：时长/曲线只取 `NonMotion`
   （fast 120 / base 180 / slow 240ms，easeOutCubic）——不要散落裸 Duration。
-  对话框统一 `showNonDialog`（fade+scale 入场，barrierColor 可覆盖）；下拉统一
+  对话框统一 `showNonDialog`
+  ——注意：nonSelect 底层是 **M3 DropdownMenu**（菜单行 MenuItemButton，高度可收敛
+  32px）；经典 DropdownButtonFormField 有运行时断言 `itemHeight >= 48`（2026-11-14
+  红屏实证，analyzer 抓不到 runtime assert——改它必须跑一次真机/测试打开菜单）。
+  entry 高度对必须规范化：`Size.fromWidth` 的隐含高度是 Infinity，与
+  `maximumSize` 高 32 组成 min>max 即崩。回归锚：test/nonselect_test.dart。（fade+scale 入场，barrierColor 可覆盖）；下拉统一
   `nonSelect(context, …)`（菜单配色/圆角 10/高度上限 280/箭头一处定义，
   inspector/settings 全部 DropdownButtonFormField 走它）；右键菜单与浮层走
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
