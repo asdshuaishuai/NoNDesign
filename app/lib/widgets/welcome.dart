@@ -434,7 +434,9 @@ class _WelcomeState extends State<Welcome> {
 
   Widget _sourceTag(Map<String, dynamic> entry, NonPalette p) {
     final desktop = entry['source'] == 'desktop';
-    final color = desktop ? const Color(0xFFFF9BD2) : const Color(0xFF7C8CFF);
+    // NonPalette 令牌随主题切换：硬编码的 accent.dark/品牌粉在浅色主题下
+    // 「桌面」标签近乎不可读（≈1.9:1）；accent2 是品牌辅助色的主题化形态。
+    final color = desktop ? p.accent2 : p.accent;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
       decoration: BoxDecoration(

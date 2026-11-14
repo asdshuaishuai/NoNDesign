@@ -174,13 +174,24 @@ abstract final class NonMotion {
 }
 
 class AppTheme {
-  static ThemeData build({bool dark = true}) {
+  /// 按 dark 布尔 memo 化：根组件 NonApp 每次 store.notifyListeners 都会
+  /// build——agent 运行期逐条事件全树广播，ThemeData 整段 copyWith 每次重算
+  /// 令 MaterialApp/Theme 层级全部失效。dark 只有两个取值，各自构造一次。
+  static final ThemeData _dark = _build(dark: true);
+  static final ThemeData _light = _build(dark: false);
+
+  static ThemeData build({bool dark = true}) => dark ? _dark : _light;
+
+  static ThemeData _build({bool dark = true}) {
     final p = dark ? NonPalette.dark : NonPalette.light;
     final base = dark ? ThemeData.dark(useMaterial3: true) : ThemeData.light(useMaterial3: true);
     return base.copyWith(
       scaffoldBackgroundColor: p.bg,
       canvasColor: p.bg,
       dividerColor: p.line,
+      // hover 与 IconAction 手写 hover 收敛为同一令牌强度（p.line），
+      // 消除「手写 32% 白 vs InkWell 默认 4% 白」的两套语言。
+      hoverColor: p.line,
       colorScheme: base.colorScheme.copyWith(
         brightness: dark ? Brightness.dark : Brightness.light,
         primary: p.accent,

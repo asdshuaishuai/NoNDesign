@@ -116,7 +116,8 @@ class _PlayViewState extends State<PlayView> {
               Container(
                 height: 48,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0x14FFFFFF)))),
+                // NonPalette 令牌：此前逐字节硬编码深色主题值，浅色下 ≈2:1 不可读。
+                decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
                 child: Row(
                   children: [
                     IconAction(icon: Icons.close, tooltip: '退出演示 Esc', size: 28, onTap: () => store.setView('design')),
@@ -124,10 +125,10 @@ class _PlayViewState extends State<PlayView> {
                     Pill(label: '演示模式', color: p.accent, background: p.accent.withValues(alpha: 0.14)),
                     const SizedBox(width: 8),
                     Text(board.name.isEmpty ? board.id : board.name,
-                        style: const TextStyle(fontSize: 12, color: Color(0xFFA6ADBD))),
+                        style: TextStyle(fontSize: 12, color: p.ink2)),
                     const SizedBox(width: 6),
                     Text('${render.artboards.indexWhere((b) => b.id == board.id) + 1} / ${render.artboards.length}',
-                        style: const TextStyle(fontSize: 10, fontFamily: 'Menlo', color: Color(0xFF737B8D))),
+                        style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink3)),
                     const Spacer(),
                     IconAction(icon: Icons.chevron_left, tooltip: '返回上一页 ←', size: 28, onTap: _goBack),
                     IconAction(
@@ -260,7 +261,7 @@ class _PlayViewState extends State<PlayView> {
               Container(
                 height: 34,
                 alignment: Alignment.center,
-                decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0x14FFFFFF)))),
+                decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
                 child: Text('Esc 退出 · ← 返回 · 点按/长按/滑动/按键均由引擎驱动',
                     style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.35))),
               ),

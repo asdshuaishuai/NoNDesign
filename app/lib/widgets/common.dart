@@ -318,7 +318,7 @@ class _IconActionState extends State<IconAction> {
             color: widget.active
                 ? p.accentSoft
                 : _hover
-                    ? p.line.withValues(alpha: 0.32)
+                    ? p.line // 与全局 hoverColor 同一令牌强度（theme.dart AppTheme.build）
                     : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
           ),

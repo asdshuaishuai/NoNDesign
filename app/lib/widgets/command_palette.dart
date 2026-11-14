@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../core/keys.dart';
@@ -45,11 +48,39 @@ class _CommandPalette extends StatefulWidget {
 class _CommandPaletteState extends State<_CommandPalette> {
   final _search = TextEditingController();
   String _query = '';
+  // ↑↓ 选中态：底部文案承诺「↑ ↓ 选择 · ↵ 执行」，回车执行选中行而非固定首行。
+  int _selected = 0;
+  // build 期缓存过滤结果，键盘处理直接按索引寻址（不重建 actions）。
+  List<_Action> _filtered = const [];
+  final GlobalKey _selectedKey = GlobalKey();
 
   @override
   void dispose() {
     _search.dispose();
     super.dispose();
+  }
+
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key != LogicalKeyboardKey.arrowDown && key != LogicalKeyboardKey.arrowUp) {
+      return KeyEventResult.ignored;
+    }
+    final items = _filtered;
+    if (items.isEmpty) return KeyEventResult.ignored;
+    setState(() {
+      // 循环移动：↓ 到底回第一项，↑ 到顶回最后一项。
+      _selected = key == LogicalKeyboardKey.arrowDown
+          ? (_selected + 1) % items.length
+          : (_selected - 1 + items.length) % items.length;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _selectedKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        Scrollable.ensureVisible(ctx, alignment: 0.0, duration: NonMotion.fast, curve: NonMotion.curve);
+      }
+    });
+    return KeyEventResult.handled;
   }
 
   @override
@@ -143,8 +174,17 @@ class _CommandPaletteState extends State<_CommandPalette> {
       if (_query.trim().isEmpty) return true;
       return '${a.label} ${a.group}'.toLowerCase().contains(_query.toLowerCase());
     }).toList();
+    _filtered = filtered;
+    // _selected 经模运算恒 ≥0；上界防 actions 列表在打开期间缩短。
+    final sel = filtered.isEmpty ? 0 : math.min(_selected, filtered.length - 1);
 
-    return Dialog(
+    // canRequestFocus:false 的被动监听节点——搜索框持有焦点，↑↓ 未被它
+    // 消费时冒泡到这里移动选中行；esc 关闭仍由对话框自身的 dismiss 处理。
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: _handleKey,
+      child: Dialog(
       backgroundColor: p.panel,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: p.lineStrong)),
       child: SizedBox(
@@ -175,9 +215,12 @@ class _CommandPaletteState extends State<_CommandPalette> {
                         contentPadding: EdgeInsets.zero,
                         hintStyle: TextStyle(fontSize: 13, color: p.ink4),
                       ),
-                      onChanged: (v) => setState(() => _query = v),
+                      onChanged: (v) => setState(() {
+                        _query = v;
+                        _selected = 0; // 过滤集变化，选中回到首行
+                      }),
                       onSubmitted: (_) {
-                        if (filtered.isNotEmpty) filtered.first.run();
+                        if (filtered.isNotEmpty) filtered[sel].run();
                       },
                     ),
                   ),
@@ -206,11 +249,15 @@ class _CommandPaletteState extends State<_CommandPalette> {
                               style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1, color: p.ink4)),
                         ),
                       InkWell(
+                        key: i == sel ? _selectedKey : null, // 键盘导航后滚动到可见
                         borderRadius: BorderRadius.circular(8),
                         onTap: action.run,
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
-                          decoration: BoxDecoration(borderRadius: BorderRadius.circular(8)),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            color: i == sel ? p.accentSoft : null, // 选中行底色
+                          ),
                           child: Row(
                             children: [
                               Icon(action.icon, size: 14, color: p.ink4),
@@ -240,6 +287,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

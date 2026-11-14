@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
@@ -20,9 +22,52 @@ class _DocsViewState extends State<DocsView> {
   final _editor = TextEditingController();
   bool _preview = true;
   String? _syncedFor;
+  // 编辑器输入本地缓冲 + 300ms 防抖：每键一字 setDocs 会 new Docs +
+  // notifyListeners 全树重建（数千字 PRD 打字延迟线性增长）。失焦/切
+  // 标签立即 flush 补齐，不在视图间丢尾字。
+  Timer? _commitTimer;
+  String? _pendingKind;
+  String? _pendingText;
+  String? _lastTab;
+  // 字数统计对 source 做同一性检查后再重算：打字期间 source 实例不变，
+  // 免去每帧对全文跑 replaceAll(RegExp)。
+  String? _countedSource;
+  int _countedChars = 0;
+
+  void _stageCommit(String kind, String text) {
+    _pendingKind = kind;
+    _pendingText = text;
+    _commitTimer?.cancel();
+    _commitTimer = Timer(const Duration(milliseconds: 300), _flushPending);
+  }
+
+  void _flushPending() {
+    _commitTimer?.cancel();
+    _commitTimer = null;
+    final kind = _pendingKind;
+    final text = _pendingText;
+    _pendingKind = null;
+    _pendingText = null;
+    if (!mounted || kind == null) return;
+    final store = context.read<AppStore>();
+    if (kind == 'prd') {
+      store.setDocs(prd: text);
+    } else {
+      store.setDocs(ui: text);
+    }
+  }
+
+  String _charCountOf(String source) {
+    if (!identical(_countedSource, source)) {
+      _countedSource = source;
+      _countedChars = source.replaceAll(RegExp(r'\s'), '').length;
+    }
+    return '$_countedChars 字';
+  }
 
   @override
   void dispose() {
+    _commitTimer?.cancel();
     _brief.dispose();
     _editor.dispose();
     super.dispose();
@@ -34,6 +79,15 @@ class _DocsViewState extends State<DocsView> {
     final p = context.palette;
     final tab = store.docsTab;
     final source = tab == 'prd' ? store.docs.prd : tab == 'ui' ? store.docs.ui : '';
+    // 切标签前先 flush 上一个标签的待写字，防止编辑器被新 source 覆盖丢字。
+    // post-frame：build 期直接 setDocs 会 notifyListeners → build 期 markNeedsBuild 异常。
+    if (tab != _lastTab) {
+      if (_lastTab != null) {
+        _commitTimer?.cancel();
+        WidgetsBinding.instance.addPostFrameCallback((_) => _flushPending());
+      }
+      _lastTab = tab;
+    }
     if (tab != 'spec' && _syncedFor != '${tab}:${source.hashCode}' && _editor.text != source) {
       _editor.text = source;
       _syncedFor = '${tab}:${source.hashCode}';
@@ -195,7 +249,7 @@ class _DocsViewState extends State<DocsView> {
             children: [
               Pill(label: kind == 'prd' ? 'PRD' : 'UI SPEC', color: p.accent, background: p.accentSoft),
               const SizedBox(width: 8),
-              Text('${source.replaceAll(RegExp(r'\s'), '').length} 字', style: TextStyle(fontSize: 10, color: p.ink4)),
+              Text(_charCountOf(source), style: TextStyle(fontSize: 10, color: p.ink4)),
               const Spacer(),
               _toggle(context, _preview, '预览', Icons.visibility_outlined, () => setState(() => _preview = true)),
               const SizedBox(width: 2),
@@ -247,13 +301,9 @@ class _DocsViewState extends State<DocsView> {
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: p.line)),
                       contentPadding: const EdgeInsets.all(20),
                     ),
-                    onChanged: (v) {
-                      if (kind == 'prd') {
-                        store.setDocs(prd: v);
-                      } else {
-                        store.setDocs(ui: v);
-                      }
-                    },
+                    onChanged: (v) => _stageCommit(kind, v),
+                    // 失焦立即 flush：防抖窗口内点别处，编辑内容也要落到真源。
+                    onTapOutside: (_) => _flushPending(),
                   ),
           ),
         ),

@@ -14,6 +14,14 @@ class _AgentPanelState extends State<AgentPanel> {
   String _mode = 'build';
   bool _modeTouched = false;
   int _lastCount = 0;
+  int _lastStreamLen = 0;
+  int _lastThinkLen = 0;
+  // 跟随滚动：流式增量只改文本不触发滚动，长输出落视口下不可见——
+  // 跟随开启时每次长度变化贴底；用户上翻（手势门）即暂停并给出浮标。
+  bool _follow = true;
+  bool _userScrolling = false;
+  bool _showJumpPill = false;
+  static const double _followSlack = 80;
 
   @override
   void dispose() {
@@ -23,18 +31,42 @@ class _AgentPanelState extends State<AgentPanel> {
     super.dispose();
   }
 
-  void _scrollToEnd() {
+  bool _atBottomOf(ScrollMetrics metrics) =>
+      metrics.maxScrollExtent - metrics.pixels <= _followSlack;
+
+  /// animate=false 瞬时贴底（流式合帧 ~12.5Hz，动画会互相追尾）；true 走
+  /// NonMotion.base（离散追加的时间线行）。动了 NonMotion 档位表别忘同步。
+  void _followBottom({required bool animate}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scroll.hasClients) return;
+      if (!mounted || !_scroll.hasClients) return;
       final max = _scroll.position.maxScrollExtent;
-      if (max - _scroll.offset < 120) _scroll.animateTo(max, duration: const Duration(milliseconds: 160), curve: Curves.easeOut);
+      if (animate) {
+        _scroll.animateTo(max, duration: NonMotion.base, curve: NonMotion.curve);
+      } else {
+        _scroll.jumpTo(max);
+      }
     });
+  }
+
+  /// 用户手势门：UserScrollNotification 只在拖拽/惯性滚动时来，自身的
+  /// jumpTo/animateTo 不经过它，不会自我打断。距底 ≤80 即恢复跟随。
+  /// 返回 false 不拦截通知（通知链继续冒泡）。
+  bool _onScrolled(UserScrollNotification n) {
+    _userScrolling = n.direction != ScrollDirection.idle;
+    _follow = _atBottomOf(n.metrics);
+    final showPill = !_follow;
+    if (showPill != _showJumpPill) setState(() => _showJumpPill = showPill);
+    return false;
   }
 
   Future<void> _send(AppStore store) async {
     final text = _input.text.trim();
     if (text.isEmpty || store.agentBusy) return;
     _input.clear();
+    // 新一轮消息直达视口下（时间线以 user 行开场），用户上翻过也重新贴上。
+    _follow = true;
+    _showJumpPill = false;
+    _followBottom(animate: true);
     // 外部智能体（ACP）接管发送：模式芯片无意义，文本直达该 CLI。
     final external = store.settings.acpAgentId;
     if (external != null && external.isNotEmpty) {
@@ -105,55 +137,101 @@ class _AgentPanelState extends State<AgentPanel> {
     final store = context.watch<AppStore>();
     final p = context.palette;
     if (!_modeTouched) _mode = store.render.artboards.isEmpty ? 'build' : 'refine';
-    if (store.timeline.length != _lastCount) {
+    // 三类长度比对：时间线行（离散追加，动画贴底）+ 流式文本/思考增量
+    // （80ms 合帧只改文本不触发滚动——不比对就落视口下不可见）。
+    final tlChanged = store.timeline.length != _lastCount;
+    final streamChanged = store.streamText.length != _lastStreamLen;
+    final thinkChanged = store.thinkingText.length != _lastThinkLen;
+    if (tlChanged || streamChanged || thinkChanged) {
       _lastCount = store.timeline.length;
-      _scrollToEnd();
+      _lastStreamLen = store.streamText.length;
+      _lastThinkLen = store.thinkingText.length;
+      // 手势拖拽进行中（_userScrolling）不贴底——与手指抢滚动条。
+      if (_follow && !_userScrolling) {
+        _followBottom(animate: tlChanged && !streamChanged && !thinkChanged);
+      }
     }
     return Column(
       children: [
         Expanded(
-          child: GestureDetector(
-            onTap: () => _inputFocus.requestFocus(),
-            // builder 惰性构建：长运行时间线可达数百行，ListView(children:)
-            // 会在每次合帧通知时重建全部行。
-            child: ListView.builder(
-              controller: _scroll,
-              padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-              itemCount: (store.timeline.isEmpty && store.streamText.isEmpty ? 1 : 0) +
-                  store.timeline.length +
-                  (store.streamText.isNotEmpty ? 1 : 0) +
-                  (store.thinkingText.isNotEmpty ? 1 : 0),
-              itemBuilder: (context, i) {
-                final intro = store.timeline.isEmpty && store.streamText.isEmpty;
-                if (intro) {
-                  return _AgentIntro(onPick: (mode, text) {
-                    setState(() {
-                      _mode = mode;
-                      _modeTouched = true;
-                    });
-                    _input.text = text;
-                    _inputFocus.requestFocus();
-                  });
-                }
-                var idx = i;
-                if (idx < store.timeline.length) {
-                  return _TimelineRow(
-                    entry: store.timeline[idx],
-                    animate: idx >= store.timeline.length - 3, // 只给新行淡入，旧行免重播
-                  );
-                }
-                idx -= store.timeline.length;
-                if (store.streamText.isNotEmpty) {
-                  if (idx == 0) return _buildStreamRow(context, store, p);
-                  idx -= 1;
-                }
-                return _buildThinkingTile(context, store, p);
-              },
-            ),
+          child: Stack(
+            children: [
+              GestureDetector(
+                onTap: () => _inputFocus.requestFocus(),
+                // builder 惰性构建：长运行时间线可达数百行，ListView(children:)
+                // 会在每次合帧通知时重建全部行。
+                child: NotificationListener<UserScrollNotification>(
+                  onNotification: _onScrolled,
+                  child: ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.all(12),
+                    itemCount: (store.timeline.isEmpty && store.streamText.isEmpty ? 1 : 0) +
+                        store.timeline.length +
+                        (store.streamText.isNotEmpty ? 1 : 0) +
+                        (store.thinkingText.isNotEmpty ? 1 : 0),
+                    itemBuilder: (context, i) {
+                      final intro = store.timeline.isEmpty && store.streamText.isEmpty;
+                      if (intro) {
+                        return _AgentIntro(onPick: (mode, text) {
+                          setState(() {
+                            _mode = mode;
+                            _modeTouched = true;
+                          });
+                          _input.text = text;
+                          _inputFocus.requestFocus();
+                        });
+                      }
+                      var idx = i;
+                      if (idx < store.timeline.length) {
+                        return _TimelineRow(
+                          entry: store.timeline[idx],
+                          animate: idx >= store.timeline.length - 3, // 只给新行淡入，旧行免重播
+                        );
+                      }
+                      idx -= store.timeline.length;
+                      if (store.streamText.isNotEmpty) {
+                        if (idx == 0) return _buildStreamRow(context, store, p);
+                        idx -= 1;
+                      }
+                      return _buildThinkingTile(context, store, p);
+                    },
+                  ),
+                ),
+              ),
+              if (_showJumpPill)
+                Positioned(
+                  right: 10,
+                  bottom: 10,
+                  // 条件挂载即入场：NonMotion.fast 淡入（离场瞬时，落底自然消失）。
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0, end: 1),
+                    duration: NonMotion.fast,
+                    curve: NonMotion.curve,
+                    builder: (context, t, child) => Opacity(opacity: t, child: child),
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: p.panel3,
+                        foregroundColor: p.ink2,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _follow = true;
+                          _showJumpPill = false;
+                        });
+                        _followBottom(animate: true);
+                      },
+                      icon: const Icon(Icons.arrow_downward, size: 12),
+                      label: const Text('回到底部', style: TextStyle(fontSize: 10)),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
         Container(
-          padding: const EdgeInsets.all(10),
+          // 面板内容 padding 统一 12（与左栏/检查器同档，列间边缘对齐）。
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             border: Border(top: BorderSide(color: p.line)),
             color: p.bgElevated.withValues(alpha: 0.95),

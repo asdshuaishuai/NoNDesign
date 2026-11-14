@@ -63,6 +63,68 @@ class _ProjectPanel extends StatelessWidget {
     final store = context.watch<AppStore>();
     final p = context.palette;
     final board = store.board;
+    // 行工厂惰性构建：画板/图层/流程/最近项目同列，ListView(children:)
+    // 每次 ~12.5Hz 通知都全量建行；builder 只建可视行（行 widget 自身
+    // 已各自 watch，构造闭包廉价）。
+    final items = <Widget Function()>[
+      for (final b in store.render.artboards) () => _BoardRow(board: b, active: b.id == store.activeBoard),
+      if (store.render.artboards.isEmpty)
+        () => Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text('还没有画板——让 NoN 生成，或点面板顶部 ＋ 新建。',
+                  style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4)),
+            ),
+      if (board != null) ...[
+        () => const SizedBox(height: 14),
+        () => SectionLabel('图层 · ${board.nodes.length}'),
+        () => const SizedBox(height: 6),
+        for (final node in board.nodes.reversed) () => _LayerRow(node: node),
+      ],
+      if (store.render.flows.isNotEmpty) ...[
+        () => const SizedBox(height: 14),
+        () => SectionLabel('流程 · ${store.render.flows.length}'),
+        () => const SizedBox(height: 6),
+        for (final flow in store.render.flows.take(16))
+          () => InkWell(
+                onTap: () {
+                  store.selectBoard(flow.from);
+                  store.selectNode(flow.nodeId);
+                },
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                  child: Row(
+                    children: [
+                      Icon(Icons.link, size: 11, color: p.ink4),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text('${flow.from} → ${flow.to}',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 11, color: p.ink3)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+      ],
+      if (store.recent.isNotEmpty) ...[
+        () => const SizedBox(height: 16),
+        () => SectionLabel('最近项目'),
+        () => const SizedBox(height: 4),
+        for (final r in store.recent.take(5))
+          () => InkWell(
+                // 与 welcome 的最近项目列表同一入口：带路径直接打开
+                // （免对话框，需密码时 openProjectFlow 自行追问）。
+                onTap: () => openProjectFlow(context, r['path']?.toString() ?? ''),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                  child: Text((r['name'] ?? '').toString(),
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, color: p.ink4)),
+                ),
+              ),
+      ],
+    ];
     return Column(
       children: [
         _PanelHead('画板', actions: [
@@ -77,67 +139,11 @@ class _ProjectPanel extends StatelessWidget {
           ),
         ]),
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 16),
-            children: [
-              for (final b in store.render.artboards) _BoardRow(board: b, active: b.id == store.activeBoard),
-              if (store.render.artboards.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text('还没有画板——让 NoN 生成，或点面板顶部 ＋ 新建。',
-                      style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4)),
-                ),
-              if (board != null) ...[
-                const SizedBox(height: 14),
-                SectionLabel('图层 · ${board.nodes.length}'),
-                const SizedBox(height: 6),
-                for (final node in board.nodes.reversed) _LayerRow(node: node),
-              ],
-              if (store.render.flows.isNotEmpty) ...[
-                const SizedBox(height: 14),
-                SectionLabel('流程 · ${store.render.flows.length}'),
-                const SizedBox(height: 6),
-                for (final flow in store.render.flows.take(16))
-                  InkWell(
-                    onTap: () {
-                      store.selectBoard(flow.from);
-                      store.selectNode(flow.nodeId);
-                    },
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                      child: Row(
-                        children: [
-                          Icon(Icons.link, size: 11, color: p.ink4),
-                          const SizedBox(width: 5),
-                          Expanded(
-                            child: Text('${flow.from} → ${flow.to}',
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 11, color: p.ink3)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-              if (store.recent.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                SectionLabel('最近项目'),
-                const SizedBox(height: 4),
-                for (final r in store.recent.take(5))
-                  InkWell(
-                    // 与 welcome 的最近项目列表同一入口：带路径直接打开
-                    // （免对话框，需密码时 openProjectFlow 自行追问）。
-                    onTap: () => openProjectFlow(context, r['path']?.toString() ?? ''),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                      child: Text((r['name'] ?? '').toString(),
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 11, color: p.ink4)),
-                    ),
-                  ),
-              ],
-            ],
+          child: ListView.builder(
+            // 面板内容 padding 统一 12（四档 8/10/11/12 → 一档；底部 16 余量并入）。
+            padding: const EdgeInsets.all(12),
+            itemCount: items.length,
+            itemBuilder: (context, i) => items[i](),
           ),
         ),
       ],
@@ -231,6 +237,15 @@ class _LayerRow extends StatelessWidget {
   final CanvasNode node;
   const _LayerRow({required this.node});
 
+  // 组件名→图标匹配：静态编译一次。此前每行每次 build 现场编译 6 个
+  // RegExp——agent 运行期 ~12.5Hz × 40 节点 ≈ 3000 次/秒。
+  static final RegExp _iconText = RegExp(r'heading|body_text|link|kbd');
+  static final RegExp _iconImage = RegExp(r'image|avatar|lightbox');
+  static final RegExp _iconButton = RegExp(r'button|chip|tag|badge|fab');
+  static final RegExp _iconInput = RegExp(r'input|search|textarea|select|checkbox|switch|radio');
+  static final RegExp _iconRule = RegExp(r'divider|progress|meter|slider');
+  static final RegExp _iconBar = RegExp(r'app_bar|navbar|bottom_nav|tab_bar|menu|pagination');
+
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
@@ -293,12 +308,12 @@ class _LayerRow extends StatelessWidget {
   }
 
   IconData _nodeIcon(String component) {
-    if (RegExp(r'heading|body_text|link|kbd').hasMatch(component)) return Icons.text_fields;
-    if (RegExp(r'image|avatar|lightbox').hasMatch(component)) return Icons.image_outlined;
-    if (RegExp(r'button|chip|tag|badge|fab').hasMatch(component)) return Icons.smart_button_outlined;
-    if (RegExp(r'input|search|textarea|select|checkbox|switch|radio').hasMatch(component)) return Icons.input;
-    if (RegExp(r'divider|progress|meter|slider').hasMatch(component)) return Icons.horizontal_rule;
-    if (RegExp(r'app_bar|navbar|bottom_nav|tab_bar|menu|pagination').hasMatch(component)) return Icons.layers_outlined;
+    if (_iconText.hasMatch(component)) return Icons.text_fields;
+    if (_iconImage.hasMatch(component)) return Icons.image_outlined;
+    if (_iconButton.hasMatch(component)) return Icons.smart_button_outlined;
+    if (_iconInput.hasMatch(component)) return Icons.input;
+    if (_iconRule.hasMatch(component)) return Icons.horizontal_rule;
+    if (_iconBar.hasMatch(component)) return Icons.layers_outlined;
     return Icons.crop_square;
   }
 }
@@ -316,7 +331,7 @@ class _DocsPanel extends StatelessWidget {
         const _PanelHead('设计文档'),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(12),
             children: [
               _docCard(context, Icons.description_outlined, '产品需求 PRD',
                   docs.prd.trim().isEmpty ? '还没有生成——描述产品，NoN 会先写文档' : '${docs.prd.replaceAll(RegExp(r'\s'), '').length} 字 · 目标 / 流程 / 页面清单',
@@ -545,7 +560,7 @@ class _SpecPanelState extends State<_SpecPanel> {
         ]),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.all(11),
+            padding: const EdgeInsets.all(12),
             children: [
               const SectionLabel('调色板'),
               const SizedBox(height: 6),
@@ -781,7 +796,7 @@ class _HistoryPanelState extends State<_HistoryPanel> {
         if (!_engineMode)
           Expanded(
             child: ListView.builder(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(12),
             itemCount: store.history.length,
             itemBuilder: (context, i) {
               final index = store.history.length - 1 - i;

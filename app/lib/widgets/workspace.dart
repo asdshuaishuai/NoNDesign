@@ -621,18 +621,25 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
             const SizedBox(height: 12),
             Text('起始画板', style: TextStyle(fontSize: 11, color: p.ink3)),
             const SizedBox(height: 4),
-            DropdownButtonFormField<String?>(
-              value: _template,
-              isDense: true,
-              items: [
-                const DropdownMenuItem<String?>(value: null, child: Text('空白画板', style: TextStyle(fontSize: 11))),
-                for (final t in store.templates.whereType<Map>())
-                  DropdownMenuItem<String?>(
-                    value: t['id']?.toString(),
-                    child: Text('${t['name'] ?? t['id']} · ${t['id']}', style: const TextStyle(fontSize: 11)),
-                  ),
-              ],
-              onChanged: (v) => setState(() => _template = v),
+            // nonSelect 统一下拉（M3 DropdownMenu，32px 菜单行 + panel2 配色）。
+            // 空白画板条目 value=null：DropdownMenu initialSelection 按
+            // entry.value == null 匹配到首条，选中态显示与旧 DropdownButton 一致；
+            // onSelected(null) 原样透传，onChanged 语义不变。
+            SizedBox(
+              width: double.infinity,
+              child: nonSelect<String?>(
+                context,
+                value: _template,
+                items: [
+                  const DropdownMenuItem<String?>(value: null, child: Text('空白画板', style: TextStyle(fontSize: 11))),
+                  for (final t in store.templates.whereType<Map>())
+                    DropdownMenuItem<String?>(
+                      value: t['id']?.toString(),
+                      child: Text('${t['name'] ?? t['id']} · ${t['id']}', style: const TextStyle(fontSize: 11)),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _template = v),
+              ),
             ),
             const SizedBox(height: 14),
             Container(

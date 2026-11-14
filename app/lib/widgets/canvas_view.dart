@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show mapEquals;
+import 'package:flutter/foundation.dart' show ValueListenable, mapEquals;
 import 'package:flutter/material.dart' hide Flow;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -150,6 +150,28 @@ class NodeImageCache extends ChangeNotifier {
 
 enum _ResizeHandle { topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left }
 
+/// 手柄 delta 应用到起始矩形（8 向钳制最小边 8）。painter 与手势收尾共用。
+Rect _applyResizeHandle(Rect start, Offset delta, _ResizeHandle handle) {
+  const minSide = 8.0;
+  var left = start.left;
+  var top = start.top;
+  var right = start.right;
+  var bottom = start.bottom;
+  if (handle == _ResizeHandle.topLeft || handle == _ResizeHandle.left || handle == _ResizeHandle.bottomLeft) {
+    left = math.min(left + delta.dx, right - minSide);
+  }
+  if (handle == _ResizeHandle.topRight || handle == _ResizeHandle.right || handle == _ResizeHandle.bottomRight) {
+    right = math.max(right + delta.dx, left + minSide);
+  }
+  if (handle == _ResizeHandle.topLeft || handle == _ResizeHandle.top || handle == _ResizeHandle.topRight) {
+    top = math.min(top + delta.dy, bottom - minSide);
+  }
+  if (handle == _ResizeHandle.bottomLeft || handle == _ResizeHandle.bottom || handle == _ResizeHandle.bottomRight) {
+    bottom = math.max(bottom + delta.dy, top + minSide);
+  }
+  return Rect.fromLTRB(left, top, right, bottom);
+}
+
 SystemMouseCursor _resizeCursor(_ResizeHandle handle) => switch (handle) {
       _ResizeHandle.topLeft || _ResizeHandle.bottomRight => SystemMouseCursors.resizeUpLeftDownRight,
       _ResizeHandle.topRight || _ResizeHandle.bottomLeft => SystemMouseCursors.resizeUpRightDownLeft,
@@ -163,26 +185,31 @@ class _CanvasViewState extends State<CanvasView> {
   final TransformationController _controller = TransformationController();
   final FocusNode _canvasFocus = FocusNode(debugLabel: 'canvas');
   String? _draggingId;
-  Offset _dragDelta = Offset.zero;
+  // 手势 delta 走 ValueNotifier 直驱活动板 painter 重绘（repaint listenable），
+  // 不再逐指针帧 setState 重建全部画板的覆盖层——变的只有 ghost 参数。
+  final ValueNotifier<Offset> _dragDelta = ValueNotifier(Offset.zero);
   bool _nodePressed = false;
   // 8 向缩放手势状态：拖手柄期间 painter 用 ghost 矩形实时绘制。
   String? _resizingId;
   _ResizeHandle? _resizeHandle;
   Rect _resizeStart = Rect.zero;
-  Offset _resizeDelta = Offset.zero;
+  final ValueNotifier<Offset> _resizeDelta = ValueNotifier(Offset.zero);
   bool _handlePressed = false;
+  // 活动板手势期 painter 的 repaint：图片缓存 + 两个手势 delta 合并监听。
+  late final Listenable _gestureRepaint =
+      Listenable.merge([NodeImageCache.instance, _dragDelta, _resizeDelta]);
   // 方向键微调串行链：连续按键逐个排队，每次从最新已提交位置计算，
   // 避免自动重复按键并发调用 applyOp 造成陈旧 mbt 丢失更新。
   Future<void> _nudgeChain = Future<void>.value();
   String _lastLayoutKey = '';
   int _lastFitEpoch = -1;
 
-  bool get _resizing => _resizingId != null;
-
   @override
   void dispose() {
     _controller.dispose();
     _canvasFocus.dispose();
+    _dragDelta.dispose();
+    _resizeDelta.dispose();
     super.dispose();
   }
 
@@ -256,30 +283,6 @@ class _CanvasViewState extends State<CanvasView> {
     if (node == null || node.id != nodeId) return;
     await store.moveNode(nodeId, node.x + dx, node.y + dy);
   }
-
-  Rect _applyHandle(Rect start, Offset delta, _ResizeHandle handle) {
-    const minSide = 8.0;
-    var left = start.left;
-    var top = start.top;
-    var right = start.right;
-    var bottom = start.bottom;
-    if (handle == _ResizeHandle.topLeft || handle == _ResizeHandle.left || handle == _ResizeHandle.bottomLeft) {
-      left = math.min(left + delta.dx, right - minSide);
-    }
-    if (handle == _ResizeHandle.topRight || handle == _ResizeHandle.right || handle == _ResizeHandle.bottomRight) {
-      right = math.max(right + delta.dx, left + minSide);
-    }
-    if (handle == _ResizeHandle.topLeft || handle == _ResizeHandle.top || handle == _ResizeHandle.topRight) {
-      top = math.min(top + delta.dy, bottom - minSide);
-    }
-    if (handle == _ResizeHandle.bottomLeft || handle == _ResizeHandle.bottom || handle == _ResizeHandle.bottomRight) {
-      bottom = math.max(bottom + delta.dy, top + minSide);
-    }
-    return Rect.fromLTRB(left, top, right, bottom);
-  }
-
-  Rect? get _resizeGhost =>
-      _resizing ? _applyHandle(_resizeStart, _resizeDelta, _resizeHandle ?? _ResizeHandle.bottomRight) : null;
 
   Future<void> _editText(AppStore store, CanvasNode node) async {
     final controller = TextEditingController(text: node.text);
@@ -373,7 +376,7 @@ class _CanvasViewState extends State<CanvasView> {
                             positions: layout.positions,
                             flows: source.flows,
                             accent: p.accent,
-                              zoom: _controller.value.getMaxScaleOnAxis(),
+                              controller: _controller,
                             ),
                           ),
                         ),
@@ -458,6 +461,9 @@ class _CanvasViewState extends State<CanvasView> {
       if (!n.style.visible) continue;
       if (n.component == 'image' || n.component == 'avatar') NodeImageCache.instance.ensure(n);
     }
+    // 手势只发生在持有被拖/被缩放节点的板上；其余板不吃手势帧重绘。
+    final paintingGesture = (_draggingId != null && board.nodes.any((n) => n.id == _draggingId)) ||
+        (_resizingId != null && board.nodes.any((n) => n.id == _resizingId));
     return Positioned(
       left: pos.dx,
       top: pos.dy,
@@ -517,11 +523,14 @@ class _CanvasViewState extends State<CanvasView> {
                             selectedIds: active ? store.selectedNodes : const [],
                             hoverId: null,
                             dragId: _draggingId,
-                            dragDelta: _dragDelta,
+                            dragDelta: paintingGesture ? _dragDelta : null,
                             resizeId: _resizingId,
-                            resizeRect: _resizeGhost,
-                            // 图片加载完成经此 listenable 触发画布重绘
-                                repaint: NodeImageCache.instance,
+                            resizeStart: paintingGesture ? _resizeStart : null,
+                            resizeHandle: paintingGesture ? _resizeHandle : null,
+                            resizeDelta: paintingGesture ? _resizeDelta : null,
+                            // 手势期合入两个 delta notifier（逐帧直驱重绘）；
+                            // 平时仍只挂图片缓存。其余板不吃手势帧重绘。
+                                repaint: paintingGesture ? _gestureRepaint : NodeImageCache.instance,
                               ),
                             ),
                           ),
@@ -556,10 +565,8 @@ class _CanvasViewState extends State<CanvasView> {
                                 },
                                 onPanCancel: () {
                                   _nodePressed = false;
-                                  setState(() {
-                                    _draggingId = null;
-                                    _dragDelta = Offset.zero;
-                                  });
+                                  _dragDelta.value = Offset.zero;
+                                  setState(() => _draggingId = null);
                                 },
                                 onPanStart: (_) {
                                   if (store.agentBusy) return;
@@ -567,20 +574,19 @@ class _CanvasViewState extends State<CanvasView> {
                                   store.selectNode(node.id);
                                   setState(() {
                                     _draggingId = node.id;
-                                    _dragDelta = Offset.zero;
+                                    _dragDelta.value = Offset.zero;
                                   });
                                 },
                                 onPanUpdate: (details) {
                                   if (_draggingId != node.id) return;
-                                  setState(() => _dragDelta += details.delta);
+                                  // 仅手势帧重绘活动板 painter，不走全树 setState。
+                                  _dragDelta.value += details.delta;
                                 },
                                 onPanEnd: (_) async {
                                   _nodePressed = false;
-                                  final delta = _dragDelta;
-                                  setState(() {
-                                    _draggingId = null;
-                                    _dragDelta = Offset.zero;
-                                  });
+                                  final delta = _dragDelta.value;
+                                  _dragDelta.value = Offset.zero;
+                                  setState(() => _draggingId = null);
                                   if (delta.distance <= 0.5) return;
                                   final moving = store.selectedNodes.contains(node.id) && store.selectedNodes.length >= 2
                                       ? store.selectedNodes
@@ -653,10 +659,10 @@ class _CanvasViewState extends State<CanvasView> {
               },
               onPanCancel: () {
                 _handlePressed = false;
+                _resizeDelta.value = Offset.zero;
                 setState(() {
                   _resizingId = null;
                   _resizeHandle = null;
-                  _resizeDelta = Offset.zero;
                 });
               },
               onPanStart: (_) {
@@ -666,23 +672,24 @@ class _CanvasViewState extends State<CanvasView> {
                   _resizingId = node.id;
                   _resizeHandle = handle;
                   _resizeStart = rect;
-                  _resizeDelta = Offset.zero;
+                  _resizeDelta.value = Offset.zero;
                 });
               },
               onPanUpdate: (details) {
                 if (_resizingId != node.id) return;
-                setState(() => _resizeDelta += details.delta);
+                // 仅手势帧重绘活动板 painter，不走全树 setState。
+                _resizeDelta.value += details.delta;
               },
               onPanEnd: (_) async {
                 _handlePressed = false;
                 final startRect = _resizeStart;
                 final which = _resizeHandle ?? _ResizeHandle.bottomRight;
-                final ghost = _applyHandle(startRect, _resizeDelta, which);
+                final ghost = _applyResizeHandle(startRect, _resizeDelta.value, which);
                 final target = node.id;
+                _resizeDelta.value = Offset.zero;
                 setState(() {
                   _resizingId = null;
                   _resizeHandle = null;
-                  _resizeDelta = Offset.zero;
                 });
                 final moved = (ghost.left - node.x).abs() > 0.5 || (ghost.top - node.y).abs() > 0.5;
                 final resized = (ghost.width - node.w).abs() > 0.5 || (ghost.height - node.h).abs() > 0.5;
@@ -755,6 +762,18 @@ class _CanvasViewState extends State<CanvasView> {
 }
 
 class ArtboardPainter extends CustomPainter {
+  /// 文本整形缓存：拖拽/缩放/Agent 预览每帧对同一文本+样式重复做
+  /// SkParagraph 整形是 painter 内最重的分配。键 = 文本+字号+字重+对齐+
+  /// 行宽(整型量化)+alpha(1/16 量化)；文本/样式变更自然换键，容量兜底整表清。
+  static final Map<String, TextPainter> _textCache = {};
+
+  /// style 色 hex 解析备忘：paint 每节点每帧 parseHex 同一字符串是纯重复
+  /// 工作。painter 实例随 build 重建，实例字段无法跨帧——用静态表。
+  static final Map<String, Color> _hexMemo = {};
+
+  static Color _hex(String raw, {Color fallback = const Color(0xFF888888)}) =>
+      _hexMemo[raw] ??= parseHex(raw, fallback: fallback);
+
   final List<CanvasNode> nodes;
   /// 品牌强调色（palette.accent）——painter 无 BuildContext，由调用方传入。
   final Color accent;
@@ -762,9 +781,13 @@ class ArtboardPainter extends CustomPainter {
   final List<String> selectedIds;
   final String? hoverId;
   final String? dragId;
-  final Offset dragDelta;
+  /// 拖拽/缩放 delta 以 ValueListenable 注入：paint 时现读、经 repaint
+  /// listenable 逐帧驱动，painter 实例随 build 重建也不丢当前 delta。
+  final ValueListenable<Offset>? dragDelta;
   final String? resizeId;
-  final Rect? resizeRect; // 缩放手势的 ghost 矩形（board 坐标，实时更新）
+  final Rect? resizeStart; // 缩放手势的起始矩形（board 坐标）
+  final _ResizeHandle? resizeHandle;
+  final ValueListenable<Offset>? resizeDelta;
 
   ArtboardPainter({
     required this.nodes,
@@ -773,20 +796,24 @@ class ArtboardPainter extends CustomPainter {
     this.selectedIds = const [],
     this.hoverId,
     this.dragId,
-    this.dragDelta = Offset.zero,
+    this.dragDelta,
     this.resizeId,
-    this.resizeRect,
+    this.resizeStart,
+    this.resizeHandle,
+    this.resizeDelta,
     super.repaint, // NodeImageCache：图片异步加载完成后重绘画布
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    final dragDelta = this.dragDelta?.value ?? Offset.zero;
+    final resizeDelta = this.resizeDelta?.value ?? Offset.zero;
     for (final node in nodes) {
       if (!node.style.visible) continue;
       final isDragging = dragId == node.id;
-      final isResizing = resizeId == node.id && resizeRect != null;
+      final isResizing = resizeId == node.id && resizeStart != null;
       final rect = isResizing
-          ? resizeRect!
+          ? _applyResizeHandle(resizeStart!, resizeDelta, resizeHandle ?? _ResizeHandle.bottomRight)
           : Rect.fromLTWH(
               node.x + (isDragging ? dragDelta.dx : 0.0),
               node.y + (isDragging ? dragDelta.dy : 0.0),
@@ -804,12 +831,12 @@ class ArtboardPainter extends CustomPainter {
         canvas.drawRRect(rrect.shift(const Offset(0, 4)), shadow);
       }
 
-      final fill = parseHex(node.style.fill);
+      final fill = _hex(node.style.fill);
       if (fill != Colors.transparent && alpha > 0) {
         canvas.drawRRect(rrect, Paint()..color = fill.withValues(alpha: fill.a * alpha));
       }
 
-      final stroke = parseHex(node.style.stroke);
+      final stroke = _hex(node.style.stroke);
       if (node.style.stroke != 'none' && stroke != Colors.transparent && node.style.strokeWidth > 0) {
         canvas.drawRRect(
           rrect,
@@ -907,7 +934,7 @@ class ArtboardPainter extends CustomPainter {
   }
 
   void _paintText(Canvas canvas, CanvasNode node, Rect rect, double alpha) {
-    final color = parseHex(node.style.textColor, fallback: const Color(0xFF111827));
+    final color = _hex(node.style.textColor, fallback: const Color(0xFF111827));
     final weight = switch (node.style.weight) {
       'medium' => FontWeight.w500,
       'semibold' => FontWeight.w600,
@@ -919,21 +946,30 @@ class ArtboardPainter extends CustomPainter {
       'right' => TextAlign.right,
       _ => TextAlign.left,
     };
-    final painter = TextPainter(
-      text: TextSpan(
-        text: node.text,
-        style: TextStyle(
-          fontSize: node.style.fontSize,
-          fontWeight: weight,
-          color: color.withValues(alpha: color.a * alpha),
-          height: 1.28,
+    final width = math.max(4, rect.width - 8).round();
+    final aq = (alpha * 16).round();
+    final key = '${node.text}|${node.style.fontSize}|${weight.index}|${align.index}|$width|$aq';
+    var painter = _textCache[key];
+    if (painter == null) {
+      painter = TextPainter(
+        text: TextSpan(
+          text: node.text,
+          style: TextStyle(
+            fontSize: node.style.fontSize,
+            fontWeight: weight,
+            color: color.withValues(alpha: color.a * alpha),
+            height: 1.28,
+          ),
         ),
-      ),
-      textAlign: align,
-      textDirection: TextDirection.ltr,
-      maxLines: 6,
-      ellipsis: '…',
-    )..layout(maxWidth: math.max(4, rect.width - 8));
+        textAlign: align,
+        textDirection: TextDirection.ltr,
+        maxLines: 6,
+        ellipsis: '…',
+      )..layout(maxWidth: width.toDouble());
+      // 容量兜底：整表清（一次 raster 开销换免 LRU 记账）。
+      if (_textCache.length > 512) _textCache.clear();
+      _textCache[key] = painter;
+    }
     final x = rect.left + 4;
     final y = rect.top + math.max(2, (rect.height - painter.height) / 2);
     painter.paint(canvas, Offset(x, y));
@@ -962,28 +998,36 @@ class ArtboardPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant ArtboardPainter old) =>
+      // 字段级对比；delta 本体不在链上——它经 repaint listenable（ValueNotifier）
+      // 逐帧直驱重绘，painter 重建只比监听器身份。
       old.nodes != nodes ||
       old.selectedId != selectedId ||
       !identical(old.selectedIds, selectedIds) ||
       old.hoverId != hoverId ||
       old.dragId != dragId ||
-      old.dragDelta != dragDelta ||
+      !identical(old.dragDelta, dragDelta) ||
       old.resizeId != resizeId ||
-      old.resizeRect != resizeRect;
+      old.resizeStart != resizeStart ||
+      old.resizeHandle != resizeHandle ||
+      !identical(old.resizeDelta, resizeDelta);
 }
 
 class FlowPainter extends CustomPainter {
   final List<Artboard> boards;
   final Map<String, Rect> positions;
   final List<Flow> flows;
-  final double zoom;
+  /// 缩放经 repaint listenable 实时注入：HUD/手势只改 _controller.value
+  /// 不 setState，build 期快照的 zoom 对比拿不到新值——挂在 controller 上，
+  /// paint 时现读，缩放中/后流线描边与箭头补偿即时跟随。
+  final TransformationController controller;
 
-  FlowPainter({required this.boards, required this.positions, required this.flows, required this.zoom, required this.accent});
+  FlowPainter({required this.boards, required this.positions, required this.flows, required this.controller, required this.accent});
   final Color accent;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (flows.isEmpty) return;
+    final zoom = controller.value.getMaxScaleOnAxis();
     final stroke = Paint()
       ..color = accent.withValues(alpha: 0.55)
       ..style = PaintingStyle.stroke
@@ -1033,8 +1077,9 @@ class FlowPainter extends CustomPainter {
   bool shouldRepaint(covariant FlowPainter old) =>
       // positions 是字段级对比：layoutBoards 每次 build 新建 Map，恒等比较
       // 恒不等 → 流线整层跟着画布每次 rebuild 重绘，抵消 RepaintBoundary 隔离。
-      // flows/zoom 保持引用比较（render 信封未变时为同实例）。
-      old.flows != flows || !mapEquals(old.positions, positions) || old.zoom != zoom;
+      // flows 保持引用比较（render 信封未变时为同实例）。zoom 不在对比链——
+      // 缩放经 repaint listenable（controller）直驱，见构造参数注释。
+      old.flows != flows || !mapEquals(old.positions, positions);
 }
 
 class _EmptyCanvas extends StatelessWidget {
