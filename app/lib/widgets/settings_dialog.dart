@@ -28,6 +28,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   List<AcpAgentInfo> _acpAgents = const [];
   // ACP 探测失败原因（含「本地服务未连接」）；null = 正常或未探测。
   String? _acpError;
+  // 步数输入控制器：initState 赋值（字段初始化器访问不到局部 store）。
+  late final TextEditingController _stepsController;
+  bool _stepsSavedFlash = false;
 
   @override
   void initState() {
@@ -35,7 +38,20 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final store = context.read<AppStore>();
     _keyController = TextEditingController(text: store.settings.apiKey);
     _baseController = TextEditingController(text: store.settings.baseUrl);
+    _stepsController = TextEditingController(text: store.settings.maxSteps.toString());
     _loadAcpAgents();
+  }
+
+  /// 显式保存按钮（用户点名）：把步数输入框的当前值提交并给出 ✓ 反馈。
+  Future<void> _saveSteps() async {
+    final store = context.read<AppStore>();
+    store.settings.maxSteps =
+        (int.tryParse(_stepsController.text) ?? store.settings.maxSteps).clamp(4, 600);
+    await store.saveSettings();
+    setState(() => _stepsSavedFlash = true);
+    Future.delayed(const Duration(milliseconds: 1400), () {
+      if (mounted) setState(() => _stepsSavedFlash = false);
+    });
   }
 
   Future<void> _loadAcpAgents() async {
@@ -63,6 +79,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   void dispose() {
     _keyController.dispose();
     _baseController.dispose();
+    _stepsController.dispose();
     super.dispose();
   }
 
@@ -321,99 +338,106 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(10)),
-              // 左右两列：左列标题+思考等级；右列元数据（context/步数）独立
-              // 成栏、右缘互相对齐——原来两个右对齐碎片散在两行，视觉孤立。
+              // 两行基线对齐：行1 标题+context，行2 思考等级 chips 与
+              // 「步数+保存」同行——右列不再上下孤立（用户红框反馈）。
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
+                      Icon(Icons.auto_awesome, size: 13, color: p.accent),
+                      const SizedBox(width: 5),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.auto_awesome, size: 13, color: p.accent),
-                                const SizedBox(width: 5),
-                                Flexible(
-                                  child: Text(store.model!.name,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
-                                ),
-                              ],
+                        child: Text(store.model!.name,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
+                      ),
+                      Text('${formatTokens(store.model!.context)} context',
+                          style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text('思考等级', style: TextStyle(fontSize: 10, color: p.ink3)),
+                      const SizedBox(width: 6),
+                      for (final level in _levels(store.model!))
+                        Padding(
+                          padding: const EdgeInsets.only(right: 3),
+                          child: InkWell(
+                            onTap: () async {
+                              store.settings.thinkingLevel = level;
+                              await store.saveSettings();
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: store.settings.thinkingLevel == level ? p.accent : p.panel3,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(level,
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: store.settings.thinkingLevel == level ? Colors.white : p.ink3)),
                             ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Text('思考等级', style: TextStyle(fontSize: 10, color: p.ink3)),
-                                const SizedBox(width: 6),
-                                for (final level in _levels(store.model!))
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 3),
-                                    child: InkWell(
-                                      onTap: () async {
-                                        store.settings.thinkingLevel = level;
-                                        await store.saveSettings();
-                                      },
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                        decoration: BoxDecoration(
-                                          color: store.settings.thinkingLevel == level ? p.accent : p.panel3,
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: Text(level,
-                                            style: TextStyle(
-                                                fontSize: 10,
-                                                color: store.settings.thinkingLevel == level ? Colors.white : p.ink3)),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ],
+                          ),
+                        ),
+                      const Spacer(),
+                      Text('步数', style: TextStyle(fontSize: 10, color: p.ink3)),
+                      const SizedBox(width: 4),
+                      SizedBox(
+                        width: 54,
+                        height: 24,
+                        child: TextFormField(
+                          controller: _stepsController,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink),
+                          decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 3)),
+                          // onChanged 即时保存：此前只挂 onFieldSubmitted，
+                          // 改完不回车直接发送就丢值（plist 实测停在 60，
+                          // 用户填的 300 未落盘 → Max turns (60) exceeded）。
+                          onChanged: (v) async {
+                            final n = int.tryParse(v);
+                            if (n == null) return;
+                            store.settings.maxSteps = n.clamp(4, 600);
+                            await store.saveSettings();
+                          },
+                          onFieldSubmitted: (_) => _saveSteps(),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text('${formatTokens(store.model!.context)} context',
-                              style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
-                          const SizedBox(height: 6),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text('步数', style: TextStyle(fontSize: 10, color: p.ink3)),
-                              const SizedBox(width: 4),
-                              SizedBox(
-                                width: 54,
-                                height: 24,
-                                child: TextFormField(
-                                  initialValue: store.settings.maxSteps.toString(),
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink),
-                                  decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 3)),
-                                  // onChanged 即时保存：此前只挂
-                                  // onFieldSubmitted，改完不回车直接发送
-                                  // 就丢值（plist 实测停在 60，用户填的
-                                  // 300 未落盘 → Max turns (60) exceeded）。
-                                  onChanged: (v) async {
-                                    final n = int.tryParse(v);
-                                    if (n == null) return;
-                                    store.settings.maxSteps = n.clamp(4, 600);
-                                    await store.saveSettings();
-                                  },
-                                  onFieldSubmitted: (v) async {
-                                    store.settings.maxSteps = (int.tryParse(v) ?? 300).clamp(4, 600);
-                                    await store.saveSettings();
-                                  },
-                                ),
-                              ),
-                            ],
+                      const SizedBox(width: 6),
+                      // 显式保存（用户点名「不然感觉没生效」）：点击提交
+                      // 输入框当前值，✓ 反馈 1.4s。
+                      InkWell(
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: _saveSteps,
+                        child: Container(
+                          height: 24,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          decoration: BoxDecoration(
+                            color: _stepsSavedFlash
+                                ? p.success.withValues(alpha: 0.16)
+                                : p.panel3,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                                color: _stepsSavedFlash
+                                    ? p.success.withValues(alpha: 0.5)
+                                    : p.line),
                           ),
-                        ],
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(_stepsSavedFlash ? Icons.check : Icons.save_outlined,
+                                size: 11,
+                                color: _stepsSavedFlash ? p.success : p.ink3),
+                            const SizedBox(width: 3),
+                            Text(_stepsSavedFlash ? '已保存' : '保存',
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: _stepsSavedFlash ? p.success : p.ink2)),
+                          ]),
+                        ),
                       ),
                     ],
                   ),
