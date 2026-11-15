@@ -39,14 +39,28 @@ class PlayView extends StatefulWidget {
   State<PlayView> createState() => _PlayViewState();
 }
 
-class _PlayViewState extends State<PlayView> {
+class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin {
   final List<String> _stack = [];
+  /// 与 [_stack] 平行的「前进时过渡」记录：返回时推导反向语义
+  /// （modal_present→modal_dismiss，其余统一 pop）。
+  final List<String> _stackT = [];
   RenderEnvelope? _live;
   String? _liveMbt;
   String? _activeBoard;
   bool _tapping = false;
   String? _toast;
   Timer? _toastTimer;
+  /// 换板入场进度（0→1，~250ms easeOutCubic）：motion=fade_in 节点整体淡入。
+  late final AnimationController _entranceCtl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 250),
+  );
+  late final Animation<double> _entrance =
+      CurvedAnimation(parent: _entranceCtl, curve: NonMotion.curve);
+  /// 标注（批注）模式：活动板上自由圈画；开启时热区点击短路（标注优先）。
+  /// 墨迹按板存（归一化坐标），runtime 状态不回写文档，随 widget 销毁清空。
+  bool _inkMode = false;
+  final Map<String, List<List<Offset>>> _inks = {};
   /// boardId → session_interactions 结果（null = 加载中/失败，走正则兜底）。
   final Map<String, List<_EngineInteraction>?> _interactions = {};
 
@@ -85,30 +99,48 @@ class _PlayViewState extends State<PlayView> {
     _guideTimer = Timer(const Duration(milliseconds: 4000), () {
       if (mounted) setState(() => _guideVisible = false);
     });
-    // 起始板 = 入口板（frontmatter entry，deepDesign「演示永远从首页展示」
-    // 语义）；entry 缺失才回落出边最多的板。
+    // 起始板 = 交互根（deepDesign demoStartBoard 语义）：entry 存在且无入边
+    // 才直接用 entry；否则取无入边的交互根集合（含 entry 则 entry 优先，否则
+    // 第一个根）；全互链无根（tab 成环）才回落「出边最多枢纽页」兜底。
+    // 弱模型把 entry 写成细节页时，演示不再从中间页开始。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _activeBoard != null) return;
       final store = context.read<AppStore>();
       final render = store.render;
       if (render.artboards.isEmpty) return;
-      int edges(String id) => render.flows.where((f) => f.from == id).length;
+      final ids = render.artboards.map((b) => b.id).toSet();
+      final inn = <String>{};
+      for (final f in render.flows) {
+        if (!ids.contains(f.from) || !ids.contains(f.to)) continue;
+        if (!f.trigger.startsWith('tap:')) continue; // 手势边不算导航入边
+        if (f.from != f.to) inn.add(f.to); // 自环不计
+      }
+      final entryExists = ids.contains(render.entry);
       String best;
-      if (render.board(render.entry) != null) {
+      if (entryExists && !inn.contains(render.entry)) {
         best = render.entry;
       } else {
-        best = render.artboards.first.id;
-        var bestEdges = edges(best);
-        for (final b in render.artboards) {
-          final n = edges(b.id);
-          if (n > bestEdges) {
-            bestEdges = n;
-            best = b.id;
+        final roots = render.artboards.where((b) => !inn.contains(b.id)).map((b) => b.id).toList();
+        if (roots.isNotEmpty) {
+          best = entryExists && roots.contains(render.entry) ? render.entry : roots.first;
+        } else {
+          int edges(String id) => render.flows.where((f) => f.from == id).length;
+          best = render.artboards.first.id;
+          var bestEdges = edges(best);
+          for (final b in render.artboards) {
+            final n = edges(b.id);
+            if (n > bestEdges) {
+              bestEdges = n;
+              best = b.id;
+            }
           }
         }
       }
       final cur = store.activeBoard;
       if (best != cur) setState(() => _activeBoard = best);
+      // 进入演示的首板也做一次入场呼吸（controller 初始 0，不 kick 则
+      // fade_in 节点在首次导航前不可见）。
+      _entranceCtl.forward(from: 0);
     });
   }
 
@@ -118,6 +150,7 @@ class _PlayViewState extends State<PlayView> {
     _badgeTimer?.cancel();
     _longPressTimer?.cancel();
     _guideTimer?.cancel();
+    _entranceCtl.dispose();
     super.dispose();
   }
 
@@ -143,7 +176,14 @@ class _PlayViewState extends State<PlayView> {
 
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () => store.setView('design'),
+        // Esc 优先退出标注模式（deepDesign 同语义），无标注才退出演示。
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (_inkMode) {
+            setState(() => _inkMode = false);
+          } else {
+            store.setView('design');
+          }
+        },
       },
       child: Focus(
         autofocus: true,
@@ -169,6 +209,27 @@ class _PlayViewState extends State<PlayView> {
                     Text('${render.artboards.indexWhere((b) => b.id == board.id) + 1} / ${render.artboards.length}',
                         style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink3)),
                     const Spacer(),
+                    // 标注模式：开启时热区点击短路，Esc/再点 ✏ 退出（deepDesign 同语义）。
+                    IconAction(
+                      icon: Icons.edit_outlined,
+                      tooltip: _inkMode ? '结束标注（Esc）' : '标注模式：在原型上圈画',
+                      size: 26,
+                      active: _inkMode,
+                      onTap: () {
+                        setState(() => _inkMode = !_inkMode);
+                        if (_inkMode) _showToast('标注模式：按住拖动圈画 · Esc 结束标注');
+                      },
+                    ),
+                    if (_inkMode) ...[
+                      const SizedBox(width: 4),
+                      IconAction(
+                        icon: Icons.cleaning_services_outlined,
+                        tooltip: '清除本板标注',
+                        size: 26,
+                        onTap: () => setState(() => _inks.remove(_activeBoard ?? board.id)),
+                      ),
+                    ],
+                    const SizedBox(width: 4),
                     // 总返回已移除（用户定案）：返回由原型内 back 节点/热区负责（引擎内置 back）；Esc 退出演示。
                     IconAction(
                       icon: Icons.restart_alt,
@@ -228,31 +289,52 @@ class _PlayViewState extends State<PlayView> {
                             width: board.width * scale,
                             height: board.height * scale,
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              // 板底色跟随引擎主题（server 从 svg 背景 rect 提取），
+                              // 无值才回落白底。
+                              color: board.background.isEmpty ? Colors.white : parseHex(board.background),
                               borderRadius: BorderRadius.circular(8),
                               boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 60, offset: const Offset(0, 30))],
                             ),
                             // 不裁剪：节点轻微超板界在编辑画布不裁可见，演示裁了就是「显示不全」（图1/图2 实证）。
-                            // 换板过渡：push/modal 左滑入，其余淡入。
+                            // 换板过渡：消费引擎 0.2 全词表（push/pop/modal_present/
+                            // modal_dismiss/sheet_present/fade/none），返回反向（_goBack 置反）。
                             child: AnimatedSwitcher(
-                              duration: NonMotion.base,
+                              duration: _lastTransition == 'none' ? Duration.zero : NonMotion.base,
                               switchInCurve: NonMotion.curve,
                               transitionBuilder: (child, anim) {
-                                final sliding =
-                                    _lastTransition == 'push' || _lastTransition == 'modal_present';
-                                final off = sliding
-                                    ? Tween<Offset>(begin: const Offset(0.25, 0), end: Offset.zero)
-                                    : Tween<Offset>(begin: Offset.zero, end: Offset.zero);
+                                switch (_lastTransition) {
+                                  case 'none':
+                                    return child; // duration 已置零：瞬时直切
+                                  case 'fade':
+                                    return FadeTransition(opacity: anim, child: child);
+                                }
+                                final begin = switch (_lastTransition) {
+                                  'sheet_present' => const Offset(0, 0.25), // 自底部滑入
+                                  'modal_dismiss' => const Offset(-0.25, 0), // 反向同族滑出
+                                  _ => const Offset(0.25, 0), // push/pop/modal_present 水平位移
+                                };
                                 return FadeTransition(
                                   opacity: anim,
-                                  child: SlideTransition(position: off.animate(anim), child: child),
+                                  child: SlideTransition(
+                                    position: Tween(begin: begin, end: Offset.zero).animate(anim),
+                                    child: child,
+                                  ),
                                 );
                               },
                               child: Stack(
                                 key: ValueKey(board.id),
-                              children: [
+                                children: [
                                 Positioned.fill(
-                                  child: CustomPaint(painter: ArtboardPainter(nodes: board.nodes, accent: p.accent)),
+                                  // 入场呼吸：motion=fade_in 节点随 _entrance 整体淡入
+                                  //（repaint 挂动画逐帧驱动）。
+                                  child: CustomPaint(
+                                    painter: ArtboardPainter(
+                                      nodes: board.nodes,
+                                      accent: p.accent,
+                                      entrance: _entrance,
+                                      repaint: _entrance,
+                                    ),
+                                  ),
                                 ),
                                 for (final zone in hotzones)
                                   Positioned(
@@ -327,6 +409,21 @@ class _PlayViewState extends State<PlayView> {
                                               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
                                             ),
                                           ),
+                                  ),
+                                ),
+                                // 标注层：栈顶盖住热区，只在标注模式吃指针；
+                                // 墨迹归一化存（换板/缩放不糊），中点贝塞尔平滑。
+                                Positioned.fill(
+                                  child: IgnorePointer(
+                                    ignoring: !_inkMode,
+                                    child: _InkLayer(
+                                      strokes: _inks[board.id] ?? const [],
+                                      onCommit: (stroke) => setState(() {
+                                        (_inks[board.id] ??= []).add(stroke);
+                                      }),
+                                      color: p.accent,
+                                      strokeWidth: 2 / scale,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -476,6 +573,8 @@ class _PlayViewState extends State<PlayView> {
   }
 
   void _onZoneTap(_Hotzone zone, String boardId) {
+    // 标注模式：圈画优先，热区点击短路（deepDesign play-ink-mode 同语义）。
+    if (_inkMode) return;
     // 长按命中后松手会同时满足热区 tap 的判定，短窗内忽略 tap 防双发。
     final suppressed = _tapSuppressedUntil;
     if (suppressed != null && DateTime.now().isBefore(suppressed)) return;
@@ -588,6 +687,15 @@ class _PlayViewState extends State<PlayView> {
         toasted = true;
         break;
       }
+      // 纯 haptic 交互（无 toast 无导航）：node_updated 命中该节点的
+      // haptic 交互定义即震动——「能定义、能感受」。
+      if (text.startsWith('node_updated:')) {
+        final nodeId = text.substring('node_updated:'.length);
+        final acts = _interactions[boardId];
+        if (acts != null && acts.any((a) => a.node == nodeId && a.kind == 'haptic')) {
+          HapticFeedback.mediumImpact();
+        }
+      }
     }
     final current = (env['current'] ?? '').toString();
     if (current.isNotEmpty && current != boardId) {
@@ -652,6 +760,8 @@ class _PlayViewState extends State<PlayView> {
   // ---- 整板指针手势：长按（500ms 未移动）/ 快速滑动 ----
 
   void _onBoardPointerDown(PointerDownEvent e, Artboard board) {
+    // 标注模式下手绘优先：长按/滑动识别静默（墨迹层自己吃指针）。
+    if (_inkMode) return;
     _longPressTimer?.cancel();
     if (_pressPointer != null) return; // 只跟踪第一根指针
     _pressPointer = e.pointer;
@@ -755,9 +865,12 @@ class _PlayViewState extends State<PlayView> {
   void _navigateTo(String target, {required String from, String transition = ''}) {
     setState(() {
       _stack.add(from);
+      _stackT.add(transition);
       _activeBoard = target;
       _lastTransition = transition;
     });
+    // 换板入场：motion=fade_in 节点重新呼吸一次（250ms）。
+    _entranceCtl.forward(from: 0);
   }
 
   void _restart() {
@@ -766,12 +879,15 @@ class _PlayViewState extends State<PlayView> {
     _longPressTimer?.cancel();
     setState(() {
       _stack.clear();
+      _stackT.clear();
       _activeBoard = null;
       _live = null;
       _liveMbt = null;
       _toast = null;
       _badge = null;
     });
+    // 重启回到起始板：换板语义，入场呼吸重播。
+    _entranceCtl.forward(from: 0);
   }
 
   void _showToast(String message) {
@@ -800,19 +916,159 @@ class _PlayViewState extends State<PlayView> {
     return v;
   }
 
+  /// 返回（热区 back / ← 键兜底同源）。栈底铁律（deepDesign playBack 语义）：
+  /// 先看交互图——当前板有入边（tap: 触发、自环不计）则回退到来源页
+  /// （新栈仍为空：可继续沿图回退），真无入边才原地拦截提示；绝不退出演示。
   void _goBack() {
     final store = context.read<AppStore>();
     if (_stack.isEmpty) {
-      store.setView('design');
+      final render = _live ?? store.render;
+      final cur = _activeBoard ?? store.activeBoard;
+      final inbound = render.flows
+          .where((f) => f.to == cur && f.from != cur && f.trigger.startsWith('tap:'))
+          .toList();
+      if (inbound.isNotEmpty) {
+        final source = inbound.last.from;
+        _toastTimer?.cancel();
+        setState(() {
+          _activeBoard = source;
+          _lastTransition = 'pop';
+          _toast = null;
+        });
+        _entranceCtl.forward(from: 0);
+        _showToast('按交互流回退');
+      } else {
+        _showToast('已是起始页 · 返回不可用');
+      }
       return;
     }
     final prev = _stack.removeLast();
+    // 返回方向感知：从前进时的过渡推导反向语义（modal_present→modal_dismiss，
+    // 其余统一 pop），消除「返回复用前进滑入方向」。
+    final forwardT = _stackT.isNotEmpty ? _stackT.removeLast() : '';
     _toastTimer?.cancel();
     setState(() {
       _activeBoard = prev;
+      _lastTransition = forwardT == 'modal_present' ? 'modal_dismiss' : 'pop';
       _toast = null;
     });
+    _entranceCtl.forward(from: 0);
   }
+}
+
+/// 演示标注层：Listener 收指针（归一化存点），CustomPaint 中点贝塞尔平滑
+/// 连线绘制。线宽 2/scale 由调用方算好传入（缩放补偿）。
+class _InkLayer extends StatefulWidget {
+  final List<List<Offset>> strokes;
+  final ValueChanged<List<Offset>> onCommit;
+  final Color color;
+  final double strokeWidth;
+  const _InkLayer({
+    required this.strokes,
+    required this.onCommit,
+    required this.color,
+    required this.strokeWidth,
+  });
+
+  @override
+  State<_InkLayer> createState() => _InkLayerState();
+}
+
+class _InkLayerState extends State<_InkLayer> {
+  List<Offset>? _current;
+
+  Offset _normalize(Offset local, Size size) => Offset(
+        local.dx / math.max(1, size.width),
+        local.dy / math.max(1, size.height),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = Size(constraints.maxWidth, constraints.maxHeight);
+        return Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: (e) => _current = [_normalize(e.localPosition, size)],
+          onPointerMove: (e) {
+            final stroke = _current;
+            if (stroke == null) return;
+            final p = _normalize(e.localPosition, size);
+            if ((p - stroke.last).distance < 0.002) return; // 归一化域抽稀
+            stroke.add(p);
+            setState(() {});
+          },
+          onPointerUp: (e) {
+            final stroke = _current;
+            _current = null;
+            if (stroke != null && stroke.length >= 2) widget.onCommit(stroke);
+            if (stroke != null) setState(() {});
+          },
+          onPointerCancel: (e) {
+            _current = null;
+            setState(() {});
+          },
+          child: CustomPaint(
+            painter: _InkPainter(
+              strokes: widget.strokes,
+              current: _current,
+              color: widget.color,
+              strokeWidth: widget.strokeWidth,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _InkPainter extends CustomPainter {
+  final List<List<Offset>> strokes;
+  final List<Offset>? current;
+  final Color color;
+  final double strokeWidth;
+  const _InkPainter({
+    required this.strokes,
+    required this.current,
+    required this.color,
+    required this.strokeWidth,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    Offset px(Offset p) => Offset(p.dx * size.width, p.dy * size.height);
+    void drawStroke(List<Offset> stroke) {
+      if (stroke.length < 2) {
+        if (stroke.isNotEmpty) canvas.drawCircle(px(stroke.first), strokeWidth / 2, paint);
+        return;
+      }
+      final path = Path()..moveTo(px(stroke.first).dx, px(stroke.first).dy);
+      // 中点二次贝塞尔平滑（手绘圆头笔感）。
+      for (var i = 1; i < stroke.length - 1; i++) {
+        final mid = (px(stroke[i]) + px(stroke[i + 1])) / 2;
+        path.quadraticBezierTo(px(stroke[i]).dx, px(stroke[i]).dy, mid.dx, mid.dy);
+      }
+      final last = px(stroke.last);
+      path.lineTo(last.dx, last.dy);
+      canvas.drawPath(path, paint);
+    }
+
+    for (final stroke in strokes) {
+      drawStroke(stroke);
+    }
+    final live = current;
+    if (live != null) drawStroke(live);
+  }
+
+  @override
+  bool shouldRepaint(covariant _InkPainter old) =>
+      old.strokes != strokes || old.current != current || old.color != color || old.strokeWidth != strokeWidth;
 }
 
 enum _ZoneKind { flow, back, interact }

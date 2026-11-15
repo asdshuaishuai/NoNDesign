@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -48,6 +49,29 @@ def engine() -> EngineHost:
 
 class RenderRequest(BaseModel):
     mbt: str
+
+
+# 每板 svg 里与画板同尺寸的第一个背景 rect（探针实证：紧跟 </defs>，
+# light #F8F9FB / dark #0F1114 / harmony #F1F3F5；n_root 内的 fill="none"
+# rect 不带 #，不会误中）。剥 svg 前把 fill 提为 artboard.background。
+_RECT_TAG_RE = re.compile(r"<rect\b[^>]*>")
+
+
+def _board_background(svg: str | None, width: float, height: float) -> str:
+    for tag in _RECT_TAG_RE.findall(svg or ""):
+        def attr(name: str) -> str:
+            m = re.search(rf'{name}="([^"]+)"', tag)
+            return m.group(1) if m else ""
+
+        try:
+            tw, th = float(attr("width")), float(attr("height"))
+        except ValueError:
+            continue
+        if abs(tw - width) <= 0.5 and abs(th - height) <= 0.5:
+            fill = attr("fill")
+            if fill.startswith("#"):
+                return fill
+    return ""
 
 
 class ApplyRequest(BaseModel):
@@ -174,12 +198,22 @@ async def render(req: RenderRequest) -> dict[str, Any]:
     # 每板 svg 字符串全 app 零消费（导出走 store 的 session_export_svg）：
     # 逐板剥掉，省 ~12% 响应体积的跨 HTTP 拉取与常驻内存
     # （写法与 compact_envelope 的剥 svg 同型，engine.py）。
+    # 剥离前先提取板底色（theme 决定：dark 板底 #0F1114 等）——
+    # Flutter 板容器不再硬编码白底。
     boards = env.get("artboards")
     if isinstance(boards, list):
-        env["artboards"] = [
-            {k: v for k, v in b.items() if k != "svg"} if isinstance(b, dict) else b
-            for b in boards
-        ]
+        stripped = []
+        for b in boards:
+            if isinstance(b, dict):
+                svg = b.get("svg")
+                if isinstance(svg, str):
+                    bg = _board_background(svg, float(b.get("width") or 0), float(b.get("height") or 0))
+                    if bg:
+                        b["background"] = bg
+                stripped.append({k: v for k, v in b.items() if k != "svg"})
+            else:
+                stripped.append(b)
+        env["artboards"] = stripped
     return env
 
 

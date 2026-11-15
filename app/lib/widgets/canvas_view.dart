@@ -503,7 +503,9 @@ class _CanvasViewState extends State<CanvasView> {
               },
               child: Container(
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  // 板底色跟随引擎主题（server 从 svg 背景 rect 提取；dark #0F1114 等），
+                  // 无值才回落白底。
+                  color: board.background.isEmpty ? Colors.white : parseHex(board.background),
                   borderRadius: BorderRadius.circular(4),
                   boxShadow: active
                       ? [BoxShadow(color: p.accent.withValues(alpha: 0.55), spreadRadius: 2, blurRadius: 0)]
@@ -766,7 +768,8 @@ class _CanvasViewState extends State<CanvasView> {
 class ArtboardPainter extends CustomPainter {
   /// 文本整形缓存：拖拽/缩放/Agent 预览每帧对同一文本+样式重复做
   /// SkParagraph 整形是 painter 内最重的分配。键 = 文本+字号+字重+对齐+
-  /// 行宽(整型量化)+alpha(1/16 量化)；文本/样式变更自然换键，容量兜底整表清。
+  /// 行宽(整型量化)+alpha(1/16 量化)+line/tracking/italic；文本/样式变更
+  /// 自然换键，容量兜底整表清。
   static final Map<String, TextPainter> _textCache = {};
 
   /// style 色 hex 解析备忘：paint 每节点每帧 parseHex 同一字符串是纯重复
@@ -775,6 +778,34 @@ class ArtboardPainter extends CustomPainter {
 
   static Color _hex(String raw, {Color fallback = const Color(0xFF888888)}) =>
       _hexMemo[raw] ??= parseHex(raw, fallback: fallback);
+
+  /// `linear-gradient(<deg>,#A,#B[,...])` 解析备忘（deg → 主方向单位向量，
+  /// CSS 语义：0deg 朝上、顺时针增——135deg ≈ 左上→右下）。失败 = null，
+  /// 调用方回落 _hex 灰色路径。
+  static final Map<String, (List<Color>, Offset)?> _gradientMemo = {};
+  static final RegExp _gradientRe = RegExp(
+      r'linear-gradient\(\s*([+-]?\d+(?:\.\d+)?)deg\s*((?:\s*,\s*#[0-9A-Fa-f]{3,8})+)\s*\)');
+  static final RegExp _hexListRe = RegExp(r'#[0-9A-Fa-f]{3,8}');
+
+  static (List<Color>, Offset)? _gradientSpec(String raw) {
+    if (_gradientMemo.containsKey(raw)) return _gradientMemo[raw];
+    (List<Color>, Offset)? spec;
+    final m = _gradientRe.firstMatch(raw.trim());
+    if (m != null) {
+      final colors = _hexListRe
+          .allMatches(m.group(2)!)
+          .map((c) => parseHex(c.group(0)!))
+          .toList(growable: false);
+      if (colors.length >= 2) {
+        final deg = double.tryParse(m.group(1)!) ?? 135.0;
+        final rad = deg * math.pi / 180.0;
+        final dir = Offset(math.sin(rad), -math.cos(rad));
+        spec = (colors, dir);
+      }
+    }
+    _gradientMemo[raw] = spec;
+    return spec;
+  }
 
   final List<CanvasNode> nodes;
   /// 品牌强调色（palette.accent）——painter 无 BuildContext，由调用方传入。
@@ -790,6 +821,10 @@ class ArtboardPainter extends CustomPainter {
   final Rect? resizeStart; // 缩放手势的起始矩形（board 坐标）
   final _ResizeHandle? resizeHandle;
   final ValueListenable<Offset>? resizeDelta;
+  /// 演示模式入场进度（0→1；仅演示传入，编辑画布 null = 静态设计稿语义）。
+  /// style.motion=='fade_in' 的节点把整体 alpha 乘以该进度；经 repaint
+  /// listenable（动画）逐帧驱动重绘。
+  final Animation<double>? entrance;
 
   ArtboardPainter({
     required this.nodes,
@@ -803,6 +838,7 @@ class ArtboardPainter extends CustomPainter {
     this.resizeStart,
     this.resizeHandle,
     this.resizeDelta,
+    this.entrance,
     super.repaint, // NodeImageCache：图片异步加载完成后重绘画布
   });
 
@@ -810,6 +846,7 @@ class ArtboardPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final dragDelta = this.dragDelta?.value ?? Offset.zero;
     final resizeDelta = this.resizeDelta?.value ?? Offset.zero;
+    final entrance = this.entrance?.value ?? 1.0;
     for (final node in nodes) {
       if (!node.style.visible) continue;
       final isDragging = dragId == node.id;
@@ -824,29 +861,81 @@ class ArtboardPainter extends CustomPainter {
             );
       final radius = math.min(node.style.radius, rect.shortestSide / 2);
       final rrect = RRect.fromRectAndRadius(rect, Radius.circular(radius));
-      final alpha = node.style.opacity.clamp(0.0, 1.0);
+      // motion=fade_in（引擎 0.2 节点级白名单唯一档）：整体 alpha 乘入场进度。
+      final alpha = node.style.opacity.clamp(0.0, 1.0) *
+          (node.style.motion == 'fade_in' ? entrance : 1.0);
 
-      if (node.style.shadow != 'none' && alpha > 0.05) {
-        final shadow = Paint()
-          ..color = Colors.black.withValues(alpha: 0.10 * alpha)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
-        canvas.drawRRect(rrect.shift(const Offset(0, 4)), shadow);
+      // 绕节点中心旋转（引擎 svg transform 语义）；绘制完 restore。
+      final rot = node.style.rotate;
+      if (rot != 0) {
+        final c = rect.center;
+        canvas.save();
+        canvas.translate(c.dx, c.dy);
+        canvas.rotate(rot * math.pi / 180.0);
+        canvas.translate(-c.dx, -c.dy);
       }
 
-      final fill = _hex(node.style.fill);
-      if (fill != Colors.transparent && alpha > 0) {
-        canvas.drawRRect(rrect, Paint()..color = fill.withValues(alpha: fill.a * alpha));
+      // 阴影 = 海拔档位（引擎 defs 三档 feDropShadow 参数逐一对齐：
+      // e1 dy2/std4/0.10、e2 dy6/std14/0.14、e3 dy16/std30/0.18）。
+      final tier = node.style.shadow;
+      if (tier != 'none' && alpha > 0.05) {
+        final (opacity, std, dy) = switch (tier) {
+          'e3' => (0.18, 30.0, 16.0),
+          'e2' => (0.14, 14.0, 6.0),
+          _ => (0.10, 4.0, 2.0), // e1；未知非 none 值回落 e1
+        };
+        final shadow = Paint()
+          ..color = Colors.black.withValues(alpha: opacity * alpha)
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, std);
+        canvas.drawRRect(rrect.shift(Offset(0, dy)), shadow);
+      }
+
+      // blur>0：fill/stroke/text（含图片/占位符）包一层高斯模糊 saveLayer。
+      final blur = node.style.blur;
+      final blurred = blur > 0;
+      if (blurred) {
+        canvas.saveLayer(
+          rect.inflate(blur * 3),
+          Paint()..imageFilter = ui.ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+        );
+      }
+
+      final gradient = _gradientSpec(node.style.fill);
+      if (gradient != null) {
+        if (alpha > 0) {
+          final (colors, dir) = gradient;
+          final modulated = [
+            for (final c in colors) c.withValues(alpha: c.a * alpha),
+          ];
+          canvas.drawRRect(
+            rrect,
+            Paint()
+              ..shader = LinearGradient(
+                begin: Alignment(-dir.dx, -dir.dy),
+                end: Alignment(dir.dx, dir.dy),
+                colors: modulated,
+              ).createShader(rect),
+          );
+        }
+      } else {
+        final fill = _hex(node.style.fill);
+        if (fill != Colors.transparent && alpha > 0) {
+          canvas.drawRRect(rrect, Paint()..color = fill.withValues(alpha: fill.a * alpha));
+        }
       }
 
       final stroke = _hex(node.style.stroke);
       if (node.style.stroke != 'none' && stroke != Colors.transparent && node.style.strokeWidth > 0) {
-        canvas.drawRRect(
-          rrect,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = node.style.strokeWidth
-            ..color = stroke.withValues(alpha: stroke.a * alpha),
-        );
+        final strokePaint = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = node.style.strokeWidth
+          ..color = stroke.withValues(alpha: stroke.a * alpha);
+        if (node.style.dash == 'dashed' || node.style.dash == 'dotted') {
+          _paintDashedStroke(canvas, rrect, strokePaint, node.style.dash,
+              math.max(1.0, node.style.strokeWidth));
+        } else {
+          canvas.drawRRect(rrect, strokePaint);
+        }
       }
 
       final imageUrl = _nodeImageUrl(node);
@@ -863,6 +952,8 @@ class ArtboardPainter extends CustomPainter {
       } else if (node.component == 'image' || node.component == 'avatar') {
         _paintImagePlaceholder(canvas, rect, alpha);
       }
+
+      if (blurred) canvas.restore();
 
       if (node.id == selectedId) {
         canvas.drawRRect(
@@ -903,6 +994,38 @@ class ArtboardPainter extends CustomPainter {
             ..color = accent.withValues(alpha: 0.53),
         );
       }
+
+      if (rot != 0) canvas.restore();
+    }
+  }
+
+  /// 虚线/点线描边：rrect 路径经 PathMetric 切段（dashed 交替段，
+  /// dotted 沿路径布圆点）。
+  void _paintDashedStroke(Canvas canvas, RRect rrect, Paint paint, String dash, double strokeWidth) {
+    final metrics = Path()..addRRect(rrect);
+    if (dash == 'dotted') {
+      final r = math.max(1.0, strokeWidth / 2);
+      final gap = math.max(4.0, strokeWidth * 3);
+      final dot = Paint()..color = paint.color;
+      for (final m in metrics.computeMetrics()) {
+        var dist = 0.0;
+        while (dist <= m.length) {
+          final tangent = m.getTangentForOffset(dist);
+          if (tangent != null) canvas.drawCircle(tangent.position, r, dot);
+          dist += gap;
+        }
+      }
+    } else {
+      final on = math.max(6.0, strokeWidth * 3);
+      final dashed = Path();
+      for (final m in metrics.computeMetrics()) {
+        var dist = 0.0;
+        while (dist < m.length) {
+          dashed.addPath(m.extractPath(dist, math.min(dist + on, m.length)), Offset.zero);
+          dist += on * 2;
+        }
+      }
+      canvas.drawPath(dashed, paint);
     }
   }
 
@@ -948,9 +1071,12 @@ class ArtboardPainter extends CustomPainter {
       'right' => TextAlign.right,
       _ => TextAlign.left,
     };
-    final width = math.max(4, rect.width - 8).round();
+    // 引擎 svg 对齐口径：12px 文本内边距（list_item/card 实测），不截断
+    // （超板如实可见，与演示模式「不裁剪」取向一致）。
+    final width = math.max(4, rect.width - 24).round();
     final aq = (alpha * 16).round();
-    final key = '${node.text}|${node.style.fontSize}|${weight.index}|${align.index}|$width|$aq';
+    final key = '${node.text}|${node.style.fontSize}|${weight.index}|${align.index}|$width|$aq'
+        '|${node.style.line}|${node.style.tracking}|${node.style.italic}';
     var painter = _textCache[key];
     if (painter == null) {
       painter = TextPainter(
@@ -960,19 +1086,19 @@ class ArtboardPainter extends CustomPainter {
             fontSize: node.style.fontSize,
             fontWeight: weight,
             color: color.withValues(alpha: color.a * alpha),
-            height: 1.28,
+            height: node.style.line > 0 ? node.style.line : 1.5,
+            letterSpacing: node.style.tracking * node.style.fontSize,
+            fontStyle: node.style.italic == 'italic' ? FontStyle.italic : FontStyle.normal,
           ),
         ),
         textAlign: align,
         textDirection: TextDirection.ltr,
-        maxLines: 6,
-        ellipsis: '…',
       )..layout(maxWidth: width.toDouble());
       // 容量兜底：整表清（一次 raster 开销换免 LRU 记账）。
       if (_textCache.length > 512) _textCache.clear();
       _textCache[key] = painter;
     }
-    final x = rect.left + 4;
+    final x = rect.left + 12;
     final y = rect.top + math.max(2, (rect.height - painter.height) / 2);
     painter.paint(canvas, Offset(x, y));
   }
@@ -1001,7 +1127,8 @@ class ArtboardPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant ArtboardPainter old) =>
       // 字段级对比；delta 本体不在链上——它经 repaint listenable（ValueNotifier）
-      // 逐帧直驱重绘，painter 重建只比监听器身份。
+      // 逐帧直驱重绘，painter 重建只比监听器身份。entrance 同理：进度经
+      // repaint（动画 listenable）驱动，链上只比动画身份。
       old.nodes != nodes ||
       old.selectedId != selectedId ||
       !identical(old.selectedIds, selectedIds) ||
@@ -1011,7 +1138,8 @@ class ArtboardPainter extends CustomPainter {
       old.resizeId != resizeId ||
       old.resizeStart != resizeStart ||
       old.resizeHandle != resizeHandle ||
-      !identical(old.resizeDelta, resizeDelta);
+      !identical(old.resizeDelta, resizeDelta) ||
+      old.entrance != entrance;
 }
 
 class FlowPainter extends CustomPainter {

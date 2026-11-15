@@ -14,6 +14,20 @@ class NodeStyle {
   final String shadow;
   final bool visible;
   final String align;
+  /// 入场动效档（engine-0.2 白名单仅 fade_in；空串/none 不参与）。
+  final String motion;
+  /// 绕节点中心旋转（度，引擎 svg transform 实证）。
+  final double rotate;
+  /// 高斯模糊半径（引擎 feGaussianBlur 语义）。
+  final double blur;
+  /// 描边线型：solid / dashed / dotted。
+  final String dash;
+  /// 行高倍数（引擎信封默认 1.5；<=0 时消费侧回落 1.5）。
+  final double line;
+  /// 字距（em 比例 ×fontSize，引擎 letter-spacing 语义）。
+  final double tracking;
+  /// 斜体：italic / normal。
+  final String italic;
 
   const NodeStyle({
     this.fill = '#FFFFFF',
@@ -27,6 +41,13 @@ class NodeStyle {
     this.shadow = 'none',
     this.visible = true,
     this.align = 'left',
+    this.motion = 'none',
+    this.rotate = 0,
+    this.blur = 0,
+    this.dash = 'solid',
+    this.line = 1.5,
+    this.tracking = 0,
+    this.italic = 'normal',
   });
 
   factory NodeStyle.fromJson(dynamic raw) {
@@ -43,6 +64,13 @@ class NodeStyle {
       shadow: (m['shadow'] ?? 'none').toString(),
       visible: m['visible'] != false,
       align: (m['align'] ?? 'left').toString(),
+      motion: (m['motion'] ?? 'none').toString(),
+      rotate: _num(m['rotate']),
+      blur: _num(m['blur']),
+      dash: (m['dash'] ?? 'solid').toString(),
+      line: _num(m['line'], 1.5),
+      tracking: _num(m['tracking']),
+      italic: (m['italic'] ?? 'normal').toString(),
     );
   }
 }
@@ -98,6 +126,8 @@ class Artboard {
   final double width;
   final double height;
   final List<CanvasNode> nodes;
+  /// 板底色（hex；server 从引擎 svg 的全幅背景 rect 提取，空 = 白底）。
+  final String background;
 
   const Artboard({
     required this.id,
@@ -105,6 +135,7 @@ class Artboard {
     required this.width,
     required this.height,
     required this.nodes,
+    this.background = '',
   });
 
   factory Artboard.fromJson(Map<String, dynamic> m) => Artboard(
@@ -116,6 +147,7 @@ class Artboard {
             .whereType<Map>()
             .map((e) => CanvasNode.fromJson(Map<String, dynamic>.from(e)))
             .toList(),
+        background: (m['background'] ?? '').toString(),
       );
 }
 

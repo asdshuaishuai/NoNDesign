@@ -10,9 +10,28 @@ class _InspectorState extends State<Inspector> {
   Map<String, dynamic>? _critique;
   String? _flowTarget;
   String _theme = 'light';
+  /// 主题下拉运行时数据源（engine list_themes，0.2 实返 13 项含 7 美学预设）：
+  /// (id, 显示名)；失败/为空回落硬编码 6 项。
+  List<(String, String)> _themes = const [];
   /// activeBoard → session_interactions 全量（按节点过滤在 build 侧做）
   final Map<String, List<Map<String, dynamic>>> _nodeInteractions = {};
   String _interactionsFor = '';
+
+  @override
+  void initState() {
+    super.initState();
+    final api = context.read<AppStore>().api;
+    if (api == null) return;
+    api.themes().then((items) {
+      if (!mounted) return;
+      final themes = <(String, String)>[
+        for (final t in items.whereType<Map>())
+          if ((t['name'] ?? '').toString().isNotEmpty)
+            ((t['name'] ?? '').toString(), (t['display_name'] ?? t['name'] ?? '').toString()),
+      ];
+      if (themes.isNotEmpty) setState(() => _themes = themes);
+    }).catchError((_) {});
+  }
 
   void _ensureNodeInteractions(AppStore store, String board) {
     if (_interactionsFor == board) return;
@@ -354,14 +373,22 @@ class _InspectorState extends State<Inspector> {
             child: nonSelect<String>(context,
               value: _theme,
               decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
-              items: const [
-                DropdownMenuItem(value: 'light', child: Text('light', style: TextStyle(fontSize: 11))),
-                DropdownMenuItem(value: 'dark', child: Text('dark', style: TextStyle(fontSize: 11))),
-                DropdownMenuItem(value: 'high_contrast', child: Text('high_contrast', style: TextStyle(fontSize: 11))),
-                DropdownMenuItem(value: 'sepia', child: Text('sepia', style: TextStyle(fontSize: 11))),
-                DropdownMenuItem(value: 'nord', child: Text('nord', style: TextStyle(fontSize: 11))),
-                DropdownMenuItem(value: 'sunset', child: Text('sunset', style: TextStyle(fontSize: 11))),
-              ],
+              // 运行时数据源（api.themes()，engine-0.2 的 13 项全量）；
+              // 拉取失败/为空回落 6 项硬编码。frontmatter 解析出的越界
+              // _theme（如 harmony）由此获得匹配项。
+              items: _themes.isEmpty
+                  ? const [
+                      DropdownMenuItem(value: 'light', child: Text('light', style: TextStyle(fontSize: 11))),
+                      DropdownMenuItem(value: 'dark', child: Text('dark', style: TextStyle(fontSize: 11))),
+                      DropdownMenuItem(value: 'high_contrast', child: Text('high_contrast', style: TextStyle(fontSize: 11))),
+                      DropdownMenuItem(value: 'sepia', child: Text('sepia', style: TextStyle(fontSize: 11))),
+                      DropdownMenuItem(value: 'nord', child: Text('nord', style: TextStyle(fontSize: 11))),
+                      DropdownMenuItem(value: 'sunset', child: Text('sunset', style: TextStyle(fontSize: 11))),
+                    ]
+                  : [
+                      for (final (id, label) in _themes)
+                        DropdownMenuItem(value: id, child: Text(label, style: const TextStyle(fontSize: 11))),
+                    ],
               onChanged: (v) async {
                 if (v == null) return;
                 setState(() => _theme = v);
