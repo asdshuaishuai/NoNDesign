@@ -61,6 +61,11 @@ class _PlayViewState extends State<PlayView> {
   bool _longPressSent = false;
   DateTime? _tapSuppressedUntil;
   double _scale = 1.0; // 当前画板缩放，LayoutBuilder 每帧回填
+  /// 进入演示模式后的手势引导条（按当前板可用触发聚合，4s 淡出）。
+  bool _guideVisible = true;
+  Timer? _guideTimer;
+  /// 最近一次导航的过渡语义（push/modal 滑入，其余淡入）。
+  String _lastTransition = '';
 
   /// 长按判定：位移超过该值即取消（屏幕像素）。
   static const double _pressSlop = 12;
@@ -75,10 +80,19 @@ class _PlayViewState extends State<PlayView> {
   static final RegExp _markerActionRe = RegExp(r'⚡\S*→([A-Za-z_]+)');
 
   @override
+  void initState() {
+    super.initState();
+    _guideTimer = Timer(const Duration(milliseconds: 4000), () {
+      if (mounted) setState(() => _guideVisible = false);
+    });
+  }
+
+  @override
   void dispose() {
     _toastTimer?.cancel();
     _badgeTimer?.cancel();
     _longPressTimer?.cancel();
+    _guideTimer?.cancel();
     super.dispose();
   }
 
@@ -140,6 +154,31 @@ class _PlayViewState extends State<PlayView> {
                   ],
                 ),
               ),
+              // 手势引导条：聚合当前板全部触发方式，告诉用户「怎么演示」。
+              AnimatedSwitcher(
+                duration: NonMotion.base,
+                child: _guideVisible
+                    ? Container(
+                        key: const ValueKey('guide'),
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        color: p.accent.withValues(alpha: 0.08),
+                        child: Row(children: [
+                          Icon(Icons.touch_app_outlined, size: 11, color: p.accent),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(_guideText(board),
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 10, color: p.ink3)),
+                          ),
+                          InkWell(
+                            onTap: () => setState(() => _guideVisible = false),
+                            child: Icon(Icons.close, size: 11, color: p.ink4),
+                          ),
+                        ]),
+                      )
+                    : const SizedBox(width: double.infinity, height: 0),
+              ),
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
@@ -169,7 +208,23 @@ class _PlayViewState extends State<PlayView> {
                               boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 60, offset: const Offset(0, 30))],
                             ),
                             clipBehavior: Clip.antiAlias,
-                            child: Stack(
+                            // 换板过渡：push/modal 左滑入，其余淡入。
+                            child: AnimatedSwitcher(
+                              duration: NonMotion.base,
+                              switchInCurve: NonMotion.curve,
+                              transitionBuilder: (child, anim) {
+                                final sliding =
+                                    _lastTransition == 'push' || _lastTransition == 'modal_present';
+                                final off = sliding
+                                    ? Tween<Offset>(begin: const Offset(0.25, 0), end: Offset.zero)
+                                    : Tween<Offset>(begin: Offset.zero, end: Offset.zero);
+                                return FadeTransition(
+                                  opacity: anim,
+                                  child: SlideTransition(position: off.animate(anim), child: child),
+                                );
+                              },
+                              child: Stack(
+                                key: ValueKey(board.id),
                               children: [
                                 Positioned.fill(
                                   child: CustomPaint(painter: ArtboardPainter(nodes: board.nodes, accent: p.accent)),
@@ -250,6 +305,7 @@ class _PlayViewState extends State<PlayView> {
                                   ),
                                 ),
                               ],
+                            ),
                             ),
                           ),
                         ),
@@ -336,7 +392,14 @@ class _PlayViewState extends State<PlayView> {
         if (action is Map && action['params'] is Map) {
           message = ((action['params'] as Map)['message'] ?? '').toString();
         }
-        list.add(_EngineInteraction(node: node, kind: kind, message: message, source: source));
+        list.add(_EngineInteraction(
+          node: node,
+          kind: kind,
+          message: message,
+          source: source,
+          trigger: item['trigger']?.toString(),
+          transition: item['transition']?.toString() ?? (item['action'] is Map ? ((item['action'] as Map)['transition'] ?? '').toString() : ''),
+        ));
       }
       setState(() => _interactions[board.id] = list);
     }).catchError((_) {
@@ -355,15 +418,35 @@ class _PlayViewState extends State<PlayView> {
     return null;
   }
 
+  /// 手势中文（热区角标与引导条共用）。
+  static String _triggerLabel(String? trigger) => switch (trigger) {
+        'long_press' => '长按',
+        'swipe_left' => '左滑',
+        'swipe_right' => '右滑',
+        'swipe_up' => '上滑',
+        'swipe_down' => '下滑',
+        'scroll_end' => '滚到底',
+        'key_enter' => 'Enter',
+        'focus' => '聚焦',
+        'blur' => '失焦',
+        'tap' => '点按',
+        _ => '点按',
+      };
+
   String _zoneLabel(_Hotzone zone) {
     switch (zone.kind) {
       case _ZoneKind.flow:
-        return '→ ${zone.target}';
+        return '点按 → ${zone.target}';
       case _ZoneKind.back:
-        return '返回';
+        return '点按 返回';
       case _ZoneKind.interact:
+        final acts = _interactions[zone.node.id];
+        final trigger = acts?.firstWhere((a) => a.node == zone.node.id,
+            orElse: () => const _EngineInteraction(node: '', kind: '', message: '', source: '')).trigger;
         final marker = _markerActionRe.firstMatch(zone.node.name);
-        return marker?.group(1) ?? '交互';
+        final action = marker?.group(1);
+        final target = action == 'navigate_to' ? ' → ${zone.target ?? ''}' : '';
+        return '${_triggerLabel(trigger ?? 'tap')}$target';
     }
   }
 
@@ -387,8 +470,20 @@ class _PlayViewState extends State<PlayView> {
   /// changed `mbt` is re-rendered into the local [_live] overlay; toast text in
   /// `changes` floats at the frame bottom for 1.5s. If the call fails, a flow
   /// zone still navigates locally so the demo never dead-ends.
+  String _pendingTransition = '';
+
   Future<void> _engineTap(_Hotzone zone, String boardId) async {
     if (_tapping) return;
+    // 命中条目的过渡语义（interaction 优先，flow 兜底）。
+    final acts = _interactions[boardId];
+    final hit = acts?.where((a) => a.node == zone.node.id).toList() ?? const [];
+    _pendingTransition = hit.isNotEmpty ? (hit.first.transition ?? '') : '';
+    if (_pendingTransition.isEmpty && zone.kind == _ZoneKind.flow) {
+      final flow = (_live ?? context.read<AppStore>().render).flows
+          .where((f) => f.from == boardId && f.nodeId == zone.node.id)
+          .toList();
+      if (flow.isNotEmpty) _pendingTransition = flow.first.transition;
+    }
     final store = context.read<AppStore>();
     final api = store.api;
     if (api == null) return;
@@ -471,7 +566,7 @@ class _PlayViewState extends State<PlayView> {
     }
     final current = (env['current'] ?? '').toString();
     if (current.isNotEmpty && current != boardId) {
-      _navigateTo(current, from: boardId);
+      _navigateTo(current, from: boardId, transition: _pendingTransition);
       return _EnvEffect(toasted: toasted, navigated: true, mutated: false);
     }
     final newMbt = (env['mbt'] ?? '').toString();
@@ -612,6 +707,17 @@ class _PlayViewState extends State<PlayView> {
     _longPressSent = false;
   }
 
+  /// 当前板可用的演示手势集合 → 引导文案。
+  String _guideText(Artboard board) {
+    final triggers = <String>{'点按热区'};
+    for (final zone in _hotzonesFor(board)) {
+      final acts = _interactions[zone.node.id];
+      final t = acts?.isNotEmpty == true ? acts!.first.trigger : null;
+      if (t != null && t != 'tap') triggers.add(_triggerLabel(t));
+    }
+    return '${triggers.join(' · ')} 驱动 · ← 返回 · Esc 退出';
+  }
+
   /// 画板坐标取整并钳制在画板范围内（引擎事件坐标是整数像素语义）。
   int _boardCoord(double px, double max) {
     final v = px.isFinite ? px.round() : 0;
@@ -621,10 +727,11 @@ class _PlayViewState extends State<PlayView> {
     return v;
   }
 
-  void _navigateTo(String target, {required String from}) {
+  void _navigateTo(String target, {required String from, String transition = ''}) {
     setState(() {
       _stack.add(from);
       _activeBoard = target;
+      _lastTransition = transition;
     });
   }
 
@@ -702,7 +809,11 @@ class _EngineInteraction {
   final String kind;
   final String message;
   final String source;
-  const _EngineInteraction({required this.node, required this.kind, required this.message, required this.source});
+  /// 触发方式（tap/long_press/swipe_left…）与过渡（push/fade…）——热区
+  /// 角标与引导条的直接数据源（engine-0.2 session_interactions 提供）。
+  final String? trigger;
+  final String? transition;
+  const _EngineInteraction({required this.node, required this.kind, required this.message, required this.source, this.trigger, this.transition});
 }
 
 class _Hotzone {

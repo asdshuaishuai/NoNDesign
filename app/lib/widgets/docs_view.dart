@@ -365,6 +365,30 @@ class _SpecPreviewState extends State<_SpecPreview> {
     setState(() => _extracting = true);
     final data = await extractDesignData(context, store, ab);
     if (!mounted) return;
+    // 提取结果自动落进 docs.design（此前只存本地预览态，规范正文永远
+    // 显示默认值——用户反馈「设计规范为啥都是默认的」的根因）。
+    if (data != null) {
+      final tokens = ExtractCompareView.tokensOf(data)
+        ..sort((a, b) {
+          final ua = (a['usage'] as num?) ?? 0;
+          final ub = (b['usage'] as num?) ?? 0;
+          return ub.compareTo(ua); // 使用次数降序，同名高频值覆盖低频
+        });
+      final palette = Map.of(store.docs.design.palette);
+      for (final t in tokens) {
+        final name = t['name']?.toString();
+        final value = t['value']?.toString();
+        if (name != null && value != null && value.isNotEmpty) palette[name] = value;
+      }
+      final d = store.docs.design;
+      store.setDocs(design: DesignSpec(
+        palette: palette,
+        h1: d.h1, h2: d.h2, body: d.body,
+        spacing: d.spacing,
+        radiusSm: d.radiusSm, radiusMd: d.radiusMd, radiusLg: d.radiusLg,
+        rules: d.rules, notes: d.notes,
+      ));
+    }
     setState(() {
       _extracting = false;
       _extract = data;
