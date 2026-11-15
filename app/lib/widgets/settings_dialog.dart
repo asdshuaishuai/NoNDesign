@@ -395,6 +395,16 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                                   textAlign: TextAlign.center,
                                   style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink),
                                   decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 3)),
+                                  // onChanged 即时保存：此前只挂
+                                  // onFieldSubmitted，改完不回车直接发送
+                                  // 就丢值（plist 实测停在 60，用户填的
+                                  // 300 未落盘 → Max turns (60) exceeded）。
+                                  onChanged: (v) async {
+                                    final n = int.tryParse(v);
+                                    if (n == null) return;
+                                    store.settings.maxSteps = n.clamp(4, 600);
+                                    await store.saveSettings();
+                                  },
                                   onFieldSubmitted: (v) async {
                                     store.settings.maxSteps = (int.tryParse(v) ?? 300).clamp(4, 600);
                                     await store.saveSettings();
@@ -571,6 +581,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               Expanded(child: _labeled(context, '最大步数', TextFormField(
                 initialValue: store.settings.maxSteps.toString(),
                 style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink),
+                onChanged: (v) async {
+                  final n = int.tryParse(v);
+                  if (n == null) return;
+                  store.settings.maxSteps = n.clamp(4, 600);
+                  await store.saveSettings();
+                },
                 onFieldSubmitted: (v) async {
                   store.settings.maxSteps = (int.tryParse(v) ?? 300).clamp(4, 600);
                   await store.saveSettings();
