@@ -429,6 +429,7 @@ class AcpAgentInfo {
   final String? executable;
   final bool grayed;
   final String note;
+  final String probeState;
   const AcpAgentInfo({
     required this.id,
     required this.name,
@@ -437,6 +438,7 @@ class AcpAgentInfo {
     this.executable,
     required this.grayed,
     required this.note,
+    this.probeState = 'unprobed',
   });
 
   factory AcpAgentInfo.fromJson(Map<String, dynamic> m) => AcpAgentInfo(
@@ -447,6 +449,7 @@ class AcpAgentInfo {
         executable: m['executable']?.toString(),
         grayed: m['grayed'] == true,
         note: (m['note'] ?? '').toString(),
+        probeState: (m['probeState'] ?? 'unprobed').toString(),
       );
 }
 

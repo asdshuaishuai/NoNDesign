@@ -122,6 +122,17 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **ACP 协议级探测（2026-11-15，用户反馈「通过 acp 协议探测一下」）**：
+  静态猜 argv 不可靠——`probe_entry`/`probe_all` 对每个候选形态真实
+  spawn + initialize + new_session 实测（npx 候选 90s/二进制 15s 超时），
+  verified 才 selectable，失败诚实标注「协议探测失败：<原因>」。
+  `/acp/agents?probe=1` 等待 ≤45s；服务启动即后台热探测。**实测收获：
+  omp=oh-my-pi（pi 系，native `omp acp` 通过）；step 无任何 ACP 入口
+  （`--acp` Unknown option、`acp` 挂起无协议响应）→ StepCode failed 是
+  诚实判定**，等官方适配器往 candidates 加一行即通。pi 本体在本机因
+  node/undici 兼容崩溃（非我方问题）；pi 条目保留 `pi acp` + npx 两候选。
+  探测 fixture 走 _which（X_OK）——fake agent 要 shebang + chmod 755。
+
 - **ACP 扫描完全性（2026-11-15，用户反馈实证）**：R1 目录只探适配器二进制 +
   用进程裸 PATH——用户装了 claude/codex/pi/stepcode 却全部 MISS。已修：
   ① 目录升级 candidates 链（适配器二进制 → **npx 官方包** → CLI 本体），

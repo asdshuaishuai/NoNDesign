@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -167,6 +169,7 @@ def detect_agents() -> list[dict[str, Any]]:
     """
     out: list[dict[str, Any]] = []
     for entry in AGENT_CATALOG:
+        probe = _probe_cache.get(entry.id)
         resolved = _resolve_entry(entry)
         command = resolved["command"] if resolved else []
         via = resolved["via"] if resolved else ""
@@ -174,22 +177,139 @@ def detect_agents() -> list[dict[str, Any]]:
                          if e != "npx" and _which(e)), None)
         installed = resolved is not None or cli_path is not None
         note = entry.note
-        if resolved is None and cli_path is not None:
-            note = "已检测到 CLI（%s），但尚无可用 ACP 形态——%s" % (cli_path, entry.note)
+        # 协议探测结果优先于静态猜测：verified 用实测命令；failed 诚实标注。
+        if probe is not None and probe.state == "verified":
+            command = probe.command
+            via = probe.via
+            note = "%s · %s" % (entry.note, probe.detail)
+        elif probe is not None and probe.state == "failed":
+            command = []
+            via = ""
+            note = "协议探测失败（%s）——%s" % (probe.detail, entry.note)
+        selectable = bool(command) and not entry.grayed and not (
+            probe is not None and probe.state == "failed")
         out.append(
             {
                 "id": entry.id,
                 "name": entry.name,
                 "installed": installed,
-                "selectable": resolved is not None and not entry.grayed,
+                "selectable": selectable,
                 "executable": cli_path,
                 "command": command,
                 "via": via,
                 "note": note,
                 "grayed": entry.grayed,
+                "probeState": probe.state if probe is not None else "unprobed",
             }
         )
     return out
+
+
+# ---------- 协议级探测（spawn + initialize/new_session 实测） ----------
+
+
+@dataclass
+class ProbeResult:
+    state: str  # verified | failed | grayed
+    via: str = ""
+    command: list[str] = field(default_factory=list)
+    detail: str = ""
+    probed_at: float = 0.0
+
+
+_probe_cache: dict[str, ProbeResult] = {}
+_probe_lock = asyncio.Lock()
+
+
+def _candidate_command(cand: Candidate) -> list[str] | None:
+    if cand.argv and cand.argv[0] == "npx":
+        npx = _which("npx")
+        return [npx, *cand.argv[1:]] if npx else None
+    found = next((_which(e) for e in cand.execs if _which(e)), None)
+    if not found:
+        return None
+    return [found if a == "{exe}" else a for a in cand.argv]
+
+
+def _via_of(cand: Candidate) -> str:
+    if cand.argv and cand.argv[0] == "npx":
+        return "npx-adapter"
+    return "native" if len(cand.argv) > 1 else "adapter"
+
+
+async def _probe_command(command: list[str], timeout_s: int, workspace: str) -> tuple[bool, str]:
+    """spawn + initialize + new_session 实测。返回 (ok, detail)。"""
+    proc = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=workspace,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        limit=4 * 1024 * 1024,
+    )
+    try:
+        client = _NoNDesignAcpClient(workspace)
+        conn = ClientSideConnection(client, proc.stdin, proc.stdout)
+        init = await asyncio.wait_for(conn.initialize(PROTOCOL_VERSION), timeout=timeout_s)
+        name = getattr(getattr(init, "agent_info", None), "name", "") or ""
+        try:
+            ns = await asyncio.wait_for(conn.new_session(cwd=workspace, mcp_servers=[]), timeout=timeout_s)
+            ok = bool(getattr(ns, "session_id", ""))
+            detail = "initialize+new_session ok" + (f" ({name})" if name else "")
+        except Exception as exc:  # noqa: BLE001
+            ok, detail = False, f"new_session failed: {type(exc).__name__}: {exc}"
+        return ok, detail
+    except asyncio.TimeoutError:
+        return False, f"timeout {timeout_s}s（无 ACP 响应）"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"{type(exc).__name__}: {exc}"
+    finally:
+        if proc.returncode is None:
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass
+
+
+async def probe_entry(entry: AgentCatalogEntry) -> ProbeResult:
+    """逐候选形态实测 ACP 握手，首个通过者胜出。"""
+    if entry.grayed:
+        result = ProbeResult("grayed", detail=entry.note, probed_at=time.time())
+        _probe_cache[entry.id] = result
+        return result
+    last_detail = ""
+    with tempfile.TemporaryDirectory() as ws:
+        for cand in entry.candidates:
+            command = _candidate_command(cand)
+            if not command:
+                continue
+            timeout_s = 90 if command[0].endswith("npx") else 15
+            ok, detail = await _probe_command(command, timeout_s, ws)
+            if ok:
+                result = ProbeResult("verified", via=_via_of(cand), command=command,
+                                     detail=detail, probed_at=time.time())
+                _probe_cache[entry.id] = result
+                return result
+            last_detail = "%s…: %s" % (" ".join(command[:3]), detail)
+    result = ProbeResult("failed", detail=last_detail or "无可启动形态", probed_at=time.time())
+    _probe_cache[entry.id] = result
+    return result
+
+
+async def probe_all() -> None:
+    """全目录并行实测（幂等：持锁期间重入直接跳过）。"""
+    if _probe_lock.locked():
+        return
+    async with _probe_lock:
+        # 未探测的先标 probing，让前端立即看到状态
+        for e in AGENT_CATALOG:
+            if e.id not in _probe_cache:
+                _probe_cache[e.id] = ProbeResult("probing")
+        await asyncio.gather(*(probe_entry(e) for e in AGENT_CATALOG))
+
+
+def probe_state_of(agent_id: str) -> str:
+    return _probe_cache[agent_id].state if agent_id in _probe_cache else "unprobed"
 
 
 @dataclass
@@ -368,10 +488,15 @@ class AcpRegistry:
             return {"ok": False, "error": "unknown_agent"}
         if entry.grayed:
             return {"ok": False, "error": "agent_grayed", "note": entry.note}
-        resolved = _resolve_entry(entry)
-        if resolved is None or entry.grayed:
-            return {"ok": False, "error": "agent_not_startable", "note": entry.note}
-        argv = resolved["command"]
+        # 协议探测 verified 的命令最可信；否则回退静态解析。
+        probe = _probe_cache.get(entry.id)
+        if probe is not None and probe.state == "verified":
+            argv = probe.command
+        else:
+            resolved = _resolve_entry(entry)
+            if resolved is None or entry.grayed:
+                return {"ok": False, "error": "agent_not_startable", "note": entry.note}
+            argv = resolved["command"]
         async with self._lock:
             self._seq += 1
             session = AcpSession(f"acp-{self._seq}", agent_id, argv, workspace)

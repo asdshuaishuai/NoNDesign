@@ -21,7 +21,8 @@ from pydantic import BaseModel, Field
 SERVER_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SERVER_DIR))
 
-from acp_bridge import AcpRegistry, detect_agents  # noqa: E402
+import acp_bridge  # noqa: E402
+from acp_bridge import AcpRegistry, detect_agents, probe_all as acp_bridge_probe_all  # noqa: E402
 from agent import AgentRunManager, AgentRunRequest  # noqa: E402
 from context import clear_session_file, parse_metadata, with_metadata  # noqa: E402
 from ddp import DdpError, decrypt_ddp, encrypt_ddp  # noqa: E402
@@ -331,8 +332,19 @@ class AcpCancelRequest(BaseModel):
     session_id: str
 
 
+@app.on_event("startup")
+async def _acp_warm_probe() -> None:
+    # 启动即后台实测全目录（npx 首拉可能较慢，不阻塞请求面）。
+    asyncio.get_running_loop().create_task(acp_bridge_probe_all())
+
+
 @app.get("/acp/agents")
-async def acp_agents() -> dict[str, Any]:
+async def acp_agents(probe: int = 0) -> dict[str, Any]:
+    if probe:
+        try:
+            await asyncio.wait_for(acp_bridge_probe_all(), timeout=45)
+        except asyncio.TimeoutError:
+            pass  # 未完成的条目以 probing 状态返回，前端可重试
     return {"ok": True, "agents": detect_agents()}
 
 

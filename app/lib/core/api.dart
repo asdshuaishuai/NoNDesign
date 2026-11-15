@@ -155,8 +155,8 @@ class NoNDesignApi {
 
   // ---- ACP 外部智能体 ----
 
-  Future<List<AcpAgentInfo>> acpAgents() async {
-    final res = await getJson('/acp/agents');
+  Future<List<AcpAgentInfo>> acpAgents({bool probe = false}) async {
+    final res = await getJson('/acp/agents${probe ? '?probe=1' : ''}');
     return ((res['agents'] as List?) ?? const [])
         .whereType<Map>()
         .map((e) => AcpAgentInfo.fromJson(Map<String, dynamic>.from(e)))

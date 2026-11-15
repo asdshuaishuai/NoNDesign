@@ -45,7 +45,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       return;
     }
     try {
-      final agents = await api.acpAgents().timeout(const Duration(seconds: 8));
+      final agents = await api.acpAgents(probe: true).timeout(const Duration(seconds: 50));
       if (mounted) {
         setState(() {
           _acpAgents = agents;
@@ -729,10 +729,16 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             store,
             a.id,
             a.name,
-            a.note,
+            a.probeState == 'probing' ? '协议探测中…' : a.note,
             a.selectable,
             a.grayed,
-            a.installed ? (a.executable ?? '适配器经 npx 拉取') : '未安装',
+            a.probeState == 'probing'
+                ? '探测中'
+                : a.probeState == 'verified'
+                    ? '已验证'
+                    : a.installed
+                        ? (a.executable ?? '适配器经 npx 拉取')
+                        : '未安装',
           ),
         const SizedBox(height: 10),
         Text('检测基于 PATH 探测；适配器类（claude-code-acp 等）需先全局安装。'

@@ -116,5 +116,44 @@ async def main() -> int:
     return 0
 
 
+async def test_probe() -> list[str]:
+    """协议级探测单测：verified / failed 两例。"""
+    from acp_bridge import AgentCatalogEntry, Candidate, probe_entry
+
+    failures: list[str] = []
+    with tempfile.TemporaryDirectory() as ws:
+        agent_script = Path(ws) / "fake_probe_agent.py"
+        # 探针走 _which（X_OK 检查）：补 shebang + 执行位
+        agent_script.write_text("#!/usr/bin/env python3\n" + FAKE_AGENT.replace("sys.argv[1]", repr(ws)), "utf-8")
+        agent_script.chmod(0o755)
+        good = await probe_entry(AgentCatalogEntry("fake-good", "Fake", [
+            Candidate([str(agent_script)], ["{exe}"]),
+        ], "probe fixture"))
+        failures.append("probe verified") if good.state != "verified" else None
+        failures.append(f"probe command {good.command}") if not good.command else None
+        bad = await probe_entry(AgentCatalogEntry("fake-bad", "Echo", [
+            Candidate(["echo"], ["{exe}", "not-acp"]),
+        ], "probe fixture"))
+        failures.append("probe failed expected") if bad.state != "failed" else None
+    return failures
+
+
+async def run_all() -> int:
+    failures = []
+    r = await main.__wrapped__() if hasattr(main, "__wrapped__") else None
+    return failures
+
+
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    import asyncio as _aio
+
+    code = _aio.run(main())
+    probe_failures = _aio.run(test_probe())
+    if probe_failures:
+        print("PROBE FAIL")
+        for f in probe_failures:
+            print(" -", f)
+        code = code or 1
+    else:
+        print("probe: verified/failed cases green")
+    raise SystemExit(code)
