@@ -30,6 +30,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   String? _acpError;
   // 步数输入控制器：initState 赋值（字段初始化器访问不到局部 store）。
   late final TextEditingController _stepsController;
+  final _stepsFocus = FocusNode();
   bool _stepsSavedFlash = false;
 
   @override
@@ -39,6 +40,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     _keyController = TextEditingController(text: store.settings.apiKey);
     _baseController = TextEditingController(text: store.settings.baseUrl);
     _stepsController = TextEditingController(text: store.settings.maxSteps.toString());
+    _stepsFocus.addListener(() { if (mounted) setState(() {}); });
     _loadAcpAgents();
   }
 
@@ -80,6 +82,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     _keyController.dispose();
     _baseController.dispose();
     _stepsController.dispose();
+    _stepsFocus.dispose();
     super.dispose();
   }
 
@@ -388,24 +391,41 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       const SizedBox(width: 10),
                       Text('步数', style: TextStyle(fontSize: 10, color: p.ink3)),
                       const SizedBox(width: 4),
-                      SizedBox(
+                      // 与保存按钮/chips 同高 24：TextFormField 默认非 dense
+                      // 的最小高度 + 聚焦 2px 粗描边会高出一截（用户截图实证）
+                      // ——实体容器自绘聚焦态，三件套视觉统一。
+                      Container(
                         width: 54,
                         height: 24,
-                        child: TextFormField(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _stepsFocus.hasFocus ? p.bgElevated : p.panel3,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                              width: _stepsFocus.hasFocus ? 1.2 : 1,
+                              color: _stepsFocus.hasFocus
+                                  ? p.accent.withValues(alpha: 0.55)
+                                  : p.line),
+                        ),
+                        child: TextField(
                           controller: _stepsController,
+                          focusNode: _stepsFocus,
                           textAlign: TextAlign.center,
+                          textAlignVertical: TextAlignVertical.center,
                           style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink),
-                          decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 3)),
-                          // onChanged 即时保存：此前只挂 onFieldSubmitted，
-                          // 改完不回车直接发送就丢值（plist 实测停在 60，
-                          // 用户填的 300 未落盘 → Max turns (60) exceeded）。
+                          decoration: const InputDecoration(
+                            isCollapsed: true,
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.zero,
+                          ),
                           onChanged: (v) async {
                             final n = int.tryParse(v);
                             if (n == null) return;
                             store.settings.maxSteps = n.clamp(4, 600);
                             await store.saveSettings();
                           },
-                          onFieldSubmitted: (_) => _saveSteps(),
+                          onSubmitted: (_) => _saveSteps(),
                         ),
                       ),
                       const SizedBox(width: 6),
