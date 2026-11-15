@@ -128,6 +128,8 @@ class Artboard {
   final List<CanvasNode> nodes;
   /// 板底色（hex；server 从引擎 svg 的全幅背景 rect 提取，空 = 白底）。
   final String background;
+  /// 引擎自渲染 SVG（内容层唯一真源；空 = 旧信封，客户端回落节点绘制）。
+  final String svg;
 
   const Artboard({
     required this.id,
@@ -136,6 +138,7 @@ class Artboard {
     required this.height,
     required this.nodes,
     this.background = '',
+    this.svg = '',
   });
 
   factory Artboard.fromJson(Map<String, dynamic> m) => Artboard(
@@ -148,6 +151,7 @@ class Artboard {
             .map((e) => CanvasNode.fromJson(Map<String, dynamic>.from(e)))
             .toList(),
         background: (m['background'] ?? '').toString(),
+        svg: (m['svg'] ?? '').toString(),
       );
 }
 

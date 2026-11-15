@@ -195,14 +195,12 @@ async def render(req: RenderRequest) -> dict[str, Any]:
         env = await asyncio.to_thread(engine().render, req.mbt)
     except EngineError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    # 每板 svg 字符串全 app 零消费（导出走 store 的 session_export_svg）：
-    # 逐板剥掉，省 ~12% 响应体积的跨 HTTP 拉取与常驻内存
-    # （写法与 compact_envelope 的剥 svg 同型，engine.py）。
-    # 剥离前先提取板底色（theme 决定：dark 板底 #0F1114 等）——
-    # Flutter 板容器不再硬编码白底。
+    # 引擎自渲染（用户定案 2026-11-16）：每板 svg 是内容层的唯一真源，
+    # Flutter 经 flutter_svg 直上屏——客户端不再重复实现节点渲染
+    # （阴影/字体/rotate/<image>/板底全由引擎 svg 携带）。仅提取板底色
+    # 备用（容器底/缩略图背景），svg 本体保留在信封里。
     boards = env.get("artboards")
     if isinstance(boards, list):
-        stripped = []
         for b in boards:
             if isinstance(b, dict):
                 svg = b.get("svg")
@@ -210,10 +208,6 @@ async def render(req: RenderRequest) -> dict[str, Any]:
                     bg = _board_background(svg, float(b.get("width") or 0), float(b.get("height") or 0))
                     if bg:
                         b["background"] = bg
-                stripped.append({k: v for k, v in b.items() if k != "svg"})
-            else:
-                stripped.append(b)
-        env["artboards"] = stripped
     return env
 
 

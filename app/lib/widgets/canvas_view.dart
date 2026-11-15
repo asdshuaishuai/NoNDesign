@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show ValueListenable, mapEquals;
@@ -515,14 +516,19 @@ class _CanvasViewState extends State<CanvasView> {
                   borderRadius: BorderRadius.circular(4),
                   child: Stack(
                     children: [
+                      // 内容层 = 引擎自渲染 SVG（唯一真源；阴影/字体/rotate/
+                      // <image> 全由引擎携带，客户端不重复实现渲染）。
+                      if (board.svg.isNotEmpty)
+                        Positioned.fill(child: SvgPicture.string(board.svg, fit: BoxFit.fill)),
                       Positioned.fill(
-                        // RepaintBoundary：每板独立图层——Agent 预览/拖拽只重绘
-                        // 活动板，其余板栅格缓存复用。
+                        // 覆盖层：选区环/拖拽幽灵/缩放手柄（svg 在场时只画
+                        // 覆盖，svg 缺席的旧信封回落整节点绘制）。
                         child: RepaintBoundary(
                           child: CustomPaint(
                             painter: ArtboardPainter(
                             nodes: board.nodes,
                             accent: p.accent,
+                            overlayOnly: board.svg.isNotEmpty,
                             selectedId: active ? store.selectedNode : null,
                             selectedIds: active ? store.selectedNodes : const [],
                             hoverId: null,
@@ -825,10 +831,14 @@ class ArtboardPainter extends CustomPainter {
   /// style.motion=='fade_in' 的节点把整体 alpha 乘以该进度；经 repaint
   /// listenable（动画）逐帧驱动重绘。
   final Animation<double>? entrance;
+  /// 引擎 SVG 在场时为 true：只画选区环/悬停/手柄，节点本体由 SvgPicture
+  /// 层承载（引擎自渲染是内容层唯一真源，客户端不重复实现渲染）。
+  final bool overlayOnly;
 
   ArtboardPainter({
     required this.nodes,
     required this.accent,
+    this.overlayOnly = false,
     this.selectedId,
     this.selectedIds = const [],
     this.hoverId,
@@ -875,6 +885,9 @@ class ArtboardPainter extends CustomPainter {
         canvas.translate(-c.dx, -c.dy);
       }
 
+      // 本体绘制段：overlayOnly（引擎 SVG 承载内容）时整体跳过——
+      // 只留后面的选区/悬停环。旧信封（无 svg）仍走完整绘制。
+      if (!overlayOnly) {
       // 阴影 = 海拔档位（引擎 defs 三档 feDropShadow 参数逐一对齐：
       // e1 dy2/std4/0.10、e2 dy6/std14/0.14、e3 dy16/std30/0.18）。
       final tier = node.style.shadow;
@@ -954,6 +967,7 @@ class ArtboardPainter extends CustomPainter {
       }
 
       if (blurred) canvas.restore();
+      } // !overlayOnly
 
       if (node.id == selectedId) {
         canvas.drawRRect(
@@ -993,6 +1007,18 @@ class ArtboardPainter extends CustomPainter {
             ..strokeWidth = 1
             ..color = accent.withValues(alpha: 0.53),
         );
+      }
+
+      // overlayOnly 下拖拽/缩放中的节点：svg 层静止，覆盖层画幽灵框跟随。
+      if (overlayOnly && (isDragging || isResizing)) {
+        canvas.drawRRect(
+          rrect,
+          Paint()
+            ..color = accent.withValues(alpha: 0.12)
+            ..strokeWidth = 1.2
+            ..style = PaintingStyle.stroke,
+        );
+        canvas.drawRRect(rrect, Paint()..color = accent.withValues(alpha: 0.06));
       }
 
       if (rot != 0) canvas.restore();

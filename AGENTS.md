@@ -122,6 +122,18 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **引擎自渲染为内容层唯一真源（2026-11-16 用户定案）**：引擎 0.2-dev 的
+  render 信封每板携带完整 svg（<style> 系统字体/defs 三档 feDropShadow/
+  rotate transform/网络 <image>+clip-path/板底 rect 全在，真机探针实证）——
+  **客户端不重复实现节点渲染**：canvas_view/play_view 内容层 = `SvgPicture.
+  string(board.svg)`（flutter_svg），ArtboardPainter 降为覆盖层（overlayOnly：
+  选区环/悬停/手柄/拖拽幽灵框；旧信封无 svg 才回落整节点绘制）。
+  演示入场呼吸改对整 svg 层 FadeTransition。已知引擎侧边界（登记不修）：
+  fill=linear-gradient(…) 以原始串写入 fill 属性、未合成 defs（svg 规范外，
+  上游修）；italic 未落 svg。/engine/render 保留 svg（仅提板底色），agent
+  工具结果的 compact_envelope 仍剥 svg（LLM 上下文不需要）。
+  锚点：test/engine_svg_test.dart（真机 svg fixture 解析契约）。
+
 - **deepDesign 对账补齐（2026-11-15，用户要求对照原版核对）**：
   ① docs dispose 先 flush 防抖编辑（syncPrdFromEditor 教训——否则 ⌘↵ 生成
   用旧 PRD）；② build 终态 **designFromEngine**：规范仍是默认时自动从入口

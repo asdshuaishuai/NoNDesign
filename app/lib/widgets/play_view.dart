@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -325,16 +326,22 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                                 key: ValueKey(board.id),
                                 children: [
                                 Positioned.fill(
-                                  // 入场呼吸：motion=fade_in 节点随 _entrance 整体淡入
-                                  //（repaint 挂动画逐帧驱动）。
-                                  child: CustomPaint(
-                                    painter: ArtboardPainter(
-                                      nodes: board.nodes,
-                                      accent: p.accent,
-                                      entrance: _entrance,
-                                      repaint: _entrance,
-                                    ),
-                                  ),
+                                  // 内容层 = 引擎自渲染 SVG（唯一真源），入场
+                                  // 呼吸改为对整层 FadeTransition（svg 是整板
+                                  // 光栅，节点级 motion 由引擎导出面承载）。
+                                  child: board.svg.isNotEmpty
+                                      ? FadeTransition(
+                                          opacity: _entrance,
+                                          child: SvgPicture.string(board.svg, fit: BoxFit.fill),
+                                        )
+                                      : CustomPaint(
+                                          painter: ArtboardPainter(
+                                            nodes: board.nodes,
+                                            accent: p.accent,
+                                            entrance: _entrance,
+                                            repaint: _entrance,
+                                          ),
+                                        ),
                                 ),
                                 for (final zone in hotzones)
                                   Positioned(
