@@ -86,14 +86,9 @@ class _AgentPanelState extends State<AgentPanel> {
   }
 
   Widget _buildStreamRow(BuildContext context, AppStore store, NonPalette p) {
-    return Container(
-      margin: const EdgeInsets.only(top: 6),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: p.panel2.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: p.line),
-      ),
+    // 常规 agent 流式形态：无卡片容器——品牌小标 + 平铺正文。
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -102,7 +97,7 @@ class _AgentPanelState extends State<AgentPanel> {
             const SizedBox(width: 4),
             Text('NoN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
           ]),
-          const SizedBox(height: 5),
+          const SizedBox(height: 4),
           SelectableText(
             store.streamText.length > 4000 ? store.streamText.substring(store.streamText.length - 4000) : store.streamText,
             style: TextStyle(fontSize: 12, height: 1.55, color: p.ink2),
@@ -123,8 +118,10 @@ class _AgentPanelState extends State<AgentPanel> {
         children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
+            padding: const EdgeInsets.only(left: 8),
+            decoration: BoxDecoration(
+              border: Border(left: BorderSide(width: 2, color: p.ink4.withValues(alpha: 0.3))),
+            ),
             child: Text(store.thinkingText,
                 maxLines: 20,
                 overflow: TextOverflow.ellipsis,
@@ -491,6 +488,115 @@ class _AgentIntro extends StatelessWidget {
   }
 }
 
+/// 工具调用行（常规 agent 形态）：无卡片背景，单行「状态图标 + 工具名 ·
+/// 参数摘要 + 耗时」，点击展开参数/结果详情（左侧竖线缩进的 mono 文本）。
+class _ToolRow extends StatefulWidget {
+  final TimelineEntry entry;
+  const _ToolRow({required this.entry});
+
+  @override
+  State<_ToolRow> createState() => _ToolRowState();
+}
+
+class _ToolRowState extends State<_ToolRow> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final entry = widget.entry;
+    final subtitle = _toolSubtitleText(entry);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(4),
+            onTap: (entry.preview == null && entry.error == null && entry.args == null)
+                ? null
+                : () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                children: [
+                  Icon(
+                    entry.running
+                        ? Icons.hourglass_top_rounded
+                        : entry.error != null
+                            ? Icons.close_rounded
+                            : Icons.check_rounded,
+                    size: 12,
+                    color: entry.running ? p.accent : entry.error != null ? p.danger : p.success,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(_toolLabel(entry.tool ?? ''),
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: p.ink2)),
+                  if (subtitle != null) ...[
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(subtitle,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                    ),
+                  ],
+                  if (entry.ms != null) ...[
+                    const SizedBox(width: 6),
+                    Text('${entry.ms}ms',
+                        style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.only(left: 18, bottom: 4),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+                decoration: BoxDecoration(
+                  border: Border(left: BorderSide(width: 2, color: p.accent.withValues(alpha: 0.35))),
+                ),
+                child: SelectableText(entry.error ?? entry.preview ?? '—',
+                    style: TextStyle(fontSize: 10, fontFamily: 'Menlo', height: 1.45, color: p.ink4)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+
+String? _toolSubtitleText(TimelineEntry entry) {
+  final args = entry.args;
+  if (args == null) return null;
+  final text = switch (entry.tool) {
+    'design_op' => args['op']?.toString(),
+    'generate_page' => '${args['intent'] ?? ''}${args['name'] != null ? ' · ${args['name']}' : ''}',
+    'inspect' => '${args['kind'] ?? ''}${args['artboard'] != null ? ' · ${args['artboard']}' : ''}',
+    'write_doc' => '${args['kind'] ?? ''} · ${args['chars'] ?? 0} 字',
+    _ => null,
+  };
+  if (text == null || text.isEmpty) return null;
+  return text;
+}
+
+String _toolLabel(String tool) => switch (tool) {
+      'generate_page' => '生成页面',
+      'design_op' => '设计操作',
+      'read_mbt' => '读取文档',
+      'inspect' => '检视引擎',
+      'list_templates' => '查询模板',
+      'list_components' => '查询组件',
+      'read_docs' => '读取文档',
+      'write_doc' => '写入文档',
+      'write_design_spec' => '写入规范',
+      'finish' => '收尾',
+      _ => tool,
+    };
+
 class _TimelineRow extends StatelessWidget {
   final TimelineEntry entry;
   /// 只对尾部新行做淡入；旧行从 1 起始，避免惰性列表滚动回看时重播动画。
@@ -545,56 +651,10 @@ class _TimelineRow extends StatelessWidget {
           ),
         );
       case 'tool':
-        return Container(
-          margin: const EdgeInsets.only(bottom: 4),
-          decoration: BoxDecoration(
-            color: p.panel2.withValues(alpha: 0.3),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: entry.error != null ? p.danger.withValues(alpha: 0.3) : p.line),
-          ),
-          child: Theme(
-            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-            child: ExpansionTile(
-              tilePadding: const EdgeInsets.symmetric(horizontal: 8),
-              childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-              shape: const Border(),
-              collapsedShape: const Border(),
-              minTileHeight: 30,
-              leading: Icon(
-                entry.running
-                    ? Icons.hourglass_top_rounded
-                    : entry.error != null
-                        ? Icons.close_rounded
-                        : Icons.check_rounded,
-                size: 12,
-                color: entry.running ? p.accent : entry.error != null ? p.danger : p.success,
-              ),
-              title: Text(_toolLabel(entry.tool ?? ''),
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: p.ink2)),
-              subtitle: _toolSubtitle(entry, p),
-              trailing: Text(entry.ms != null ? '${entry.ms}ms' : '',
-                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(color: p.bgElevated, borderRadius: BorderRadius.circular(6)),
-                  child: SelectableText(entry.error ?? entry.preview ?? '—',
-                      style: TextStyle(fontSize: 10, fontFamily: 'Menlo', height: 1.45, color: p.ink4)),
-                ),
-              ],
-            ),
-          ),
-        );
+        return _ToolRow(entry: entry);
       case 'note':
-        return Container(
-          margin: const EdgeInsets.only(bottom: 5),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          decoration: BoxDecoration(
-            color: p.success.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: p.success.withValues(alpha: 0.2)),
-          ),
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 5),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -610,94 +670,47 @@ class _TimelineRow extends StatelessWidget {
           ),
         );
       case 'assistant':
-        return Container(
-          margin: const EdgeInsets.only(bottom: 6),
-          padding: const EdgeInsets.all(9),
-          decoration: BoxDecoration(
-            color: p.panel2.withValues(alpha: 0.4),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: p.line),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                Icon(Icons.auto_awesome, size: 10, color: p.accent),
-                const SizedBox(width: 4),
-                Text('NoN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
-              ]),
-              const SizedBox(height: 4),
-              MarkdownBody(
-                data: entry.text,
-                styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-                  p: TextStyle(fontSize: 12, height: 1.55, color: p.ink2),
-                ),
-              ),
-            ],
+        // 常规 agent 消息形态：无气泡无卡片，正文平铺（品牌标只在流式块）。
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: MarkdownBody(
+            data: entry.text,
+            styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+              p: TextStyle(fontSize: 12, height: 1.55, color: p.ink2),
+            ),
           ),
         );
       case 'finish':
-        return Container(
-          margin: const EdgeInsets.only(top: 4, bottom: 6),
-          padding: const EdgeInsets.all(9),
-          decoration: BoxDecoration(
-            color: (entry.ok ? p.success : p.danger).withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: (entry.ok ? p.success : p.danger).withValues(alpha: 0.25)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(entry.ok ? Icons.check_circle_outline : Icons.error_outline,
-                      size: 12, color: entry.ok ? p.success : p.danger),
-                  const SizedBox(width: 5),
-                  Text(entry.title ?? (entry.ok ? '完成' : '异常结束'),
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: entry.ok ? p.success : p.danger)),
-                  const Spacer(),
-                  Text(formatTime(entry.ts), style: TextStyle(fontSize: 10, color: p.ink4)),
-                ],
-              ),
-              if (entry.text.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(entry.text, style: TextStyle(fontSize: 11, height: 1.45, color: p.ink3)),
+        // 细分隔 + 单行状态（无底色框）——常规 agent 的收尾是一条轻结论。
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 4),
+            Divider(height: 1, thickness: 0.5, color: p.line),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(entry.ok ? Icons.check_circle_outline : Icons.error_outline,
+                    size: 12, color: entry.ok ? p.success : p.danger),
+                const SizedBox(width: 5),
+                Text(entry.title ?? (entry.ok ? '完成' : '异常结束'),
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                        color: entry.ok ? p.success : p.danger)),
+                const Spacer(),
+                Text(formatTime(entry.ts), style: TextStyle(fontSize: 10, color: p.ink4)),
               ],
+            ),
+            if (entry.text.isNotEmpty) ...[
+              const SizedBox(height: 3),
+              Text(entry.text, style: TextStyle(fontSize: 11, height: 1.45, color: p.ink3)),
             ],
-          ),
+            const SizedBox(height: 6),
+          ],
         );
       default:
         return const SizedBox.shrink();
     }
   }
 
-  Widget? _toolSubtitle(TimelineEntry entry, NonPalette p) {
-    final args = entry.args;
-    if (args == null) return null;
-    final text = switch (entry.tool) {
-      'design_op' => args['op']?.toString(),
-      'generate_page' => '${args['intent'] ?? ''}${args['name'] != null ? ' · ${args['name']}' : ''}',
-      'inspect' => '${args['kind'] ?? ''}${args['artboard'] != null ? ' · ${args['artboard']}' : ''}',
-      'write_doc' => '${args['kind'] ?? ''} · ${args['chars'] ?? 0} 字',
-      _ => null,
-    };
-    if (text == null || text.isEmpty) return null;
-    return Text(text, maxLines: 1, overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4));
-  }
-
-  String _toolLabel(String tool) => switch (tool) {
-        'generate_page' => '生成页面',
-        'design_op' => '设计操作',
-        'read_mbt' => '读取文档',
-        'inspect' => '检视引擎',
-        'list_templates' => '查询模板',
-        'list_components' => '查询组件',
-        'read_docs' => '读取文档',
-        'write_doc' => '写入文档',
-        'write_design_spec' => '写入规范',
-        'finish' => '收尾',
-        _ => tool,
-      };
 }
 
