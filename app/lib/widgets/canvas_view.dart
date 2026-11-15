@@ -27,7 +27,9 @@ class BoardLayout {
 }
 
 BoardLayout layoutBoards(List<Artboard> boards) {
-  const gap = 96.0;
+  // gap 150：流程线要在板间展示「节点→节点」全路径 + 目标标签，96 太挤
+  // （用户反馈：连线太短太小，跳转关系看不清）。
+  const gap = 150.0;
   const labelH = 34.0;
   if (boards.isEmpty) return const BoardLayout({}, Size(800, 600), 'empty');
   final maxW = boards.map((b) => b.width).reduce(math.max);
@@ -1029,49 +1031,127 @@ class FlowPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (flows.isEmpty) return;
     final zoom = controller.value.getMaxScaleOnAxis();
+    final k = 1 / math.max(0.2, zoom);
     final stroke = Paint()
-      ..color = accent.withValues(alpha: 0.55)
+      ..color = accent.withValues(alpha: 0.75)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5 / math.max(0.2, zoom)
+      ..strokeWidth = 2 * k
       ..strokeCap = StrokeCap.round;
+
+    // 源板节点位置索引：连线从「触发节点中心」出发，而不是板中心——
+    // 跳转关系一眼可见（用户反馈：线太短太小看不清）。
+    final nodeOf = <String, Map<String, Offset>>{};
+    for (final b in boards) {
+      nodeOf[b.id] = {
+        for (final n in b.nodes) n.id: Offset(n.x + n.w / 2, n.y + n.h / 2),
+      };
+    }
+
     for (final flow in flows) {
       final from = positions[flow.from];
       final to = positions[flow.to];
       if (from == null || to == null) continue;
-      final fc = from.center;
-      final tc = to.center;
-      Offset start;
-      Offset end;
+      final local = nodeOf[flow.from]?[flow.nodeId];
+      // 起点：节点中心（板内坐标 + 板位）；无节点回落板中心。
+      final src = local != null
+          ? from.topLeft + local
+          : from.center;
+      final dst = to.center;
+
+      // 出源板：从 src 朝板外延伸到源板边界。
+      final outDir = (src - from.center);
+      final out = outDir == Offset.zero ? const Offset(0, -1) : (outDir / outDir.distance);
+      var start = src + out * 14 * k; // 节点外 14px
+      start = _clipToRect(src, start, from.inflate(4 * k));
+
+      // 入目标板：从 dst 反向回退到目标板边界（箭头贴边不进板内）。
+      final dir = (dst - start);
+      final len = dir.distance;
+      final u = len == 0 ? const Offset(0, -1) : (dir / len);
+      var end = dst - u * 6 * k;
+      end = _clipToRect(dst, dst - u * (len + 200 * k), to.inflate(2 * k));
+
+      // 三阶贝塞尔：水平/垂直主导时用控制点外撑，弧线更可读。
+      final d = end - start;
       Offset c1;
       Offset c2;
-      if ((tc.dx - fc.dx).abs() >= (tc.dy - fc.dy).abs()) {
-        final right = tc.dx > fc.dx;
-        start = Offset(right ? from.right : from.left, fc.dy);
-        end = Offset(right ? to.left : to.right, tc.dy);
-        c1 = Offset(start.dx + (right ? 60 : -60), start.dy);
-        c2 = Offset(end.dx + (right ? -60 : 60), end.dy);
+      if (d.dx.abs() >= d.dy.abs()) {
+        final right = d.dx > 0;
+        c1 = Offset(start.dx + (right ? 70 : -70) * k, start.dy);
+        c2 = Offset(end.dx + (right ? -70 : 70) * k, end.dy);
       } else {
-        final down = tc.dy > fc.dy;
-        start = Offset(fc.dx, down ? from.bottom : from.top);
-        end = Offset(tc.dx, down ? to.top : to.bottom);
-        c1 = Offset(start.dx, start.dy + (down ? 60 : -60));
-        c2 = Offset(end.dx, end.dy + (down ? -60 : 60));
+        final down = d.dy > 0;
+        c1 = Offset(start.dx, start.dy + (down ? 70 : -70) * k);
+        c2 = Offset(end.dx, end.dy + (down ? -70 : 70) * k);
       }
       final path = Path()
         ..moveTo(start.dx, start.dy)
         ..cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, end.dx, end.dy);
       canvas.drawPath(path, stroke);
-      final dir = (end - c2);
-      final angle = math.atan2(dir.dy, dir.dx);
-      final arrow = Path();
-      final len = 9 / math.max(0.3, zoom);
-      arrow
+
+      // 起点小圆点（触发节点标记）
+      canvas.drawCircle(src, 3.5 * k, Paint()..color = accent.withValues(alpha: 0.9));
+
+      // 大箭头
+      final dirE = (end - c2);
+      final angle = math.atan2(dirE.dy, dirE.dx);
+      final head = 13 * k;
+      final arrow = Path()
         ..moveTo(end.dx, end.dy)
-        ..lineTo(end.dx - len * math.cos(angle - 0.45), end.dy - len * math.sin(angle - 0.45))
-        ..lineTo(end.dx - len * math.cos(angle + 0.45), end.dy - len * math.sin(angle + 0.45))
+        ..lineTo(end.dx - head * math.cos(angle - 0.42), end.dy - head * math.sin(angle - 0.42))
+        ..lineTo(end.dx - head * math.cos(angle + 0.42), end.dy - head * math.sin(angle + 0.42))
         ..close();
-      canvas.drawPath(arrow, Paint()..color = accent.withValues(alpha: 0.8));
+      canvas.drawPath(arrow, Paint()..color = accent);
+
+      // 中点标签：目标板名（白底 pill，跟缩放）
+      final mid = _cubicAt(start, c1, c2, end, 0.5);
+      final label = flow.to;
+      final tp = TextPainter(
+        text: TextSpan(
+            text: label,
+            style: TextStyle(
+                fontSize: 10 * math.max(0.5, math.min(1.6, zoom)),
+                fontFamily: 'Menlo',
+                // 双主题通用：白底深字（画布标注惯例，painter 无 palette）。
+                color: const Color(0xFF14161A))),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final pad = 4 * k;
+      final rect = Rect.fromCenter(
+          center: mid,
+          width: tp.width + pad * 2,
+          height: tp.height + pad);
+      canvas.drawRRect(
+          RRect.fromRectAndRadius(rect, Radius.circular(4 * k)),
+          Paint()..color = Colors.white.withValues(alpha: 0.92));
+      tp.paint(canvas, Offset(rect.left + pad, rect.top + pad / 2));
     }
+  }
+
+  /// 线段 p0→p1 与 rect 边界的交点（从 p0 朝 p1 出发的第一次出界点）。
+  Offset _clipToRect(Offset p0, Offset p1, Rect rect) {
+    double t = 1;
+    if (p1.dx != p0.dx) {
+      final tx = p1.dx > p0.dx
+          ? (rect.right - p0.dx) / (p1.dx - p0.dx)
+          : (rect.left - p0.dx) / (p1.dx - p0.dx);
+      if (tx >= 0 && tx < t) t = tx;
+    }
+    if (p1.dy != p0.dy) {
+      final ty = p1.dy > p0.dy
+          ? (rect.bottom - p0.dy) / (p1.dy - p0.dy)
+          : (rect.top - p0.dy) / (p1.dy - p0.dy);
+      if (ty >= 0 && ty < t) t = ty;
+    }
+    return Offset(p0.dx + (p1.dx - p0.dx) * t, p0.dy + (p1.dy - p0.dy) * t);
+  }
+
+  Offset _cubicAt(Offset p0, Offset c1, Offset c2, Offset p1, double t) {
+    final u = 1 - t;
+    return Offset(
+      u * u * u * p0.dx + 3 * u * u * t * c1.dx + 3 * u * t * t * c2.dx + t * t * t * p1.dx,
+      u * u * u * p0.dy + 3 * u * u * t * c1.dy + 3 * u * t * t * c2.dy + t * t * t * p1.dy,
+    );
   }
 
   @override

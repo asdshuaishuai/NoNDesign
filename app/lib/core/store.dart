@@ -1412,13 +1412,8 @@ class AppStore extends ChangeNotifier {
         // designFromEngine：直接构建（无 PLAN）时规范仍是默认 → 自动从
         // 画布提取真实配色，流程闭环（异步，不阻塞终态）。
         unawaited(_autoDesignFromEngine());
-        // 画布 toast 只取首句短语（长结论在时间线 finish 条目里）。
-        final firstLine = summary
-            .split('\n')
-            .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '')
-            .replaceAll(RegExp(r'[*#`\[\]]'), '')
-            .trim();
-        _toast('NoN 完成', firstLine.length > 60 ? '${firstLine.substring(0, 60)}…' : firstLine);
+        // done 不再弹 toast（用户定案：没必要）——完整结论就在时间线
+        // finish 条目里，画布保持干净。
         break;
     }
     notifyListeners();
