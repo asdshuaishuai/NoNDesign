@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ from acp.schema import (
 )
 
 PROTOCOL_VERSION = 1
+ROOT_DIR = Path(__file__).resolve().parent.parent
 
 # 服务端由 Flutter 拉起，PATH 常缺用户 shell 的私有目录（nvm/npm-global/
 # ~/.local 等）——codex 就装在 ~/.nvm/versions/node/*/bin。检测合并：
@@ -57,29 +59,47 @@ def _login_path() -> str:
     return _login_path_cache
 
 
-def _which(name: str) -> str | None:
-    """shutil.which + 登录 PATH + 常见目录，供目录探测用。"""
-    found = shutil.which(name)
-    if found:
-        return found
+def _scan_dirs() -> list[str]:
+    """探测目录序：nvm 版本 bin（新版降序优先）→ 登录 PATH → 常见目录 → 进程 PATH。"""
     dirs: list[str] = []
-    for chunk in _login_path().split(":"):
-        if chunk:
-            dirs.append(chunk)
     home = Path.home()
-    for d in _EXTRA_DIRS:
-        dirs.append(str(home / d[2:]) if d.startswith("~") else d)
     nvm_root = home / ".nvm" / "versions" / "node"
     if nvm_root.is_dir():
-        for vdir in nvm_root.iterdir():
+        for vdir in sorted(nvm_root.iterdir(), key=lambda p: p.name, reverse=True):
             bins = vdir / "bin"
             if bins.is_dir():
                 dirs.append(str(bins))
+    for chunk in _login_path().split(":"):
+        if chunk:
+            dirs.append(chunk)
+    for d in _EXTRA_DIRS:
+        dirs.append(str(home / d[2:]) if d.startswith("~") else d)
+    if "PATH" in os.environ:
+        dirs.extend(p for p in os.environ["PATH"].split(":") if p)
     seen: set[str] = set()
+    out: list[str] = []
     for d in dirs:
-        if d in seen:
-            continue
-        seen.add(d)
+        if d not in seen:
+            seen.add(d)
+            out.append(d)
+    return out
+
+
+def _child_env() -> dict[str, str]:
+    """ACP 子进程环境：PATH 前置强化目录——适配器内部再 spawn `pi`/`node`
+    等也能解析到好副本（pi-acp 的 new_session 就栽在裸 PATH 上）。"""
+    env = dict(os.environ)
+    env["PATH"] = ":".join(_scan_dirs())
+    return env
+
+
+def _which(name: str) -> str | None:
+    """登录 PATH + 常见目录 + nvm 版本 bin（新版优先）+ 进程 PATH 兜底。
+
+    nvm 排在最前（版本号降序）：同名的坏旧副本（如 brew 遗留的 pi）不该
+    遮蔽新装的可执行。
+    """
+    for d in _scan_dirs():
         cand = Path(d) / name
         if cand.is_file() and os.access(cand, os.X_OK):
             return str(cand)
@@ -105,7 +125,19 @@ class AgentCatalogEntry:
     grayed: bool = False
 
 
+# 最终白名单（用户定案 2026-11-15，就这几个，其他不考虑）：
+# qwen / pi / claude / codex / dsh / stepcode / mcode / kimi / omp / gemini /
+# pivot(置灰) / solon。适配策略：有第三方适配走 npx/中间适配器；只有
+# stepcode 完全没有 → NoN 自研适配层（server/acp_adapters/step_adapter.py）。
 AGENT_CATALOG: list[AgentCatalogEntry] = [
+    AgentCatalogEntry("qwen", "Qwen Code", [
+        Candidate(["qwen"], ["{exe}", "--experimental-acp"]),
+    ], "gemini-cli 分支，--experimental-acp 旗标"),
+    AgentCatalogEntry("pi", "Pi", [
+        Candidate(["pi"], ["{exe}", "acp"]),
+        Candidate(["pi-acp"], ["{exe}"]),
+        Candidate(["npx"], ["npx", "-y", "pi-acp"]),
+    ], "pi 系 ACP 入口为 <exe> acp 子命令（oh-my-pi 实证同形态）"),
     AgentCatalogEntry("claude-code", "Claude Code", [
         Candidate(["claude-code-acp", "claude-agent-acp"], ["{exe}"]),
         Candidate(["npx"], ["npx", "-y", "@zed-industries/claude-code-acp"]),
@@ -114,49 +146,45 @@ AGENT_CATALOG: list[AgentCatalogEntry] = [
         Candidate(["codex-acp"], ["{exe}"]),
         Candidate(["npx"], ["npx", "-y", "@zed-industries/codex-acp"]),
     ], "经 Zed 官方适配器 codex-acp"),
-    AgentCatalogEntry("pi", "Pi", [
-        Candidate(["pi-acp"], ["{exe}"]),
-        Candidate(["npx"], ["npx", "-y", "pi-acp"]),
-    ], "经 pi-acp 适配器"),
+    AgentCatalogEntry("dsh", "DSH", [
+        Candidate(["dsh"], ["{exe}", "acp"]),
+    ], "DeepSeek CLI；acp 子命令形态待协议探测裁决"),
+    AgentCatalogEntry("stepcode", "StepCode", [
+        Candidate([], [sys.executable, str(ROOT_DIR / "server" / "acp_adapters" / "step_adapter.py")]),
+        Candidate(["step", "stepcode"], ["{exe}", "acp"]),
+    ], "NoN 自研适配层：经 step -p 打流（文本流，工具事件不可见）"),
+    AgentCatalogEntry("mcode", "MiniMax Code", [
+        Candidate(["mcode", "minimax-code", "minimax"], ["{exe}", "acp"]),
+    ], "MiniMax 智能体 CLI（mcode / minimax 均探测）"),
     AgentCatalogEntry("kimi", "Kimi Code", [
         Candidate(["kimi"], ["{exe}", "acp"]),
     ], "Kimi CLI 的 acp 子命令"),
-    AgentCatalogEntry("stepcode", "StepCode", [
-        Candidate(["step", "stepcode"], ["{exe}", "acp"]),
-    ], "本机已装 step CLI；尚无公开 ACP 适配器，待接入"),
-    AgentCatalogEntry("minimax-code", "MiniMax Code", [
-        Candidate(["minimax-code", "minimax"], ["{exe}", "acp"]),
-    ], "MiniMax 智能体 CLI"),
     AgentCatalogEntry("omp", "OMP", [
         Candidate(["omp"], ["{exe}", "acp"]),
-    ], "检测到 omp 即列出；若为同名非 ACP 程序，连接时会报错"),
+    ], "oh-my-pi（pi 系发行版，实测 native ACP）"),
+    AgentCatalogEntry("gemini", "Gemini CLI", [
+        Candidate(["gemini"], ["{exe}", "--experimental-acp"]),
+    ], "Google 官方 CLI，--experimental-acp 旗标"),
     AgentCatalogEntry("pivot", "Pivot", [
         Candidate(["pivot"], ["{exe}", "acp"]),
     ], "我们自己的智能体 · 即将接入", grayed=True),
-    AgentCatalogEntry("gemini", "Gemini CLI", [
-        Candidate(["gemini"], ["{exe}", "--experimental-acp"]),
-    ], "Google 官方，--experimental-acp 旗标"),
-    AgentCatalogEntry("qwen", "Qwen Code", [
-        Candidate(["qwen"], ["{exe}", "--experimental-acp"]),
-    ], "gemini-cli 分支，同旗标"),
-    AgentCatalogEntry("cline", "Cline", [
-        Candidate(["cline"], ["{exe}", "acp"]),
-    ], "Cline CLI 的 acp 子命令"),
+    AgentCatalogEntry("solon", "Solon Code", [
+        Candidate(["solon", "solon-code"], ["{exe}", "acp"]),
+    ], "Solon Code CLI"),
 ]
 
 
 def _resolve_entry(entry: AgentCatalogEntry) -> dict[str, Any] | None:
-    """按序探测候选形态，返回 {command, via} 或 None。npx 形态另查 npx 本体。"""
+    """按序探测候选形态，返回 {command, via} 或 None。
+
+    统一走 _candidate_command（含 npx/静态适配器/本体三形态的解析）——
+    此前它与 probe 面分叉：静态适配器（execs 空）在这里被跳过，create
+    回落到 step acp 挂起（2026-11-15 实证）。
+    """
     for cand in entry.candidates:
-        if cand.argv and cand.argv[0] == "npx":
-            npx = _which("npx")
-            if npx:
-                return {"command": [npx, *cand.argv[1:]], "via": "npx-adapter"}
-            continue
-        found = next((_which(e) for e in cand.execs if _which(e)), None)
-        if found:
-            return {"command": [found if a == "{exe}" else a for a in cand.argv],
-                    "via": "native" if len(cand.argv) > 1 else "adapter"}
+        command = _candidate_command(cand)
+        if command:
+            return {"command": command, "via": _via_of(cand)}
     return None
 
 
@@ -225,6 +253,9 @@ def _candidate_command(cand: Candidate) -> list[str] | None:
     if cand.argv and cand.argv[0] == "npx":
         npx = _which("npx")
         return [npx, *cand.argv[1:]] if npx else None
+    if not cand.execs:
+        # 静态 argv（自研适配层）：适配器脚本在场即用
+        return list(cand.argv) if Path(cand.argv[0]).is_file() else None
     found = next((_which(e) for e in cand.execs if _which(e)), None)
     if not found:
         return None
@@ -234,14 +265,17 @@ def _candidate_command(cand: Candidate) -> list[str] | None:
 def _via_of(cand: Candidate) -> str:
     if cand.argv and cand.argv[0] == "npx":
         return "npx-adapter"
+    if cand.argv and cand.argv[0].endswith("python") and "acp_adapters" in " ".join(cand.argv):
+        return "builtin-adapter"
     return "native" if len(cand.argv) > 1 else "adapter"
 
 
-async def _probe_command(command: list[str], timeout_s: int, workspace: str) -> tuple[bool, str]:
+async def _probe_command(command: list[str], timeout_s: int, workspace: str, env: dict[str, str] | None = None) -> tuple[bool, str]:
     """spawn + initialize + new_session 实测。返回 (ok, detail)。"""
     proc = await asyncio.create_subprocess_exec(
         *command,
         cwd=workspace,
+        env=env or _child_env(),
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
@@ -271,26 +305,57 @@ async def _probe_command(command: list[str], timeout_s: int, workspace: str) -> 
                 pass
 
 
+def _alt_node_envs(limit: int = 2) -> list[dict[str, str]]:
+    """多 node 环境切换：默认环境之外的 nvm 版本，新版优先，最多 limit 个。"""
+    home = Path.home()
+    nvm_root = home / ".nvm" / "versions" / "node"
+    if not nvm_root.is_dir():
+        return []
+    out: list[dict[str, str]] = []
+    for vdir in sorted(nvm_root.iterdir(), key=lambda p: p.name, reverse=True):
+        bins = vdir / "bin"
+        if not bins.is_dir():
+            continue
+        env = dict(os.environ)
+        env["PATH"] = str(bins) + ":" + ":".join(_scan_dirs())
+        out.append(env)
+        if len(out) >= limit:
+            break
+    return out
+
+
 async def probe_entry(entry: AgentCatalogEntry) -> ProbeResult:
-    """逐候选形态实测 ACP 握手，首个通过者胜出。"""
+    """逐候选形态实测 ACP 握手，首个通过者胜出。
+
+    native 候选在默认环境失败后，用其余 nvm node 版本各重试一次
+    （用户定案：多 nodejs 环境尝试切换 node；npx 候选不重试——包自身
+    已绑定拉取时的 node）。
+    """
     if entry.grayed:
         result = ProbeResult("grayed", detail=entry.note, probed_at=time.time())
         _probe_cache[entry.id] = result
         return result
     last_detail = ""
+    alt_envs = _alt_node_envs()
     with tempfile.TemporaryDirectory() as ws:
         for cand in entry.candidates:
             command = _candidate_command(cand)
             if not command:
                 continue
-            timeout_s = 90 if command[0].endswith("npx") else 15
-            ok, detail = await _probe_command(command, timeout_s, ws)
-            if ok:
-                result = ProbeResult("verified", via=_via_of(cand), command=command,
-                                     detail=detail, probed_at=time.time())
-                _probe_cache[entry.id] = result
-                return result
-            last_detail = "%s…: %s" % (" ".join(command[:3]), detail)
+            is_npx = command[0].endswith("npx")
+            timeout_s = 90 if is_npx else 15
+            attempts = [(command, _child_env())]
+            if not is_npx:
+                attempts.extend((command, env) for env in alt_envs)
+            for attempt_i, (cmd, env) in enumerate(attempts):
+                suffix = "" if attempt_i == 0 else "（node 切换重试）"
+                ok, detail = await _probe_command(cmd, timeout_s, ws, env=env)
+                if ok:
+                    result = ProbeResult("verified", via=_via_of(cand), command=cmd,
+                                         detail=detail + suffix, probed_at=time.time())
+                    _probe_cache[entry.id] = result
+                    return result
+                last_detail = "%s…: %s%s" % (" ".join(cmd[:3]), detail, suffix)
     result = ProbeResult("failed", detail=last_detail or "无可启动形态", probed_at=time.time())
     _probe_cache[entry.id] = result
     return result
@@ -305,7 +370,11 @@ async def probe_all() -> None:
         for e in AGENT_CATALOG:
             if e.id not in _probe_cache:
                 _probe_cache[e.id] = ProbeResult("probing")
-        await asyncio.gather(*(probe_entry(e) for e in AGENT_CATALOG))
+        results = await asyncio.gather(*(probe_entry(e) for e in AGENT_CATALOG), return_exceptions=True)
+        for e, r in zip(AGENT_CATALOG, results):
+            if isinstance(r, BaseException):
+                # 单条探测崩掉不拖垮全目录；标记 failed 并保留原因
+                _probe_cache[e.id] = ProbeResult("failed", detail=f"{type(r).__name__}: {r}", probed_at=time.time())
 
 
 def probe_state_of(agent_id: str) -> str:
@@ -418,15 +487,20 @@ class AcpSession:
         self.proc = await asyncio.create_subprocess_exec(
             *self.argv,
             cwd=self.workspace,
+            env=_child_env(),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            # stderr=DEVNULL：无人消费的 PIPE 在子进程写满时死锁（stepcode
+            # 适配层 create 挂起 30s 实证；probe 面因 DEVNULL 从未复现）。
+            stderr=asyncio.subprocess.DEVNULL,
             limit=4 * 1024 * 1024,
         )
         assert self.proc.stdin is not None and self.proc.stdout is not None
         self.conn = ClientSideConnection(self.client, self.proc.stdin, self.proc.stdout)
-        await self.conn.initialize(PROTOCOL_VERSION)
-        resp = await self.conn.new_session(cwd=self.workspace, mcp_servers=[])
+        # 会话建立也实测（probe 已验证过的命令同样可能偶发挂起）——30s 无响应
+        # 视为启动失败，交由上层报错而非永久悬挂。
+        await asyncio.wait_for(self.conn.initialize(PROTOCOL_VERSION), timeout=30)
+        resp = await asyncio.wait_for(self.conn.new_session(cwd=self.workspace, mcp_servers=[]), timeout=30)
         self.remote_session = resp.session_id
 
     async def prompt(self, text: str) -> _PendingPrompt:

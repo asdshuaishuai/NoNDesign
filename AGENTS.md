@@ -122,6 +122,23 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **ACP 最终标准（2026-11-15 用户定案）**：白名单收敛 12 个——qwen/pi/
+  claude/codex/dsh/stepcode/mcode/kimi/omp/gemini/pivot(灰)/solon，cline 等
+  移除。适配策略：有第三方适配走 npx/中间适配器；**只有 stepcode 自研**
+  （`server/acp_adapters/step_adapter.py`：把 `step -p` 打流包成 ACP，
+  stdin 必须 DEVNULL——step 继承 stdin 管道等永不到来的 EOF 会挂起，
+  适配器首版全链路挂起 120s 实证）。多 node 环境：native 候选默认环境
+  失败后按 nvm 版本（新→旧，最多 2 个）切换 PATH 重试（`_alt_node_envs`）。
+  pi 更新实录：`~/.npmrc` 把全局 prefix 钉在 node20（装哪都进 v20），
+  pi@latest 需 node≥22 → `npm i -g --prefix ~/.nvm/versions/node/v24.22.2`
+  强制装 v24；brew 遗留坏副本删除；`_which`/`_scan_dirs` nvm 新版优先，
+  `_child_env()` 让 ACP 子进程（含适配器内部再 spawn）都解析到好副本。
+  **探测/启动/静态解析三条路径必须共用 `_candidate_command`**——
+  `_resolve_entry` 曾与它分叉（静态适配器被跳过 → create 回落 step acp
+  挂起）。真机终态：qwen/pi/claude/codex/dsh(deepseek-harness-acp)/
+  stepcode(自研)/omp(oh-my-pi) 七个 verified 全链路；mcode/kimi/gemini/
+  solon 未安装诚实列出；pivot 置灰。
+
 - **ACP 协议级探测（2026-11-15，用户反馈「通过 acp 协议探测一下」）**：
   静态猜 argv 不可靠——`probe_entry`/`probe_all` 对每个候选形态真实
   spawn + initialize + new_session 实测（npx 候选 90s/二进制 15s 超时），
