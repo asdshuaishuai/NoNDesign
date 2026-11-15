@@ -13,6 +13,7 @@ fs 读写回调限制在工作区目录内。
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,47 +32,160 @@ from acp.schema import (
 
 PROTOCOL_VERSION = 1
 
+# 服务端由 Flutter 拉起，PATH 常缺用户 shell 的私有目录（nvm/npm-global/
+# ~/.local 等）——codex 就装在 ~/.nvm/versions/node/*/bin。检测合并：
+# ① 登录 shell 的 PATH（缓存一次）② 常见安装目录 ③ nvm 全部 node 版本 bin。
+_EXTRA_DIRS = ("~/.local/bin", "~/.stepcode/bin", "~/bin", "/opt/homebrew/bin",
+               "/usr/local/bin", "/opt/homebrew/sbin", "/usr/local/sbin")
+_login_path_cache: str | None = None
+
+
+def _login_path() -> str:
+    global _login_path_cache
+    if _login_path_cache is None:
+        try:
+            import subprocess
+            out = subprocess.run(
+                ["/bin/zsh", "-lc", "echo $PATH"],
+                capture_output=True, text=True, timeout=8,
+            )
+            _login_path_cache = out.stdout.strip() if out.returncode == 0 else ""
+        except Exception:
+            _login_path_cache = ""
+    return _login_path_cache
+
+
+def _which(name: str) -> str | None:
+    """shutil.which + 登录 PATH + 常见目录，供目录探测用。"""
+    found = shutil.which(name)
+    if found:
+        return found
+    dirs: list[str] = []
+    for chunk in _login_path().split(":"):
+        if chunk:
+            dirs.append(chunk)
+    home = Path.home()
+    for d in _EXTRA_DIRS:
+        dirs.append(str(home / d[2:]) if d.startswith("~") else d)
+    nvm_root = home / ".nvm" / "versions" / "node"
+    if nvm_root.is_dir():
+        for vdir in nvm_root.iterdir():
+            bins = vdir / "bin"
+            if bins.is_dir():
+                dirs.append(str(bins))
+    seen: set[str] = set()
+    for d in dirs:
+        if d in seen:
+            continue
+        seen.add(d)
+        cand = Path(d) / name
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return str(cand)
+    return None
+
+
+@dataclass
+class Candidate:
+    """一个可启动形态：execs 命中即用 argv（{exe} 替换为命中路径）。"""
+
+    execs: list[str]
+    argv: list[str]
+
 
 @dataclass
 class AgentCatalogEntry:
-    """目录项：探测可执行名 + 启动 argv + 展示信息。"""
+    """目录项：按序探测 candidates（适配器二进制 → npx 官方包 → CLI 本体）。"""
 
     id: str
     name: str
-    execs: list[str]
-    argv: list[str]  # {exe} 占位符替换为探测到的可执行路径
+    candidates: list[Candidate]
     note: str
     grayed: bool = False
 
 
 AGENT_CATALOG: list[AgentCatalogEntry] = [
-    AgentCatalogEntry("claude-code", "Claude Code", ["claude-code-acp", "claude-agent-acp"], ["{exe}"], "经 Zed 官方 ACP 适配器（claude-code-acp）"),
-    AgentCatalogEntry("codex", "Codex CLI", ["codex-acp"], ["{exe}"], "经 codex-acp 适配器"),
-    AgentCatalogEntry("kimi", "Kimi Code", ["kimi"], ["{exe}", "acp"], "Kimi CLI 的 acp 子命令"),
-    AgentCatalogEntry("pi", "Pi", ["pi-acp"], ["{exe}"], "经 pi-acp 适配器"),
-    AgentCatalogEntry("stepcode", "StepCode", ["stepcode", "stepcode-acp"], ["{exe}", "acp"], "StepFun 智能体 CLI"),
-    AgentCatalogEntry("minimax-code", "MiniMax Code", ["minimax-code", "minimax"], ["{exe}", "acp"], "MiniMax 智能体 CLI"),
-    AgentCatalogEntry("omp", "OMP", ["omp"], ["{exe}", "acp"], "检测到 omp 即列出；若为同名非 ACP 程序，连接时会报错"),
-    AgentCatalogEntry("pivot", "Pivot", ["pivot"], ["{exe}", "acp"], "我们自己的智能体 · 即将接入", grayed=True),
-    AgentCatalogEntry("gemini", "Gemini CLI", ["gemini"], ["{exe}", "--experimental-acp"], "Google 官方，--experimental-acp 旗标"),
-    AgentCatalogEntry("qwen", "Qwen Code", ["qwen"], ["{exe}", "--experimental-acp"], "gemini-cli 分支，同旗标"),
-    AgentCatalogEntry("cline", "Cline", ["cline"], ["{exe}", "acp"], "Cline CLI 的 acp 子命令"),
+    AgentCatalogEntry("claude-code", "Claude Code", [
+        Candidate(["claude-code-acp", "claude-agent-acp"], ["{exe}"]),
+        Candidate(["npx"], ["npx", "-y", "@zed-industries/claude-code-acp"]),
+    ], "经 Zed 官方适配器（本机无适配器二进制时经 npx 拉取）"),
+    AgentCatalogEntry("codex", "Codex CLI", [
+        Candidate(["codex-acp"], ["{exe}"]),
+        Candidate(["npx"], ["npx", "-y", "@zed-industries/codex-acp"]),
+    ], "经 Zed 官方适配器 codex-acp"),
+    AgentCatalogEntry("pi", "Pi", [
+        Candidate(["pi-acp"], ["{exe}"]),
+        Candidate(["npx"], ["npx", "-y", "pi-acp"]),
+    ], "经 pi-acp 适配器"),
+    AgentCatalogEntry("kimi", "Kimi Code", [
+        Candidate(["kimi"], ["{exe}", "acp"]),
+    ], "Kimi CLI 的 acp 子命令"),
+    AgentCatalogEntry("stepcode", "StepCode", [
+        Candidate(["step", "stepcode"], ["{exe}", "acp"]),
+    ], "本机已装 step CLI；尚无公开 ACP 适配器，待接入"),
+    AgentCatalogEntry("minimax-code", "MiniMax Code", [
+        Candidate(["minimax-code", "minimax"], ["{exe}", "acp"]),
+    ], "MiniMax 智能体 CLI"),
+    AgentCatalogEntry("omp", "OMP", [
+        Candidate(["omp"], ["{exe}", "acp"]),
+    ], "检测到 omp 即列出；若为同名非 ACP 程序，连接时会报错"),
+    AgentCatalogEntry("pivot", "Pivot", [
+        Candidate(["pivot"], ["{exe}", "acp"]),
+    ], "我们自己的智能体 · 即将接入", grayed=True),
+    AgentCatalogEntry("gemini", "Gemini CLI", [
+        Candidate(["gemini"], ["{exe}", "--experimental-acp"]),
+    ], "Google 官方，--experimental-acp 旗标"),
+    AgentCatalogEntry("qwen", "Qwen Code", [
+        Candidate(["qwen"], ["{exe}", "--experimental-acp"]),
+    ], "gemini-cli 分支，同旗标"),
+    AgentCatalogEntry("cline", "Cline", [
+        Candidate(["cline"], ["{exe}", "acp"]),
+    ], "Cline CLI 的 acp 子命令"),
 ]
 
 
+def _resolve_entry(entry: AgentCatalogEntry) -> dict[str, Any] | None:
+    """按序探测候选形态，返回 {command, via} 或 None。npx 形态另查 npx 本体。"""
+    for cand in entry.candidates:
+        if cand.argv and cand.argv[0] == "npx":
+            npx = _which("npx")
+            if npx:
+                return {"command": [npx, *cand.argv[1:]], "via": "npx-adapter"}
+            continue
+        found = next((_which(e) for e in cand.execs if _which(e)), None)
+        if found:
+            return {"command": [found if a == "{exe}" else a for a in cand.argv],
+                    "via": "native" if len(cand.argv) > 1 else "adapter"}
+    return None
+
+
 def detect_agents() -> list[dict[str, Any]]:
-    """按目录探测 PATH，返回给前端的清单（installed/grayed/命令）。"""
+    """按目录探测（强化 PATH），返回给前端的清单。
+
+    installed = 存在可启动形态（适配器二进制或 npx 官方包）或检测到 CLI 本体；
+    selectable = installed 且有可启动形态且非 grayed。「CLI 在但无适配器」的
+    条目（如 StepCode）installed=True 但 command 为空 → 不可选，note 说明。
+    """
     out: list[dict[str, Any]] = []
     for entry in AGENT_CATALOG:
-        found = next((shutil.which(e) for e in entry.execs if shutil.which(e)), None)
+        resolved = _resolve_entry(entry)
+        command = resolved["command"] if resolved else []
+        via = resolved["via"] if resolved else ""
+        cli_path = next((_which(e) for c in entry.candidates for e in c.execs
+                         if e != "npx" and _which(e)), None)
+        installed = resolved is not None or cli_path is not None
+        note = entry.note
+        if resolved is None and cli_path is not None:
+            note = "已检测到 CLI（%s），但尚无可用 ACP 形态——%s" % (cli_path, entry.note)
         out.append(
             {
                 "id": entry.id,
                 "name": entry.name,
-                "installed": found is not None,
-                "executable": found,
-                "command": [found if a == "{exe}" else a for a in entry.argv] if found else [],
-                "note": entry.note,
+                "installed": installed,
+                "selectable": resolved is not None and not entry.grayed,
+                "executable": cli_path,
+                "command": command,
+                "via": via,
+                "note": note,
                 "grayed": entry.grayed,
             }
         )
@@ -254,10 +368,10 @@ class AcpRegistry:
             return {"ok": False, "error": "unknown_agent"}
         if entry.grayed:
             return {"ok": False, "error": "agent_grayed", "note": entry.note}
-        executable = next((shutil.which(e) for e in entry.execs if shutil.which(e)), None)
-        if executable is None:
-            return {"ok": False, "error": "agent_not_installed", "note": entry.note}
-        argv = [executable if a == "{exe}" else a for a in entry.argv]
+        resolved = _resolve_entry(entry)
+        if resolved is None or entry.grayed:
+            return {"ok": False, "error": "agent_not_startable", "note": entry.note}
+        argv = resolved["command"]
         async with self._lock:
             self._seq += 1
             session = AcpSession(f"acp-{self._seq}", agent_id, argv, workspace)

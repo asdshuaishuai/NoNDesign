@@ -425,6 +425,7 @@ class AcpAgentInfo {
   final String id;
   final String name;
   final bool installed;
+  final bool selectable;
   final String? executable;
   final bool grayed;
   final String note;
@@ -432,6 +433,7 @@ class AcpAgentInfo {
     required this.id,
     required this.name,
     required this.installed,
+    this.selectable = false,
     this.executable,
     required this.grayed,
     required this.note,
@@ -441,6 +443,7 @@ class AcpAgentInfo {
         id: (m['id'] ?? '').toString(),
         name: (m['name'] ?? '').toString(),
         installed: m['installed'] == true,
+        selectable: m['selectable'] == true,
         executable: m['executable']?.toString(),
         grayed: m['grayed'] == true,
         note: (m['note'] ?? '').toString(),

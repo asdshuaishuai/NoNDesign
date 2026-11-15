@@ -122,6 +122,18 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **ACP 扫描完全性（2026-11-15，用户反馈实证）**：R1 目录只探适配器二进制 +
+  用进程裸 PATH——用户装了 claude/codex/pi/stepcode 却全部 MISS。已修：
+  ① 目录升级 candidates 链（适配器二进制 → **npx 官方包** → CLI 本体），
+  claude/codex/pi 的 npx 形态 `npx -y @zed-industries/claude-code-acp` 等
+  （npm view 核实包名）；② `_which()` 合并登录 shell PATH（zsh -lc 缓存）+
+  `~/.local/bin`、`~/.stepcode/bin`、nvm 全部版本 bin——codex 就在 nvm 路径；
+  ③ detect 返回 `selectable`（= 可启动形态存在且非 grayed）——「CLI 在但无
+  适配器」（StepCode → `step` 可执行在 ~/.stepcode/bin）列出让用户看见但不可
+  选。真机验收集：claude-code/codex/pi（npx）/stepcode/omp/pivot/qwen/cline。
+  claude 适配器真机握手通过（spawn→initialize→new_session→close）。
+  改适配器 argv 前先 `npm view <pkg> version` 核实包名。
+
 - **外部智能体 ACP（2026-11-14）**：`server/acp_bridge.py`——模块名**不能叫
   acp.py**（会遮蔽 site-packages 的 SDK 包 `acp`，ImportError circular）。
   官方 SDK `agent-client-protocol`（导入名 acp）路由按 **kwargs 直传 hook

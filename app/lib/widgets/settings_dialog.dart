@@ -730,9 +730,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             a.id,
             a.name,
             a.note,
-            a.installed && !a.grayed,
+            a.selectable,
             a.grayed,
-            a.installed ? (a.executable ?? '') : '未安装',
+            a.installed ? (a.executable ?? '适配器经 npx 拉取') : '未安装',
           ),
         const SizedBox(height: 10),
         Text('检测基于 PATH 探测；适配器类（claude-code-acp 等）需先全局安装。'
