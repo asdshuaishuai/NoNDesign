@@ -33,6 +33,13 @@ class NonApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: rootMessengerKey,
       theme: AppTheme.build(dark: dark),
+      // 全局快捷键宿主：CallbackShortcuts 挂在 Workspace 子树依赖焦点；
+      // 无输入焦点（构建刚结束/点过非交互区）时 FocusScope 接管，⌘1-4/⌘K
+      // 才能响应（真机 CUA 实证：构建完按 ⌘2/⌘4 全部无响应）。
+      builder: (context, child) => FocusScope(
+        autofocus: true,
+        child: child ?? const SizedBox.shrink(),
+      ),
       // 应用级 ExcludeSemantics：Flutter macOS 引擎的无障碍桥在 macOS 27.2
       // 上被 AX 客户端激活后，逐帧语义更新经 AccessibilityBridgeMac 触发
       // doesNotRecognizeSelector → SIGABRT（2026-11-14 崩溃报告实证）。语义树
