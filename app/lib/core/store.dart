@@ -329,6 +329,16 @@ class AppStore extends ChangeNotifier {
   void _toast(String title, [String? detail]) {
     final messenger = rootMessengerKey.currentState;
     if (messenger == null) return;
+    // 姿态防线：toast 是短提示，不是输出面板——标题/详情去换行并截断，
+    // 长结论留给时间线 finish 条目（done 分支曾把 120 字模型摘要塞进
+    // 画布 SnackBar，黑块糊脸实证 2026-11-15）。
+    final t = title.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final safeTitle = t.length > 40 ? '${t.substring(0, 40)}…' : t;
+    String? safeDetail;
+    if (detail != null && detail.trim().isNotEmpty) {
+      final d = detail.replaceAll(RegExp(r'\s+'), ' ').trim();
+      safeDetail = d.length > 90 ? '${d.substring(0, 90)}…' : d;
+    }
     messenger.showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
@@ -337,11 +347,11 @@ class AppStore extends ChangeNotifier {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-            if (detail != null && detail.isNotEmpty)
+            Text(safeTitle, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            if (safeDetail != null && safeDetail.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 3),
-                child: Text(detail, style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                child: Text(safeDetail, style: const TextStyle(fontSize: 11, color: Colors.white70)),
               ),
           ],
         ),
@@ -1169,9 +1179,10 @@ class AppStore extends ChangeNotifier {
       agentError = e.toString();
       timeline.add(TimelineEntry.finish(false, '运行失败', e.toString()));
     } finally {
-      _flushDelta();
+      _flushStreamAsAssistant();
       _flushThinking();
       agentBusy = false;
+      streamText = '';
       agentPhase = 'idle';
       runId = null;
       previewRender = null;
@@ -1185,9 +1196,11 @@ class AppStore extends ChangeNotifier {
     final type = (event['type'] ?? '').toString();
     switch (type) {
       case 'note':
+        _flushStreamAsAssistant();
         timeline.add(TimelineEntry.note((event['label'] ?? '').toString(), (event['detail'] ?? '').toString()));
         break;
       case 'tool_start':
+        _flushStreamAsAssistant();
         timeline.add(TimelineEntry(
           kind: 'tool',
           tool: (event['tool'] ?? '').toString(),
@@ -1232,7 +1245,11 @@ class AppStore extends ChangeNotifier {
         return;
       case 'assistant_text':
         if (event['final'] == true) {
-          timeline.add(TimelineEntry.assistant((event['text'] ?? '').toString()));
+          _flushDelta();
+          final text =
+              streamText.trim().isNotEmpty ? streamText : (event['text'] ?? '').toString();
+          if (text.trim().isNotEmpty) timeline.add(TimelineEntry.assistant(text));
+          streamText = '';
         }
         break;
       case 'thinking_delta':
@@ -1321,7 +1338,13 @@ class AppStore extends ChangeNotifier {
         if (event['docs'] is Map) docs = Docs.fromJson(event['docs']);
         final summary = (event['text'] ?? '').toString();
         timeline.add(TimelineEntry.finish(true, 'NoN 完成', summary));
-        _toast('NoN 完成', summary.length > 120 ? summary.substring(0, 120) : summary);
+        // 画布 toast 只取首句短语（长结论在时间线 finish 条目里）。
+        final firstLine = summary
+            .split('\n')
+            .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '')
+            .replaceAll(RegExp(r'[*#`\[\]]'), '')
+            .trim();
+        _toast('NoN 完成', firstLine.length > 60 ? '${firstLine.substring(0, 60)}…' : firstLine);
         break;
     }
     notifyListeners();
@@ -1332,6 +1355,16 @@ class AppStore extends ChangeNotifier {
     streamText += _deltaBuffer;
     _deltaBuffer = '';
     notifyListeners();
+  }
+
+  /// 把未固化的流式正文落成 timeline assistant 条目并清空尾槽——
+  /// 之后 append 的工具/系统条目自然排在它后面，保证严格时序
+  /// （此前流式正文钉在列表尾槽，先说的话显示在工具后面）。
+  void _flushStreamAsAssistant() {
+    _flushDelta();
+    if (streamText.trim().isEmpty) return;
+    timeline.add(TimelineEntry.assistant(streamText));
+    streamText = '';
   }
 
   void _flushThinking() {
