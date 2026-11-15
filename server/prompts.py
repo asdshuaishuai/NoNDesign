@@ -81,6 +81,9 @@ appear live. You design the experience, not a pile of boxes.
 6. Connect every screen: flow <from> <to> <tappable_node>. Bind the flow to the container the
    user taps (row, button, card), never to an inner text fragment. Back is built in for
    back-like nodes (id/text containing back/返回/←).
+   EVERY screen except the entry/home gets a visible back affordance: place a back node in
+   the top bar — place <ab> button back - 16 52 44 32 text="←" (id MUST contain "back") —
+   so demo mode can navigate back via the engine builtin-back resolution.
 7. Verify with inspect {kind:"critique"} per page and inspect {kind:"lint"} for gate debt.
    Fix only real issues; then finish.
 

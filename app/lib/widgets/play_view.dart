@@ -85,6 +85,31 @@ class _PlayViewState extends State<PlayView> {
     _guideTimer = Timer(const Duration(milliseconds: 4000), () {
       if (mounted) setState(() => _guideVisible = false);
     });
+    // 起始板 = 入口板（frontmatter entry，deepDesign「演示永远从首页展示」
+    // 语义）；entry 缺失才回落出边最多的板。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _activeBoard != null) return;
+      final store = context.read<AppStore>();
+      final render = store.render;
+      if (render.artboards.isEmpty) return;
+      int edges(String id) => render.flows.where((f) => f.from == id).length;
+      String best;
+      if (render.board(render.entry) != null) {
+        best = render.entry;
+      } else {
+        best = render.artboards.first.id;
+        var bestEdges = edges(best);
+        for (final b in render.artboards) {
+          final n = edges(b.id);
+          if (n > bestEdges) {
+            bestEdges = n;
+            best = b.id;
+          }
+        }
+      }
+      final cur = store.activeBoard;
+      if (best != cur) setState(() => _activeBoard = best);
+    });
   }
 
   @override
@@ -144,7 +169,7 @@ class _PlayViewState extends State<PlayView> {
                     Text('${render.artboards.indexWhere((b) => b.id == board.id) + 1} / ${render.artboards.length}',
                         style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink3)),
                     const Spacer(),
-                    IconAction(icon: Icons.chevron_left, tooltip: '返回上一页 ←', size: 26, onTap: _goBack),
+                    // 总返回已移除（用户定案）：返回由原型内 back 节点/热区负责（引擎内置 back）；Esc 退出演示。
                     IconAction(
                       icon: Icons.restart_alt,
                       tooltip: '重新开始',
@@ -207,7 +232,7 @@ class _PlayViewState extends State<PlayView> {
                               borderRadius: BorderRadius.circular(8),
                               boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 60, offset: const Offset(0, 30))],
                             ),
-                            clipBehavior: Clip.antiAlias,
+                            // 不裁剪：节点轻微超板界在编辑画布不裁可见，演示裁了就是「显示不全」（图1/图2 实证）。
                             // 换板过渡：push/modal 左滑入，其余淡入。
                             child: AnimatedSwitcher(
                               duration: NonMotion.base,
@@ -846,9 +871,12 @@ class _HotspotState extends State<_Hotspot> {
         onTap: widget.onTap,
         child: Container(
           decoration: BoxDecoration(
-            border: Border.all(color: _hover ? p.accent.withValues(alpha: 0.70) : Colors.transparent, width: 2),
+            // 常亮高亮（deepDesign 演示语义：热区始终可见，hover 强化）。
+            border: Border.all(
+                color: _hover ? p.accent.withValues(alpha: 0.85) : p.accent.withValues(alpha: 0.38),
+                width: _hover ? 2 : 1.4),
             borderRadius: BorderRadius.circular(4),
-            color: _hover ? p.accent.withValues(alpha: 0.10) : Colors.transparent,
+            color: _hover ? p.accent.withValues(alpha: 0.16) : p.accent.withValues(alpha: 0.07),
           ),
           child: _hover
               ? Align(
