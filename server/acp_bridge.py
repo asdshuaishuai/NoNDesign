@@ -155,7 +155,7 @@ AGENT_CATALOG: list[AgentCatalogEntry] = [
     ], "NoN 自研适配层：经 step -p 打流（文本流，工具事件不可见）"),
     AgentCatalogEntry("mcode", "MiniMax Code", [
         Candidate(["mcode", "minimax-code", "minimax"], ["{exe}", "acp"]),
-    ], "MiniMax 智能体 CLI（mcode / minimax 均探测）"),
+    ], "MiniMax Code 官方 acp 子命令；new_session 要求先 mcode login"),
     AgentCatalogEntry("kimi", "Kimi Code", [
         Candidate(["kimi"], ["{exe}", "acp"]),
     ], "Kimi CLI 的 acp 子命令"),
@@ -169,8 +169,9 @@ AGENT_CATALOG: list[AgentCatalogEntry] = [
         Candidate(["pivot"], ["{exe}", "acp"]),
     ], "我们自己的智能体 · 即将接入", grayed=True),
     AgentCatalogEntry("solon", "Solon Code", [
-        Candidate(["solon", "solon-code"], ["{exe}", "acp"]),
-    ], "Solon Code CLI"),
+        Candidate(["solon", "solon-code", "soloncodecli"], ["{exe}", "acp"]),
+    ], "Java 版（opensolon/soloncodecli，需 Java 17+）：ACP 经配置启用"
+       "（solon.code.cli: acpEnabled + acpTransport: stdio），无独立子命令"),
 ]
 
 
@@ -305,19 +306,25 @@ async def _probe_command(command: list[str], timeout_s: int, workspace: str, env
                 pass
 
 
-def _alt_node_envs(limit: int = 2) -> list[dict[str, str]]:
-    """多 node 环境切换：默认环境之外的 nvm 版本，新版优先，最多 limit 个。"""
+def _alt_node_envs(limit: int = 3) -> list[dict[str, str]]:
+    """多 node 环境切换：按主版本去重（每个 major 取最新），新版优先。
+
+    pi 的 bun shim 只在 node22 下能跑（用户实证）——只重试两个 v24 会
+    错过它，必须覆盖到不同主版本。
+    """
     home = Path.home()
     nvm_root = home / ".nvm" / "versions" / "node"
     if not nvm_root.is_dir():
         return []
-    out: list[dict[str, str]] = []
+    by_major: dict[str, Path] = {}
     for vdir in sorted(nvm_root.iterdir(), key=lambda p: p.name, reverse=True):
-        bins = vdir / "bin"
-        if not bins.is_dir():
-            continue
+        major = vdir.name.split(".")[0]
+        if major not in by_major and (vdir / "bin").is_dir():
+            by_major[major] = vdir
+    out: list[dict[str, str]] = []
+    for vdir in by_major.values():
         env = dict(os.environ)
-        env["PATH"] = str(bins) + ":" + ":".join(_scan_dirs())
+        env["PATH"] = str(vdir / "bin") + ":" + ":".join(_scan_dirs())
         out.append(env)
         if len(out) >= limit:
             break

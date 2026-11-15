@@ -122,6 +122,17 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **ACP 白名单文档核实（2026-11-15 二轮）**：kimi 官方文档证实 `kimi acp`
+  子命令（catalog 形态已对）；**Solon Code 是 Java 项目**（opensolon/
+  soloncodecli，Java 17+），ACP 经配置启用（acpEnabled + acpTransport:
+  stdio），无独立子命令——note 写明文档指引；mcode 原生 `mcode acp` 存在
+  但 new_session 要求 `mcode login`（认证不代劳，note 指引）。
+  **node 切换升级：按主版本去重**（每个 major 取最新，v24/v22/v20 覆盖，
+  limit 3）——pi 的 bun shim 只在 node22 活，只重试两个 v24 会错过。
+  本机终态 7 verified：qwen/pi(npx)/claude/codex/dsh/stepcode(自研)/omp。
+  已知噪音：probe 期偶发 "cannot reuse already awaited coroutine" 打印
+  （SDK 后台 task 清理，不影响结果正确性），未根治。
+
 - **ACP 最终标准（2026-11-15 用户定案）**：白名单收敛 12 个——qwen/pi/
   claude/codex/dsh/stepcode/mcode/kimi/omp/gemini/pivot(灰)/solon，cline 等
   移除。适配策略：有第三方适配走 npx/中间适配器；**只有 stepcode 自研**
