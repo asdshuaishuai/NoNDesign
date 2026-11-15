@@ -353,8 +353,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
                       ),
-                      Text('${formatTokens(store.model!.context)} context',
-                          style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -385,6 +383,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                           ),
                         ),
                       const Spacer(),
+                      Text('${formatTokens(store.model!.context)} context',
+                          style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                      const SizedBox(width: 10),
                       Text('步数', style: TextStyle(fontSize: 10, color: p.ink3)),
                       const SizedBox(width: 4),
                       SizedBox(
