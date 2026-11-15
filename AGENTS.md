@@ -122,6 +122,19 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **deepDesign 对账补齐（2026-11-15，用户要求对照原版核对）**：
+  ① docs dispose 先 flush 防抖编辑（syncPrdFromEditor 教训——否则 ⌘↵ 生成
+  用旧 PRD）；② build 终态 **designFromEngine**：规范仍是默认时自动从入口
+  板 extract-design-system 合并真实配色（判默认 = palette 与 defaults 全等
+  且 rules 数相同），PLAN 写过/手编过不覆盖；合并逻辑下沉
+  `store.mergeExtractedPalette`，规范页提取与终态钩子共用；③ 源码模式
+  从只读升级为可编辑 +「应用并渲染」（`store.applySource` 走 render 面，
+  比 op 严——deepDesign 整篇 canonical 流程对齐）；④ 演示起始板 = 交互根
+  （出边最多的板，demoStartBoard 教训：落在最后编辑板 = 零热区）。
+  有意差异（不改）：run 中画布编辑 deepDesign 走 rebase_agent_ops，
+  NoNDesign 用 agentBusy 拒绝（op 队列是单独一轮）；撤销是本地快照栈
+  非引擎 history；无 i18n/多窗口。
+
 - **ACP 白名单文档核实（2026-11-15 二轮）**：kimi 官方文档证实 `kimi acp`
   子命令（catalog 形态已对）；**Solon Code 是 Java 项目**（opensolon/
   soloncodecli，Java 17+），ACP 经配置启用（acpEnabled + acpTransport:

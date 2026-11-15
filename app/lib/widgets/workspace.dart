@@ -434,8 +434,36 @@ class _BoardTabs extends StatelessWidget {
   }
 }
 
-class _SourceView extends StatelessWidget {
+/// MBT 源码视图：展示 + 可编辑（deepDesign 对齐——源码模式支持整篇
+/// 编辑后「应用并渲染」，走引擎 render 面，比 op 路径更严）。
+class _SourceView extends StatefulWidget {
   const _SourceView();
+
+  @override
+  State<_SourceView> createState() => _SourceViewState();
+}
+
+class _SourceViewState extends State<_SourceView> {
+  bool _editing = false;
+  bool _applying = false;
+  final _editController = TextEditingController();
+
+  @override
+  void dispose() {
+    _editController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _apply() async {
+    if (_applying) return;
+    setState(() => _applying = true);
+    final ok = await context.read<AppStore>().applySource(_editController.text);
+    if (!mounted) return;
+    setState(() {
+      _applying = false;
+      if (ok) _editing = false; // 成功后 mbt 已是 canonical，回展示态
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -486,17 +514,63 @@ class _SourceView extends StatelessWidget {
                   icon: const Icon(Icons.verified_outlined, size: 12),
                   label: const Text('校验'),
                 ),
+                if (!_editing)
+                  TextButton.icon(
+                    onPressed: () {
+                      _editController.text = store.mbt;
+                      setState(() => _editing = true);
+                    },
+                    icon: const Icon(Icons.edit_outlined, size: 12),
+                    label: const Text('编辑'),
+                  )
+                else ...[
+                  TextButton.icon(
+                    onPressed: _applying ? null : () => setState(() => _editing = false),
+                    icon: const Icon(Icons.close, size: 12),
+                    label: const Text('取消'),
+                  ),
+                  const SizedBox(width: 4),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: p.accent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    onPressed: _applying ? null : _apply,
+                    icon: _applying
+                        ? SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.4, color: Colors.white))
+                        : const Icon(Icons.flash_on, size: 12),
+                    label: const Text('应用并渲染'),
+                  ),
+                ],
               ],
             ),
           ),
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(14),
-              child: SelectableText(
-                lines.asMap().entries.map((e) => '${(e.key + 1).toString().padLeft(4)}  ${e.value}').join('\n'),
-                style: TextStyle(fontSize: 11, height: 1.7, fontFamily: 'Menlo', color: p.ink2),
-              ),
-            ),
+            child: _editing
+                ? Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: TextField(
+                      controller: _editController,
+                      maxLines: null,
+                      expands: true,
+                      textAlignVertical: TextAlignVertical.top,
+                      style: TextStyle(fontSize: 11, height: 1.7, fontFamily: 'Menlo', color: p.ink),
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: p.bgElevated,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: p.line)),
+                        contentPadding: const EdgeInsets.all(12),
+                      ),
+                    ),
+                  )
+                : SingleChildScrollView(
+                    padding: const EdgeInsets.all(14),
+                    child: SelectableText(
+                      lines.asMap().entries.map((e) => '${(e.key + 1).toString().padLeft(4)}  ${e.value}').join('\n'),
+                      style: TextStyle(fontSize: 11, height: 1.7, fontFamily: 'Menlo', color: p.ink2),
+                    ),
+                  ),
           ),
         ],
       ),

@@ -834,6 +834,77 @@ class AppStore extends ChangeNotifier {
     return res;
   }
 
+  /// 把引擎提取的 color_tokens 合并进 docs.design.palette（usage 降序，
+  /// 高频覆盖同名低频）——规范页提取与 build 终态 designFromEngine 共用。
+  void mergeExtractedPalette(Map<String, dynamic> data) {
+    final raw = data['color_tokens'];
+    if (raw is! List) return;
+    final tokens = raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+      ..sort((a, b) {
+        final ua = (a['usage'] as num?) ?? 0;
+        final ub = (b['usage'] as num?) ?? 0;
+        return ub.compareTo(ua);
+      });
+    final palette = Map.of(docs.design.palette);
+    for (final t in tokens) {
+      final name = t['name']?.toString();
+      final value = t['value']?.toString();
+      if (name != null && value != null && value.isNotEmpty) palette[name] = value;
+    }
+    final d = docs.design;
+    setDocs(design: DesignSpec(
+      palette: palette,
+      h1: d.h1, h2: d.h2, body: d.body,
+      spacing: d.spacing,
+      radiusSm: d.radiusSm, radiusMd: d.radiusMd, radiusLg: d.radiusLg,
+      rules: d.rules, notes: d.notes,
+    ));
+  }
+
+  /// 规范是否仍是默认值（未被 PLAN 写入/未手编/未提取过）。
+  bool get designIsDefault {
+    final d = docs.design;
+    if (d.notes.isNotEmpty || d.rules.length != DesignSpec.defaults.rules.length) return false;
+    for (final e in DesignSpec.defaults.palette.entries) {
+      if (d.palette[e.key]?.toUpperCase() != e.value.toUpperCase()) return false;
+    }
+    return true;
+  }
+
+  /// deepDesign「校验并渲染」对齐：把源码编辑器的整篇提交走引擎校验
+  /// （render 面，比 op 路径更严——真实重叠债会拒绝），通过即 commit。
+  Future<bool> applySource(String text) async {
+    if (api == null || agentBusy) {
+      if (agentBusy) _toast('NoN 正在工作', '等这一轮结束再改画布。');
+      return false;
+    }
+    try {
+      final res = await api!.render(text);
+      if (res['ok'] != true) {
+        _toast('源码被引擎拒绝', res['error']?.toString());
+        return false;
+      }
+      return _commit(res);
+    } catch (e) {
+      _toast('引擎异常', e.toString());
+      return false;
+    }
+  }
+
+  /// deepDesign designFromEngine 对齐：build 终态且规范仍为默认时，
+  /// 从入口画板提取真实配色落进规范——流程闭环「生成即得规范」。
+  Future<void> _autoDesignFromEngine() async {
+    if (api == null || !hasProject || !designIsDefault) return;
+    final ab = render.entry.isNotEmpty
+        ? render.entry
+        : (render.artboards.isEmpty ? '' : render.artboards.first.id);
+    if (ab.isEmpty) return;
+    try {
+      final data = await extractDesignSystem(ab);
+      if (data != null) mergeExtractedPalette(data);
+    } catch (_) {}
+  }
+
   /// Missing-element check (session_infer_missing): {page_type, missing_count,
   /// missing[{type, element, suggestion}]}. The upstream detector autofill
   /// materializes.
@@ -1338,6 +1409,9 @@ class AppStore extends ChangeNotifier {
         if (event['docs'] is Map) docs = Docs.fromJson(event['docs']);
         final summary = (event['text'] ?? '').toString();
         timeline.add(TimelineEntry.finish(true, 'NoN 完成', summary));
+        // designFromEngine：直接构建（无 PLAN）时规范仍是默认 → 自动从
+        // 画布提取真实配色，流程闭环（异步，不阻塞终态）。
+        unawaited(_autoDesignFromEngine());
         // 画布 toast 只取首句短语（长结论在时间线 finish 条目里）。
         final firstLine = summary
             .split('\n')
