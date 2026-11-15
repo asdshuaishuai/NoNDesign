@@ -385,6 +385,8 @@ class AppSettings {
   String theme;
   /// 外部智能体（ACP）：null 或空 = NoN 内置管线；否则发给该 ACP agent。
   String? acpAgentId;
+  /// 选中 agent 的显示名（选定时随 id 一起持久化，输入框 pill 用）。
+  String? acpAgentName;
 
   AppSettings({
     this.providerId = 'deepseek',
@@ -395,6 +397,7 @@ class AppSettings {
     this.maxSteps = 300,
     this.theme = 'dark',
     this.acpAgentId,
+    this.acpAgentName,
   });
 
   Map<String, dynamic> toJson() => {
@@ -406,6 +409,7 @@ class AppSettings {
         'maxSteps': maxSteps,
         'theme': theme,
         'acpAgentId': acpAgentId,
+        'acpAgentName': acpAgentName,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> m) => AppSettings(
@@ -417,6 +421,7 @@ class AppSettings {
         maxSteps: (m['maxSteps'] is num) ? (m['maxSteps'] as num).toInt() : 300,
         theme: (m['theme'] ?? 'dark').toString(),
         acpAgentId: m['acpAgentId']?.toString(),
+        acpAgentName: m['acpAgentName']?.toString(),
       );
 }
 

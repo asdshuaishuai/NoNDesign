@@ -139,7 +139,11 @@ class _AgentPanelState extends State<AgentPanel> {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final p = context.palette;
-    if (!_modeTouched) _mode = store.render.artboards.isEmpty ? 'build' : 'refine';
+    final external = store.settings.acpAgentId?.isNotEmpty == true;
+    final agentLabel = external
+        ? (store.settings.acpAgentName ?? store.settings.acpAgentId!) + ' · ACP'
+        : 'NoN 内置';
+    if (!external && !_modeTouched) _mode = store.render.artboards.isEmpty ? 'build' : 'refine';
     // 三类长度比对：时间线行（离散追加，动画贴底）+ 流式文本/思考增量
     // （80ms 合帧只改文本不触发滚动——不比对就落视口下不可见）。
     final tlChanged = store.timeline.length != _lastCount;
@@ -243,19 +247,6 @@ class _AgentPanelState extends State<AgentPanel> {
           ),
           child: Column(
             children: [
-              if (store.settings.acpAgentId != null && store.settings.acpAgentId!.isNotEmpty)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 6),
-                  child: Row(children: [
-                    Icon(Icons.hub_outlined, size: 10, color: p.accent),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text('外部智能体 · ${store.settings.acpAgentId}（ACP）— 模式芯片不参与，消息直达该 CLI',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 10, color: p.ink3)),
-                    ),
-                  ]),
-                ),
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
@@ -288,35 +279,63 @@ class _AgentPanelState extends State<AgentPanel> {
                     ),
                     Row(
                       children: [
-                        _ModeChip(
-                          mode: 'build',
-                          label: '生成',
-                          current: _mode,
-                          onTap: () => setState(() {
-                            _mode = 'build';
-                            _modeTouched = true;
-                          }),
+                        // 当前执行的 agent（用户点名展示）：内置/外部具名。
+                        Tooltip(
+                          message: external
+                              ? '消息将发给外部智能体 $agentLabel（模式芯片不参与）；在设置 → 外部智能体 里切换'
+                              : 'NoN 内置管线；可在设置 → 外部智能体 里切换',
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: external ? p.accentSoft : p.panel3,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                  color: external ? p.accent.withValues(alpha: 0.45) : p.line),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(external ? Icons.hub_outlined : Icons.auto_awesome,
+                                  size: 10, color: external ? p.accent : p.ink3),
+                              const SizedBox(width: 4),
+                              Text(agentLabel,
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: external ? p.accent : p.ink3)),
+                            ]),
+                          ),
                         ),
-                        const SizedBox(width: 3),
-                        _ModeChip(
-                          mode: 'refine',
-                          label: '调整',
-                          current: _mode,
-                          onTap: () => setState(() {
-                            _mode = 'refine';
-                            _modeTouched = true;
-                          }),
-                        ),
-                        const SizedBox(width: 3),
-                        _ModeChip(
-                          mode: 'plan',
-                          label: '文档',
-                          current: _mode,
-                          onTap: () => setState(() {
-                            _mode = 'plan';
-                            _modeTouched = true;
-                          }),
-                        ),
+                        if (!external) ...[
+                          const SizedBox(width: 3),
+                          _ModeChip(
+                            mode: 'build',
+                            label: '生成',
+                            current: _mode,
+                            onTap: () => setState(() {
+                              _mode = 'build';
+                              _modeTouched = true;
+                            }),
+                          ),
+                          const SizedBox(width: 3),
+                          _ModeChip(
+                            mode: 'refine',
+                            label: '调整',
+                            current: _mode,
+                            onTap: () => setState(() {
+                              _mode = 'refine';
+                              _modeTouched = true;
+                            }),
+                          ),
+                          const SizedBox(width: 3),
+                          _ModeChip(
+                            mode: 'plan',
+                            label: '文档',
+                            current: _mode,
+                            onTap: () => setState(() {
+                              _mode = 'plan';
+                              _modeTouched = true;
+                            }),
+                          ),
+                        ],
                         const Spacer(),
                         if (store.agentBusy)
                           FilledButton.icon(

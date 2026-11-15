@@ -758,7 +758,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         onTap: !selectable
             ? null
             : () async {
-                store.settings.acpAgentId = id;
+                store.settings
+                  ..acpAgentId = id
+                  ..acpAgentName = id == null ? null : name;
                 await store.saveSettings();
                 if (mounted) setState(() {});
               },
