@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import 'core/keys.dart';
 import 'core/store.dart';
 import 'core/theme.dart';
 import 'widgets/common.dart';
@@ -33,13 +34,28 @@ class NonApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: rootMessengerKey,
       theme: AppTheme.build(dark: dark),
-      // 全局快捷键宿主：CallbackShortcuts 挂在 Workspace 子树依赖焦点；
-      // 无输入焦点（构建刚结束/点过非交互区）时 FocusScope 接管，⌘1-4/⌘K
-      // 才能响应（真机 CUA 实证：构建完按 ⌘2/⌘4 全部无响应）。
-      builder: (context, child) => FocusScope(
-        autofocus: true,
-        child: child ?? const SizedBox.shrink(),
-      ),
+      // 全局快捷键宿主（真机 CUA 实证：CallbackShortcuts 挂 Workspace 子树
+      // 依赖焦点，构建刚结束/无输入焦点时 ⌘2/⌘4 全部无响应）——视图切换
+      // 这类「任何时候都该生效」的键上移到 app 根，FocusScope 托管焦点。
+      builder: (context, child) {
+        final store = context.read<AppStore>();
+        return FocusScope(
+          autofocus: true,
+          child: CallbackShortcuts(
+            bindings: {
+              modKey(LogicalKeyboardKey.digit1): () => store.setView('design'),
+              modKey(LogicalKeyboardKey.digit2): () => store.setView('docs'),
+              modKey(LogicalKeyboardKey.digit3): () => store.setView('source'),
+              modKey(LogicalKeyboardKey.digit4): () => store.setView('play'),
+              modKey(LogicalKeyboardKey.digit0): () {
+                store.setView('design');
+                store.bumpFit();
+              },
+            },
+            child: child ?? const SizedBox.shrink(),
+          ),
+        );
+      },
       // 应用级 ExcludeSemantics：Flutter macOS 引擎的无障碍桥在 macOS 27.2
       // 上被 AX 客户端激活后，逐帧语义更新经 AccessibilityBridgeMac 触发
       // doesNotRecognizeSelector → SIGABRT（2026-11-14 崩溃报告实证）。语义树
