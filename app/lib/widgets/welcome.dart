@@ -278,6 +278,8 @@ class _WelcomeState extends State<Welcome> {
                                 const SizedBox(height: 10),
                                 _workbenchCard(context, store),
                                 const SizedBox(height: 10),
+                                _portfolioCard(context, store),
+                                const SizedBox(height: 10),
                                 _howCard(context, p),
                                 const SizedBox(height: 10),
                                 Wrap(
@@ -360,6 +362,34 @@ class _WelcomeState extends State<Welcome> {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  /// 作品集入口卡：聚合小应用/视频/3D 三类产物，快速查看与使用。
+  Widget _portfolioCard(BuildContext context, AppStore store) {
+    final p = context.palette;
+    return InkWell(
+      onTap: () => store.setView('portfolio'),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: p.panel.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: p.line),
+        ),
+        child: Row(children: [
+          Icon(Icons.collections_bookmark_outlined, size: 18, color: p.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('作品集', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.ink)),
+              Text('小应用 · 视频 · 3D 场景——生成过的都在这里', style: TextStyle(fontSize: 10, color: p.ink4)),
+            ]),
+          ),
+          Icon(Icons.chevron_right, size: 15, color: p.ink4),
+        ]),
       ),
     );
   }

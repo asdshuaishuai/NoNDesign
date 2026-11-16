@@ -17,6 +17,18 @@ plugins/      独立插件：video-engine/ 代码生成视频（零 Flutter/服�
 app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板块解耦）
 ```
 
+- **A2UI 小应用引擎 + 作品集（2026-11-16 立项，灵闪/Dots 式）**：小应用 =
+  **自包含单 HTML**（全内联零外链，动画优先 canvas/SVG/CSS keyframes）——
+  「热更新」= 覆盖文件 + WebView reload（与 3D 同构；Flutter 热更新无官方
+  能力不务实）。server/a2ui_agent.py（generate/refine/page/list/delete +
+  fail-closed：结构校验不过拒绝覆盖——旧版仍在热更新无损坏风险）+
+  **作品集横切收藏夹**（portfolio/index.json 聚合 a2ui/video/three 三类，
+  存量 mp4/3d 自动补扫）；客户端 a2ui_workspace.dart（对话式修改条即
+  热更新入口）+ portfolio_view.dart（类型过滤网格/打开直达/移除）；
+  registry 第 3 插件 a2ui（⌘7），portfolio 独立视图（主页卡 + 标题栏入口）。
+  v1 质量环 = 结构校验 + WebView onerror 回传；视觉截图（canvas
+  toDataURL）v2。mock 全链冒烟：generate/refine/page/portfolio 三类
+  聚合/delete 全 PASS。
 - **移动客户端（2026-11-16 立项，双层架构）**：ios/android 平台目标已生成
   （iOS debug 构建 38.7s 实证通过；**Android toolchain 缺失**——SDK 未装，
   apk 构建待装后验证）。主页 welcome 加「工作台」插件区（注册表驱动）。

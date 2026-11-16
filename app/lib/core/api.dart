@@ -290,6 +290,35 @@ class NoNDesignApi {
   /// 应用内 WebView 的执行面 URL（服务器实时 serve 的 three.js 预览页）。
   String threePreviewUrl(String name) => '$baseUrl/three/preview/${Uri.encodeQueryComponent(name)}';
 
+  // ---------- A2UI 小应用引擎 + 作品集 ----------
+
+  Future<Map<String, dynamic>> a2uiGenerate({
+    required String name, required String brief,
+    required String model, required String baseUrl, required String apiKey,
+  }) => postJson('/a2ui/generate', {
+        'name': name, 'brief': brief, 'model': model,
+        'base_url': baseUrl, 'api_key': apiKey,
+      });
+
+  Future<Map<String, dynamic>> a2uiRefine({
+    required String name, required String instruction,
+    required String model, required String baseUrl, required String apiKey,
+  }) => postJson('/a2ui/refine', {
+        'name': name, 'instruction': instruction, 'model': model,
+        'base_url': baseUrl, 'api_key': apiKey,
+      });
+
+  Future<Map<String, dynamic>> a2uiList() => getJson('/a2ui/list');
+  Future<Map<String, dynamic>> a2uiDelete(String name) =>
+      postJson('/a2ui/delete', {'name': name});
+
+  /// A2UI 小应用的执行面 URL（自包含动画 HTML，WebView 即运行时）。
+  String a2uiPageUrl(String name) => '$baseUrl/a2ui/page/${Uri.encodeQueryComponent(name)}';
+
+  Future<Map<String, dynamic>> portfolio() => getJson('/portfolio');
+  Future<Map<String, dynamic>> portfolioDelete(String kind, String ref) =>
+      postJson('/portfolio/delete', {'kind': kind, 'ref': ref});
+
   /// Layout intent (session_constrain): `intent` is a phrase like 居中 / 等间距 /
   /// 网格 3. Engine returns a canonical envelope {ok, id, x, mbt} — no render
   /// face; cannot_parse failures carry the intent vocabulary in `error`.

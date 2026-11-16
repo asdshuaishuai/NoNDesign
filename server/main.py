@@ -28,6 +28,7 @@ sys.path.insert(0, str(SERVER_DIR))
 
 import acp_bridge  # noqa: E402
 import three_agent as three  # noqa: E402（轨道 C：3D 工作台，依赖 SERVER_DIR 已入 path）
+import a2ui_agent as a2ui  # noqa: E402（A2UI 小应用引擎 + 作品集，同上）
 from acp_bridge import AcpRegistry, detect_agents, probe_all as acp_bridge_probe_all  # noqa: E402
 from agent import AgentRunManager, AgentRunRequest  # noqa: E402
 from context import clear_session_file, parse_metadata, with_metadata  # noqa: E402
@@ -647,6 +648,87 @@ async def three_vendor(filename: str) -> PlainTextResponse:
     if not f.exists():
         raise HTTPException(status_code=404, detail="vendor_missing")
     return PlainTextResponse(f.read_text("utf-8"), media_type=mime)
+
+
+# ---------- A2UI 小应用引擎 + 作品集（灵闪/Dots 式自成一体小应用） ----------
+
+class A2uiGenerateRequest(BaseModel):
+    name: str
+    brief: str
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+
+
+class A2uiRefineRequest(BaseModel):
+    name: str
+    instruction: str
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+
+
+class A2uiDeleteRequest(BaseModel):
+    name: str
+
+
+class PortfolioDeleteRequest(BaseModel):
+    kind: str
+    ref: str
+
+
+def _a2ui_guard(fn, *args):
+    try:
+        return fn(*args)
+    except a2ui.A2uiError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+async def _a2ui_guard_async(coro_fn, *args):
+    try:
+        return await coro_fn(*args)
+    except a2ui.A2uiError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/a2ui/generate")
+async def a2ui_generate(req: A2uiGenerateRequest) -> dict[str, Any]:
+    """一句话 → 自包含动画 HTML 小应用（落盘即热更新）。"""
+    return await _a2ui_guard_async(a2ui.generate, req.name, req.brief, req.model,
+                                   req.base_url, req.api_key)
+
+
+@app.post("/a2ui/refine")
+async def a2ui_refine(req: A2uiRefineRequest) -> dict[str, Any]:
+    """对话式修改（reload=true 提示 WebView 重载）。"""
+    return await _a2ui_guard_async(a2ui.refine, req.name, req.instruction, req.model,
+                                   req.base_url, req.api_key)
+
+
+@app.get("/a2ui/page/{name}", response_class=HTMLResponse)
+async def a2ui_page(name: str) -> str:
+    return _a2ui_guard(a2ui.page_html, name)
+
+
+@app.get("/a2ui/list")
+async def a2ui_list() -> dict[str, Any]:
+    return _a2ui_guard(a2ui.list_apps)
+
+
+@app.post("/a2ui/delete")
+async def a2ui_delete(req: A2uiDeleteRequest) -> dict[str, Any]:
+    return _a2ui_guard(a2ui.delete_app, req.name)
+
+
+@app.get("/portfolio")
+async def portfolio_list() -> dict[str, Any]:
+    """作品集聚合：a2ui / video / three 三类产物（存量自动补扫）。"""
+    return _a2ui_guard(a2ui.portfolio_list)
+
+
+@app.post("/portfolio/delete")
+async def portfolio_delete(req: PortfolioDeleteRequest) -> dict[str, Any]:
+    return _a2ui_guard(a2ui.portfolio_delete, req.kind, req.ref)
 
 
 @app.post("/acp/prompt")

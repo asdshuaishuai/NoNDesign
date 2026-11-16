@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../core/keys.dart';
 import '../plugins/registry.dart';
+import 'portfolio_view.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'canvas_view.dart';
@@ -51,6 +52,7 @@ class _WorkspaceState extends State<Workspace> {
     final store = context.watch<AppStore>();
     final p = context.palette;
     if (store.view == 'play') return const PlayView();
+    if (store.view == 'portfolio') return const PortfolioView();
     // 插件工作台路由（plugin:<id>）：注册表驱动，与设计板块解耦。
     final pluginView = pluginWorkspaceFor(store.view);
     if (pluginView != null) return pluginView;
@@ -478,6 +480,7 @@ class _BoardTabs extends StatelessWidget {
           ),
           IconAction(icon: Icons.code, tooltip: 'MBT 源码 ${modCombo('⌘3')}', size: 26, onTap: () => store.setView('source')),
           IconAction(icon: Icons.play_arrow_outlined, tooltip: '演示模式 ${modCombo('⌘4')}', size: 26, onTap: () => store.setView('play')),
+          IconAction(icon: Icons.collections_bookmark_outlined, tooltip: '作品集', size: 26, onTap: () => store.setView('portfolio')),
           for (final def in pluginRegistry)
             IconAction(icon: def.icon, tooltip: def.tooltip, size: 26, onTap: () => store.setView('plugin:${def.id}')),
           const SizedBox(width: 4),
