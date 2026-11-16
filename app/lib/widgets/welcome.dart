@@ -123,13 +123,14 @@ class _WelcomeState extends State<Welcome> {
                   ],
                 ),
               ),
-              if (MediaQuery.of(context).size.width < 900)
+              if (MediaQuery.of(context).size.width < 700)
                 Expanded(
                   child: _mobileBody(context, store),
                 )
               else
                 Expanded(
                 child: Center(
+                  key: const ValueKey('welcome-wide'),
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 1120),
                     child: Padding(
@@ -261,6 +262,7 @@ class _WelcomeState extends State<Welcome> {
   Widget _mobileBody(BuildContext context, AppStore store) {
     final p = context.palette;
     return SingleChildScrollView(
+      key: const ValueKey('welcome-narrow'),
       padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

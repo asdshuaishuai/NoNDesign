@@ -29,16 +29,24 @@ AppStore _store({bool project = false}) {
 
 Widget _wrap(AppStore store, Widget child) => ChangeNotifierProvider<AppStore>.value(
       value: store,
-      child: MaterialApp(theme: AppTheme.build(dark: true), home: child),
+      child: MaterialApp(
+        theme: AppTheme.build(dark: true),
+        builder: (context, child) => withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
+        home: child,
+      ),
     );
 
 Future<void> _pumpAt(WidgetTester tester, Widget child, double width,
     {AppStore? store}) async {
-  await tester.binding.setSurfaceSize(Size(width, 874));
+  // setSurfaceSize 不改 MediaQuery（仍是 800×600）；改 view.physicalSize
+  // 才能让 MediaQuery 断点与真实设备一致。
+  tester.view.physicalSize = Size(width, 874);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(_wrap(store ?? _store(), child));
   await tester.pump(const Duration(milliseconds: 150));
   expect(tester.takeException(), isNull);
-  await tester.binding.setSurfaceSize(null);
 }
 
 void main() {
@@ -78,7 +86,10 @@ void main() {
     });
 
     testWidgets('settings dialog fits ${width.toInt()}px', (tester) async {
-      await tester.binding.setSurfaceSize(Size(width, 874));
+      tester.view.physicalSize = Size(width, 874);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       final store = _store();
       await tester.pumpWidget(_wrap(
         store,
@@ -99,7 +110,6 @@ void main() {
       expect(find.text('设置'), findsOneWidget);
       expect(find.text('模型与端点'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
-      await tester.binding.setSurfaceSize(null);
     });
 
     testWidgets('play view fits ${width.toInt()}px', (tester) async {
@@ -109,7 +119,10 @@ void main() {
 
     testWidgets('workspace bottom sheets fit ${width.toInt()}px', (tester) async {
       final store = _store(project: true)..view = 'design';
-      await tester.binding.setSurfaceSize(Size(width, 874));
+      tester.view.physicalSize = Size(width, 874);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(_wrap(store, const Workspace()));
       await tester.pump(const Duration(milliseconds: 200));
       await tester.tap(find.text('项目面板'));
@@ -123,16 +136,17 @@ void main() {
       await tester.pump(const Duration(milliseconds: 350));
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
-      await tester.binding.setSurfaceSize(null);
     });
   }
 
   testWidgets('wide desktop keeps the two-column video workspace', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(_wrap(_store(), const Scaffold(body: VideoWorkspace())));
     await tester.pump(const Duration(milliseconds: 150));
     expect(tester.takeException(), isNull);
     expect(find.text('标杆示例'), findsOneWidget);
-    await tester.binding.setSurfaceSize(null);
   });
 }

@@ -26,16 +26,19 @@ Widget _wrap(AppStore store, Widget child) => ChangeNotifierProvider<AppStore>.v
       value: store,
       child: MaterialApp(
         theme: AppTheme.build(dark: true),
+        builder: (context, child) => withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
         home: Scaffold(body: child),
       ),
     );
 
 Future<void> _pumpWidth(WidgetTester tester, Widget child, double width) async {
-  await tester.binding.setSurfaceSize(Size(width, 844));
+  tester.view.physicalSize = Size(width, 844);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(_wrap(_store(), child));
   await tester.pump(const Duration(milliseconds: 30));
   expect(tester.takeException(), isNull);
-  await tester.binding.setSurfaceSize(null);
 }
 
 /// 审计实测 390 与 410 两个宽度都曾溢出，两个都守。
@@ -63,7 +66,6 @@ void main() {
       await tester.pumpWidget(_wrap(_store(projectName: 'demo'), titleBar()));
       await tester.pump(const Duration(milliseconds: 30));
       expect(tester.takeException(), isNull);
-      await tester.binding.setSurfaceSize(null);
     }
   });
 

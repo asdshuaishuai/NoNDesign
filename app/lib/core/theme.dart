@@ -294,3 +294,21 @@ class AppTheme {
     );
   }
 }
+
+/// 响应式字号缩放：手机 +10%、平板 +5%、桌面 1.0；与系统文字大小相乘并
+/// 钳在 [1.0, 1.3]。字号声明保持既有 8 档字阶不变，渲染期统一缩放——
+/// 新增文案仍按字阶表写，不为手机单独维护一套字号。
+double responsiveTextScale(Size size, TextScaler system) {
+  final base = size.width < 600 ? 1.10 : size.width < 1024 ? 1.05 : 1.0;
+  final systemScale = system.scale(14) / 14;
+  return (systemScale * base).clamp(1.0, 1.3).toDouble();
+}
+
+/// 把响应式 textScaler 注入子树（main.dart 与测试共用同一条路径）。
+Widget withResponsiveTextScale(BuildContext context, Widget child) {
+  final mq = MediaQuery.of(context);
+  return MediaQuery(
+    data: mq.copyWith(textScaler: TextScaler.linear(responsiveTextScale(mq.size, mq.textScaler))),
+    child: child,
+  );
+}

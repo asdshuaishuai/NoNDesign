@@ -46,7 +46,9 @@ class NonApp extends StatelessWidget {
       // 这类「任何时候都该生效」的键上移到 app 根，FocusScope 托管焦点。
       builder: (context, child) {
         final store = context.read<AppStore>();
-        return FocusScope(
+        // 响应式字号：手机 +10% / 平板 +5% / 桌面 1.0（渲染期统一缩放，
+        // 字号声明仍守 8 档字阶）。系统文字大小一并尊重，钳 1.0–1.3。
+        return withResponsiveTextScale(context, FocusScope(
           autofocus: true,
           child: CallbackShortcuts(
             bindings: {
@@ -92,6 +94,7 @@ class NonApp extends StatelessWidget {
             },
             child: child ?? const SizedBox.shrink(),
           ),
+        ),
         );
       },
       // 应用级 ExcludeSemantics：Flutter macOS 引擎的无障碍桥在 macOS 27.2

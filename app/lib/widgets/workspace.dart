@@ -92,13 +92,17 @@ class _WorkspaceState extends State<Workspace> {
         autofocus: true,
         child: Scaffold(
           backgroundColor: p.bg,
-          // 窄屏（390–410 手机/窄窗）：58 + 252 + 348 固定面板会把画布
-          // 压到 0。左右栏折叠成底部 sheet，画布保住可用宽度；宽屏不变。
+          // 三档断点：手机 <700（左右面板都折叠成底部 sheet）、平板
+          // 700–1024（左栏常驻 + 右栏 sheet）、宽屏 ≥1024（三栏全开）。
+          // 58 + 252 + 348 固定面板在手机宽度会把画布压到 0；平板竖屏
+          // 保留左栏（项目/画板）同时让右栏走 sheet，画布仍有可用宽度。
           // SafeArea：iOS 状态栏 / Home 指示条不压标题栏与状态栏。
           body: SafeArea(
             child: LayoutBuilder(
             builder: (context, constraints) {
-              final narrow = constraints.maxWidth < 900;
+              final width = constraints.maxWidth;
+              final phone = width < 700;
+              final wide = width >= 1024;
               return Column(
                 children: [
                   TitleBar(
@@ -113,13 +117,13 @@ class _WorkspaceState extends State<Workspace> {
                     child: Row(
                       children: [
                         const Rail(),
-                        if (!narrow) const LeftPanel(),
+                        if (!phone) const LeftPanel(),
                         Expanded(child: _center(store)),
-                        if (!narrow) const RightPanel(),
+                        if (wide) const RightPanel(),
                       ],
                     ),
                   ),
-                  if (narrow) _narrowBar(context),
+                  if (!wide) _narrowBar(context, leftAsSheet: phone, rightAsSheet: true),
                   StatusBar(onCommand: _command),
                 ],
               );
@@ -131,8 +135,9 @@ class _WorkspaceState extends State<Workspace> {
     );
   }
 
-  /// 窄屏面板开关：左右栏折叠为底部 sheet（高度 60%，内容复用原面板）。
-  Widget _narrowBar(BuildContext context) {
+  /// 紧凑面板开关：折叠的面板以底部 sheet 打开（高度 60%）。
+  /// 手机两端都折叠；平板只折叠右栏（左栏常驻）。
+  Widget _narrowBar(BuildContext context, {required bool leftAsSheet, required bool rightAsSheet}) {
     final p = context.palette;
     Widget sheet(Widget child) => SafeArea(
           child: SizedBox(
@@ -145,28 +150,32 @@ class _WorkspaceState extends State<Workspace> {
       decoration: BoxDecoration(color: p.bgElevated, border: Border(top: BorderSide(color: p.line))),
       child: Row(children: [
         const Spacer(),
-        TextButton.icon(
-          onPressed: () => showModalBottomSheet<void>(
-            context: context,
-            backgroundColor: p.panel,
-            isScrollControlled: true,
-            builder: (_) => sheet(const LeftPanel()),
+        if (leftAsSheet) ...[
+          TextButton.icon(
+            onPressed: () => showModalBottomSheet<void>(
+              context: context,
+              backgroundColor: p.panel,
+              isScrollControlled: true,
+              builder: (_) => sheet(const LeftPanel()),
+            ),
+            icon: const Icon(Icons.view_sidebar_outlined, size: 16),
+            label: const Text('项目面板', style: TextStyle(fontSize: 12)),
           ),
-          icon: const Icon(Icons.view_sidebar_outlined, size: 16),
-          label: const Text('项目面板', style: TextStyle(fontSize: 12)),
-        ),
-        const Spacer(),
-        TextButton.icon(
-          onPressed: () => showModalBottomSheet<void>(
-            context: context,
-            backgroundColor: p.panel,
-            isScrollControlled: true,
-            builder: (_) => sheet(const RightPanel()),
+          const Spacer(),
+        ],
+        if (rightAsSheet) ...[
+          TextButton.icon(
+            onPressed: () => showModalBottomSheet<void>(
+              context: context,
+              backgroundColor: p.panel,
+              isScrollControlled: true,
+              builder: (_) => sheet(const RightPanel()),
+            ),
+            icon: const Icon(Icons.auto_awesome, size: 16),
+            label: const Text('NoN 面板', style: TextStyle(fontSize: 12)),
           ),
-          icon: const Icon(Icons.auto_awesome, size: 16),
-          label: const Text('NoN 面板', style: TextStyle(fontSize: 12)),
-        ),
-        const Spacer(),
+          const Spacer(),
+        ],
       ]),
     );
   }

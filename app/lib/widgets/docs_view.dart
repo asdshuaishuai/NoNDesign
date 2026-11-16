@@ -99,7 +99,7 @@ class _DocsViewState extends State<DocsView> {
       children: [
         Container(
           height: 48,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
           child: LayoutBuilder(builder: (context, constraints) {
             // 窄屏（手机 390–410）：三个 tab + 「生成原型」按钮曾右溢 58px。
@@ -126,6 +126,8 @@ class _DocsViewState extends State<DocsView> {
                   IconButton(
                     tooltip: '生成原型',
                     visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    padding: EdgeInsets.zero,
                     icon: const Icon(Icons.auto_awesome, size: 16),
                     onPressed: store.agentBusy || store.docs.prd.trim().isEmpty
                         ? null
@@ -172,7 +174,7 @@ class _DocsViewState extends State<DocsView> {
       onTap: () => store.setDocsTab(id),
       child: Container(
         height: 28,
-        padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 9),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 5 : 9),
         decoration: BoxDecoration(
           color: active ? p.panel2 : Colors.transparent,
           borderRadius: BorderRadius.circular(8),

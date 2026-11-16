@@ -59,6 +59,18 @@ app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板�
   `app/test/mobile_surfaces_test.dart`（402/390 × 视频/3D/A2UI/作品集/文档/设计/
   演示/设置/底部 sheet 共 19 项 + 宽屏视频双栏）；全量 48 项测试绿；模拟器截图
   复核文档/设计/视频/设置四屏。
+- **响应式字号与 iPad 三档布局（2026-11-16 深夜）**：字号在渲染期统一缩放——
+  `theme.dart::responsiveTextScale`（手机 +10% / 平板 +5% / 桌面 1.0，与系统
+  文字大小相乘并钳 1.0–1.3），`NonApp.builder` 经 `withResponsiveTextScale`
+  注入，测试走同一路径；字号声明仍守 8 档字阶，不为手机另维护一套字号。
+  Workspace 三档断点：手机 <700（左右栏均底部 sheet）、平板 700–1024
+  （左栏常驻 + 右栏 sheet）、宽屏 ≥1024（三栏全开）；Welcome 双栏断点降到
+  700（iPad 竖屏不再走手机单列）。**测试基建修正**：`setSurfaceSize` 只改渲染
+  表面、不改 MediaQuery（builder 里恒 800×600）——手机/平板测试必须设
+  `tester.view.physicalSize`；修正前「手机宽度」测试实际跑的是桌面分支。
+  回归：`tablet_layout_test.dart`（768 竖屏双栏/左栏+右栏 sheet、1024 横屏
+  三栏、视频/A2UI/作品集/设置）+ 手机测试全量 **54 项绿**；模拟器 iPad Pro 11
+  竖屏与 iPhone 17 截图复核。
 - **插件工作台 UI 与设计板块解耦**（用户裁决 2026-11-16 二次确认）：
   `app/lib/plugins/registry.dart` 是注册表——每插件一个 PluginDef（id/
   图标/builder），视图路由 `plugin:<id>`，顶栏入口与 ⌘5/⌘6… 快捷键按
