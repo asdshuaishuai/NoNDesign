@@ -274,7 +274,29 @@ class _DocsViewState extends State<DocsView> {
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(28, 8, 28, 32),
-            child: _preview
+            // PLAN 运行中的流式直播：write_doc 正文边写边推进（doc_delta 累积
+            // 到 store.liveDocText），自动切渲染视图（原版同语义）；doc_written
+            // 全量到达后清缓冲回落编辑态。
+            child: (store.agentBusy && store.liveDocText.isNotEmpty)
+                ? Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(26),
+                    decoration: BoxDecoration(
+                      color: p.panel.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: p.accent.withValues(alpha: 0.35)),
+                    ),
+                    child: MarkdownBody(
+                      data: store.liveDocText,
+                      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                        p: TextStyle(fontSize: 13, height: 1.7, color: p.ink2),
+                        h1: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: p.ink),
+                        h2: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink),
+                        h3: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink),
+                      ),
+                    ),
+                  )
+                : _preview
                 ? Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(26),

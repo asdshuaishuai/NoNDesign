@@ -97,6 +97,104 @@ def _preview(value: Any, limit: int = 360) -> str:
 
 
 @dataclass
+class _DocDeltaExtractor:
+    """从 write_doc 的流式 JSON arguments 中提取 content 字段的解码增量。
+
+    状态机：seek_key（找 "content" 键的值开引号）→ in_value（逐字符解码，
+    转义跨片缓冲）→ done。产出经 ctx.emit("doc_delta") 直播；doc_written
+    全量事件仍是正确性兜底，本提取器只服务流式 UX。
+    """
+
+    def __init__(self) -> None:
+        self.buf = ""
+        self.state = "seek_key"
+        self.escape = False
+        self.pending_uni = 0  # \uXXXX 剩余 hex 位（0 = 不在 unicode 收集）
+        self.uni = ""
+        self.done = False
+
+    def feed(self, delta: str) -> str:
+        if self.done or not delta:
+            return ""
+        self.buf += delta
+        out: list[str] = []
+        i = 0
+        text = self.buf
+        while i < len(text):
+            ch = text[i]
+            if self.state == "seek_key":
+                idx = text.find('"content"', i)
+                if idx < 0:
+                    # 保留尾部（可能是 "content 的前缀碎片）
+                    self.buf = text[max(0, len(text) - 12):]
+                    return "".join(out)
+                after = text[idx + len('"content"'):]
+                colon = after.find('"')
+                j = 0
+                seen_colon = False
+                while j < len(after):
+                    c2 = after[j]
+                    if c2 == ":" and not seen_colon:
+                        seen_colon = True
+                    elif c2 == '"':
+                        break
+                    elif not c2.isspace():
+                        return "".join(out)  # 不是 content 键（值里出现字样），放弃
+                    j += 1
+                if not seen_colon or j >= len(after):
+                    self.buf = text[max(0, len(text) - 12):]
+                    return "".join(out)
+                self.state = "in_value"
+                i = idx + len('"content"') + j + 1  # 跳过开引号
+                text = self.buf = text[i:]
+                i = 0
+                continue
+            # in_value
+            if self.escape:
+                if self.pending_uni == 0 and ch == "u":
+                    self.pending_uni = 4  # \uXXXX：随后 4 个字符必须是 hex
+                    i += 1
+                    continue
+                if self.pending_uni > 0:
+                    if ch in "0123456789abcdefABCDEF":
+                        self.uni += ch
+                        self.pending_uni -= 1
+                        if self.pending_uni == 0:
+                            try:
+                                out.append(chr(int(self.uni, 16)))
+                            except ValueError:
+                                pass
+                            self.uni = ""
+                            self.escape = False
+                        i += 1
+                        continue
+                    # 非法 unicode 转义：已收 hex 按字面输出，当前字符回落单字符映射
+                    if self.uni:
+                        out.append(self.uni)
+                        self.uni = ""
+                    self.pending_uni = 0
+                out.append({"n": chr(10), "t": chr(9), "r": chr(13), "b": chr(8), "f": chr(12),
+                            '"': '"', chr(92): chr(92), "/": "/"}.get(ch, ch))
+                self.escape = False
+                i += 1
+                continue
+            if ch == "\\":
+                self.escape = True
+                i += 1
+                continue
+            if ch == '"':
+                self.done = True
+                self.buf = ""
+                break
+            out.append(ch)
+            i += 1
+        # 到达文本末尾：已消费部分不留在 buf（escape/\uXXXX 状态由字段承载，
+        # buf 若不清会整段重放——真机单测 case2 'a' 被二次输出即此）。
+        if not self.done:
+            self.buf = ""
+        return "".join(out)
+
+
 class AgentContext:
     engine: EngineHost
     mode: str
@@ -440,6 +538,7 @@ class AgentRun:
                 run_config=RunConfig(tracing_disabled=True),
             )
             self.result = result
+            doc_streamer: dict = {}  # write_doc 参数增量提取器（plan 模式直播用）
             async for event in result.stream_events():
                 for queued in self._drain():
                     yield queued  # type: ignore[misc]
@@ -447,7 +546,20 @@ class AgentRun:
                 if etype == "raw_response_event":
                     data = getattr(event, "data", None)
                     dtype = getattr(data, "type", "")
-                    if dtype == "response.output_text.delta":
+                    if dtype == "response.function_call_arguments.delta" and req.mode == "plan":
+                        # write_doc 的 JSON 参数流式增量 → 解码出 content 正文直播
+                        # （PLAN 阶段文档边写边推进；design 模式刻意不发——
+                        # 一步一工具会淹没 op 流，与 thinking 同一取舍）。
+                        piece = getattr(data, "delta", "") or ""
+                        if piece:
+                            doc_x = doc_streamer.get("x")
+                            if doc_x is None:
+                                doc_x = _DocDeltaExtractor()
+                                doc_streamer["x"] = doc_x
+                            decoded = doc_x.feed(piece)
+                            if decoded:
+                                yield {"type": "doc_delta", "text": decoded}
+                    elif dtype == "response.output_text.delta":
                         delta = getattr(data, "delta", "") or ""
                         if delta:
                             text_parts.append(delta)

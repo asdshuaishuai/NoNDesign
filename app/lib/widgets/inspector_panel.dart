@@ -264,6 +264,98 @@ class _InspectorState extends State<Inspector> {
           ),
         ],
       ),
+      const SizedBox(height: 5),
+      // 阴影档位（引擎 e1/e2/e3 三档海拔，原版同词表）。
+      _SelectField(
+        label: '阴影',
+        value: node.style.shadow,
+        options: const ['none', 'e1', 'e2', 'e3'],
+        onChanged: (v) => store.updateNode(node.id, {'shadow': v}),
+      ),
+      const SizedBox(height: 5),
+      Row(
+        children: [
+          _NumField(label: '描边宽', value: node.style.strokeWidth, onCommit: (v) => store.updateNode(node.id, {'stroke_width': v})),
+          const SizedBox(width: 4),
+          Expanded(child: _ColorRow(label: '描边色', value: node.style.stroke == 'none' ? '#000000' : node.style.stroke, onCommit: (v) => store.updateNode(node.id, {'stroke': v}))),
+        ],
+      ),
+      const SizedBox(height: 5),
+      Row(
+        children: [
+          Expanded(
+            child: _SelectField(
+              label: '斜体',
+              value: node.style.italic,
+              options: const ['normal', 'italic'],
+              onChanged: (v) => store.updateNode(node.id, {'italic': v}),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: _SelectField(
+              label: '线型',
+              value: node.style.dash,
+              options: const ['solid', 'dashed', 'dotted'],
+              onChanged: (v) => store.updateNode(node.id, {'dash': v}),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      const SectionLabel('布局'),
+      const SizedBox(height: 6),
+      Row(
+        children: [
+          Expanded(
+            child: _SelectField(
+              label: '宽模式',
+              value: node.widthMode,
+              options: const ['fixed', 'hug', 'fill'],
+              onChanged: (v) => store.updateNode(node.id, {'width_mode': v}),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: _SelectField(
+              label: '高模式',
+              value: node.heightMode,
+              options: const ['fixed', 'hug', 'fill'],
+              onChanged: (v) => store.updateNode(node.id, {'height_mode': v}),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 5),
+      Row(
+        children: [
+          Expanded(
+            child: _SelectField(
+              label: '容器布局',
+              value: node.layoutDir,
+              options: const ['none', 'vertical', 'horizontal'],
+              onChanged: (v) => store.updateNode(node.id, {'layout': v}),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: _SelectField(
+              label: '对齐方式',
+              value: node.layoutJustify,
+              options: const ['start', 'center', 'end'],
+              onChanged: (v) => store.updateNode(node.id, {'justify': v}),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 5),
+      Row(
+        children: [
+          _NumField(label: '间距', value: node.layoutGap, onCommit: (v) => store.updateNode(node.id, {'gap': v})),
+          const SizedBox(width: 4),
+          _NumField(label: '内边距', value: node.layoutPadding, onCommit: (v) => store.updateNode(node.id, {'padding': v})),
+        ],
+      ),
       const SizedBox(height: 12),
       const SectionLabel('内容'),
       const SizedBox(height: 6),

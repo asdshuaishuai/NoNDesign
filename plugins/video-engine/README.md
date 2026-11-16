@@ -69,9 +69,17 @@ LLM（或人）写 **timeline JSON**（视频程序），`render.py` 逐帧确�
 
 - 坐标支持数字 / `"50%"` / `"center"`；元素级 `opacity`；色值字面量
   （**颜色不支持 expr**）。
-- `motion`（持续运动）：`{"type":"linear","vx":…,"vy":…}` /
-  `{"type":"orbit","cx","cy","r","omega"}` / `{"type":"path","points":[…],"speed":…}`
-  （值均可 expr；path 超出终点即停）。
+- `motion`（持续运动，值均可 expr；path 超出终点即停）：
+  - `linear`：**加性偏移**——元素从自身坐标按速度 (vx, vy) 平移；
+  - `orbit`：**绝对定位**——元素绕屏幕点 (cx, cy) 转圈（r/omega），自身
+    x/y 被忽略（t=0 在 (cx+r, cy)）；
+  - `path`：**绝对定位**——元素沿屏幕坐标折线 points 匀速走，自身 x/y
+    被忽略。
+  ⚠️ orbit/path 是绝对语义（位置完全由 motion 决定）——曾为加性语义，
+  按「绕屏幕中心转」的自然读法写会把元素甩出画外（真机复现后改定）。
+  DSL 速览里的 `image`：path 相对 **timeline 目录** 解析（同 timeline 同
+  片，不随调用目录漂移）；缺失 fail-closed（`image_missing` 拒绝）；
+  mime 按扩展名 png/jpg/webp。
 - 字体默认 `PingFang SC`（resvg 已验证 CJK 出图）。
 - 场景边界浮点容差防闪黑（t=场景结束时刻仍渲染该场景终态）。
 

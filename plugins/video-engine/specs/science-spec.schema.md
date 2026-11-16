@@ -44,7 +44,7 @@ spec 硬拒（`spec_missing` / `spec_invalid`，exit 2）。规范是 RSI 环②
 }
 ```
 
-## 硬规则（违反 = 管线拒绝或环②打回）
+## 硬规则（1/2/4 违反 = 管线拒绝或环②打回；3 为评审核查项）
 
 1. **params 全数字**——单位/量纲写进字段名或 note（`theta_deg`、
    `scale_px_per_m`），值里不许带字符串单位。
@@ -52,8 +52,11 @@ spec 硬拒（`spec_missing` / `spec_invalid`，exit 2）。规范是 RSI 环②
    `params` 键 / `formulas` 名字 / 内建 `pi`、`e` / math 白名单函数
    （sin cos tan sqrt abs min max floor ceil log exp pow radians degrees
    atan2 asin acos）。出现任何未声明标识符 → `undeclared_symbol` 拒绝。
-3. **不许在 timeline 里现写物理公式**绕开 spec——公式必须在 spec.formulas
-   声明（环②对照 timeline expr 与 formulas 一致性）。
+3. **不许在 timeline 里现写物理定律公式**绕开 spec——定律公式必须在
+   spec.formulas 声明。画布几何常数（如斜面像素布置 600/346）可作数字
+   字面量内联，管线不拦、由环②评审 agent 按 facts 核查（review 对不在
+   formulas 原文清单里的内联算式打 NOTE）——「想当然」由
+   undeclared_symbol 硬拦标识符，字面量的科学性靠评审。
 4. **assumptions 必须诚实**：理想化条件（无空气阻力、质点、刚体）必须
    显式列出；片子旁白/标注与假设冲突即环② fail。
 5. facts 是给评审 agent 的核查清单，每条一句话可判真伪。

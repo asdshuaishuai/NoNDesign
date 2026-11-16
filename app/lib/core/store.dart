@@ -69,6 +69,8 @@ class AppStore extends ChangeNotifier {
   int? runId;
   List<TimelineEntry> timeline = [];
   String streamText = '';
+  /// PLAN 阶段 write_doc 的流式正文缓冲（doc_delta 累积；doc_written 清空）。
+  String liveDocText = '';
   String thinkingText = '';
   Map<String, dynamic> usage = const {};
   String? agentError;
@@ -285,6 +287,41 @@ class AppStore extends ChangeNotifier {
     settings.threeProjectName = name;
     saveSettings();
     notifyListeners();
+  }
+
+  /// 演示批注墨迹（板 id → 笔迹 → 归一化点），随项目文档持久——保存时
+  /// 幂等注入 `<!-- nondesign:ink … -->` 尾块，打开时解析恢复（对齐原版
+  /// inkPersist/inkRestore；引擎对未知 HTML 注释容忍，文末最稳）。
+  Map<String, List<List<Offset>>> demoInks = {};
+
+  /// 带墨迹块的文档（保存用）；无墨迹时剥旧块返回干净文档。
+  String get mbtWithInk {
+    final clean = mbt.replaceFirst(RegExp(r'<!--\s*nondesign:ink[\s\S]*?-->\s*'), '').trimRight();
+    if (demoInks.isEmpty) return clean;
+    final payload = jsonEncode(demoInks.map((k, v) => MapEntry(
+        k,
+        v.map((s) => s.map((o) => [
+              double.parse(o.dx.toStringAsFixed(4)),
+              double.parse(o.dy.toStringAsFixed(4)),
+            ]).toList()).toList())));
+    return '$clean\n\n<!-- nondesign:ink $payload -->';
+  }
+
+  /// 从文档恢复墨迹（只在打开项目时调用——运行中 op 不得清运行态批注）。
+  void restoreInks(String documentMbt) {
+    demoInks = {};
+    final m = RegExp(r'<!--\s*nondesign:ink\s*([\s\S]*?)-->').firstMatch(documentMbt);
+    if (m == null) return;
+    try {
+      final raw = (jsonDecode(m.group(1) ?? '') as Map).cast<String, dynamic>();
+      demoInks = raw.map((k, v) => MapEntry(
+          k,
+          ((v as List).map((s) => ((s as List).map((pt) {
+                final pair = pt as List;
+                return Offset((pair[0] as num).toDouble(), (pair[1] as num).toDouble());
+              }).toList())).toList())));
+      notifyListeners();
+    } catch (_) {}
   }
 
   void setDocsTab(String value) {
@@ -522,6 +559,7 @@ class AppStore extends ChangeNotifier {
       projectPath = (res['path'] ?? path).toString();
       projectName = _baseName(projectPath!);
       this.password = password;
+      restoreInks(openedMbt);
       dirty = false;
       lastSavedAt = DateTime.now().millisecondsSinceEpoch;
       docs = Docs.fromJson(res['docs']);
@@ -566,7 +604,7 @@ class AppStore extends ChangeNotifier {
     }
     try {
       final res = await api!.saveProject(
-        mbt: mbt,
+        mbt: mbtWithInk,
         path: target,
         password: password,
         docs: docs.toJson(),
@@ -1371,11 +1409,21 @@ class AppStore extends ChangeNotifier {
           _flushThinking();
         });
         return; // 同 assistant_delta：缓冲后跳过 switch 尾部通知
+      case 'doc_delta':
+        // PLAN 阶段 write_doc 参数流式增量：正文边写边推进（80ms SSE 合帧
+        // 在传输层已做）；doc_written 全量到达时清缓冲（全量事件是正确性兜底）。
+        final piece = (event['text'] ?? '').toString();
+        if (piece.isNotEmpty) {
+          liveDocText += piece;
+          notifyListeners();
+        }
+        break;
       case 'doc_written':
         final kind = (event['kind'] ?? '').toString();
         final content = (event['content'] ?? '').toString();
         if (kind == 'prd') docs.prd = content;
         if (kind == 'ui') docs.ui = content;
+        liveDocText = '';
         unawaited(_persistRecovery()); // PLAN 半程崩溃也要保住已写文档
         notifyListeners();
         break;

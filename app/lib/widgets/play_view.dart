@@ -59,9 +59,12 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
   late final Animation<double> _entrance =
       CurvedAnimation(parent: _entranceCtl, curve: NonMotion.curve);
   /// 标注（批注）模式：活动板上自由圈画；开启时热区点击短路（标注优先）。
-  /// 墨迹按板存（归一化坐标），runtime 状态不回写文档，随 widget 销毁清空。
+  /// 墨迹存 store.demoInks 并随项目文档持久（保存注入 nondesign:ink 块、
+  /// 打开恢复）——退出演示/重启不再丢。
   bool _inkMode = false;
-  final Map<String, List<List<Offset>>> _inks = {};
+  Map<String, List<List<Offset>>> get _inks => context.read<AppStore>().demoInks;
+  /// 热区常亮开关（给干系人演示时切真实成品观感，交互不受影响）。
+  bool _hotspotsVisible = true;
   /// boardId → session_interactions 结果（null = 加载中/失败，走正则兜底）。
   final Map<String, List<_EngineInteraction>?> _interactions = {};
 
@@ -227,9 +230,18 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                         icon: Icons.cleaning_services_outlined,
                         tooltip: '清除本板标注',
                         size: 26,
-                        onTap: () => setState(() => _inks.remove(_activeBoard ?? board.id)),
+                        onTap: () => setState(() => context.read<AppStore>().demoInks.remove(_activeBoard ?? board.id)),
                       ),
                     ],
+                    const SizedBox(width: 4),
+                    // 热区显隐（原版 toggleHotZones 同语义）：隐藏后是真实成品观感，点击交互不受影响。
+                    IconAction(
+                      icon: _hotspotsVisible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                      tooltip: _hotspotsVisible ? '隐藏热区（真实成品观感）' : '显示热区',
+                      size: 26,
+                      active: _hotspotsVisible,
+                      onTap: () => setState(() => _hotspotsVisible = !_hotspotsVisible),
+                    ),
                     const SizedBox(width: 4),
                     // 总返回已移除（用户定案）：返回由原型内 back 节点/热区负责（引擎内置 back）；Esc 退出演示。
                     IconAction(
@@ -358,6 +370,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                                     height: math.max(4, zone.node.h * scale),
                                     child: _Hotspot(
                                       label: _zoneLabel(zone),
+                                      visible: _hotspotsVisible,
                                       onTap: () => _onZoneTap(zone, board.id),
                                     ),
                                   ),
@@ -1121,7 +1134,10 @@ class _Hotzone {
 class _Hotspot extends StatefulWidget {
   final String label;
   final VoidCallback onTap;
-  const _Hotspot({required this.label, required this.onTap});
+  const _Hotspot({required this.label, required this.onTap, this.visible = true});
+
+  /// false = 隐藏热区视觉（真实成品观感），点击交互保留（原版 toggleHotZones 语义）。
+  final bool visible;
 
   @override
   State<_Hotspot> createState() => _HotspotState();
@@ -1141,12 +1157,18 @@ class _HotspotState extends State<_Hotspot> {
         onTap: widget.onTap,
         child: Container(
           decoration: BoxDecoration(
-            // 常亮高亮（deepDesign 演示语义：热区始终可见，hover 强化）。
-            border: Border.all(
-                color: _hover ? p.accent.withValues(alpha: 0.85) : p.accent.withValues(alpha: 0.38),
-                width: _hover ? 2 : 1.4),
+            // 常亮高亮（deepDesign 演示语义：热区始终可见，hover 强化）；
+            // visible=false（热区开关关闭）时边框/填充归零——真实成品观感，
+            // 点击交互保留；hover 时复现提示（可发现性）。
+            border: (widget.visible || _hover)
+                ? Border.all(
+                    color: _hover ? p.accent.withValues(alpha: 0.85) : p.accent.withValues(alpha: 0.38),
+                    width: _hover ? 2 : 1.4)
+                : Border.all(color: Colors.transparent),
             borderRadius: BorderRadius.circular(4),
-            color: _hover ? p.accent.withValues(alpha: 0.16) : p.accent.withValues(alpha: 0.07),
+            color: _hover
+                ? p.accent.withValues(alpha: 0.16)
+                : (widget.visible ? p.accent.withValues(alpha: 0.07) : Colors.transparent),
           ),
           child: _hover
               ? Align(

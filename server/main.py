@@ -631,6 +631,21 @@ async def three_scene(name: str) -> str:
     return _three_guard(three.scene_js, name)
 
 
+_THREE_VENDOR_WHITELIST = {"three.module.js": "application/javascript"}
+
+
+@app.get("/three/vendor/{filename}")
+async def three_vendor(filename: str) -> PlainTextResponse:
+    """本地 vendored three.js（离线可用）——白名单单文件，不接受任意路径。"""
+    mime = _THREE_VENDOR_WHITELIST.get(filename)
+    if mime is None:
+        raise HTTPException(status_code=404, detail=f"vendor_not_found:{filename}")
+    f = Path(__file__).resolve().parent / "three_vendor" / filename
+    if not f.exists():
+        raise HTTPException(status_code=404, detail="vendor_missing")
+    return PlainTextResponse(f.read_text("utf-8"), media_type=mime)
+
+
 @app.post("/acp/prompt")
 async def acp_prompt(req: AcpPromptRequest) -> StreamingResponse:
     session = acp_registry.get(req.session_id)

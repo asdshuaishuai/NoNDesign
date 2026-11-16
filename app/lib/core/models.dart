@@ -87,6 +87,14 @@ class CanvasNode {
   final double w;
   final double h;
   final NodeStyle style;
+  /// 尺寸模式：fixed / hug / fill（引擎 update 词表 width_mode/height_mode）。
+  final String widthMode;
+  final String heightMode;
+  /// 容器布局：layout.dir none/vertical/horizontal + gap/padding/justify。
+  final String layoutDir;
+  final double layoutGap;
+  final double layoutPadding;
+  final String layoutJustify;
 
   const CanvasNode({
     required this.id,
@@ -100,10 +108,17 @@ class CanvasNode {
     required this.w,
     required this.h,
     required this.style,
+    this.widthMode = 'fixed',
+    this.heightMode = 'fixed',
+    this.layoutDir = 'none',
+    this.layoutGap = 0,
+    this.layoutPadding = 0,
+    this.layoutJustify = 'start',
   });
 
   factory CanvasNode.fromJson(Map<String, dynamic> m) {
     final rect = m['rect'] is Map ? m['rect'] as Map : const {};
+    final layout = m['layout'] is Map ? m['layout'] as Map : const {};
     return CanvasNode(
       id: (m['id'] ?? '').toString(),
       parent: (m['parent'] ?? 'root').toString(),
@@ -116,6 +131,12 @@ class CanvasNode {
       w: _num(rect['w']),
       h: _num(rect['h']),
       style: NodeStyle.fromJson(m['style']),
+      widthMode: (m['width_mode'] ?? 'fixed').toString(),
+      heightMode: (m['height_mode'] ?? 'fixed').toString(),
+      layoutDir: (layout['dir'] ?? 'none').toString(),
+      layoutGap: _num(layout['gap']),
+      layoutPadding: _num(layout['padding']),
+      layoutJustify: (layout['justify'] ?? 'start').toString(),
     );
   }
 }

@@ -104,6 +104,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     setState(() => _busy = true);
     try {
       final res = await api.postJson('/video/render', {'timeline': _tl, 'spec': _spec, 'fps': _fps.round()});
+      if (!mounted) return; // 在飞期间切走视图：dispose 已取消旧定时器，不得再建新轮询
       if (res['ok'] == true) {
         _job = res['job'] as String?;
         _poll?.cancel();
@@ -143,8 +144,15 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   }
 
   void _toast(String title, String detail) {
+    // 失败原因必须可见（此前 detail 形参被丢弃）。
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(title)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        if (detail.trim().isNotEmpty)
+          Text(detail.trim(), style: const TextStyle(fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
+      ]),
+    ));
   }
 
   @override

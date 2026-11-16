@@ -50,6 +50,12 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   String _lastError = '';
 
   @override
+  void dispose() {
+    _specCtl.dispose();
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
     if (!_wkRegistered) {
@@ -244,6 +250,54 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     }
   }
 
+  /// 项目新建/切换：列出服务器 3D 项目（含当前标记），或新建覆盖当前会话项目。
+  Future<void> _pickProject() async {
+    final api = store.api;
+    if (api == null) return;
+    try {
+      final res = await api.threeProjects();
+      final items = ((res['projects'] as List?) ?? []).cast<Map>();
+      final choice = await showNonDialog<String>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          backgroundColor: ctx.palette.panel,
+          title: Text('3D 项目', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+          children: [
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, '__new__'),
+              child: Row(children: [Icon(Icons.add, size: 16, color: ctx.palette.accent), const SizedBox(width: 8), const Text('新建项目…')]),
+            ),
+            for (final it in items)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx, it['name'] as String),
+                child: Row(children: [
+                  Icon(it['name'] == _project ? Icons.check : (it['blocked'] == true ? Icons.block : Icons.view_in_ar_outlined),
+                      size: 15, color: it['name'] == _project ? ctx.palette.accent : (it['blocked'] == true ? ctx.palette.warn : ctx.palette.ink3)),
+                  const SizedBox(width: 8),
+                  Text('${it['name']}（${_passLabels[it['current']] ?? it['current']}）', style: const TextStyle(fontSize: 13)),
+                ]),
+              ),
+          ],
+        ),
+      );
+      if (choice == null) return;
+      if (choice == '__new__') {
+        await _createProject();
+        return;
+      }
+      if (choice == _project) return;
+      setState(() {
+        _project = choice;
+        _lastError = '';
+      });
+      store.setThreeProjectName(choice);
+      _mountPreview();
+      await _refresh();
+    } catch (e) {
+      _toast('项目列表失败', '$e');
+    }
+  }
+
   /// 规范手编回灌（客户端先验 JSON，服务器再过 components/acceptance 门）。
   Future<void> _saveSpec() async {
     final api = store.api;
@@ -270,8 +324,15 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   }
 
   void _toast(String title, String detail) {
+    // 失败原因必须可见（此前 detail 形参被丢弃，错误只弹标题无法诊断）。
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(title)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        if (detail.trim().isNotEmpty)
+          Text(detail.trim(), style: const TextStyle(fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
+      ]),
+    ));
   }
 
   @override
@@ -313,6 +374,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
             const Spacer(),
             if (_busy) SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 1.8, color: p.accent)),
             const SizedBox(width: 8),
+            _TopBtn(icon: Icons.folder_open_outlined, label: '项目', onTap: _busy ? null : () => _pickProject()),
             _TopBtn(icon: Icons.auto_awesome_outlined, label: '生成当前层', onTap: _busy || _project == null ? null : _runPass),
             _TopBtn(icon: Icons.camera_alt_outlined, label: '截图', onTap: _project == null ? null : () => _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()')),
             // turntable 四方位（img2threejs：单视角不是模型的证据）

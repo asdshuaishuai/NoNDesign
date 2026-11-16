@@ -47,7 +47,7 @@ PREVIEW_TEMPLATE = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>NonDesign 3D · __NAME__</title>
 <style>html,body{margin:0;height:100%;overflow:hidden;background:#0b0d12}
 #err{position:fixed;top:8px;left:8px;color:#ff8a7a;font:12px monospace;white-space:pre-wrap;max-width:70%;z-index:9}</style>
-<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+<script type="importmap">{"imports":{"three":"/three/vendor/three.module.js"}}</script>
 </head><body><pre id="err"></pre>
 <script>
 // —— 执行反馈桥（环①）：一切运行时错误回传 Flutter（JavaScriptChannel NON3D）——
@@ -63,7 +63,6 @@ window.addEventListener('unhandledrejection', function(e){
 </script>
 <script type="module">
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b0d12);
 const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 2000);
@@ -72,8 +71,49 @@ const renderer = new THREE.WebGLRenderer({antialias: true, preserveDrawingBuffer
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 document.body.appendChild(renderer.domElement);
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
+// —— 轨道控制（自实现，零 addons 依赖）：接口兼容 controls.target/update() ——
+class MiniOrbit {
+  constructor(camera, dom, targetInit) {
+    this.target = targetInit;
+    this.spherical = { r: 10, theta: Math.atan2(camera.position.x - targetInit.x, camera.position.z - targetInit.z), phi: Math.acos(Math.min(1, Math.max(-1, (camera.position.y - targetInit.y) / Math.max(0.001, camera.position.distanceTo(targetInit))))) };
+    this.goal = { ...this.spherical };
+    this.pan = targetInit.clone();
+    this.panGoal = targetInit.clone();
+    let mode = 0, lx = 0, ly = 0;
+    dom.addEventListener('contextmenu', (e) => e.preventDefault());
+    dom.addEventListener('pointerdown', (e) => { mode = e.button === 2 || e.button === 1 ? 2 : 1; lx = e.clientX; ly = e.clientY; dom.setPointerCapture(e.pointerId); });
+    dom.addEventListener('pointermove', (e) => {
+      if (!mode) return;
+      const dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;
+      if (mode === 1) {
+        this.goal.theta -= dx * 0.006;
+        this.goal.phi = Math.min(Math.PI - 0.05, Math.max(0.05, this.goal.phi - dy * 0.006));
+      } else {
+        const scale = this.goal.r * 0.0012;
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0).multiplyScalar(-dx * scale);
+        const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1).multiplyScalar(dy * scale);
+        this.panGoal.add(right).add(up);
+      }
+    });
+    dom.addEventListener('pointerup', () => { mode = 0; });
+    dom.addEventListener('wheel', (e) => { e.preventDefault(); this.goal.r = Math.min(500, Math.max(0.5, this.goal.r * Math.exp(e.deltaY * 0.0011))); }, { passive: false });
+  }
+  update() {
+    const k = 0.16;
+    this.spherical.r += (this.goal.r - this.spherical.r) * k;
+    this.spherical.theta += (this.goal.theta - this.spherical.theta) * k;
+    this.spherical.phi += (this.goal.phi - this.spherical.phi) * k;
+    this.pan.lerp(this.panGoal, k);
+    const sp = this.spherical;
+    camera.position.set(
+      this.pan.x + sp.r * Math.sin(sp.phi) * Math.sin(sp.theta),
+      this.pan.y + sp.r * Math.cos(sp.phi),
+      this.pan.z + sp.r * Math.sin(sp.phi) * Math.cos(sp.theta),
+    );
+    camera.lookAt(this.pan);
+  }
+}
+const controls = new MiniOrbit(camera, renderer.domElement, new THREE.Vector3(0, 0, 0));
 addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);

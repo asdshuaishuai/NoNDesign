@@ -219,26 +219,33 @@ def _anim_factor(anim, t_scene: float):
     return ease, 0.0, 1.0  # fade / 未知 → 按 fade
 
 
-def _motion_offset(motion, t_scene: float, T: float, env_static: dict, resolve) -> tuple[float, float]:
-    """持续运动 → (dx, dy)。linear / orbit / path。"""
+def _motion_offset(motion, t_scene: float, T: float, env_static: dict, resolve) -> tuple[float, float, bool]:
+    """持续运动 → (mx, my, absolute)。
+
+    - linear：加性偏移（vx*t, vy*t 叠加到元素坐标）。
+    - orbit：元素绕**屏幕点** (cx, cy) 转圈，返回绝对位置（元素自身 x/y 被
+      orbit 完全决定——此前是加性语义，按自然读法写会把元素甩出画外，
+      真机复现 cx=1380 出画后改为绝对语义；现无示例依赖旧行为，零破坏）。
+    - path：元素沿**屏幕坐标**折线走，返回绝对位置（同上改绝对语义）。
+    """
     if not motion:
-        return 0.0, 0.0
+        return 0.0, 0.0, False
     kind = motion.get("type", "linear")
     if kind == "linear":
         vx = resolve(_maybe_expr(motion.get("vx", 0), _EXPR_SYM, _EXPR_CACHE), t_scene, T, env_static)
         vy = resolve(_maybe_expr(motion.get("vy", 0), _EXPR_SYM, _EXPR_CACHE), t_scene, T, env_static)
-        return vx * t_scene, vy * t_scene
+        return vx * t_scene, vy * t_scene, False
     if kind == "orbit":
         cx = resolve(_maybe_expr(motion.get("cx", 0), _EXPR_SYM, _EXPR_CACHE), t_scene, T, env_static)
         cy = resolve(_maybe_expr(motion.get("cy", 0), _EXPR_SYM, _EXPR_CACHE), t_scene, T, env_static)
         r = resolve(_maybe_expr(motion.get("r", 50), _EXPR_SYM, _EXPR_CACHE), t_scene, T, env_static)
         omega = resolve(_maybe_expr(motion.get("omega", 1), _EXPR_SYM, _EXPR_CACHE), t_scene, T, env_static)
         a = omega * t_scene
-        return cx + r * math.cos(a), cy + r * math.sin(a)
+        return cx + r * math.cos(a), cy + r * math.sin(a), True
     if kind == "path":
         pts = motion.get("points") or []
         if len(pts) < 2:
-            return 0.0, 0.0
+            return 0.0, 0.0, False
         speed = resolve(_maybe_expr(motion.get("speed", 100), _EXPR_SYM, _EXPR_CACHE), t_scene, T, env_static)
         dist = speed * t_scene
         acc = 0.0
@@ -248,16 +255,17 @@ def _motion_offset(motion, t_scene: float, T: float, env_static: dict, resolve) 
             seg = math.hypot(x2 - x1, y2 - y1)
             if acc + seg >= dist:
                 f = (dist - acc) / seg if seg > 0 else 0
-                return x1 + (x2 - x1) * f, y1 + (y2 - y1) * f
+                return x1 + (x2 - x1) * f, y1 + (y2 - y1) * f, True
             acc += seg
-        return float(pts[-1][0]), float(pts[-1][1])
-    return 0.0, 0.0
+        return float(pts[-1][0]), float(pts[-1][1]), True
+    return 0.0, 0.0, False
 
 
 # ---------------------------------------------------------------- 元素渲染
 
 _EXPR_CACHE: dict[str, Expr] = {}
 _EXPR_SYM: set[str] = set()  # 渲染前由 prepare 填充
+_TIMELINE_DIR: Path = Path(".")  # image 相对路径的解析基准（main() 设置）
 
 
 def _esc(s: str) -> str:
@@ -266,7 +274,12 @@ def _esc(s: str) -> str:
 
 def _element_svg(el, t_scene: float, T: float, env: dict, resolve) -> str:
     alpha, dy, scale = _anim_factor(el.get("anim"), t_scene)
-    mx, my = _motion_offset(el.get("motion"), t_scene, T, env, resolve)
+    mx, my, motion_absolute = _motion_offset(el.get("motion"), t_scene, T, env, resolve)
+    if motion_absolute:
+        # orbit/path 完全决定位置：元素自身 x/y 不叠加（入场 dy 仍生效）
+        base_override = True
+    else:
+        base_override = False
     if alpha <= 0.01:
         return ""
     kind = el.get("type")
@@ -275,7 +288,7 @@ def _element_svg(el, t_scene: float, T: float, env: dict, resolve) -> str:
     parts = [f'opacity="{opacity:.3f}"']
 
     def px(v, axis):
-        return resolve(_maybe_expr(v, _EXPR_SYM, _EXPR_CACHE), t_scene, T, env, axis)
+        return 0.0 if motion_absolute else resolve(_maybe_expr(v, _EXPR_SYM, _EXPR_CACHE), t_scene, T, env, axis)
 
     if kind == "text":
         x = px(el.get("x", "50%"), "x") + mx
@@ -367,12 +380,21 @@ def _element_svg(el, t_scene: float, T: float, env: dict, resolve) -> str:
         w = px(el.get("w", 200), "x") * scale
         h = px(el.get("h", 200), "y") * scale
         path = el.get("path", "")
-        if path and Path(path).exists():
-            import base64
-            b64 = base64.b64encode(Path(path).read_bytes()).decode()
-            return (f'<g {" ".join(parts)}><image x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}"'
-                    f' href="data:image/png;base64,{b64}" preserveAspectRatio="xMidYMid slice"/></g>')
-        return ""
+        if not path:
+            return ""
+        # 相对路径按 timeline 目录解析（非进程 cwd）——同 timeline 同片，
+        # 不随调用目录漂移；缺失 fail-closed（此前静默消失，破坏确定性声明）。
+        img_path = Path(path)
+        if not img_path.is_absolute():
+            img_path = _TIMELINE_DIR / img_path
+        if not img_path.exists():
+            raise RenderRejected(f"image_missing: {path}（解析为 {img_path}）——元素静默消失会破坏确定性")
+        mime = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}.get(
+            img_path.suffix.lower(), "image/png")
+        import base64
+        b64 = base64.b64encode(img_path.read_bytes()).decode()
+        return (f'<g {" ".join(parts)}><image x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}"'
+                f' href="data:{mime};base64,{b64}" preserveAspectRatio="xMidYMid slice"/></g>')
     return ""
 
 
@@ -439,6 +461,8 @@ def main() -> int:
     timeline_path = Path(sys.argv[1])
     out_dir = Path(sys.argv[2])
     tl = json.loads(timeline_path.read_text("utf-8"))
+    global _TIMELINE_DIR
+    _TIMELINE_DIR = timeline_path.resolve().parent
 
     # —— 硬门 1：spec 先行 ——
     spec = load_spec(timeline_path, tl)
