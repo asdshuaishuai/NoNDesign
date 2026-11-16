@@ -52,31 +52,24 @@ class _WorkspaceState extends State<Workspace> {
     final store = context.watch<AppStore>();
     final p = context.palette;
     if (store.view == 'play') return const PlayView();
-    if (store.view == 'portfolio') return const PortfolioView();
-    // 插件工作台路由（plugin:<id>）：注册表驱动，与设计板块解耦。
+    // 作品集/插件工作台：不进设计壳（无项目也可达）。仍包 Scaffold——
+    // 这些视图内的 SnackBar 需要 ScaffoldMessenger 的 Scaffold 祖先
+    // （旧实现早退裸视图，debug 断言、release 静默不显示）。
+    if (store.view == 'portfolio') {
+      return Scaffold(backgroundColor: p.bg, body: const PortfolioView());
+    }
     final pluginView = pluginWorkspaceFor(store.view);
-    if (pluginView != null) return pluginView;
+    if (pluginView != null) {
+      return Scaffold(backgroundColor: p.bg, body: pluginView);
+    }
     return CallbackShortcuts(
       bindings: {
-      modKey(LogicalKeyboardKey.keyK): _command,
-      modKey(LogicalKeyboardKey.keyS): () => store.saveProject(),
+      // ⌘N/⌘O/⌘S/⌘Z/⌘K 已上移 main.dart 根级 bindings：插件/作品集视图
+      // 不挂载本 CallbackShortcuts，workspace 级绑定在全屏视图不可达。
+      // 保留的项是设计壳内部动作（设置/快捷键/文档直达原型/导出）。
       modKey(LogicalKeyboardKey.keyH, shift: true): () {
         // ⇧⌘H：导出 HTML 原型——标题栏菜单同项标注的快捷键，无项目时忽略。
         if (store.hasProject) store.exportHtml();
-      },
-      modKey(LogicalKeyboardKey.keyN): _newProject,
-      modKey(LogicalKeyboardKey.keyO): () => _openPath(''),
-      modKey(LogicalKeyboardKey.keyZ): () => _undoRedo(store, redo: false),
-      modKey(LogicalKeyboardKey.keyZ, shift: true): () => _undoRedo(store, redo: true),
-      modKey(LogicalKeyboardKey.digit1): () => store.setView('design'),
-      modKey(LogicalKeyboardKey.digit2): () => store.setView('docs'),
-      modKey(LogicalKeyboardKey.digit3): () => store.setView('source'),
-      modKey(LogicalKeyboardKey.digit4): () => store.setView('play'),
-      // 插件快捷键 ⌘5/⌘6/…已上移 main.dart 根级 bindings（插件视图内
-      // 本 CallbackShortcuts 不挂载，workspace 级绑定在插件视图不可达）。
-      modKey(LogicalKeyboardKey.digit0): () {
-        store.setView('design');
-        store.bumpFit();
       },
       modKey(LogicalKeyboardKey.slash): _shortcuts,
       modKey(LogicalKeyboardKey.comma): _settings,
@@ -96,31 +89,79 @@ class _WorkspaceState extends State<Workspace> {
         autofocus: true,
         child: Scaffold(
           backgroundColor: p.bg,
-          body: Column(
-            children: [
-              TitleBar(
-                onCommand: _command,
-                onSettings: _settings,
-                onNewProject: _newProject,
-                onOpenProject: () => _openPath(''),
-                onShortcuts: _shortcuts,
-                onOpenRecent: (path) => _openPath(path),
-              ),
-              Expanded(
-                child: Row(
-                  children: [
-                    const Rail(),
-                    const LeftPanel(),
-                    Expanded(child: _center(store)),
-                    const RightPanel(),
-                  ],
-                ),
-              ),
-              StatusBar(onCommand: _command),
-            ],
+          // 窄屏（390–410 手机/窄窗）：58 + 252 + 348 固定面板会把画布
+          // 压到 0。左右栏折叠成底部 sheet，画布保住可用宽度；宽屏不变。
+          body: LayoutBuilder(
+            builder: (context, constraints) {
+              final narrow = constraints.maxWidth < 900;
+              return Column(
+                children: [
+                  TitleBar(
+                    onCommand: _command,
+                    onSettings: _settings,
+                    onNewProject: _newProject,
+                    onOpenProject: () => _openPath(''),
+                    onShortcuts: _shortcuts,
+                    onOpenRecent: (path) => _openPath(path),
+                  ),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const Rail(),
+                        if (!narrow) const LeftPanel(),
+                        Expanded(child: _center(store)),
+                        if (!narrow) const RightPanel(),
+                      ],
+                    ),
+                  ),
+                  if (narrow) _narrowBar(context),
+                  StatusBar(onCommand: _command),
+                ],
+              );
+            },
           ),
         ),
       ),
+    );
+  }
+
+  /// 窄屏面板开关：左右栏折叠为底部 sheet（高度 60%，内容复用原面板）。
+  Widget _narrowBar(BuildContext context) {
+    final p = context.palette;
+    Widget sheet(Widget child) => SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.6,
+            child: child,
+          ),
+        );
+    return Container(
+      height: 38,
+      decoration: BoxDecoration(color: p.bgElevated, border: Border(top: BorderSide(color: p.line))),
+      child: Row(children: [
+        const Spacer(),
+        TextButton.icon(
+          onPressed: () => showModalBottomSheet<void>(
+            context: context,
+            backgroundColor: p.panel,
+            isScrollControlled: true,
+            builder: (_) => sheet(const LeftPanel()),
+          ),
+          icon: const Icon(Icons.view_sidebar_outlined, size: 16),
+          label: const Text('项目面板', style: TextStyle(fontSize: 12)),
+        ),
+        const Spacer(),
+        TextButton.icon(
+          onPressed: () => showModalBottomSheet<void>(
+            context: context,
+            backgroundColor: p.panel,
+            isScrollControlled: true,
+            builder: (_) => sheet(const RightPanel()),
+          ),
+          icon: const Icon(Icons.auto_awesome, size: 16),
+          label: const Text('NoN 面板', style: TextStyle(fontSize: 12)),
+        ),
+        const Spacer(),
+      ]),
     );
   }
 
@@ -169,7 +210,7 @@ class _WorkspaceState extends State<Workspace> {
   }
 
   Future<void> _shortcuts() async {
-    await showNonDialog(context: context, builder: (context) => const _ShortcutsDialog());
+    await showShortcutsDialog(context);
   }
 
   Future<void> _newProject() => showNewProjectFlow(context);
@@ -178,44 +219,50 @@ class _WorkspaceState extends State<Workspace> {
     await openProjectFlow(context, path);
     if (mounted) _focus.requestFocus();
   }
+}
 
-  /// ⌘Z / ⇧⌘Z 分流：焦点在文本编辑框（MBT 源码编辑 / PRD 编辑器）内时
-  /// 执行文本撤销，否则画布撤销。CallbackShortcuts 命中绑定即消费按键
-  /// （Shortcuts.handleKeypress 对已启用的 VoidCallbackAction 一律返回
-  /// handled）——「守卫不作为等事件穿透」不可行，故在文本场景显式
-  /// invoke UndoTextIntent/RedoTextIntent（DefaultTextEditingShortcuts
-  /// 同款意图），行为与按键穿透等效。
-  void _undoRedo(AppStore store, {required bool redo}) {
-    final fctx = FocusManager.instance.primaryFocus?.context;
-    if (fctx != null && _inEditable(fctx)) {
-      final intent = redo
-          ? const RedoTextIntent(SelectionChangedCause.keyboard)
-          : const UndoTextIntent(SelectionChangedCause.keyboard);
-      final action = Actions.maybeFind<Intent>(fctx, intent: intent);
-      if (action != null) {
-        Actions.of(fctx).invokeAction(action, intent, fctx);
-      }
-      return; // 编辑框内即使找不到文本撤销动作，也不回退画布历史
+/// 快捷键说明弹窗（根级 ⌘K 命令面板也要用——从 Workspace 私有方法提为
+/// 顶层入口）。
+Future<void> showShortcutsDialog(BuildContext context) {
+  return showNonDialog(context: context, builder: (context) => const _ShortcutsDialog());
+}
+
+/// ⌘Z / ⇧⌘Z 分流（根级绑定）：焦点在文本编辑框（MBT 源码编辑 / PRD
+/// 编辑器）内时执行文本撤销，否则画布撤销。CallbackShortcuts 命中绑定即
+/// 消费按键（Shortcuts.handleKeypress 对已启用的 VoidCallbackAction 一律
+/// 返回 handled）——「守卫不作为等事件穿透」不可行，故在文本场景显式
+/// invoke UndoTextIntent/RedoTextIntent（DefaultTextEditingShortcuts 同款
+/// 意图），行为与按键穿透等效。
+void undoRedoShortcut(AppStore store, {required bool redo}) {
+  final fctx = FocusManager.instance.primaryFocus?.context;
+  if (_focusInEditable(fctx)) {
+    final intent = redo
+        ? const RedoTextIntent(SelectionChangedCause.keyboard)
+        : const UndoTextIntent(SelectionChangedCause.keyboard);
+    final action = Actions.maybeFind<Intent>(fctx!, intent: intent);
+    if (action != null) {
+      Actions.of(fctx).invokeAction(action, intent, fctx);
     }
-    redo ? store.redo() : store.undo();
+    return; // 编辑框内即使找不到文本撤销动作，也不回退画布历史
   }
+  redo ? store.redo() : store.undo();
+}
 
-  /// 沿焦点祖先找 EditableText——焦点节点不一定挂在 EditableText 本身
-  /// （TextField/编辑器都包一层 Focus）。visitAncestorElements 从最近
-  /// 祖先向外走（不含自身），自身先单独查。
-  bool _inEditable(BuildContext? ctx) {
-    if (ctx == null) return false;
-    if (ctx is Element && ctx.widget is EditableText) return true;
-    var found = false;
-    ctx.visitAncestorElements((Element e) {
-      if (e.widget is EditableText) {
-        found = true;
-        return false;
-      }
-      return true;
-    });
-    return found;
-  }
+/// 沿焦点祖先找 EditableText——焦点节点不一定挂在 EditableText 本身
+/// （TextField/编辑器都包一层 Focus）。visitAncestorElements 从最近祖先
+/// 向外走（不含自身），自身先单独查。
+bool _focusInEditable(BuildContext? ctx) {
+  if (ctx == null) return false;
+  if (ctx is Element && ctx.widget is EditableText) return true;
+  var found = false;
+  ctx.visitAncestorElements((Element e) {
+    if (e.widget is EditableText) {
+      found = true;
+      return false;
+    }
+    return true;
+  });
+  return found;
 }
 
 Future<void> showNewProjectFlow(BuildContext context) async {

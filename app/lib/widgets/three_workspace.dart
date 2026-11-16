@@ -16,6 +16,10 @@ import 'common.dart';
 /// webview_flutter 无 endorsed macOS 实现——首次使用前幂等注册 WebKit。
 bool _wkRegistered = false;
 
+/// 作品集「打开」直载：切视图前设置，ThreeWorkspace.initState 消费后清空
+/// （与 a2uiLoadOnOpen 同构的跨实例传名通道）。
+String? threeLoadOnOpen;
+
 const _passLabels = {
   'blockout': '占位',
   'structure': '结构',
@@ -48,11 +52,29 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   bool _busy = false;
   WebViewController? _controller;
   String _lastError = '';
+  // 缓存 store：dispose 里保存规范草稿时不能再 context.read（元素已停用）。
+  late final AppStore _store = context.read<AppStore>();
 
   @override
   void dispose() {
+    // 未保存的规范编辑跨视图保留（按项目名持久化草稿）——工作台切换即
+    // dispose，没有草稿 = 用户手编的 JSON 静默丢失。持久化延后到帧末：
+    // dispose 常发生在构建期，notifyListeners 会标记祖先脏。
+    _stashDraft(defer: true);
     _specCtl.dispose();
     super.dispose();
+  }
+
+  /// 把当前项目未保存的规范编辑落进草稿（项目切换/视图 dispose 边界）。
+  void _stashDraft({bool defer = false}) {
+    final p = _project;
+    if (p == null || !_specDirty || _specCtl.text.trim().isEmpty) return;
+    final text = _specCtl.text;
+    if (defer) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _store.setThreeSpecDraft(p, text));
+    } else {
+      _store.setThreeSpecDraft(p, text);
+    }
   }
 
   @override
@@ -63,14 +85,26 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       _wkRegistered = true;
     }
     _specCtl.addListener(() => _specDirty = true);
-    // 视图切换会 dispose 本工作台——从持久化项目名续接（跨会话亦然）。
+    // 视图切换会 dispose 本工作台——优先消费作品集直载的项目名，其次
+    // 从持久化项目名续接（跨会话亦然）。
     // 续接路径必须挂载 WebView（与创建路径同路）：否则预览永久停在
     // 「加载预览…」，截图/四方位/刷新全是 _controller?. 空安全无操作，
     // error/metrics/screenshot 三反馈桥断链。
-    final saved = store.settings.threeProjectName;
+    final pending = threeLoadOnOpen;
+    threeLoadOnOpen = null;
+    final saved = pending ?? store.settings.threeProjectName;
     if (saved.isNotEmpty) {
       _project = saved;
+      final draft = store.threeSpecDraft(saved);
+      if (draft != null && draft.isNotEmpty) {
+        _specCtl.text = draft;
+        _specDirty = true; // listener 已置位；显式声明防 _refresh 覆盖
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        // 持久化推迟到首帧后：initState 里 notifyListeners 会在构建期
+        // 触发祖先重建（setState during build）。
+        if (pending != null) store.setThreeProjectName(pending);
         await _refresh();
         if (!mounted || _controller != null) return; // 创建路径已挂载不双挂
         _mountPreview();
@@ -79,7 +113,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     }
   }
 
-  AppStore get store => context.read<AppStore>();
+  AppStore get store => _store;
 
   Future<void> _refresh() async {
     if (_project == null) return;
@@ -156,11 +190,13 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       );
       if (res['ok'] == true) {
         if (!mounted) return;
+        _stashDraft(); // 旧项目未保存的规范编辑先存草稿
         setState(() {
           _project = name;
           _spec = (res['spec'] as Map?)?.cast<String, dynamic>();
           _state = (res['state'] as Map?)?.cast<String, dynamic>();
           _lastError = '';
+          _specDirty = false;
         });
         store.setThreeProjectName(name);
         _mountPreview();
@@ -286,13 +322,20 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         return;
       }
       if (choice == _project) return;
+      _stashDraft(); // 旧项目未保存的规范编辑先存草稿
+      final draft = store.threeSpecDraft(choice);
       setState(() {
         _project = choice;
         _lastError = '';
         // 项目边界复位规范编辑守卫：A 项目未保存的规范编辑不能带进 B——
         // 不复位会让 _refresh 跳过回灌，编辑器停在 A 的 JSON，_saveSpec
         // 却把 A 内容以 B 的名义落盘（标题已显示 B，全程无提示）。
+        // B 自己的草稿（若有）显式回灌，无草稿则等 _refresh 回服务器态。
         _specDirty = false;
+        if (draft != null && draft.isNotEmpty) {
+          _specCtl.text = draft;
+          _specDirty = true;
+        }
       });
       store.setThreeProjectName(choice);
       _mountPreview();
@@ -318,6 +361,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       if (res['ok'] == true) {
         _toast('规范已回灌', '后续生成层将使用新规范（refine-spec）');
         _specDirty = false; // 显式保存 = 期待服务器态回灌，恢复同步
+        store.setThreeSpecDraft(_project!, null); // 服务器已收下，草稿作废
         await _refresh();
       } else {
         _toast('保存被拒', '${res['detail']}');
@@ -325,6 +369,19 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     } catch (e) {
       _toast('保存失败', '$e');
     }
+  }
+
+  PopupMenuItem<String> _menuItem(BuildContext context, String value, IconData icon, String label) {
+    final p = context.palette;
+    return PopupMenuItem<String>(
+      value: value,
+      height: 36,
+      child: Row(children: [
+        Icon(icon, size: 16, color: p.ink3),
+        const SizedBox(width: 8),
+        Text(label, style: const TextStyle(fontSize: 13)),
+      ]),
+    );
   }
 
   void _toast(String title, String detail) {
@@ -351,47 +408,105 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           height: 46,
           decoration: BoxDecoration(color: p.bgElevated, border: Border(bottom: BorderSide(color: p.line))),
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(children: [
+          // 窄屏断点：pass chips 隐藏、标题省略号、九个动作收进溢出菜单
+          // （390 宽曾溢出 528px，手机端右侧按钮全部不可见）。
+          child: LayoutBuilder(builder: (context, constraints) {
+            final narrow = constraints.maxWidth < 700;
+            return Row(children: [
             // 插件视图全屏接管的可见出口（镜像 PlayView 的返回画布）。
             IconButton(
               icon: const Icon(Icons.arrow_back, size: 18),
               tooltip: '返回设计 ${modCombo('⌘1')}',
               color: p.ink2,
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
               onPressed: () => store.setView('design'),
             ),
             const SizedBox(width: 4),
             Icon(Icons.view_in_ar_outlined, size: 17, color: p.accent),
             const SizedBox(width: 8),
-            Text(_project ?? '3D 工作台', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
-            const SizedBox(width: 14),
-            if (passes.isNotEmpty)
-              for (final ps in passes)
-                Padding(
-                  padding: const EdgeInsets.only(right: 5),
-                  child: _PassChip(
-                    label: _passLabels[ps['id']] ?? '${ps['id']}',
-                    status: '${ps['status']}',
-                    active: ps['id'] == current,
-                    palette: p,
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: narrow ? 110 : 400),
+              child: Text(_project ?? '3D 工作台',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
+            ),
+            if (!narrow) ...[
+              const SizedBox(width: 14),
+              if (passes.isNotEmpty)
+                for (final ps in passes)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 5),
+                    child: _PassChip(
+                      label: _passLabels[ps['id']] ?? '${ps['id']}',
+                      status: '${ps['status']}',
+                      active: ps['id'] == current,
+                      palette: p,
+                    ),
                   ),
-                ),
+            ],
             const Spacer(),
             if (_busy) SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 1.8, color: p.accent)),
             const SizedBox(width: 8),
-            _TopBtn(icon: Icons.folder_open_outlined, label: '项目', onTap: _busy ? null : () => _pickProject()),
-            _TopBtn(icon: Icons.auto_awesome_outlined, label: '生成当前层', onTap: _busy || _project == null ? null : _runPass),
-            _TopBtn(icon: Icons.camera_alt_outlined, label: '截图', onTap: _project == null ? null : () => _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()')),
-            // turntable 四方位（img2threejs：单视角不是模型的证据）
-            _TopBtn(icon: Icons.rotate_90_degrees_ccw_outlined, label: '四方位取证', onTap: _project == null ? null : () => _controller?.runJavaScript('window.__non3d_turntable && window.__non3d_turntable()')),
-            _TopBtn(icon: Icons.check_rounded, label: '通过并继续', onTap: _busy || _project == null ? null : _continue),
-            _TopBtn(icon: Icons.refresh, label: '刷新预览', onTap: _project == null ? null : () => _controller?.loadRequest(Uri.parse(store.api!.threePreviewUrl(_project!)))),
-            for (final f in const [('preview', '预览', Icons.visibility_outlined), ('source', '源码', Icons.code_outlined), ('spec', '规范', Icons.rule_outlined)])
-              _TopBtn(
-                icon: f.$3,
-                label: f.$2,
-                onTap: _project == null ? null : () => setState(() => _face = f.$1),
-              ),
-          ]),
+            if (narrow)
+              PopupMenuButton<String>(
+                tooltip: '3D 操作',
+                color: p.panel,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10), side: BorderSide(color: p.lineStrong)),
+                onSelected: (v) {
+                  switch (v) {
+                    case 'project':
+                      _pickProject();
+                    case 'pass':
+                      _runPass();
+                    case 'shot':
+                      _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()');
+                    case 'turntable':
+                      _controller?.runJavaScript('window.__non3d_turntable && window.__non3d_turntable()');
+                    case 'continue':
+                      _continue();
+                    case 'reload':
+                      if (_project != null) {
+                        _controller?.loadRequest(Uri.parse(store.api!.threePreviewUrl(_project!)));
+                      }
+                    case 'face:preview':
+                    case 'face:source':
+                    case 'face:spec':
+                      if (_project != null) setState(() => _face = v.substring('face:'.length));
+                  }
+                },
+                itemBuilder: (ctx) => [
+                  _menuItem(ctx, 'project', Icons.folder_open_outlined, '项目'),
+                  _menuItem(ctx, 'pass', Icons.auto_awesome_outlined, '生成当前层'),
+                  _menuItem(ctx, 'shot', Icons.camera_alt_outlined, '截图'),
+                  _menuItem(ctx, 'turntable', Icons.rotate_90_degrees_ccw_outlined, '四方位取证'),
+                  _menuItem(ctx, 'continue', Icons.check_rounded, '通过并继续'),
+                  _menuItem(ctx, 'reload', Icons.refresh, '刷新预览'),
+                  const PopupMenuDivider(),
+                  _menuItem(ctx, 'face:preview', Icons.visibility_outlined, '预览'),
+                  _menuItem(ctx, 'face:source', Icons.code_outlined, '源码'),
+                  _menuItem(ctx, 'face:spec', Icons.rule_outlined, '规范'),
+                ],
+              )
+            else ...[
+              _TopBtn(icon: Icons.folder_open_outlined, label: '项目', onTap: _busy ? null : () => _pickProject()),
+              _TopBtn(icon: Icons.auto_awesome_outlined, label: '生成当前层', onTap: _busy || _project == null ? null : _runPass),
+              _TopBtn(icon: Icons.camera_alt_outlined, label: '截图', onTap: _project == null ? null : () => _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()')),
+              // turntable 四方位（img2threejs：单视角不是模型的证据）
+              _TopBtn(icon: Icons.rotate_90_degrees_ccw_outlined, label: '四方位取证', onTap: _project == null ? null : () => _controller?.runJavaScript('window.__non3d_turntable && window.__non3d_turntable()')),
+              _TopBtn(icon: Icons.check_rounded, label: '通过并继续', onTap: _busy || _project == null ? null : _continue),
+              _TopBtn(icon: Icons.refresh, label: '刷新预览', onTap: _project == null ? null : () => _controller?.loadRequest(Uri.parse(store.api!.threePreviewUrl(_project!)))),
+              for (final f in const [('preview', '预览', Icons.visibility_outlined), ('source', '源码', Icons.code_outlined), ('spec', '规范', Icons.rule_outlined)])
+                _TopBtn(
+                  icon: f.$3,
+                  label: f.$2,
+                  onTap: _project == null ? null : () => setState(() => _face = f.$1),
+                ),
+            ],
+          ]);
+          }),
         ),
         Expanded(
           child: _project == null

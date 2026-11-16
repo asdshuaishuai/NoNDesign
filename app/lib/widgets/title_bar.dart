@@ -37,7 +37,11 @@ class TitleBar extends StatelessWidget {
         border: Border(bottom: BorderSide(color: p.line)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
+      // 窄屏（手机 390–410）断点：命令条/模型规格/忙碌标签让位——顶栏
+      // 曾横向溢出 64–221px，右侧按钮在手机上不可见。
+      child: LayoutBuilder(builder: (context, constraints) {
+        final narrow = constraints.maxWidth < 700;
+        return Row(
         children: [
           const NonLogo(size: 24),
           const SizedBox(width: 8),
@@ -97,7 +101,7 @@ class TitleBar extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 210),
+                    constraints: BoxConstraints(maxWidth: narrow ? 96 : 210),
                     child: Text(
                       store.projectName,
                       overflow: TextOverflow.ellipsis,
@@ -115,7 +119,14 @@ class TitleBar extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          Expanded(
+          if (narrow)
+            IconAction(
+              icon: Icons.search,
+              tooltip: '命令 ${modCombo('⌘K')}',
+              onTap: onCommand,
+            )
+          else
+            Expanded(
             flex: 4,
             child: Center(
               child: ConstrainedBox(
@@ -163,7 +174,8 @@ class TitleBar extends StatelessWidget {
                     child: CircularProgressIndicator(strokeWidth: 1.6, color: p.accent),
                   ),
                   const SizedBox(width: 5),
-                  Text(
+                  if (!narrow)
+                    Text(
                     store.agentPhase == 'planning'
                         ? '规划中'
                         : store.agentPhase == 'building'
@@ -208,20 +220,22 @@ class TitleBar extends StatelessWidget {
               _menu(context, 'settings', Icons.tune, '模型与 API Key…', ''),
             ],
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              padding: EdgeInsets.symmetric(horizontal: narrow ? 3 : 6, vertical: 6),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.auto_awesome, size: 12, color: p.accent),
-                  const SizedBox(width: 4),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 150),
-                    child: Text(model?.name ?? '选择模型',
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11, color: p.ink2, fontWeight: FontWeight.w500)),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(formatTokens(model?.context), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                  if (!narrow) ...[
+                    const SizedBox(width: 4),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 150),
+                      child: Text(model?.name ?? '选择模型',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11, color: p.ink2, fontWeight: FontWeight.w500)),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(formatTokens(model?.context), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                  ],
                 ],
               ),
             ),
@@ -238,7 +252,8 @@ class TitleBar extends StatelessWidget {
           ),
           IconAction(icon: Icons.settings_outlined, tooltip: '设置 ${modCombo('⌘,')}', onTap: onSettings),
         ],
-      ),
+        );
+      }),
     );
   }
 

@@ -26,9 +26,9 @@ app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板�
   存量 mp4/3d 自动补扫）；客户端 a2ui_workspace.dart（对话式修改条即
   热更新入口）+ portfolio_view.dart（类型过滤网格/打开直达/移除）；
   registry 第 3 插件 a2ui（⌘7），portfolio 独立视图（主页卡 + 标题栏入口）。
-  v1 质量环 = 结构校验 + WebView onerror 回传；视觉截图（canvas
-  toDataURL）v2。mock 全链冒烟：generate/refine/page/portfolio 三类
-  聚合/delete 全 PASS。
+  v1 质量环 = 结构/外链校验（全内联零外链硬门；服务端在 `</body>` 前注入
+  window.onerror/unhandledrejection → NONA2UI 桥回传，页面 CSP 第二道
+  防线）；视觉截图（canvas toDataURL）v2。
 - **移动客户端（2026-11-16 立项，双层架构）**：ios/android 平台目标已生成
   （iOS debug 构建 38.7s 实证通过；**Android toolchain 缺失**——SDK 未装，
   apk 构建待装后验证）。主页 welcome 加「工作台」插件区（注册表驱动）。

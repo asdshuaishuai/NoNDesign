@@ -8,10 +8,15 @@ import 'core/keys.dart';
 import 'core/store.dart';
 import 'core/theme.dart';
 import 'plugins/registry.dart';
+import 'widgets/command_palette.dart';
 import 'widgets/common.dart';
 import 'widgets/settings_dialog.dart';
 import 'widgets/welcome.dart';
 import 'widgets/workspace.dart';
+
+/// 根级快捷键需要 Navigator 内的 context 才能弹对话框（命令面板/新建/
+/// 打开）；MaterialApp.navigatorKey 是这些全局动作的唯一入口。
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,6 +39,7 @@ class NonApp extends StatelessWidget {
       title: 'NoNDesign',
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: rootMessengerKey,
+      navigatorKey: rootNavigatorKey,
       theme: AppTheme.build(dark: dark),
       // 全局快捷键宿主（真机 CUA 实证：CallbackShortcuts 挂 Workspace 子树
       // 依赖焦点，构建刚结束/无输入焦点时 ⌘2/⌘4 全部无响应）——视图切换
@@ -44,6 +50,21 @@ class NonApp extends StatelessWidget {
           autofocus: true,
           child: CallbackShortcuts(
             bindings: {
+              // workspace 级动作上移根级：插件/作品集视图会早退 Workspace
+              // 的 CallbackShortcuts，⌘N/⌘O/⌘S/⌘Z/⌘K 在这些全屏视图里
+              // 曾全部失联（对应 workspace 内的重复绑定已删除）。
+              modKey(LogicalKeyboardKey.keyK): _rootCommand,
+              modKey(LogicalKeyboardKey.keyS): () {
+                if (!_overlayRouteActive()) store.saveProject();
+              },
+              modKey(LogicalKeyboardKey.keyN): _rootNewProject,
+              modKey(LogicalKeyboardKey.keyO): _rootOpenProject,
+              modKey(LogicalKeyboardKey.keyZ): () {
+                if (!_overlayRouteActive()) undoRedoShortcut(store, redo: false);
+              },
+              modKey(LogicalKeyboardKey.keyZ, shift: true): () {
+                if (!_overlayRouteActive()) undoRedoShortcut(store, redo: true);
+              },
               modKey(LogicalKeyboardKey.digit1): () => store.setView('design'),
               modKey(LogicalKeyboardKey.digit2): () => store.setView('docs'),
               modKey(LogicalKeyboardKey.digit3): () => store.setView('source'),
@@ -58,11 +79,11 @@ class NonApp extends StatelessWidget {
               // 插件视图内可达（配合各插件顶栏返回按钮与 Esc）。
               for (var i = 0; i < pluginRegistry.length && i < pluginDigitKeys.length; i++)
                 modKey(pluginDigitKeys[i]): () => store.setView('plugin:${pluginRegistry[i].id}'),
-              // Esc：仅插件视图生效的返回设计出口（镜像各插件顶栏返回
-              // 按钮）。有对话框/浮层在场（焦点路由非当前路由或本身是
-              // PopupRoute）时不消费——交给浮层自身处理，不劫持对话框。
+              // Esc：插件视图与作品集（均无设计板）的返回设计出口（镜像
+              // 各全屏视图顶栏返回按钮）。有对话框/浮层在场（焦点路由非
+              // 当前路由或本身是 PopupRoute）时不消费——交给浮层自身处理。
               SingleActivator(LogicalKeyboardKey.escape): () {
-                if (!store.view.startsWith('plugin:')) return;
+                if (!(store.view == 'portfolio' || store.view.startsWith('plugin:'))) return;
                 final fctx = FocusManager.instance.primaryFocus?.context;
                 final route = fctx == null ? null : ModalRoute.of(fctx);
                 if (route == null || !route.isCurrent || route is PopupRoute) return;
@@ -83,7 +104,15 @@ class NonApp extends StatelessWidget {
             ? _BootError(message: store.bootError!)
           : !store.ready
               ? const _BootScreen()
-              : store.hasProject
+              // 作品集/插件工作台不依赖项目：无项目启动也必须可路由，
+              // 否则欢迎页卡片与 ⌘5–⌘7 点了不换屏（四个入口全不可达）。
+              // 离线移动端恢复的 docs（api==null）同样走 Workspace：
+              // 否则恢复成功后 hasProject 仍 false，界面停在 Welcome，
+              // 文档虽然恢复进 store 却看不见。
+              : (store.hasProject ||
+                      store.view == 'portfolio' ||
+                      store.view.startsWith('plugin:') ||
+                      (store.api == null && store.view == 'docs'))
                   ? const Workspace()
                   // Builder：回调的 context 必须落在 MaterialApp（Navigator 子树）
                   // 之内——NonApp 自己的 context 在其上层，showDialog/流程入口
@@ -101,6 +130,49 @@ class NonApp extends StatelessWidget {
         ),
     );
   }
+}
+
+/// Navigator 内的 context（Overlay 是 Navigator 的子级）——GlobalKey 挂在
+/// 根 Navigator 上时，currentContext 是 Navigator 自身，位于它之上，
+/// showDialog 的 Navigator.of 会找不到 Navigator；overlay.context 才对。
+BuildContext? _navigatorContext() => rootNavigatorKey.currentState?.overlay?.context;
+
+/// 根级 ⌘K：命令面板需要 Navigator 内 context；有对话框/浮层在场时
+/// 不叠加新面板（与 Esc 的浮层让位语义一致）。
+void _rootCommand() {
+  if (_overlayRouteActive()) return;
+  final ctx = _navigatorContext();
+  if (ctx == null) return;
+  showCommandPalette(
+    ctx,
+    onNewProject: () => showNewProjectFlow(ctx),
+    onOpenPath: (path) => openProjectFlow(ctx, path),
+    onSettings: () => showSettingsDialog(ctx),
+    onShortcuts: () => showShortcutsDialog(ctx),
+  );
+}
+
+void _rootNewProject() {
+  if (_overlayRouteActive()) return;
+  final ctx = _navigatorContext();
+  if (ctx == null) return;
+  showNewProjectFlow(ctx);
+}
+
+void _rootOpenProject() {
+  if (_overlayRouteActive()) return;
+  final ctx = _navigatorContext();
+  if (ctx == null) return;
+  openProjectFlow(ctx, '');
+}
+
+/// 焦点是否落在 PopupRoute（对话框/命令面板）或非当前路由上——根级
+/// CallbackShortcuts 活在 Navigator 之上，不挡就会在对话框里触发
+/// 新建/打开/撤销等全局动作。
+bool _overlayRouteActive() {
+  final fctx = FocusManager.instance.primaryFocus?.context;
+  final route = fctx == null ? null : ModalRoute.of(fctx);
+  return route is PopupRoute || (route != null && !route.isCurrent);
 }
 
 /// 启动画面：品牌化加载动画——logo 呼吸 + 光晕脉动 + 细进度条，
@@ -226,6 +298,7 @@ class _BootError extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    final store = context.read<AppStore>();
     return Scaffold(
       backgroundColor: p.bg,
       body: Center(
@@ -248,6 +321,27 @@ class _BootError extends StatelessWidget {
               const SizedBox(height: 14),
               Text('检查 .venv 依赖与 server/main.py；或设置 NONDESIGN_SERVER 指向已运行的服务。',
                   textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: p.ink4)),
+              const SizedBox(height: 12),
+              // 死屏三出路：重试（改完环境/服务器地址后）、设置（改连接
+              // 桌面地址或模型）、离线继续（只看恢复文档，不碰引擎）。
+              Wrap(
+                spacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  OutlinedButton(
+                    onPressed: () => store.retryBoot(),
+                    child: const Text('重试', style: TextStyle(fontSize: 12)),
+                  ),
+                  TextButton(
+                    onPressed: () => showSettingsDialog(context),
+                    child: const Text('设置', style: TextStyle(fontSize: 12)),
+                  ),
+                  TextButton(
+                    onPressed: () => store.continueOffline(),
+                    child: const Text('离线继续', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
             ],
           ),
         ),

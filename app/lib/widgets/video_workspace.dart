@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -7,7 +6,6 @@ import 'package:provider/provider.dart';
 import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
-import 'common.dart';
 
 /// 轨道 B 客户端面：视频工作台（无声版，用户裁决音轨/旁白暂不做）。
 /// 加载标杆示例（或粘贴 timeline）→ 环②机械对照 → 后台渲染（job 轮询）
@@ -46,6 +44,31 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   AppStore get store => context.read<AppStore>();
 
   @override
+  void initState() {
+    super.initState();
+    // 视图切换即 dispose：示例下标与在飞 job 从设置恢复，回来接回轮询
+    // （旧实现切走就永久丢失渲染进度）。
+    final s = store.settings;
+    _sampleIdx = s.videoSampleIdx.clamp(0, _samples.length - 1);
+    if (s.videoJob.isNotEmpty) {
+      _job = s.videoJob;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (store.api == null) {
+          // 离线恢复的 job 无处查询：直接清掉，不建永久空转轮询。
+          setState(() => _busy = false);
+          store.setVideoState(job: '');
+          return;
+        }
+        setState(() => _busy = true);
+        _pollOnce();
+        _poll?.cancel();
+        _poll = Timer.periodic(const Duration(milliseconds: 1200), (_) => _pollOnce());
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _poll?.cancel();
     super.dispose();
@@ -71,6 +94,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           _job = null;
           _previewCount = 0;
         });
+        store.setVideoState(job: '');
         _runReview();
       } else {
         _toast('加载失败', '${res['detail']}');
@@ -107,6 +131,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       if (!mounted) return; // 在飞期间切走视图：dispose 已取消旧定时器，不得再建新轮询
       if (res['ok'] == true) {
         _job = res['job'] as String?;
+        if (_job != null) store.setVideoState(job: _job); // 视图切走可接回轮询
         _poll?.cancel();
         _poll = Timer.periodic(const Duration(milliseconds: 1200), (_) => _pollOnce());
       } else {
@@ -121,26 +146,49 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
 
   void _pollOnce() async {
     final api = store.api;
-    if (api == null || _job == null) return;
+    if (api == null) {
+      // 离线/未连接：不留下永久转圈（恢复的 job 只在有服务器时能接回）。
+      if (mounted && _busy) setState(() => _busy = false);
+      return;
+    }
+    final job = _job;
+    if (job == null) return;
     try {
-      final res = await api.getJson('/video/render/status?job=$_job');
-      if (!mounted) return;
+      final res = await api.getJson('/video/render/status?job=$job');
+      if (!mounted || _job != job) return; // 旧回调/已清 job：丢弃迟到结果
+      // 未知 job（服务器随 App 重启，任务只在进程内存里 → 404）或任何
+      // 非 ok 响应都视为终态：否则每 1.2s 轮询一个永远不存在的 job，
+      // _busy 永不清、『加载示例/渲染』永久禁点（工作台死端）。
+      if (res['ok'] != true || res['status'] == 404) {
+        _poll?.cancel();
+        setState(() {
+          _job = null;
+          _jobState = null;
+          _busy = false;
+          _previewCount = 0;
+        });
+        store.setVideoState(job: ''); // 清持久化的失效 job
+        _toast('渲染任务已失效', '服务器重启后旧任务不再存在，请重新渲染。');
+        return;
+      }
       setState(() => _jobState = res);
       if (res['status'] == 'done' || res['status'] == 'failed') {
         _poll?.cancel();
-        if (mounted) {
-          setState(() {
-            _busy = false;
-            _previewCount = (res['frames'] as num?)?.toInt() ?? 0;
-          });
-        }
+        setState(() {
+          _job = null;
+          _busy = false;
+          _previewCount = (res['frames'] as num?)?.toInt() ?? 0;
+        });
+        store.setVideoState(job: ''); // 终态不再持久化在飞 job
         if (res['status'] == 'done') {
           _toast('渲染完成（$_previewCount 帧）', '${res['mp4']}');
         } else {
           _toast('渲染失败', (res['log'] ?? '').toString().split('\n').last);
         }
       }
-    } catch (_) {}
+    } catch (_) {
+      // 网络抖动不视为终态：保留轮询，服务器恢复后可继续。
+    }
   }
 
   void _toast(String title, String detail) {
@@ -168,24 +216,38 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           height: 46,
           decoration: BoxDecoration(color: p.bgElevated, border: Border(bottom: BorderSide(color: p.line))),
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(children: [
+          // 窄屏断点：副标题（长串技术管线）隐藏、返回钮压缩，标题省略号；
+          // 390 宽曾溢出 241px。
+          child: LayoutBuilder(builder: (context, constraints) {
+            final narrow = constraints.maxWidth < 700;
+            return Row(children: [
             // 插件视图全屏接管的可见出口（镜像 PlayView 的返回画布）。
             IconButton(
               icon: const Icon(Icons.arrow_back, size: 18),
               tooltip: '返回设计 ${modCombo('⌘1')}',
               color: p.ink2,
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
               onPressed: () => store.setView('design'),
             ),
             const SizedBox(width: 4),
             Icon(Icons.movie_outlined, size: 17, color: p.accent),
             const SizedBox(width: 8),
-            Text('视频工作台', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: narrow ? 110 : 400),
+              child: Text('视频工作台',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
+            ),
             const SizedBox(width: 14),
-            Text('无声版 · timeline → 逐帧 SVG → resvg → ffmpeg',
-                style: TextStyle(fontSize: 11, color: p.ink4)),
+            if (!narrow)
+              Text('无声版 · timeline → 逐帧 SVG → resvg → ffmpeg',
+                  style: TextStyle(fontSize: 11, color: p.ink4)),
             const Spacer(),
             if (_busy) SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 1.8, color: p.accent)),
-          ]),
+          ]);
+          }),
         ),
         Expanded(
           child: Row(children: [
@@ -201,7 +263,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: InkWell(
-                      onTap: () => setState(() => _sampleIdx = i),
+                      onTap: () {
+                        setState(() => _sampleIdx = i);
+                        store.setVideoState(sampleIdx: i);
+                      },
                       borderRadius: BorderRadius.circular(8),
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),

@@ -6,12 +6,25 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart' hide Flow;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ai_sdk_dart/ai_sdk_dart.dart' show CancellationToken;
 
 import 'api.dart';
 import 'mobile_agent.dart';
 import 'models.dart';
 
 final GlobalKey<ScaffoldMessengerState> rootMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
+/// 离线移动端的端点回退表（models.json 快照不可用时至少让默认服务商可用）。
+const _builtInBaseUrls = <String, String>{
+  'openai': 'https://api.openai.com/v1',
+  'deepseek': 'https://api.deepseek.com',
+  'zhipuai': 'https://open.bigmodel.cn/api/paas/v4',
+  'moonshotai-cn': 'https://api.moonshot.cn/v1',
+  'moonshotai': 'https://api.moonshot.ai/v1',
+  'minimax-cn': 'https://api.minimax.cn/v1',
+  'minimax': 'https://api.minimax.io/v1',
+  'stepfun': 'https://api.stepfun.com/v1',
+};
 
 String _baseName(String path) {
   final name = path.split(RegExp(r'[\\/]')).last;
@@ -110,6 +123,8 @@ class AppStore extends ChangeNotifier {
   /// 最近一次成功渲染的 preview canonical（run 期间的实时画布进度）。
   String? _liveCanonical;
   Timer? _recoveryTimer;
+  /// 移动直连在飞请求的本地取消令牌（无服务器 /agent/cancel 可调）。
+  CancellationToken? _mobileCancel;
 
   /// 在飞 op 串行队列：HTTP 往返窗口内第二个 op 若不等前一条 _commit，
   /// 会以陈旧 mbt 为基底提交并覆盖（丢改动——缩放松手两连发×方向键×
@@ -143,21 +158,25 @@ class AppStore extends ChangeNotifier {
   List<Flow> get flows => render.flows;
 
   Future<void> boot() async {
+    SharedPreferences? prefs;
     try {
+      // 先读设置、再拉起服务器：manualBaseUrl（「连接桌面」）必须赶在
+      // launch 之前生效——旧顺序先 launch 后读盘，设置里填的地址永远
+      // 赶不上本次启动（移动端直接恒失败）。
+      prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getString('nondesign.settings');
+      if (stored != null) {
+        try {
+          settings = AppSettings.fromJson(Map<String, dynamic>.from(jsonDecode(stored) as Map));
+        } catch (_) {}
+      }
+      ServerLauncher.manualBaseUrl = settings.serverUrl;
       _server = await ServerLauncher.launch();
       api = NoNDesignApi(_server!.baseUrl);
       final modelsRaw = await api!.models();
       final snapshot = modelsRaw['snapshot'];
       if (snapshot is Map) {
         registry = ModelRegistry.fromJson(Map<String, dynamic>.from(snapshot));
-      }
-      final prefs = await SharedPreferences.getInstance();
-      final stored = prefs.getString('nondesign.settings');
-      if (stored != null) {
-        try {
-          settings = AppSettings.fromJson(Map<String, dynamic>.from(jsonDecode(stored) as Map));
-          ServerLauncher.manualBaseUrl = settings.serverUrl; // 连接桌面模式（移动端）
-        } catch (_) {}
       }
       final m = model;
       if (m == null) {
@@ -193,10 +212,47 @@ class AppStore extends ChangeNotifier {
       _recoveryTimer = Timer.periodic(const Duration(seconds: 20), (_) => _persistRecovery());
       notifyListeners();
     } catch (e) {
+      // 移动端没有 server/main.py，也无法 spawn Python：launch 失败是
+      // 正常形态（连接桌面 / PLAN 直连二选一），不能把用户钉死在错误
+      // 死屏——降级为离线就绪，api 依赖的加载全部跳过。
+      if ((Platform.isIOS || Platform.isAndroid) && _server == null) {
+        api = null;
+        bootError = null;
+        if (prefs != null) recent = _loadRecent(prefs);
+        await _loadRecovery();
+        ready = true;
+        _recoveryTimer ??= Timer.periodic(const Duration(seconds: 20), (_) => _persistRecovery());
+        notifyListeners();
+        return;
+      }
       bootError = e.toString();
       ready = false;
       notifyListeners();
     }
+  }
+
+  /// 启动失败后的「重试」：清掉半残实例再走一遍 boot（设置已落盘，
+  /// 用户可在错误页先改服务器地址）。
+  Future<void> retryBoot() async {
+    _server?.dispose();
+    _server = null;
+    api = null;
+    bootError = null;
+    ready = false;
+    notifyListeners();
+    await boot();
+  }
+
+  /// 启动失败后的「离线继续」：桌面保留错误提示，这里只服务愿意在无
+  /// 引擎条件下查看恢复文档的场景。
+  Future<void> continueOffline() async {
+    api = null;
+    bootError = null;
+    ready = true;
+    notifyListeners();
+    await _loadRecovery();
+    _recoveryTimer ??= Timer.periodic(const Duration(seconds: 20), (_) => _persistRecovery());
+    notifyListeners();
   }
 
   /// Discover DDPs the server can see: the workspace directory reported by
@@ -267,6 +323,8 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> saveSettings() async {
+    // 连接桌面地址与持久化同源：设置面板保存后立刻对下一次 launch 生效。
+    ServerLauncher.manualBaseUrl = settings.serverUrl;
     final encoded = jsonEncode(settings.toJson());
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('nondesign.settings', encoded);
@@ -290,6 +348,36 @@ class AppStore extends ChangeNotifier {
   /// （工作台视图切换即 dispose，内存态不保活）。
   void setThreeProjectName(String name) {
     settings.threeProjectName = name;
+    saveSettings();
+    notifyListeners();
+  }
+
+  /// A2UI 工作台当前应用名（'' = 无）：同 threeProjectName，切走后回来
+  /// 仍停在原应用并自动重挂载。
+  void setA2uiApp(String name) {
+    settings.a2uiApp = name;
+    saveSettings();
+    notifyListeners();
+  }
+
+  /// 视频工作台：示例下标 + 渲染 job（回来可重新接回轮询）。
+  void setVideoState({int? sampleIdx, String? job}) {
+    if (sampleIdx != null) settings.videoSampleIdx = sampleIdx;
+    if (job != null) settings.videoJob = job;
+    saveSettings();
+    notifyListeners();
+  }
+
+  /// 3D 规范手编草稿（按项目名）：未保存的编辑跨视图保留。
+  String? threeSpecDraft(String project) => settings.threeSpecDrafts[project];
+
+  void setThreeSpecDraft(String project, String? draft) {
+    if (project.isEmpty) return;
+    if (draft == null || draft.isEmpty) {
+      settings.threeSpecDrafts.remove(project);
+    } else {
+      settings.threeSpecDrafts[project] = draft;
+    }
     saveSettings();
     notifyListeners();
   }
@@ -1268,13 +1356,20 @@ class AppStore extends ChangeNotifier {
     if (runId == null || !agentBusy) return;
     agentPhase = 'cancelling';
     notifyListeners();
+    if (api == null) {
+      // 移动直连：没有 /agent/cancel，取消本地 SDK 在飞请求（token 透传
+      // 到 streamText 的 abortSignal）。
+      _mobileCancel?.cancel();
+      _toast('正在停止', '移动直连请求已中断。');
+      return;
+    }
     await api?.cancelAgent(runId!);
     _toast('正在停止', '当前这一步结束后生效。');
   }
 
   /// PLAN 移动直连：ai_sdk_dart 本地循环。事件面最小对齐（user 行/notes/
   /// 文档落盘/终态 toast），无 RSI/画布（引擎在移动端不可用）。
-  Future<bool> _runMobilePlan(String instruction) async {
+  Future<bool> _runMobilePlan(String instruction, {String? baseUrl, String? model}) async {
     runId = DateTime.now().microsecondsSinceEpoch % 0x7fffffff;
     agentBusy = true;
     agentPhase = 'planning';
@@ -1283,25 +1378,42 @@ class AppStore extends ChangeNotifier {
     agentError = null;
     streamText = '';
     liveDocText = '';
+    _mobileCancel = CancellationToken();
     timeline.add(TimelineEntry.user(instruction));
     notifyListeners();
     try {
       final r = await runMobilePlan(
         instruction: instruction,
-        model: settings.modelId,
-        baseUrl: settings.baseUrl,
+        model: model ?? settings.modelId,
+        baseUrl: baseUrl ?? settings.baseUrl,
         apiKey: settings.apiKey,
+        abortSignal: _mobileCancel,
+        timeout: const Duration(minutes: 10),
         onNote: (m) {
           timeline.add(TimelineEntry.note('移动直连', m));
           notifyListeners();
         },
       );
       if (r.ok) {
+        // 移动 PLAN 成功必须建立最小项目态：否则 hasProject 仍 false，
+        // 主界面停在 Welcome、_persistRecovery 早退，文档既看不见也救不回。
+        if (!hasProject) {
+          hasProject = true;
+          final cleaned = instruction
+              .replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), '')
+              .trim();
+          projectName = cleaned.length > 18 ? cleaned.substring(0, 18) : (cleaned.isEmpty ? 'untitled' : cleaned);
+          mbt = '';
+          render = RenderEnvelope.empty();
+          previewRender = null;
+          activeBoard = null;
+          dirty = true;
+        }
         docs.prd = r.prd;
         if (r.ui.isNotEmpty) docs.ui = r.ui;
         view = 'docs';
         docsTab = 'prd';
-        unawaited(_persistRecovery());
+        unawaited(_persistRecovery(force: true));
         _toast('文档已生成', 'PRD${r.ui.isNotEmpty ? ' + UI 说明' : ''}（${r.prd.length} 字）');
       } else {
         _toast('无文档产出', '模型未调用 write_doc——重试或换模型。');
@@ -1312,6 +1424,7 @@ class AppStore extends ChangeNotifier {
       _toast('直连失败', e.toString());
       return false;
     } finally {
+      _mobileCancel = null;
       agentBusy = false;
       agentPhase = '';
       notifyListeners();
@@ -1326,7 +1439,26 @@ class AppStore extends ChangeNotifier {
         _toast('先配置模型', '独立文档模式需要 API Key（或连接桌面服务器）。');
         return false;
       }
-      return _runMobilePlan(instruction);
+      final selected = model;
+      if (selected != null) {
+        if (!selected.toolCall) {
+          _toast('该模型不支持工具调用', 'Agent 需要 function calling。');
+          return false;
+        }
+        if (selected.protocol != 'openai') {
+          _toast('非 OpenAI 兼容协议不可用', '请选择 OpenAI 兼容端点（MiniMax 亦提供 /v1）。');
+          return false;
+        }
+      }
+      var base = settings.baseUrl.trim();
+      if (base.isEmpty) base = selected?.baseUrl.trim() ?? '';
+      if (base.isEmpty) base = _builtInBaseUrls[settings.providerId] ?? _builtInBaseUrls['openai']!;
+      if (settings.baseUrl.trim().isEmpty) {
+        settings.baseUrl = base; // 空端点曾让 OpenAIProvider 发到空 baseUrl 静默失败
+        unawaited(saveSettings());
+        _toast('已回退默认端点', base);
+      }
+      return _runMobilePlan(instruction, baseUrl: base, model: selected?.id ?? settings.modelId);
     }
     if (api == null || agentBusy) return false;
     if (settings.apiKey.trim().isEmpty) {
@@ -1649,13 +1781,23 @@ class AppStore extends ChangeNotifier {
   Future<void> _persistRecovery({bool force = false}) async {
     // 运行期间（agentBusy）即使未置 dirty 也要写：中途崩溃时文档
     //（doc_written）与画布进度（preview canonical）都靠这份快照恢复。
-    if (!hasProject || (!dirty && !agentBusy && !force)) return;
+    // 移动端（api==null）没有画布/项目概念：只要 docs 有内容就落
+    // docs-only recovery（hasProject 硬门曾让移动 PLAN 文档永远救不回）。
+    final docsOnly = api == null && !hasProject;
+    if (!force && !agentBusy) {
+      if (docsOnly) {
+        if (!docs.hasContent) return;
+      } else if (!hasProject || !dirty) {
+        return;
+      }
+    }
     try {
       final dir = '${Platform.environment['HOME']}/.nondesign';
       await Directory(dir).create(recursive: true);
       await File('$dir/recovery.json').writeAsString(jsonEncode({
         'mbt': mbt,
         'docs': docs.toJson(),
+        'view': view,
         'name': projectName,
         'path': projectPath,
         'ts': DateTime.now().millisecondsSinceEpoch,
@@ -1683,8 +1825,19 @@ class AppStore extends ChangeNotifier {
 
   Future<void> restoreRecovery() async {
     final rec = recovery;
-    if (rec == null || api == null) return;
+    if (rec == null) return;
     try {
+      // 移动端离线（api==null）：只恢复文档与视图——没有引擎可 render。
+      if (api == null) {
+        docs = Docs.fromJson(rec['docs']);
+        view = 'docs';
+        docsTab = 'prd';
+        recovery = null;
+        await _clearRecovery();
+        notifyListeners();
+        _toast('已恢复未保存的文档', '移动直连生成的内容已回到文档视图。');
+        return;
+      }
       // 中断运行优先用 partial canonical（构建进度），无则回落已提交 mbt。
       final run = rec['run'];
       final partial = (run is Map ? (run['partialMbt'] ?? '') : '').toString();

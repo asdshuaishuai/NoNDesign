@@ -28,6 +28,8 @@ class MobilePlanResult {
 }
 
 /// PLAN 直连：一句话 → PRD + UI 说明（两份 write_doc，doc_not_written 语义同服）。
+/// [abortSignal]/[timeout] 透传 ai_sdk_dart：移动端无服务器取消端点，
+/// 只能靠本地 token 中断在飞请求。
 Future<MobilePlanResult> runMobilePlan({
   required String instruction,
   required String model,
@@ -35,6 +37,8 @@ Future<MobilePlanResult> runMobilePlan({
   required String apiKey,
   void Function(String note)? onNote,
   int maxSteps = 12,
+  CancellationToken? abortSignal,
+  Duration? timeout,
 }) async {
   String? prd;
   String? ui;
@@ -80,6 +84,8 @@ Future<MobilePlanResult> runMobilePlan({
       model: provider.call(model),
       maxSteps: maxSteps,
       tools: {'write_doc': writeDoc},
+      abortSignal: abortSignal,
+      timeout: timeout == null ? null : TimeoutConfiguration(total: timeout),
       prompt:
           '你是 NoNDesign 的产品设计师。根据用户需求依次完成两份文档：\n'
           '1) write_doc(kind="prd")：产品需求文档（Markdown：目标用户、核心流程、功能列表、非目标）。\n'

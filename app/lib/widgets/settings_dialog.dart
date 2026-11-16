@@ -47,6 +47,14 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     _loadAcpAgents();
   }
 
+  /// 连接桌面地址：保存后同步 manualBaseUrl（下一次 launch 立即使用）。
+  Future<void> _saveServerUrl(String value) async {
+    final store = context.read<AppStore>();
+    store.settings.serverUrl = value.trim();
+    ServerLauncher.manualBaseUrl = store.settings.serverUrl;
+    await store.saveSettings();
+  }
+
   /// 显式保存按钮（用户点名）：把步数输入框的当前值提交并给出 ✓ 反馈。
   Future<void> _saveSteps() async {
     final store = context.read<AppStore>();
@@ -261,6 +269,18 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               store.settings.apiKey = _keyController.text.trim();
               await store.saveSettings();
             },
+          )),
+          const SizedBox(height: 12),
+          // 手机「连接桌面」的唯一输入口：旧实现控制器建了却从未绑定，
+          // 地址无处填写 → launch 永远连不上桌面服务器。
+          _labeled(context, '桌面服务器（手机连接桌面模式）', TextField(
+            controller: _serverUrlController,
+            style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink2),
+            decoration: const InputDecoration(
+              hintText: 'http://192.168.1.5:8799（留空 = 本机自动拉起 / PLAN 直连）',
+            ),
+            onSubmitted: _saveServerUrl,
+            onTapOutside: (_) => _saveServerUrl(_serverUrlController.text),
           )),
           const SizedBox(height: 12),
           Row(

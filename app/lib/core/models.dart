@@ -447,6 +447,13 @@ class AppSettings {
   /// 3D 工作台当前项目名（'' = 无）。工作台视图切换会 dispose 状态，
   /// 项目名持久化让「切走再回来」续接同一项目（跨会话亦然）。
   String threeProjectName;
+  /// A2UI 工作台当前应用名（'' = 无）：工作台 dispose 后回来仍停在原应用。
+  String a2uiApp;
+  /// 视频工作台：当前示例下标 + 在飞/最近的渲染 job（回来可接回轮询）。
+  int videoSampleIdx;
+  String videoJob;
+  /// 3D 规范手编草稿（项目名 → JSON 文本）：未保存的编辑跨视图保留。
+  Map<String, String> threeSpecDrafts;
   /// 「连接桌面」模式：桌面端服务器地址（如 http://192.168.1.5:8799）。
   /// 非空时 launch 优先连接它（移动端无法本地跑 Python 服务器）；
   /// 留空且本地 spawn 失败时回落 PLAN 直连（Dart AI SDK）。
@@ -463,8 +470,12 @@ class AppSettings {
     this.acpAgentId,
     this.acpAgentName,
     this.threeProjectName = '',
+    this.a2uiApp = '',
+    this.videoSampleIdx = 0,
+    this.videoJob = '',
+    Map<String, String>? threeSpecDrafts,
     this.serverUrl = '',
-  });
+  }) : threeSpecDrafts = threeSpecDrafts ?? {};
 
   Map<String, dynamic> toJson() => {
         'providerId': providerId,
@@ -477,6 +488,10 @@ class AppSettings {
         'acpAgentId': acpAgentId,
         'acpAgentName': acpAgentName,
         'threeProjectName': threeProjectName,
+        'a2uiApp': a2uiApp,
+        'videoSampleIdx': videoSampleIdx,
+        'videoJob': videoJob,
+        'threeSpecDrafts': threeSpecDrafts,
         'serverUrl': serverUrl,
       };
 
@@ -491,6 +506,14 @@ class AppSettings {
         acpAgentId: m['acpAgentId']?.toString(),
         acpAgentName: m['acpAgentName']?.toString(),
         threeProjectName: (m['threeProjectName'] ?? '').toString(),
+        a2uiApp: (m['a2uiApp'] ?? '').toString(),
+        videoSampleIdx: (m['videoSampleIdx'] is num) ? (m['videoSampleIdx'] as num).toInt() : 0,
+        videoJob: (m['videoJob'] ?? '').toString(),
+        threeSpecDrafts: (m['threeSpecDrafts'] is Map)
+            ? Map<String, String>.fromEntries(
+                (m['threeSpecDrafts'] as Map).entries
+                    .map((e) => MapEntry(e.key.toString(), e.value.toString())))
+            : <String, String>{},
         serverUrl: (m['serverUrl'] ?? '').toString(),
       );
 }

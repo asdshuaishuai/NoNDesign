@@ -682,6 +682,9 @@ def _a2ui_guard(fn, *args):
         return fn(*args)
     except a2ui.A2uiError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (OSError, ValueError) as e:
+        # 文件系统/JSON 意外错误不裸 500：给可诊断的明确 detail。
+        raise HTTPException(status_code=500, detail=f"a2ui_io_error: {e}")
 
 
 async def _a2ui_guard_async(coro_fn, *args):
@@ -689,6 +692,18 @@ async def _a2ui_guard_async(coro_fn, *args):
         return await coro_fn(*args)
     except a2ui.A2uiError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (OSError, ValueError) as e:
+        raise HTTPException(status_code=500, detail=f"a2ui_io_error: {e}")
+
+
+# 生成页是本机服务同源执行的自包含 HTML：CSP 只放行内联脚本/样式与
+# data:/blob: 资源，禁一切网络回连与表单/框架嵌入（外链已被 _html_ok 拒绝，
+# CSP 是第二道防线）。
+_A2UI_PAGE_CSP = (
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+    "img-src data: blob:; font-src data:; media-src data: blob:; "
+    "connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+)
 
 
 @app.post("/a2ui/generate")
@@ -706,8 +721,9 @@ async def a2ui_refine(req: A2uiRefineRequest) -> dict[str, Any]:
 
 
 @app.get("/a2ui/page/{name}", response_class=HTMLResponse)
-async def a2ui_page(name: str) -> str:
-    return _a2ui_guard(a2ui.page_html, name)
+async def a2ui_page(name: str) -> HTMLResponse:
+    html = _a2ui_guard(a2ui.page_html, name)
+    return HTMLResponse(html, headers={"Content-Security-Policy": _A2UI_PAGE_CSP})
 
 
 @app.get("/a2ui/list")
@@ -717,7 +733,7 @@ async def a2ui_list() -> dict[str, Any]:
 
 @app.post("/a2ui/delete")
 async def a2ui_delete(req: A2uiDeleteRequest) -> dict[str, Any]:
-    return _a2ui_guard(a2ui.delete_app, req.name)
+    return await _a2ui_guard_async(a2ui.delete_app, req.name)
 
 
 @app.get("/portfolio")

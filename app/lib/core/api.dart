@@ -165,15 +165,19 @@ class NoNDesignApi {
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
-  Future<Map<String, dynamic>> getJson(String path) async {
-    final res = await _client.get(_uri(path)).timeout(const Duration(seconds: 20));
+  Future<Map<String, dynamic>> getJson(String path, {Duration timeout = const Duration(seconds: 20)}) async {
+    final res = await _client.get(_uri(path)).timeout(timeout);
     return _decode(res);
   }
 
-  Future<Map<String, dynamic>> postJson(String path, Map<String, dynamic> body) async {
+  Future<Map<String, dynamic>> postJson(
+    String path,
+    Map<String, dynamic> body, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
     final res = await _client
         .post(_uri(path), headers: {'content-type': 'application/json'}, body: jsonEncode(body))
-        .timeout(const Duration(seconds: 30));
+        .timeout(timeout);
     return _decode(res);
   }
 
@@ -230,11 +234,30 @@ class NoNDesignApi {
   }
 
   Map<String, dynamic> _decode(http.Response res) {
-    if (res.body.isEmpty) return {'ok': false, 'error': 'empty_response'};
-    final value = jsonDecode(res.body);
+    dynamic value;
+    if (res.body.isNotEmpty) {
+      try {
+        value = jsonDecode(res.body);
+      } catch (_) {
+        value = null; // 非 JSON body（代理错误页/纯文本 500）不抛 FormatException
+      }
+    }
+    final okStatus = res.statusCode >= 200 && res.statusCode < 300;
+    if (!okStatus) {
+      String detail;
+      if (value is Map) {
+        detail = (value['detail'] ?? value['error'] ?? res.body).toString();
+      } else {
+        final text = res.body.trim();
+        detail = text.isEmpty ? 'HTTP ${res.statusCode}' : text;
+      }
+      if (detail.length > 500) detail = '${detail.substring(0, 500)}…';
+      return {'ok': false, 'status': res.statusCode, 'detail': detail};
+    }
     if (value is Map<String, dynamic>) return value;
     if (value is Map) return Map<String, dynamic>.from(value);
-    return {'ok': false, 'error': 'unexpected_response'};
+    if (value == null && res.body.isEmpty) return {'ok': false, 'error': 'empty_response'};
+    return {'ok': false, 'error': 'unexpected_response', 'status': res.statusCode};
   }
 
   Future<Map<String, dynamic>> health() => getJson('/health');
@@ -298,7 +321,7 @@ class NoNDesignApi {
   }) => postJson('/a2ui/generate', {
         'name': name, 'brief': brief, 'model': model,
         'base_url': baseUrl, 'api_key': apiKey,
-      });
+      }, timeout: const Duration(minutes: 10));
 
   Future<Map<String, dynamic>> a2uiRefine({
     required String name, required String instruction,
@@ -306,7 +329,7 @@ class NoNDesignApi {
   }) => postJson('/a2ui/refine', {
         'name': name, 'instruction': instruction, 'model': model,
         'base_url': baseUrl, 'api_key': apiKey,
-      });
+      }, timeout: const Duration(minutes: 10));
 
   Future<Map<String, dynamic>> a2uiList() => getJson('/a2ui/list');
   Future<Map<String, dynamic>> a2uiDelete(String name) =>
