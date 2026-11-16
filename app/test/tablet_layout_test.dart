@@ -12,6 +12,7 @@ import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/widgets/hotapp_workspace.dart';
 import 'package:nondesign/widgets/portfolio_view.dart';
 import 'package:nondesign/widgets/settings_dialog.dart';
+import 'package:nondesign/widgets/three_workspace.dart';
 import 'package:nondesign/widgets/video_workspace.dart';
 import 'package:nondesign/widgets/welcome.dart';
 import 'package:nondesign/widgets/workspace.dart';
@@ -87,6 +88,52 @@ void main() {
     await _pumpAt(tester, const Scaffold(body: PortfolioView()), _tabletPortrait);
   });
 
+  testWidgets('3D workspace uses the two-row chrome on iPad portrait', (tester) async {
+    final store = _store()..settings.threeProjectName = 'demo';
+    await _pumpAt(tester, const Scaffold(body: ThreeWorkspace()), _tabletPortrait, store: store);
+    expect(find.byKey(const ValueKey('three-header-portrait')), findsOneWidget);
+    expect(find.byKey(const ValueKey('three-header-landscape')), findsNothing);
+    expect(find.byKey(const ValueKey('three-body-split')), findsNothing);
+  });
+
+  testWidgets('3D workspace fits iPad 11 portrait', (tester) async {
+    final store = _store()..settings.threeProjectName = 'saturn-demo';
+    await _pumpAt(tester, const Scaffold(body: ThreeWorkspace()), const Size(834, 1194), store: store);
+    expect(find.byKey(const ValueKey('three-header-portrait')), findsOneWidget);
+    expect(find.text('项目'), findsOneWidget);
+    expect(find.text('生成当前层'), findsOneWidget);
+  });
+
+  testWidgets('iPad 11 landscape keeps full action labels and split side pane', (tester) async {
+    final store = _store()..settings.threeProjectName = 'saturn-demo';
+    await _pumpAt(tester, const Scaffold(body: ThreeWorkspace()), const Size(1194, 834), store: store);
+    expect(find.byKey(const ValueKey('three-header-landscape')), findsOneWidget);
+    expect(find.byKey(const ValueKey('three-header-portrait')), findsNothing);
+    expect(find.text('截图'), findsOneWidget);
+    expect(find.text('源码'), findsOneWidget);
+    expect(find.byTooltip('3D 操作'), findsNothing);
+
+    await tester.tap(find.text('源码'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('three-body-split')), findsOneWidget);
+  });
+
+  testWidgets('3D workspace uses one-row chrome + side pane on iPad landscape', (tester) async {
+    final store = _store()..settings.threeProjectName = 'demo';
+    await _pumpAt(tester, const Scaffold(body: ThreeWorkspace()), _tabletLandscape, store: store);
+    expect(find.byKey(const ValueKey('three-header-landscape')), findsOneWidget);
+    expect(find.byKey(const ValueKey('three-header-portrait')), findsNothing);
+    expect(find.text('项目'), findsOneWidget);
+    expect(find.text('生成当前层'), findsOneWidget);
+
+    // 横屏下源码/规范是预览侧栏，不是把预览整块替换掉。
+    await tester.tap(find.byTooltip('3D 操作'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('源码（侧栏）'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('three-body-split')), findsOneWidget);
+  });
+
   testWidgets('settings dialog fits iPad portrait', (tester) async {
     tester.view.physicalSize = _tabletPortrait;
     tester.view.devicePixelRatio = 1.0;
@@ -113,6 +160,83 @@ void main() {
     expect(find.text('模型与端点'), findsOneWidget);
     // iPad 同样属于移动端：第三方智能体入口隐藏。
     expect(find.text('外部智能体'), findsNothing);
+  });
+
+  testWidgets('settings uses top tabs on iPad portrait', (tester) async {
+    tester.view.physicalSize = _tabletPortrait;
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = _store();
+    await tester.pumpWidget(_wrap(
+      store,
+      Builder(builder: (context) {
+        return Scaffold(
+          body: Center(
+            child: ElevatedButton(
+              onPressed: () => showSettingsDialog(context),
+              child: const Text('open'),
+            ),
+          ),
+        );
+      }),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('settings-topnav')), findsOneWidget);
+    expect(find.byKey(const ValueKey('settings-rail')), findsNothing);
+  });
+
+  testWidgets('settings uses the side rail on iPad landscape', (tester) async {
+    tester.view.physicalSize = _tabletLandscape;
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = _store();
+    await tester.pumpWidget(_wrap(
+      store,
+      Builder(builder: (context) {
+        return Scaffold(
+          body: Center(
+            child: ElevatedButton(
+              onPressed: () => showSettingsDialog(context),
+              child: const Text('open'),
+            ),
+          ),
+        );
+      }),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('settings-rail')), findsOneWidget);
+    expect(find.byKey(const ValueKey('settings-topnav')), findsNothing);
+  });
+
+  testWidgets('settings stays full-screen on phone landscape', (tester) async {
+    tester.view.physicalSize = const Size(844, 390);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = _store();
+    await tester.pumpWidget(_wrap(
+      store,
+      Builder(builder: (context) {
+        return Scaffold(
+          body: Center(
+            child: ElevatedButton(
+              onPressed: () => showSettingsDialog(context),
+              child: const Text('open'),
+            ),
+          ),
+        );
+      }),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('settings-topnav')), findsOneWidget);
   });
 
   testWidgets('desktop settings keeps the external agent tab', (tester) async {

@@ -401,135 +401,259 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     final p = context.palette;
     final current = _state?['current'] as String? ?? '';
     final passes = (_state?['passes'] as List?)?.cast<Map>() ?? const [];
-    return Column(
-      children: [
-        // 顶栏：pass 状态机 + 操作
-        Container(
-          height: 46,
-          decoration: BoxDecoration(color: p.bgElevated, border: Border(bottom: BorderSide(color: p.line))),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          // 窄屏断点：pass chips 隐藏、标题省略号、九个动作收进溢出菜单
-          // （390 宽曾溢出 528px，手机端右侧按钮全部不可见）。
-          child: LayoutBuilder(builder: (context, constraints) {
-            final narrow = constraints.maxWidth < 700;
-            return Row(children: [
-            // 插件视图全屏接管的可见出口（镜像 PlayView 的返回画布）。
-            IconButton(
-              icon: const Icon(Icons.arrow_back, size: 18),
-              tooltip: '返回设计 ${modCombo('⌘1')}',
-              color: p.ink2,
-              visualDensity: VisualDensity.compact,
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-              onPressed: () => store.setView('design'),
+    final size = MediaQuery.sizeOf(context);
+    return LayoutBuilder(builder: (context, constraints) {
+      final width = constraints.maxWidth;
+      final phone = width < 700;
+      // iPad 竖屏（及窄高窗口）走双行工具栏：状态一行、动作一行，
+      // 动作行横向滚动；横屏/桌面单行，主操作保留文字，次操作收进菜单。
+      final padPortrait = !phone && width < 1100 && size.height >= size.width;
+      return Column(children: [
+        _header(context, p, current, passes,
+            width: width, phone: phone, padPortrait: padPortrait),
+        Expanded(child: _body(context, p, width: width)),
+      ]);
+    });
+  }
+
+  Widget _header(BuildContext context, NonPalette p, String current, List<Map> passes,
+      {required double width, required bool phone, required bool padPortrait}) {
+    final decoration = BoxDecoration(
+        color: p.bgElevated, border: Border(bottom: BorderSide(color: p.line)));
+    if (phone) {
+      return Container(
+        key: const ValueKey('three-header-phone'),
+        height: 46,
+        decoration: decoration,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(children: [
+          _backButton(p),
+          ..._titleBits(p, 110),
+          const Spacer(),
+          if (_busy) ..._busyBits(p),
+          _menuButton(context, p, landscape: false),
+        ]),
+      );
+    }
+    if (padPortrait) {
+      return Container(
+        key: const ValueKey('three-header-portrait'),
+        decoration: decoration,
+        child: Column(children: [
+          SizedBox(
+            height: 44,
+            child: Row(children: [
+              Padding(padding: const EdgeInsets.only(left: 8), child: _backButton(p)),
+              ..._titleBits(p, 230),
+              const SizedBox(width: 10),
+              Expanded(
+                child: passes.isEmpty ? const SizedBox.shrink() : _passScroll(p, current, passes),
+              ),
+              if (_busy) ..._busyBits(p),
+              const SizedBox(width: 8),
+            ]),
+          ),
+          Container(
+            height: 44,
+            decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(children: [
+                ..._primaryActions(p, includeAll: true),
+                ..._faceActions(p),
+              ]),
             ),
-            const SizedBox(width: 4),
-            Icon(Icons.view_in_ar_outlined, size: 17, color: p.accent),
-            const SizedBox(width: 8),
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: narrow ? 110 : 400),
-              child: Text(_project ?? '3D 工作台',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
-            ),
-            if (!narrow) ...[
-              const SizedBox(width: 14),
-              if (passes.isNotEmpty)
-                for (final ps in passes)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 5),
-                    child: _PassChip(
-                      label: _passLabels[ps['id']] ?? '${ps['id']}',
-                      status: '${ps['status']}',
-                      active: ps['id'] == current,
-                      palette: p,
-                    ),
-                  ),
-            ],
-            const Spacer(),
-            if (_busy) SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 1.8, color: p.accent)),
-            const SizedBox(width: 8),
-            if (narrow)
-              PopupMenuButton<String>(
-                tooltip: '3D 操作',
-                color: p.panel,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10), side: BorderSide(color: p.lineStrong)),
-                onSelected: (v) {
-                  switch (v) {
-                    case 'project':
-                      _pickProject();
-                    case 'pass':
-                      _runPass();
-                    case 'shot':
-                      _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()');
-                    case 'turntable':
-                      _controller?.runJavaScript('window.__non3d_turntable && window.__non3d_turntable()');
-                    case 'continue':
-                      _continue();
-                    case 'reload':
-                      if (_project != null) {
-                        _controller?.loadRequest(Uri.parse(store.api!.threePreviewUrl(_project!)));
-                      }
-                    case 'face:preview':
-                    case 'face:source':
-                    case 'face:spec':
-                      if (_project != null) setState(() => _face = v.substring('face:'.length));
-                  }
-                },
-                itemBuilder: (ctx) => [
-                  _menuItem(ctx, 'project', Icons.folder_open_outlined, '项目'),
-                  _menuItem(ctx, 'pass', Icons.auto_awesome_outlined, '生成当前层'),
-                  _menuItem(ctx, 'shot', Icons.camera_alt_outlined, '截图'),
-                  _menuItem(ctx, 'turntable', Icons.rotate_90_degrees_ccw_outlined, '四方位取证'),
-                  _menuItem(ctx, 'continue', Icons.check_rounded, '通过并继续'),
-                  _menuItem(ctx, 'reload', Icons.refresh, '刷新预览'),
-                  const PopupMenuDivider(),
-                  _menuItem(ctx, 'face:preview', Icons.visibility_outlined, '预览'),
-                  _menuItem(ctx, 'face:source', Icons.code_outlined, '源码'),
-                  _menuItem(ctx, 'face:spec', Icons.rule_outlined, '规范'),
-                ],
-              )
-            else ...[
-              _TopBtn(icon: Icons.folder_open_outlined, label: '项目', onTap: _busy ? null : () => _pickProject()),
-              _TopBtn(icon: Icons.auto_awesome_outlined, label: '生成当前层', onTap: _busy || _project == null ? null : _runPass),
-              _TopBtn(icon: Icons.camera_alt_outlined, label: '截图', onTap: _project == null ? null : () => _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()')),
-              // turntable 四方位（img2threejs：单视角不是模型的证据）
-              _TopBtn(icon: Icons.rotate_90_degrees_ccw_outlined, label: '四方位取证', onTap: _project == null ? null : () => _controller?.runJavaScript('window.__non3d_turntable && window.__non3d_turntable()')),
-              _TopBtn(icon: Icons.check_rounded, label: '通过并继续', onTap: _busy || _project == null ? null : _continue),
-              _TopBtn(icon: Icons.refresh, label: '刷新预览', onTap: _project == null ? null : () => _controller?.loadRequest(Uri.parse(store.api!.threePreviewUrl(_project!)))),
-              for (final f in const [('preview', '预览', Icons.visibility_outlined), ('source', '源码', Icons.code_outlined), ('spec', '规范', Icons.rule_outlined)])
-                _TopBtn(
-                  icon: f.$3,
-                  label: f.$2,
-                  onTap: _project == null ? null : () => setState(() => _face = f.$1),
-                ),
-            ],
-          ]);
-          }),
-        ),
+          ),
+        ]),
+      );
+    }
+    final all = width >= 1100;
+    return Container(
+      key: const ValueKey('three-header-landscape'),
+      height: 46,
+      decoration: decoration,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(children: [
+        _backButton(p),
+        ..._titleBits(p, all ? 260 : 220),
+        const SizedBox(width: 12),
         Expanded(
-          child: _project == null
-              ? _EmptyNew(onCreate: _createProject, busy: _busy)
-              : switch (_face) {
-                  'source' => SingleChildScrollView(
-                      padding: const EdgeInsets.all(14),
-                      child: SelectableText(
-                        _sceneJs.isEmpty ? '// 尚无 scene.js——点「生成当前层」' : _sceneJs,
-                        style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: p.ink2, height: 1.5),
-                      ),
-                    ),
-                  'spec' => _SpecPane(
-                      controller: _specCtl,
-                      onSave: () => _saveSpec(),
-                    ),
-                  _ => (_controller == null
-                      ? const Center(child: Text('加载预览…'))
-                      : WebViewWidget(controller: _controller!)),
-                },
+          child: passes.isEmpty ? const SizedBox.shrink() : _passScroll(p, current, passes),
         ),
+        if (_busy) ..._busyBits(p),
+        if (all) ...[
+          ..._primaryActions(p, includeAll: true),
+          ..._faceActions(p),
+        ] else ...[
+          ..._primaryActions(p, includeAll: false),
+          _menuButton(context, p, landscape: true),
+        ],
+      ]),
+    );
+  }
+
+  Widget _backButton(NonPalette p) => IconButton(
+        icon: const Icon(Icons.arrow_back, size: 18),
+        tooltip: '返回设计 ${modCombo('⌘1')}',
+        color: p.ink2,
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+        onPressed: () => store.setView('design'),
+      );
+
+  List<Widget> _titleBits(NonPalette p, double maxWidth) => [
+        const SizedBox(width: 4),
+        Icon(Icons.view_in_ar_outlined, size: 17, color: p.accent),
+        const SizedBox(width: 8),
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: Text(_project ?? '3D 工作台',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
+        ),
+      ];
+
+  List<Widget> _busyBits(NonPalette p) => [
+        SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 1.8, color: p.accent)),
+        const SizedBox(width: 8),
+      ];
+
+  Widget _passScroll(NonPalette p, String current, List<Map> passes) => SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: [
+          for (final ps in passes)
+            Padding(
+              padding: const EdgeInsets.only(right: 5),
+              child: _PassChip(
+                label: _passLabels[ps['id']] ?? '${ps['id']}',
+                status: '${ps['status']}',
+                active: ps['id'] == current,
+                palette: p,
+              ),
+            ),
+        ]),
+      );
+
+  List<Widget> _primaryActions(NonPalette p, {required bool includeAll}) => [
+        _TopBtn(icon: Icons.folder_open_outlined, label: '项目', onTap: _busy ? null : () => _pickProject()),
+        _TopBtn(icon: Icons.auto_awesome_outlined, label: '生成当前层', onTap: _busy || _project == null ? null : _runPass),
+        if (includeAll) ...[
+          _TopBtn(
+              icon: Icons.camera_alt_outlined,
+              label: '截图',
+              onTap: _project == null
+                  ? null
+                  : () => _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()')),
+          _TopBtn(
+              icon: Icons.rotate_90_degrees_ccw_outlined,
+              label: '四方位取证',
+              onTap: _project == null
+                  ? null
+                  : () => _controller?.runJavaScript('window.__non3d_turntable && window.__non3d_turntable()')),
+        ],
+        _TopBtn(icon: Icons.check_rounded, label: '通过并继续', onTap: _busy || _project == null ? null : _continue),
+        if (includeAll)
+          _TopBtn(
+              icon: Icons.refresh,
+              label: '刷新预览',
+              onTap: _project == null
+                  ? null
+                  : () => _controller?.loadRequest(Uri.parse(store.api!.threePreviewUrl(_project!)))),
+      ];
+
+  List<Widget> _faceActions(NonPalette p) => [
+        for (final f in const [
+          ('preview', '预览', Icons.visibility_outlined),
+          ('source', '源码', Icons.code_outlined),
+          ('spec', '规范', Icons.rule_outlined),
+        ])
+          _TopBtn(
+            icon: f.$3,
+            label: f.$2,
+            active: _face == f.$1,
+            onTap: _project == null ? null : () => setState(() => _face = f.$1),
+          ),
+      ];
+
+  Widget _menuButton(BuildContext context, NonPalette p, {required bool landscape}) {
+    return PopupMenuButton<String>(
+      tooltip: '3D 操作',
+      color: p.panel,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10), side: BorderSide(color: p.lineStrong)),
+      onSelected: _handleAction,
+      itemBuilder: (ctx) => [
+        _menuItem(ctx, 'project', Icons.folder_open_outlined, '项目'),
+        _menuItem(ctx, 'pass', Icons.auto_awesome_outlined, '生成当前层'),
+        _menuItem(ctx, 'shot', Icons.camera_alt_outlined, '截图'),
+        _menuItem(ctx, 'turntable', Icons.rotate_90_degrees_ccw_outlined, '四方位取证'),
+        _menuItem(ctx, 'continue', Icons.check_rounded, '通过并继续'),
+        _menuItem(ctx, 'reload', Icons.refresh, '刷新预览'),
+        const PopupMenuDivider(),
+        _menuItem(ctx, 'face:preview', Icons.visibility_outlined, landscape ? '预览（全屏）' : '预览'),
+        _menuItem(ctx, 'face:source', Icons.code_outlined, landscape ? '源码（侧栏）' : '源码'),
+        _menuItem(ctx, 'face:spec', Icons.rule_outlined, landscape ? '规范（侧栏）' : '规范'),
       ],
     );
+  }
+
+  void _handleAction(String v) {
+    switch (v) {
+      case 'project':
+        _pickProject();
+      case 'pass':
+        _runPass();
+      case 'shot':
+        _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()');
+      case 'turntable':
+        _controller?.runJavaScript('window.__non3d_turntable && window.__non3d_turntable()');
+      case 'continue':
+        _continue();
+      case 'reload':
+        if (_project != null) {
+          _controller?.loadRequest(Uri.parse(store.api!.threePreviewUrl(_project!)));
+        }
+      case 'face:preview':
+      case 'face:source':
+      case 'face:spec':
+        if (_project != null) setState(() => _face = v.substring('face:'.length));
+    }
+  }
+
+  Widget _body(BuildContext context, NonPalette p, {required double width}) {
+    if (_project == null) {
+      return _EmptyNew(onCreate: _createProject, busy: _busy);
+    }
+    final preview = _controller == null
+        ? const Center(child: Text('加载预览…'))
+        : WebViewWidget(controller: _controller!);
+    final side = switch (_face) {
+      'source' => SingleChildScrollView(
+          padding: const EdgeInsets.all(14),
+          child: SelectableText(
+            _sceneJs.isEmpty ? '// 尚无 scene.js——点「生成当前层」' : _sceneJs,
+            style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: p.ink2, height: 1.5),
+          ),
+        ),
+      'spec' => _SpecPane(controller: _specCtl, onSave: _saveSpec),
+      _ => null,
+    };
+    // 横屏/桌面：源码/规范是预览的侧栏，不把预览整块替换掉；
+    // 竖屏/手机：保持单面切换（宽度不足，并排会两张都不可读）。
+    if (width >= 900 && side != null) {
+      final sideWidth = (width * 0.36).clamp(320.0, 460.0).toDouble();
+      return Row(
+        key: const ValueKey('three-body-split'),
+        children: [
+          Expanded(child: preview),
+          Container(width: 1, color: p.line),
+          SizedBox(width: sideWidth, child: side),
+        ],
+      );
+    }
+    return side ?? preview;
   }
 }
 
@@ -599,25 +723,30 @@ class _PassChip extends StatelessWidget {
 }
 
 class _TopBtn extends StatelessWidget {
-  const _TopBtn({required this.icon, required this.label, this.onTap});
+  const _TopBtn({required this.icon, required this.label, this.onTap, this.active = false});
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    final color = onTap == null ? p.ink4 : (active ? p.accent : p.ink2);
     return Padding(
       padding: const EdgeInsets.only(left: 6),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
-        child: Padding(
+        child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: active
+              ? BoxDecoration(color: p.accentSoft, borderRadius: BorderRadius.circular(7))
+              : null,
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 14, color: onTap == null ? p.ink4 : p.ink2),
+            Icon(icon, size: 14, color: color),
             const SizedBox(width: 4),
-            Text(label, style: TextStyle(fontSize: 12, color: onTap == null ? p.ink4 : p.ink2)),
+            Text(label, style: TextStyle(fontSize: 12, color: color)),
           ]),
         ),
       ),

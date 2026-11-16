@@ -102,9 +102,16 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final p = context.palette;
-    // 手机窄屏：860×600 会被 Dialog 夹到 ~310×600，176px 侧栏只剩 ~98px 内容区。
-    // 窄屏改全屏弹层 + 顶部横向导航条，宽屏保持原双栏。
-    final narrow = MediaQuery.sizeOf(context).width < 700;
+    final size = MediaQuery.sizeOf(context);
+    // 三档布局：手机/矮窗全屏 + 顶部导航；iPad 竖屏全屏但内容限宽；
+    // iPad 横屏/桌面居中对话框 + 左侧导航（两种朝向不共用同一套堆叠）。
+    final phone = size.width < 700;
+    final short = size.height < 560;
+    final padPortrait = !phone && !short && size.width < 1100 && size.height >= size.width;
+    final fullScreen = phone || short || padPortrait;
+    final dialogWidth = (size.width - 48).clamp(320.0, size.width < 1100 ? 920.0 : 860.0).toDouble();
+    final dialogHeight = (size.height - 48).clamp(420.0, 640.0).toDouble();
+    final railWidth = size.width < 1100 ? 200.0 : 176.0;
     // 移动端没有本地 agent/引擎，第三方智能体（ACP）不可用：入口整体隐藏，
     // 只保留 NoN 内置管线（用户裁决 2026-11-16）。
     final mobile = Theme.of(context).platform == TargetPlatform.iOS ||
@@ -117,7 +124,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       ('about', Icons.info_outline, '关于'),
     ];
     final content = Padding(
-      padding: EdgeInsets.all(narrow ? 14 : 18),
+      padding: EdgeInsets.all(phone ? 14 : (padPortrait ? 20 : 18)),
       child: switch (_tab) {
         'appearance' => _appearance(context, store),
         'agent' => _agent(context, store),
@@ -126,26 +133,43 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         _ => _models(context, store),
       },
     );
+    final topNav = Container(
+      key: const ValueKey('settings-topnav'),
+      width: double.infinity,
+      height: phone ? 46 : 50,
+      decoration: BoxDecoration(
+        color: p.panel2.withValues(alpha: 0.3),
+        border: Border(bottom: BorderSide(color: p.line)),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(children: [
+          for (final item in navItems) _nav(context, item.$1, item.$2, item.$3, compact: true),
+        ]),
+      ),
+    );
     return Dialog(
-      insetPadding: narrow ? EdgeInsets.zero : const EdgeInsets.all(24),
+      insetPadding: fullScreen ? EdgeInsets.zero : const EdgeInsets.all(24),
       backgroundColor: p.panel,
-      shape: narrow
+      shape: fullScreen
           ? const RoundedRectangleBorder()
-          : RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.lineStrong)),
+          : RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.lineStrong)),
       child: SizedBox(
-        width: narrow ? double.infinity : 860,
-        height: narrow ? double.infinity : 600,
+        width: fullScreen ? double.infinity : dialogWidth,
+        height: fullScreen ? double.infinity : dialogHeight,
         child: SafeArea(
           child: Column(
             children: [
               Container(
                 height: 54,
-                padding: const EdgeInsets.symmetric(horizontal: 18),
+                padding: EdgeInsets.symmetric(horizontal: phone ? 14 : 18),
                 decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
                 child: Row(
                   children: [
                     Text('设置', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
-                    if (!narrow) ...[
+                    if (!phone) ...[
                       const SizedBox(width: 8),
                       Text('模型、外观与 Agent 上下文策略', style: TextStyle(fontSize: 11, color: p.ink3)),
                     ],
@@ -154,28 +178,21 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   ],
                 ),
               ),
-              if (narrow)
-                Container(
-                  height: 46,
-                  decoration: BoxDecoration(
-                    color: p.panel2.withValues(alpha: 0.3),
-                    border: Border(bottom: BorderSide(color: p.line)),
-                  ),
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Row(children: [
-                      for (final item in navItems) _nav(context, item.$1, item.$2, item.$3, compact: true),
-                    ]),
-                  ),
-                ),
+              if (fullScreen) topNav,
               Expanded(
-                child: narrow
-                    ? content
+                child: fullScreen
+                    ? Align(
+                        alignment: Alignment.topCenter,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: padPortrait ? 820 : double.infinity),
+                          child: content,
+                        ),
+                      )
                     : Row(
                         children: [
                           Container(
-                            width: 176,
+                            key: const ValueKey('settings-rail'),
+                            width: railWidth,
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
                               color: p.panel2.withValues(alpha: 0.3),
