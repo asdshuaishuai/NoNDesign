@@ -20,10 +20,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from fastapi.responses import HTMLResponse, PlainTextResponse
+
 SERVER_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SERVER_DIR))
 
 import acp_bridge  # noqa: E402
+import three_agent as three  # noqa: E402（轨道 C：3D 工作台，依赖 SERVER_DIR 已入 path）
 from acp_bridge import AcpRegistry, detect_agents, probe_all as acp_bridge_probe_all  # noqa: E402
 from agent import AgentRunManager, AgentRunRequest  # noqa: E402
 from context import clear_session_file, parse_metadata, with_metadata  # noqa: E402
@@ -517,6 +520,98 @@ async def export_figma(req: RenderRequest) -> dict[str, Any]:
     return {"ok": True, "dir": str(out_dir),
             "boards": len(manifest["boards"]),
             "files": [f.name for f in sorted(out_dir.iterdir())]}
+
+
+# ---------- 轨道 C：3D 制作工作台（客户端插件，与引擎解耦） ----------
+
+class ThreeNewRequest(BaseModel):
+    name: str
+    brief: str
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    thinking_level: str = "auto"
+
+
+class ThreeRunRequest(BaseModel):
+    name: str
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    thinking_level: str = "auto"
+
+
+class ThreeFeedbackRequest(BaseModel):
+    name: str
+    kind: str
+    payload: Any = None
+
+
+class ThreeContinueRequest(BaseModel):
+    name: str
+    summary: str = ""
+
+
+def _three_guard(fn, *args):
+    try:
+        return fn(*args)
+    except three.ThreeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+async def _three_guard_async(coro_fn, *args, **kwargs):
+    try:
+        return await coro_fn(*args, **kwargs)
+    except three.ThreeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/three/project/new")
+async def three_new(req: ThreeNewRequest) -> dict[str, Any]:
+    """spec 阶段（img2threejs 纪律：先 spec 后代码，fail-closed）。"""
+    return await _three_guard_async(three.new_project, req.name, req.brief, req.model,
+                                    req.base_url, req.api_key, req.thinking_level)
+
+
+@app.post("/three/pass")
+async def three_pass(req: ThreeRunRequest) -> dict[str, Any]:
+    """执行当前 pass（状态门禁：blocked 拒绝、生成后未收反馈拒绝重复生成）。"""
+    return await _three_guard_async(three.run_pass, req.name, req.model, req.base_url,
+                                    req.api_key, req.thinking_level)
+
+
+@app.post("/three/feedback")
+async def three_feedback(req: ThreeFeedbackRequest) -> dict[str, Any]:
+    """三反馈入口（WebView 桥回传）：error 修复轮+1 / metrics 记录 /
+    screenshot 落盘 evidence/。"""
+    return await _three_guard_async(three.feedback, req.name, req.kind, req.payload)
+
+
+@app.post("/three/continue")
+async def three_continue(req: ThreeContinueRequest) -> dict[str, Any]:
+    """评审通过推进下一 pass（必须有 evidence——每步必带证据）。"""
+    return _three_guard(three.continue_pass, req.name, req.summary)
+
+
+@app.get("/three/project")
+async def three_project(name: str) -> dict[str, Any]:
+    return _three_guard(three.read_project, name)
+
+
+@app.get("/three/projects")
+async def three_projects() -> dict[str, Any]:
+    return three.list_projects()
+
+
+@app.get("/three/preview/{name}", response_class=HTMLResponse)
+async def three_preview(name: str) -> str:
+    """应用内 WebView 的执行面：three.js CDN importmap + 错误/测量/截图三桥。"""
+    return _three_guard(three.preview_html, name)
+
+
+@app.get("/three/scene/{name}.js", response_class=PlainTextResponse)
+async def three_scene(name: str) -> str:
+    return _three_guard(three.scene_js, name)
 
 
 @app.post("/acp/prompt")

@@ -54,7 +54,7 @@
 - 化学（配平校验）/数学（manim 风构造）/地理（色阶图例）规范模板细化
 - 音轨/旁白（TTS 时间轴对齐）
 
-## C · 3D 制作工作台（客户端插件）—— 📋 定稿待施工
+## C · 3D 制作工作台（客户端插件）—— 🚧 C1 骨架已落地（C2 强化待接）
 
 **定位（用户裁决）**：不是 2D 画板 3D 化预览，而是**直接制作 3D**——
 LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引外部浏览器、
@@ -79,6 +79,17 @@ LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引�
   macro→meso→micro 分层观察、身份特征清单、单视角盲区显式声明）/ 图+文。
 - 技术底座已预验证：webview_flutter_wkwebview 3.27.2 macOS 支持 +
   `WebKitWebViewPlatform.registerWith()`（真实 API 名）+ profile 构建链接。
+- **C1 落地明细**（本轮）：server/three_agent.py（new→spec 生成 / run_pass
+  分 pass 生成 / feedback 三反馈 / continue 状态推进 / blocked fail-closed
+  上限每 pass 3 轮）；端点 /three/*（preview 页含执行错误桥 window.onerror、
+  测量桥 __measure、截图桥 __non3d_screenshot，2s 节流）；客户端
+  three_workspace.dart（新建表单→spec→生成当前层→截图→通过并继续；
+  JavaScriptChannel NON3D 自动转发三反馈；pass 状态 chips；⌘5 进视图）。
+  mock LLM 全链 E2E 11 步全绿（含重复生成守卫/修复轮/blocked 打满/
+  preview 三桥/scene serve）。真 bug 登记×2：① main.py 的 three_agent
+  import 曾置于 sys.path 注入前（ModuleNotFoundError）；② Path.open 位置
+  参数陷阱（"a","utf-8" 把 encoding 当 buffering）；③ new_project 的
+  mkdir 曾在 LLM 成功前执行（失败残留目录 → project_exists）。
 - 后续：GLTF 真 3D 资产（3dcodeverse 语料模型）、动画时间轴、多场景分镜。
 
 ## D · RSI 审查与增强（design 模块内置）—— 📋 待施工
@@ -95,5 +106,5 @@ LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引�
 |---|---|---|
 | A Figma 双向 | ✅ 落地（含两处真机修复） | 72491c6 |
 | B 视频引擎 | ✅ 落地（spec 硬门 + expr 闭包 + RSI 三环 + 三示例） | 本轮 |
-| C 3D 工作台 | 📋 定稿待施工（img2threejs 理念已吸收进方案） | — |
+| C 3D 工作台 | 🚧 C1 落地（spec 先行 + 分 pass 状态门禁 + WebView 执行面 + 三反馈桥 + fail-closed 全链 E2E）；C2 强化（turntable 四方位门/自相交检测/spec 手编）待接 | 本轮 |
 | D RSI 审查 | 📋 待施工 | — |

@@ -12,6 +12,7 @@ import 'common.dart';
 import 'docs_view.dart';
 import 'left_panel.dart';
 import 'play_view.dart';
+import 'three_workspace.dart';
 import 'rail.dart';
 import 'right_panel.dart';
 import 'settings_dialog.dart';
@@ -38,6 +39,7 @@ class _WorkspaceState extends State<Workspace> {
     final store = context.watch<AppStore>();
     final p = context.palette;
     if (store.view == 'play') return const PlayView();
+    if (store.view == 'three') return const ThreeWorkspace();
     return CallbackShortcuts(
       bindings: {
       modKey(LogicalKeyboardKey.keyK): _command,
@@ -54,6 +56,7 @@ class _WorkspaceState extends State<Workspace> {
       modKey(LogicalKeyboardKey.digit2): () => store.setView('docs'),
       modKey(LogicalKeyboardKey.digit3): () => store.setView('source'),
       modKey(LogicalKeyboardKey.digit4): () => store.setView('play'),
+      modKey(LogicalKeyboardKey.digit5): () => store.setView('three'),
       modKey(LogicalKeyboardKey.digit0): () {
         store.setView('design');
         store.bumpFit();
@@ -422,6 +425,7 @@ class _BoardTabs extends StatelessWidget {
           ),
           IconAction(icon: Icons.code, tooltip: 'MBT 源码 ${modCombo('⌘3')}', size: 26, onTap: () => store.setView('source')),
           IconAction(icon: Icons.play_arrow_outlined, tooltip: '演示模式 ${modCombo('⌘4')}', size: 26, onTap: () => store.setView('play')),
+          IconAction(icon: Icons.view_in_ar_outlined, tooltip: '3D 工作台 ${modCombo('⌘5')}', size: 26, onTap: () => store.setView('three')),
           const SizedBox(width: 4),
           TextButton.icon(
             onPressed: () => store.setView('docs'),

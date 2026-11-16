@@ -234,6 +234,37 @@ class NoNDesignApi {
   Future<Map<String, dynamic>> exportFigma(String mbt) =>
       postJson('/project/export/figma', {'mbt': mbt});
 
+  // ---------- 轨道 C：3D 制作工作台（应用内 WebView 即执行面） ----------
+
+  Future<Map<String, dynamic>> threeNewProject({
+    required String name, required String brief,
+    required String model, required String baseUrl,
+    required String apiKey, required String thinkingLevel,
+  }) => postJson('/three/project/new', {
+        'name': name, 'brief': brief, 'model': model, 'base_url': baseUrl,
+        'api_key': apiKey, 'thinking_level': thinkingLevel,
+      });
+
+  Future<Map<String, dynamic>> threeRunPass({
+    required String name, required String model, required String baseUrl,
+    required String apiKey, required String thinkingLevel,
+  }) => postJson('/three/pass', {
+        'name': name, 'model': model, 'base_url': baseUrl,
+        'api_key': apiKey, 'thinking_level': thinkingLevel,
+      });
+
+  Future<Map<String, dynamic>> threeFeedback(String name, String kind, [Object? payload]) =>
+      postJson('/three/feedback', {'name': name, 'kind': kind, if (payload != null) 'payload': payload});
+
+  Future<Map<String, dynamic>> threeContinue(String name, [String summary = '']) =>
+      postJson('/three/continue', {'name': name, 'summary': summary});
+
+  Future<Map<String, dynamic>> threeProject(String name) => getJson('/three/project?name=${Uri.encodeQueryComponent(name)}');
+  Future<Map<String, dynamic>> threeProjects() => getJson('/three/projects');
+
+  /// 应用内 WebView 的执行面 URL（服务器实时 serve 的 three.js 预览页）。
+  String threePreviewUrl(String name) => '$baseUrl/three/preview/${Uri.encodeQueryComponent(name)}';
+
   /// Layout intent (session_constrain): `intent` is a phrase like 居中 / 等间距 /
   /// 网格 3. Engine returns a canonical envelope {ok, id, x, mbt} — no render
   /// face; cannot_parse failures carry the intent vocabulary in `error`.

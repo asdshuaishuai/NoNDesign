@@ -40,7 +40,7 @@ plugins/      独立插件：video-engine/ 代码生成视频（零 Flutter/服�
   读数恒 0（首版冒烟真机抓出）。渲染前全量预编译（fail-closed：
   语法/符号错误在第一帧前报干净）。三标杆示例在 examples/（物理摩擦力
   = 真实性门面，读数 v=17.47=x·T 实测吻合）。
-- **3D 制作工作台**（规划定稿，见 docs/plan-plugins.md 轨道 C）：
+- **3D 制作工作台**（C1 骨架已落地，方案见 docs/plan-plugins.md 轨道 C；server/three_agent.py + /three/* 端点 + widgets/three_workspace.dart，mock LLM 全链 E2E 11 步绿）：
   LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引外部
   浏览器/headless）——执行错误 window.onerror 回传、场景几何自检、
   canvas.toDataURL 截图给 vision 评审，三反馈驱动 RSI 修复轮。
