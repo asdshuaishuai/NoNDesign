@@ -329,10 +329,17 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                                   // 内容层 = 引擎自渲染 SVG（唯一真源），入场
                                   // 呼吸改为对整层 FadeTransition（svg 是整板
                                   // 光栅，节点级 motion 由引擎导出面承载）。
+                                  // 上屏前经 EngineSvgPrep 兼容预处理，同画布。
                                   child: board.svg.isNotEmpty
                                       ? FadeTransition(
                                           opacity: _entrance,
-                                          child: SvgPicture.string(board.svg, fit: BoxFit.fill),
+                                          child: ListenableBuilder(
+                                            listenable: EngineSvgPrep.instance,
+                                            builder: (_, __) => SvgPicture.string(
+                                              EngineSvgPrep.instance.prepared(board.svg),
+                                              fit: BoxFit.fill,
+                                            ),
+                                          ),
                                         )
                                       : CustomPaint(
                                           painter: ArtboardPainter(

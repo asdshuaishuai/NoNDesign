@@ -1,10 +1,12 @@
+import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show ValueListenable, mapEquals;
+import 'package:flutter/foundation.dart' show ValueListenable, mapEquals, debugPrint;
 import 'package:flutter/material.dart' hide Flow;
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 
 import '../core/models.dart';
@@ -151,6 +153,191 @@ class NodeImageCache extends ChangeNotifier {
   }
 }
 
+/// 引擎 svg → flutter_svg 兼容预处理（2026-11-16 缺陷修复）。
+/// flutter_svg 2.4.0 / vector_graphics_compiler 1.3.6 渲染链两处静默降级
+/// （pub-cache parser.dart 亲读实证）：
+/// ① 滤镜白名单仅 feGaussianBlur/feOffset/feMerge（parser.dart:190），
+///    其余基元令整个 filter 被丢弃（:253 hasUnsupportedPrimitive → return）
+///    ——引擎 defs 三档 feDropShadow（e1/e2/e3，参数与 ArtboardPainter
+///    海拔档位逐一对齐）全部不可见。按 SVG 规范等价式改写：
+///    blur(SourceAlpha) → offset → merge(offset, SourceGraphic)；编译器
+///    把 SourceAlpha 图层颜色置黑（resolver.dart:495 Color.fromARGB(a,0,0,0)），
+///    恰为 feDropShadow 默认 flood-color 黑。flood-opacity 在三基元白名单内
+///    无法表达，改写链不携带（阴影比引擎意图略重，可见性优先）。
+/// ② <image> 仅接受 data: href（parser.dart:610），http(s) href 直接
+///    return 丢弃（:649-652）——网络图整节点消失。这里把 http(s) href 按
+///    NodeImageCache 同款管线语义（URL 幂等、失败不重试）预取原始字节，
+///    改写为 data: URI（mime 按 Content-Type/扩展名收紧到 png/jpeg/webp/
+///    gif/bmp；≤8MB——更大的原始位图转 data URI 只会拖垮 svg 字符串）。
+///    未取到（离线/404/超时/超大）保留原 href：该 image 节点被 flutter_svg
+///    丢弃，画布覆盖层占位与旧行为一致（fail-visible 不劣化）。
+/// 结果按 svg 全文缓存（LRU 12 条）：feDropShadow 改写同步完成即时上屏，
+/// 图片改写异步完成后 notifyListeners 触发重渲染；同一 svg 重复构建零开销。
+class EngineSvgPrep extends ChangeNotifier {
+  EngineSvgPrep._();
+  static final EngineSvgPrep instance = EngineSvgPrep._();
+
+  static const _maxEntries = 12;
+  static const _maxImageBytes = 8 * 1024 * 1024;
+  static final Duration _fetchTimeout = Duration(seconds: 15);
+
+  static final _shadowRe = RegExp(r'<feDropShadow\b[^>]*/>');
+  static final _imageTagRe = RegExp(r'<image\b[^>]*>');
+  // 注意：正则含单引号（href 引号捕获组），单引号 raw string 里无法承载
+  // ——用普通字符串写（\\s→\s、\\2→\2、\'→'）。
+  static final _hrefRe =
+      RegExp('((?:xlink:)?href\\s*=\\s*)(["\'])([^"\']+)\\2');
+
+  final Map<String, String> _cache = {};
+  final Set<String> _inflight = {};
+  final Set<String> _failedUrls = {}; // 失败不重试（NodeImageCache 同语义）
+
+  /// 同步入口：命中缓存返回成品；未命中先做同步部分（feDropShadow 改写）
+  /// 立即返回，同时启动异步部分（网络图 data: 改写），完成后通知重建。
+  String prepared(String svg) {
+    if (!svg.contains('<feDropShadow') && !svg.contains('<image')) return svg;
+    final hit = _cache[svg];
+    if (hit != null) {
+      _cache.remove(svg);
+      _cache[svg] = hit; // LRU 触碰
+      return hit;
+    }
+    final provisional = rewriteShadows(svg);
+    _cache[svg] = provisional;
+    _trim();
+    if (_inflight.add(svg)) {
+      _prepareImages(svg, provisional).whenComplete(() {
+        _inflight.remove(svg);
+        notifyListeners();
+      });
+    }
+    return provisional;
+  }
+
+  /// 同步改写全部 feDropShadow（纯字符串，无 IO）。
+  String rewriteShadows(String svg) {
+    if (!svg.contains('<feDropShadow')) return svg;
+    var i = 0;
+    return svg.replaceAllMapped(_shadowRe, (m) {
+      final tag = m[0]!;
+      String? num(String name) {
+        final raw = _attr(tag, name)?.trim();
+        if (raw == null || raw.isEmpty) return null;
+        final v = double.tryParse(raw.split(RegExp(r'[\s,]+')).first);
+        return v == null ? null : v.toString();
+      }
+
+      final std = num('stdDeviation') ?? '0';
+      final dx = num('dx') ?? '0';
+      final dy = num('dy') ?? '0';
+      final r = i++;
+      return '<feGaussianBlur in="SourceAlpha" stdDeviation="$std" result="nsgb$r"/>'
+          '<feOffset in="nsgb$r" dx="$dx" dy="$dy" result="nsof$r"/>'
+          '<feMerge result="nsmg$r">'
+          '<feMergeNode in="nsof$r"/><feMergeNode in="SourceGraphic"/>'
+          '</feMerge>';
+    });
+  }
+
+  Future<void> _prepareImages(String key, String provisional) async {
+    var out = provisional;
+    try {
+      final urls = <String>{};
+      for (final m in _imageTagRe.allMatches(provisional)) {
+        final href = _hrefOf(m[0]!);
+        if (href != null &&
+            (href.startsWith('http://') || href.startsWith('https://'))) {
+          urls.add(href);
+        }
+      }
+      if (urls.isNotEmpty) {
+        final resolved = <String, String>{};
+        for (final url in urls) {
+          if (_failedUrls.contains(url)) continue;
+          final dataUri = await _fetchAsDataUri(url);
+          if (dataUri != null) {
+            resolved[url] = dataUri;
+          } else {
+            _failedUrls.add(url); // 与 NodeImageCache 一致：失败不自动重试
+            debugPrint('[EngineSvgPrep] image prefetch failed: $url');
+          }
+        }
+        if (resolved.isNotEmpty) {
+          final tagRewrites = <String, String>{};
+          for (final m in _imageTagRe.allMatches(provisional)) {
+            final tag = m[0]!;
+            if (tagRewrites.containsKey(tag)) continue;
+            final href = _hrefOf(tag);
+            final data = href == null ? null : resolved[href];
+            if (data != null) {
+              tagRewrites[tag] = tag.replaceFirstMapped(
+                _hrefRe,
+                (hm) => '${hm.group(1)}${hm.group(2)}$data${hm.group(2)}',
+              );
+            }
+          }
+          if (tagRewrites.isNotEmpty) {
+            out = provisional.replaceAllMapped(
+              _imageTagRe,
+              (m) => tagRewrites[m[0]!] ?? m[0]!,
+            );
+          }
+        }
+      }
+    } catch (_) {
+      // 预处理失败不抛：provisional（阴影已改写）仍可上屏。
+    }
+    _cache[key] = out;
+  }
+
+  Future<String?> _fetchAsDataUri(String url) async {
+    try {
+      final res = await http.get(Uri.parse(url)).timeout(_fetchTimeout);
+      if (res.statusCode != 200) return null;
+      final bytes = res.bodyBytes;
+      if (bytes.isEmpty || bytes.length > _maxImageBytes) return null;
+      final mime = _mimeOf(res.headers['content-type'], url);
+      if (mime == null) return null;
+      return 'data:$mime;base64,${base64Encode(bytes)}';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _mimeOf(String? contentType, String url) {
+    const allowed = {'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp'};
+    final ct = contentType?.split(';').first.trim().toLowerCase() ?? '';
+    if (allowed.contains(ct)) return ct;
+    // Content-Type 缺失/宽泛时按扩展名兜底。
+    final path = Uri.tryParse(url)?.path.toLowerCase() ?? '';
+    const exts = {
+      'png': 'image/png',
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'webp': 'image/webp',
+      'gif': 'image/gif',
+      'bmp': 'image/bmp',
+    };
+    for (final e in exts.entries) {
+      if (path.endsWith('.${e.key}')) return e.value;
+    }
+    return null;
+  }
+
+  String? _hrefOf(String tag) => _hrefRe.firstMatch(tag)?.group(3);
+
+  String? _attr(String tag, String name) =>
+      RegExp('$name\\s*=\\s*["\']([^"\']*)["\']', caseSensitive: false)
+          .firstMatch(tag)
+          ?.group(1);
+
+  void _trim() {
+    while (_cache.length > _maxEntries) {
+      _cache.remove(_cache.keys.first);
+    }
+  }
+}
+
 enum _ResizeHandle { topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left }
 
 /// 手柄 delta 应用到起始矩形（8 向钳制最小边 8）。painter 与手势收尾共用。
@@ -201,8 +388,10 @@ class _CanvasViewState extends State<CanvasView> {
   // 活动板手势期 painter 的 repaint：图片缓存 + 两个手势 delta 合并监听。
   late final Listenable _gestureRepaint =
       Listenable.merge([NodeImageCache.instance, _dragDelta, _resizeDelta]);
-  // 方向键微调串行链：连续按键逐个排队，每次从最新已提交位置计算，
-  // 避免自动重复按键并发调用 applyOp 造成陈旧 mbt 丢失更新。
+  // 方向键微调串行链：连续按键逐个排队，每次从最新已提交位置计算。
+  // 陈旧 mbt 丢改动的根治在 store 级 applyOp 串行队列（store.dart
+  // _opQueue——跨入口互斥，缩放松手两连发/inspector 编辑同样被串行化）；
+  // 这条链只做同键自动重复的合帧排队，op 提交本身全部经 store 队列。
   Future<void> _nudgeChain = Future<void>.value();
   String _lastLayoutKey = '';
   int _lastFitEpoch = -1;
@@ -518,8 +707,19 @@ class _CanvasViewState extends State<CanvasView> {
                     children: [
                       // 内容层 = 引擎自渲染 SVG（唯一真源；阴影/字体/rotate/
                       // <image> 全由引擎携带，客户端不重复实现渲染）。
+                      // 上屏前经 EngineSvgPrep 兼容预处理（feDropShadow→
+                      // 白名单基元链、网络 <image>→data:），flutter_svg 才
+                      // 不静默丢阴影/图片。
                       if (board.svg.isNotEmpty)
-                        Positioned.fill(child: SvgPicture.string(board.svg, fit: BoxFit.fill)),
+                        Positioned.fill(
+                          child: ListenableBuilder(
+                            listenable: EngineSvgPrep.instance,
+                            builder: (_, __) => SvgPicture.string(
+                              EngineSvgPrep.instance.prepared(board.svg),
+                              fit: BoxFit.fill,
+                            ),
+                          ),
+                        ),
                       Positioned.fill(
                         // 覆盖层：选区环/拖拽幽灵/缩放手柄（svg 在场时只画
                         // 覆盖，svg 缺席的旧信封回落整节点绘制）。

@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from render import Expr, RenderRejected, load_spec  # noqa: E402
+from render import Expr, RenderRejected, load_spec, _CONSTS  # noqa: E402
 
 _FUNCS_NAMES = {"sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sqrt",
                 "abs", "min", "max", "floor", "ceil", "log", "exp", "pow",
@@ -57,7 +57,9 @@ def main() -> int:
     total = sum(float(s.get("duration", 0)) for s in tl.get("scenes", []))
     params = set(spec.get("params", {}))
     formulas = {f["name"] for f in spec.get("formulas", [])}
-    allowed = {"t", "T"} | params | formulas
+    # 与 render.py 符号闭包逐字一致（含内建常量 pi/e）：漏 _CONSTS 曾导致
+    # 「render exit 0 但 review 判 undeclared_symbol:['pi']」的矛盾死循环。
+    allowed = {"t", "T"} | params | formulas | set(_CONSTS)
     formula_srcs = {f["expr"] for f in spec.get("formulas", [])}
 
     # —— expr 符号闭包 ——

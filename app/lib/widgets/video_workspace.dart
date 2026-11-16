@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
@@ -160,6 +161,14 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           decoration: BoxDecoration(color: p.bgElevated, border: Border(bottom: BorderSide(color: p.line))),
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(children: [
+            // 插件视图全屏接管的可见出口（镜像 PlayView 的返回画布）。
+            IconButton(
+              icon: const Icon(Icons.arrow_back, size: 18),
+              tooltip: '返回设计 ${modCombo('⌘1')}',
+              color: p.ink2,
+              onPressed: () => store.setView('design'),
+            ),
+            const SizedBox(width: 4),
             Icon(Icons.movie_outlined, size: 17, color: p.accent),
             const SizedBox(width: 8),
             Text('视频工作台', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),

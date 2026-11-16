@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -777,15 +778,25 @@ async def video_render(req: VideoRenderRequest) -> dict[str, Any]:
         (d / Path(str(req.timeline.get("spec") or "spec.json")).name).write_text(
             json.dumps(req.spec, ensure_ascii=False, indent=1), "utf-8")
     _VIDEO_JOBS[job] = {"status": "running", "dir": str(d / "frames"), "log": "", "mp4": "", "frames": 0}
+    _prune_video_jobs()
     script = Path(__file__).resolve().parent.parent / "plugins" / "video-engine" / "render.py"
 
     def _run() -> None:
         import subprocess as sp
         py = str(Path(sys.executable))
-        proc = sp.run([py, str(script), str(tl_file), str(d / "frames"),
-                       "--fps", str(max(1, min(30, req.fps)))],
-                      capture_output=True, text=True, timeout=600)
-        j = _VIDEO_JOBS[job]
+        try:
+            proc = sp.run([py, str(script), str(tl_file), str(d / "frames"),
+                           "--fps", str(max(1, min(30, req.fps)))],
+                          capture_output=True, text=True, timeout=600)
+        except Exception as e:
+            # 子进程异常（含 TimeoutExpired）必须落终态，否则 job 永远 running、
+            # 客户端轮询无终结（2026-11-16 登记：/video/render future 逃逸）。
+            _VIDEO_JOBS[job] = {**_VIDEO_JOBS.get(job, {}), "status": "failed",
+                                "log": (f"{type(e).__name__}: {e}")[-2000:]}
+            return
+        j = _VIDEO_JOBS.get(job)
+        if j is None:
+            return  # 已被 _prune_video_jobs 容量轮换清理：终态无处落，直接结束
         j["log"] = (proc.stdout + proc.stderr)[-2000:]
         if proc.returncode == 0:
             # render.py 的 mp4 产物名 = <frames 目录名>.mp4 → d/frames.mp4
@@ -801,6 +812,23 @@ async def video_render(req: VideoRenderRequest) -> dict[str, Any]:
     return {"ok": True, "job": job}
 
 
+def _prune_video_jobs(keep: int = 20) -> None:
+    """_VIDEO_JOBS 与 _VIDEO_ROOT 的 job 目录只保留最近 keep 个（dict 插入序
+    = 创建序，删最旧）；running 中的 job 一样按容量轮换（上限内不受影响）。"""
+    jobs = list(_VIDEO_JOBS.keys())
+    while len(jobs) > keep:
+        old = jobs.pop(0)
+        info = _VIDEO_JOBS.pop(old, None)
+        if not info:
+            continue
+        d = Path(str(info.get("dir", ""))).parent  # dir 指向 frames，父目录即 job 目录
+        try:
+            if d != _VIDEO_ROOT and d.resolve().is_relative_to(_VIDEO_ROOT.resolve()) and d.exists():
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
+
+
 @app.get("/video/render/status")
 async def video_render_status(job: str) -> dict[str, Any]:
     j = _VIDEO_JOBS.get(job)
@@ -811,13 +839,19 @@ async def video_render_status(job: str) -> dict[str, Any]:
 
 @app.get("/video/frame")
 async def video_frame(path: str, n: int = 0) -> PlainTextResponse:
-    """serve 渲染帧（path 限定在已注册 job 的 frames 目录内——防目录穿越）。"""
+    """serve 渲染帧（path 必须精确命中某个已注册 job 的 frames 目录——
+    防目录穿越；不再按注册序抢第一个命中帧：多 job 并发时客户端拿到的
+    是自己 job 的帧而非别的 job）。"""
+    want = Path(path).resolve()
     for j in _VIDEO_JOBS.values():
         frames_dir = j.get("dir", "")
         base = Path(frames_dir).resolve()
+        if want != base:
+            continue
         target = (base / f"frame_{n:05d}.png").resolve()
         if str(target).startswith(str(base)) and target.exists():
             return PlainTextResponse(target.read_bytes(), media_type="image/png")
+        break
     raise HTTPException(status_code=404, detail="frame_not_found")
 
 
@@ -840,9 +874,11 @@ async def video_sample(timeline: str, spec: str) -> dict[str, Any]:
 async def video_review(req: VideoRenderRequest) -> dict[str, Any]:
     """环②机械对照（review.py）：符号闭包/beats 落片长/facts 形状。"""
     import subprocess as sp
+    import uuid
     _VIDEO_ROOT.mkdir(parents=True, exist_ok=True)
-    d = _VIDEO_ROOT / "review-tmp"
-    d.mkdir(exist_ok=True)
+    # 并发评审互不覆盖输入（共享 review-tmp 曾相互覆写 timeline/spec）
+    d = _VIDEO_ROOT / f"review-{uuid.uuid4().hex[:8]}"
+    d.mkdir(parents=True)
     tl_file = d / "timeline.json"
     tl_file.write_text(json.dumps(req.timeline, ensure_ascii=False, indent=1), "utf-8")
     if isinstance(req.spec, dict):

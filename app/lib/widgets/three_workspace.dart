@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
+import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
@@ -40,6 +41,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   // 面板三态：预览 / 源码 / 规范（规范手编 = img2threejs 的 refine-spec 面）。
   String _face = 'preview';
   final _specCtl = TextEditingController();
+  // 规范编辑守卫：_refresh 被每条桥消息与每次 _runPass 调用——用户在
+  // refine-spec 面未保存的 JSON 编辑不能被服务器 spec 静默覆盖；保存
+  // 成功（用户显式期待服务器态回灌）后重置守卫恢复正常同步。
+  bool _specDirty = false;
   bool _busy = false;
   WebViewController? _controller;
   String _lastError = '';
@@ -51,11 +56,20 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       WebKitWebViewPlatform.registerWith();
       _wkRegistered = true;
     }
+    _specCtl.addListener(() => _specDirty = true);
     // 视图切换会 dispose 本工作台——从持久化项目名续接（跨会话亦然）。
+    // 续接路径必须挂载 WebView（与创建路径同路）：否则预览永久停在
+    // 「加载预览…」，截图/四方位/刷新全是 _controller?. 空安全无操作，
+    // error/metrics/screenshot 三反馈桥断链。
     final saved = store.settings.threeProjectName;
     if (saved.isNotEmpty) {
       _project = saved;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _refresh();
+        if (!mounted || _controller != null) return; // 创建路径已挂载不双挂
+        _mountPreview();
+        setState(() {});
+      });
     }
   }
 
@@ -73,7 +87,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _state = (res['state'] as Map?)?.cast<String, dynamic>();
           _spec = (res['spec'] as Map?)?.cast<String, dynamic>();
           _sceneJs = (res['scene_js'] as String?) ?? '';
-          _specCtl.text = const JsonEncoder.withIndent('  ').convert(_spec);
+          if (!_specDirty) {
+            _specCtl.text = const JsonEncoder.withIndent('  ').convert(_spec);
+            _specDirty = false; // listener 在文本赋值时已置位，恢复未脏
+          }
         });
       }
     } catch (_) {}
@@ -242,6 +259,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       final res = await api.postJson('/three/spec/save', {'name': _project, 'spec': parsed});
       if (res['ok'] == true) {
         _toast('规范已回灌', '后续生成层将使用新规范（refine-spec）');
+        _specDirty = false; // 显式保存 = 期待服务器态回灌，恢复同步
         await _refresh();
       } else {
         _toast('保存被拒', '${res['detail']}');
@@ -269,6 +287,14 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           decoration: BoxDecoration(color: p.bgElevated, border: Border(bottom: BorderSide(color: p.line))),
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(children: [
+            // 插件视图全屏接管的可见出口（镜像 PlayView 的返回画布）。
+            IconButton(
+              icon: const Icon(Icons.arrow_back, size: 18),
+              tooltip: '返回设计 ${modCombo('⌘1')}',
+              color: p.ink2,
+              onPressed: () => store.setView('design'),
+            ),
+            const SizedBox(width: 4),
             Icon(Icons.view_in_ar_outlined, size: 17, color: p.accent),
             const SizedBox(width: 8),
             Text(_project ?? '3D 工作台', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),

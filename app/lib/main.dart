@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'core/keys.dart';
 import 'core/store.dart';
 import 'core/theme.dart';
+import 'plugins/registry.dart';
 import 'widgets/common.dart';
 import 'widgets/settings_dialog.dart';
 import 'widgets/welcome.dart';
@@ -50,6 +51,22 @@ class NonApp extends StatelessWidget {
               modKey(LogicalKeyboardKey.digit0): () {
                 store.setView('design');
                 store.bumpFit();
+              },
+              // 插件快捷键 ⌘5/⌘6/…：根级挂载（注册表顺序派生）——
+              // workspace 级 CallbackShortcuts 在插件视图内不挂载
+              // （视图路由早退），插件入口键必须活在根级才能在
+              // 插件视图内可达（配合各插件顶栏返回按钮与 Esc）。
+              for (var i = 0; i < pluginRegistry.length && i < pluginDigitKeys.length; i++)
+                modKey(pluginDigitKeys[i]): () => store.setView('plugin:${pluginRegistry[i].id}'),
+              // Esc：仅插件视图生效的返回设计出口（镜像各插件顶栏返回
+              // 按钮）。有对话框/浮层在场（焦点路由非当前路由或本身是
+              // PopupRoute）时不消费——交给浮层自身处理，不劫持对话框。
+              SingleActivator(LogicalKeyboardKey.escape): () {
+                if (!store.view.startsWith('plugin:')) return;
+                final fctx = FocusManager.instance.primaryFocus?.context;
+                final route = fctx == null ? null : ModalRoute.of(fctx);
+                if (route == null || !route.isCurrent || route is PopupRoute) return;
+                store.setView('design');
               },
             },
             child: child ?? const SizedBox.shrink(),

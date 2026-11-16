@@ -123,7 +123,16 @@ class Expr:
         self.tree = tree
 
     def eval(self, env: dict) -> float:
-        return self._eval(self.tree.body, env)
+        # 值域收口（fail-closed 兑现：除零/负数开方/log(0) 等裸 Python 异常
+        # 不允许在渲染中段以 traceback 崩掉（exit 1），一律转 RenderRejected
+        # exit 2 干净拒绝；复数/inf 不能进 SVG 坐标属性）。
+        try:
+            v = self._eval(self.tree.body, env)
+        except (ZeroDivisionError, ValueError, OverflowError) as exc:
+            raise RenderRejected(f"expr_domain_error: {self.src!r}: {exc}") from exc
+        if isinstance(v, complex) or not math.isfinite(v):
+            raise RenderRejected(f"expr_domain_error: {self.src!r} 产出 {v!r}（复数/非有限值）")
+        return v
 
     def _eval(self, node: ast.AST, env: dict) -> float:
         if isinstance(node, ast.Expression):
@@ -150,12 +159,23 @@ class Expr:
             if op is ast.Mult:
                 return l * r
             if op is ast.Div:
+                if r == 0:
+                    raise RenderRejected(f"expr_domain_error: 除零 in {self.src!r}")
                 return l / r
             if op is ast.Pow:
-                return l ** r
+                if l < 0 and r != int(r):
+                    raise RenderRejected(f"expr_domain_error: 负底数非整数指数 in {self.src!r}")
+                v = l ** r
+                if isinstance(v, complex) or not math.isfinite(v):
+                    raise RenderRejected(f"expr_domain_error: {self.src!r} 产出 {v!r}（复数/非有限值）")
+                return v
             if op is ast.Mod:
+                if r == 0:
+                    raise RenderRejected(f"expr_domain_error: 模零 in {self.src!r}")
                 return l % r
             if op is ast.FloorDiv:
+                if r == 0:
+                    raise RenderRejected(f"expr_domain_error: 除零 in {self.src!r}")
                 return l // r
             raise RenderRejected(f"expr_forbidden_operator: {op.__name__}")
         if isinstance(node, ast.UnaryOp):
@@ -280,7 +300,7 @@ def _element_svg(el, t_scene: float, T: float, env: dict, resolve) -> str:
 
     if kind == "rect":
         x = px(el.get("x", 0), "x") + mx
-        y = px(el.get("y", 0), "y")
+        y = px(el.get("y", 0), "y") + my  # motion 纵向分量（vy/orbit-cy/path）与其余元素类型同语义
         w = px(el.get("w", 100), "x") * scale
         h = px(el.get("h", 60), "y") * scale
         cx, cy = x + w / 2, y + h / 2  # 缩放绕中心，x/y = 左上角
@@ -442,6 +462,10 @@ def main() -> int:
     W, H = int(tl.get("width", 1280)), int(tl.get("height", 720))
     total = sum(float(s.get("duration", 0)) for s in tl.get("scenes", []))
     frames = int(total * fps)
+    if frames <= 0:
+        # scenes 非空但时长全 0 时 no_scenes 门（只查真值）拦不住——
+        # 0 帧会让 ffmpeg 在空目录上 check=True 崩（正是该注释声称要防的事）。
+        raise RenderRejected("no_frames: scenes 时长全为 0")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     env_static: dict = dict(params)

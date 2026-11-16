@@ -20,7 +20,10 @@ import 'status_bar.dart';
 import 'title_bar.dart';
 
 /// 插件快捷键数字键池（⌘5 起）；池容量即同时可注册插件数上限。
-const _pluginDigitKeys = [
+/// 消费点在 main.dart 根级 bindings——workspace 级 CallbackShortcuts 在
+/// 插件视图内不挂载（视图路由早退），插件入口键必须活在根级才能
+/// 「进得去也出得来」。
+const pluginDigitKeys = [
   LogicalKeyboardKey.digit5,
   LogicalKeyboardKey.digit6,
   LogicalKeyboardKey.digit7,
@@ -61,15 +64,14 @@ class _WorkspaceState extends State<Workspace> {
       },
       modKey(LogicalKeyboardKey.keyN): _newProject,
       modKey(LogicalKeyboardKey.keyO): () => _openPath(''),
-      modKey(LogicalKeyboardKey.keyZ): store.undo,
-      modKey(LogicalKeyboardKey.keyZ, shift: true): store.redo,
+      modKey(LogicalKeyboardKey.keyZ): () => _undoRedo(store, redo: false),
+      modKey(LogicalKeyboardKey.keyZ, shift: true): () => _undoRedo(store, redo: true),
       modKey(LogicalKeyboardKey.digit1): () => store.setView('design'),
       modKey(LogicalKeyboardKey.digit2): () => store.setView('docs'),
       modKey(LogicalKeyboardKey.digit3): () => store.setView('source'),
       modKey(LogicalKeyboardKey.digit4): () => store.setView('play'),
-      // 插件快捷键 ⌘5/⌘6/…：注册表顺序派生（新增插件零接线）。
-      for (var i = 0; i < pluginRegistry.length && i < _pluginDigitKeys.length; i++)
-        modKey(_pluginDigitKeys[i]): () => store.setView('plugin:${pluginRegistry[i].id}'),
+      // 插件快捷键 ⌘5/⌘6/…已上移 main.dart 根级 bindings（插件视图内
+      // 本 CallbackShortcuts 不挂载，workspace 级绑定在插件视图不可达）。
       modKey(LogicalKeyboardKey.digit0): () {
         store.setView('design');
         store.bumpFit();
@@ -173,6 +175,44 @@ class _WorkspaceState extends State<Workspace> {
   Future<void> _openPath(String path) async {
     await openProjectFlow(context, path);
     if (mounted) _focus.requestFocus();
+  }
+
+  /// ⌘Z / ⇧⌘Z 分流：焦点在文本编辑框（MBT 源码编辑 / PRD 编辑器）内时
+  /// 执行文本撤销，否则画布撤销。CallbackShortcuts 命中绑定即消费按键
+  /// （Shortcuts.handleKeypress 对已启用的 VoidCallbackAction 一律返回
+  /// handled）——「守卫不作为等事件穿透」不可行，故在文本场景显式
+  /// invoke UndoTextIntent/RedoTextIntent（DefaultTextEditingShortcuts
+  /// 同款意图），行为与按键穿透等效。
+  void _undoRedo(AppStore store, {required bool redo}) {
+    final fctx = FocusManager.instance.primaryFocus?.context;
+    if (fctx != null && _inEditable(fctx)) {
+      final intent = redo
+          ? const RedoTextIntent(SelectionChangedCause.keyboard)
+          : const UndoTextIntent(SelectionChangedCause.keyboard);
+      final action = Actions.maybeFind<Intent>(fctx, intent: intent);
+      if (action != null) {
+        Actions.of(fctx).invokeAction(action, intent, fctx);
+      }
+      return; // 编辑框内即使找不到文本撤销动作，也不回退画布历史
+    }
+    redo ? store.redo() : store.undo();
+  }
+
+  /// 沿焦点祖先找 EditableText——焦点节点不一定挂在 EditableText 本身
+  /// （TextField/编辑器都包一层 Focus）。visitAncestorElements 从最近
+  /// 祖先向外走（不含自身），自身先单独查。
+  bool _inEditable(BuildContext? ctx) {
+    if (ctx == null) return false;
+    if (ctx is Element && ctx.widget is EditableText) return true;
+    var found = false;
+    ctx.visitAncestorElements((Element e) {
+      if (e.widget is EditableText) {
+        found = true;
+        return false;
+      }
+      return true;
+    });
+    return found;
   }
 }
 
@@ -789,9 +829,17 @@ class _ShortcutsDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final groups = {
-      '全局': [('命令面板', modCombo('⌘K')), ('设置', modCombo('⌘,')), ('保存', modCombo('⌘S')), ('新建 / 打开', modCombo('⌘N / ⌘O'))],
+      '全局': [
+        ('命令面板', modCombo('⌘K')), ('设置', modCombo('⌘,')), ('保存', modCombo('⌘S')),
+        ('新建 / 打开', modCombo('⌘N / ⌘O')), ('导出 HTML', modCombo('⇧⌘H')),
+      ],
       '画布': [('撤销 / 重做', modCombo('⌘Z / ⇧⌘Z')), ('适配窗口', modCombo('⌘0')), ('缩放', modCombo('⌘滚轮')), ('平移', 'space + 拖动')],
-      '视图': [('设计画布', modCombo('⌘1')), ('设计文档', modCombo('⌘2')), ('MBT 源码', modCombo('⌘3')), ('演示模式', modCombo('⌘4'))],
+      '视图': [
+        ('设计画布', modCombo('⌘1')), ('设计文档', modCombo('⌘2')), ('MBT 源码', modCombo('⌘3')), ('演示模式', modCombo('⌘4')),
+        // 插件入口键（根级 bindings，注册表顺序派生）。
+        for (var i = 0; i < pluginRegistry.length && i < pluginDigitKeys.length; i++)
+          (pluginRegistry[i].title, modCombo('⌘${5 + i}')),
+      ],
       'Agent': [('发送', modCombo('⌘↵')), ('停止', '运行胶囊停止')],
     };
     return AlertDialog(

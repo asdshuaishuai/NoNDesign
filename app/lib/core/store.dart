@@ -105,6 +105,13 @@ class AppStore extends ChangeNotifier {
   String? _liveCanonical;
   Timer? _recoveryTimer;
 
+  /// 在飞 op 串行队列：HTTP 往返窗口内第二个 op 若不等前一条 _commit，
+  /// 会以陈旧 mbt 为基底提交并覆盖（丢改动——缩放松手两连发×方向键×
+  /// inspector 编辑任意组合均可触发）。所有画布变更入口统一走
+  /// applyOp 链式排队，链内每条读取 `mbt` 前必须等上一条提交完成；
+  /// 失败不毒化链（_applyOpNow 内部吞异常返回 false）。
+  Future<void> _opQueue = Future.value();
+
   ModelInfo? get model {
     final found = registry.find(settings.providerId, settings.modelId);
     if (found != null) return found;
@@ -647,7 +654,14 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  Future<bool> applyOp(String op, {bool silent = false}) async {
+  /// 画布变更统一入口：op 串行入队（跨入口互斥），返回链尾结果。
+  Future<bool> applyOp(String op, {bool silent = false}) {
+    final next = _opQueue.then((_) => _applyOpNow(op, silent: silent));
+    _opQueue = next; // Future<bool> 赋给 Future<void> 队列字段：链续接
+    return next;
+  }
+
+  Future<bool> _applyOpNow(String op, {bool silent = false}) async {
     if (api == null || agentBusy) {
       if (agentBusy) _toast('NoN 正在工作', '等这一轮结束再改画布。');
       return false;

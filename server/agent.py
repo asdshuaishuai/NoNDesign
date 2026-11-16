@@ -514,7 +514,11 @@ class AgentRun:
             # 至多 2 轮；全程时间线可见。
             if req.mode != "plan":
                 for rnd in range(1, 3):
-                    arts = ctx.engine.session("session_list_artboards", ctx.mbt)
+                    # to_thread：engine.session 是同步 wasm 直调（engine.py:321
+                    # 普通 def + RLock）——在 async 流里直调会阻塞事件循环，
+                    # 冻结 /agent/cancel、/health 与 SSE 推送；同函数 critique/
+                    # auto_fix 均已走 to_thread，此漏网点补齐（2026-11-16）。
+                    arts = await asyncio.to_thread(ctx.engine.session, "session_list_artboards", ctx.mbt)
                     boards = (arts.get("data") or []) if isinstance(arts, dict) else []
                     targets = []
                     for b in boards:

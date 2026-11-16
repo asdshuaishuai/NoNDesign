@@ -293,7 +293,11 @@ async def run_pass(name: str, model: str, base_url: str, api_key: str,
     state = read_state(name)
     if state.get("blocked"):
         raise ThreeError(f"blocked:{state.get('blocked_reason')} —— 先 refine-spec（重新 new 覆盖或人工改 three-spec.json）")
-    cur = next(p for p in state["passes"] if p["id"] == state["current"])
+    if state.get("current") == "done":
+        raise ThreeError("already_done: 项目已完成，无当前 pass")
+    cur = next((p for p in state["passes"] if p["id"] == state["current"]), None)
+    if cur is None:
+        raise ThreeError("state_corrupt: current pass 不存在")
     if cur["status"] == "generated" and cur["attempts"] == 0:
         raise ThreeError(f"pass_awaiting_feedback:{state['current']} 已生成，先跑预览收集反馈（error/metrics/screenshot）")
     if cur["attempts"] >= state["loop_max"]:
@@ -307,17 +311,28 @@ async def run_pass(name: str, model: str, base_url: str, api_key: str,
     raw = await _chat(model, base_url, api_key, thinking, system, user)
     js = _extract_js(raw)
     (_proj_dir(name) / "scene.js").write_text(js, "utf-8")
-    cur["status"] = "generated"
-    write_state(name, state)
-    append_history(name, {"action": "generate", "pass": state["current"], "chars": len(js)})
-    return {"ok": True, "pass": state["current"], "chars": len(js), "state": state}
+    # await 之后重读盘上状态再写回：run 期间并发 feedback（error/metrics/
+    # screenshot）可能已推进 attempts/blocked/evidence——旧快照整写会把它
+    # 们覆盖掉（状态机绕过：blocked 门复活）。本函数只拥有 status 字段。
+    state2 = read_state(name)
+    cur2 = next((p for p in state2["passes"] if p["id"] == state2["current"]), None)
+    if cur2 is None:
+        raise ThreeError("state_corrupt: current pass 不存在")
+    cur2["status"] = "generated"
+    write_state(name, state2)
+    append_history(name, {"action": "generate", "pass": state2["current"], "chars": len(js)})
+    return {"ok": True, "pass": state2["current"], "chars": len(js), "state": state2}
 
 
 async def feedback(name: str, kind: str, payload: Any) -> dict[str, Any]:
     """三反馈入口（WebView 桥回传）。error → 修复轮 +1；metrics 记录；
     screenshot 落盘 evidence/。"""
     state = read_state(name)
-    cur = next(p for p in state["passes"] if p["id"] == state["current"])
+    if state.get("current") == "done":
+        raise ThreeError("already_done: 项目已完成，无当前 pass")
+    cur = next((p for p in state["passes"] if p["id"] == state["current"]), None)
+    if cur is None:
+        raise ThreeError("state_corrupt: current pass 不存在")
     if kind == "error":
         cur["attempts"] += 1
         cur["status"] = "failed"
@@ -346,7 +361,12 @@ async def feedback(name: str, kind: str, payload: Any) -> dict[str, Any]:
         import base64
         img.write_bytes(base64.b64decode(data))
         cur["evidence"].append(img.name)
-        cur["status"] = "generated"  # 有截图证据，等待 continue 判定
+        # 仅在已有真实生成痕迹（修复轮已计/scene.js 在场）时才置 generated：
+        # 骨架页（首次 run_pass 前）的截图不能置 generated——否则 continue
+        # 门被骨架截图穿透、首个真实 run_pass 反被 pass_awaiting_feedback
+        # 卡死（状态机绕过登记 2026-11-16）。无痕迹时只记 evidence 不改 status。
+        if cur["attempts"] > 0 or (_proj_dir(name) / "scene.js").exists():
+            cur["status"] = "generated"  # 有截图证据，等待 continue 判定
         append_history(name, {"action": "evidence", "pass": state["current"],
                               "kind": "screenshot", "file": img.name, "tag": tag})
         status = "evidence-ok"
@@ -369,7 +389,11 @@ async def feedback(name: str, kind: str, payload: Any) -> dict[str, Any]:
 def continue_pass(name: str, summary: str = "") -> dict[str, Any]:
     """评审通过（agent 看过 evidence/截图后调用）：推进到下一 pass。"""
     state = read_state(name)
-    cur = next(p for p in state["passes"] if p["id"] == state["current"])
+    if state.get("current") == "done":
+        raise ThreeError("already_done: 项目已完成，无当前 pass")
+    cur = next((p for p in state["passes"] if p["id"] == state["current"]), None)
+    if cur is None:
+        raise ThreeError("state_corrupt: current pass 不存在")
     if cur["status"] not in ("generated", "verified") or not cur["evidence"]:
         raise ThreeError(f"cannot_continue:{state['current']} 状态 {cur['status']} 且无 evidence —— 先截图（img2threejs：每步必带证据）")
     cur["status"] = "verified"
