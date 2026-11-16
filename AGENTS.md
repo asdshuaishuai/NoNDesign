@@ -17,6 +17,17 @@ plugins/      独立插件：video-engine/ 代码生成视频（零 Flutter/服�
 app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板块解耦）
 ```
 
+- **移动客户端（2026-11-16 立项，双层架构）**：ios/android 平台目标已生成
+  （iOS debug 构建 38.7s 实证通过；**Android toolchain 缺失**——SDK 未装，
+  apk 构建待装后验证）。主页 welcome 加「工作台」插件区（注册表驱动）。
+  手机两层模式：① **连接桌面**——settings.serverUrl（设置面板输入）→
+  ServerLauncher.manualBaseUrl → launch 优先连接桌面服务器（LAN 全功能，
+  引擎 MoonViz 无法在移动端运行）；② **PLAN 直连**——无服务器时 Dart
+  AI SDK（ai_sdk_dart 3.1 + ai_sdk_openai，**非官方 OpenAI Agents SDK，
+  Dart 生态无官方版**）本地跑文档生成（core/mobile_agent.dart，
+  write_doc 工具语义对齐 server PLAN；工具参数无流式增量，事件式而非
+  逐字直播；RSI 依赖引擎不在直连范围）。store._runAgent 分流：
+  api==null && mode==plan && 有 key → _runMobilePlan。
 - **插件工作台 UI 与设计板块解耦**（用户裁决 2026-11-16 二次确认）：
   `app/lib/plugins/registry.dart` 是注册表——每插件一个 PluginDef（id/
   图标/builder），视图路由 `plugin:<id>`，顶栏入口与 ⌘5/⌘6… 快捷键按

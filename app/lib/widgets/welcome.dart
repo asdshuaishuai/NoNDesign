@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import '../plugins/registry.dart';
 import 'common.dart';
 import 'workspace.dart';
 
@@ -275,6 +276,8 @@ class _WelcomeState extends State<Welcome> {
                               children: [
                                 _recentCard(context, store),
                                 const SizedBox(height: 10),
+                                _workbenchCard(context, store),
+                                const SizedBox(height: 10),
                                 _howCard(context, p),
                                 const SizedBox(height: 10),
                                 Wrap(
@@ -304,6 +307,58 @@ class _WelcomeState extends State<Welcome> {
               ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+
+  /// 插件工作台入口区（3D / 视频工作台）：主页呈现插件内容——注册表
+  /// 驱动（pluginRegistry），新增插件即自动出现在主页。
+  Widget _workbenchCard(BuildContext context, AppStore store) {
+    final p = context.palette;
+    final statuses = {
+      'three': store.settings.threeProjectName.isEmpty ? '未开始' : store.settings.threeProjectName,
+      'video': '无声版 · 六类标杆示例',
+    };
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: p.panel.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: p.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('工作台', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
+          const SizedBox(height: 8),
+          for (final def in pluginRegistry)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: InkWell(
+                onTap: () => store.setView('plugin:${def.id}'),
+                borderRadius: BorderRadius.circular(9),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: p.panel2.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(9),
+                    border: Border.all(color: p.line),
+                  ),
+                  child: Row(children: [
+                    Icon(def.icon, size: 17, color: p.accent),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(def.title, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.ink)),
+                        Text(statuses[def.id] ?? '', style: TextStyle(fontSize: 10, color: p.ink4), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ]),
+                    ),
+                    Icon(Icons.chevron_right, size: 15, color: p.ink4),
+                  ]),
+                ),
+              ),
+            ),
         ],
       ),
     );

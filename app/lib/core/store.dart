@@ -8,6 +8,7 @@ import 'package:flutter/material.dart' hide Flow;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
+import 'mobile_agent.dart';
 import 'models.dart';
 
 final GlobalKey<ScaffoldMessengerState> rootMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -155,6 +156,7 @@ class AppStore extends ChangeNotifier {
       if (stored != null) {
         try {
           settings = AppSettings.fromJson(Map<String, dynamic>.from(jsonDecode(stored) as Map));
+          ServerLauncher.manualBaseUrl = settings.serverUrl; // 连接桌面模式（移动端）
         } catch (_) {}
       }
       final m = model;
@@ -1270,7 +1272,62 @@ class AppStore extends ChangeNotifier {
     _toast('正在停止', '当前这一步结束后生效。');
   }
 
+  /// PLAN 移动直连：ai_sdk_dart 本地循环。事件面最小对齐（user 行/notes/
+  /// 文档落盘/终态 toast），无 RSI/画布（引擎在移动端不可用）。
+  Future<bool> _runMobilePlan(String instruction) async {
+    runId = DateTime.now().microsecondsSinceEpoch % 0x7fffffff;
+    agentBusy = true;
+    agentPhase = 'planning';
+    _runInstruction = instruction;
+    _runStartedAt = DateTime.now().toIso8601String();
+    agentError = null;
+    streamText = '';
+    liveDocText = '';
+    timeline.add(TimelineEntry.user(instruction));
+    notifyListeners();
+    try {
+      final r = await runMobilePlan(
+        instruction: instruction,
+        model: settings.modelId,
+        baseUrl: settings.baseUrl,
+        apiKey: settings.apiKey,
+        onNote: (m) {
+          timeline.add(TimelineEntry.note('移动直连', m));
+          notifyListeners();
+        },
+      );
+      if (r.ok) {
+        docs.prd = r.prd;
+        if (r.ui.isNotEmpty) docs.ui = r.ui;
+        view = 'docs';
+        docsTab = 'prd';
+        unawaited(_persistRecovery());
+        _toast('文档已生成', 'PRD${r.ui.isNotEmpty ? ' + UI 说明' : ''}（${r.prd.length} 字）');
+      } else {
+        _toast('无文档产出', '模型未调用 write_doc——重试或换模型。');
+      }
+      return r.ok;
+    } catch (e) {
+      agentError = e.toString();
+      _toast('直连失败', e.toString());
+      return false;
+    } finally {
+      agentBusy = false;
+      agentPhase = '';
+      notifyListeners();
+    }
+  }
+
   Future<bool> _runAgent(String mode, String instruction) async {
+    // 移动直连（PLAN 独立模式）：无服务器但有模型 key 时，Dart AI SDK
+    // 本地跑文档生成（PRD/UI），无需桌面服务器——设计/画布仍需连接。
+    if (api == null && mode == 'plan' && !agentBusy) {
+      if (settings.apiKey.trim().isEmpty) {
+        _toast('先配置模型', '独立文档模式需要 API Key（或连接桌面服务器）。');
+        return false;
+      }
+      return _runMobilePlan(instruction);
+    }
     if (api == null || agentBusy) return false;
     if (settings.apiKey.trim().isEmpty) {
       _toast('先配置模型', '在设置里填入服务商 API Key。');

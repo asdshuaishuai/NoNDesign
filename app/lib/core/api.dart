@@ -18,7 +18,18 @@ class ServerHandle {
 }
 
 class ServerLauncher {
+  /// 手动指定的服务器地址（手机「连接桌面」模式）：设置面板写入，launch
+  /// 优先于环境变量与本地 spawn——移动端无法跑 Python 服务器。
+  static String? manualBaseUrl;
+
   static Future<ServerHandle> launch() async {
+    final manual = manualBaseUrl;
+    if (manual != null && manual.isNotEmpty) {
+      final url = manual.replaceAll(RegExp(r'//$'), '');
+      final ok = await _healthy(url, attempts: 4);
+      if (ok) return ServerHandle(url, null, ['using manual server ($url)']);
+      throw StateError('指定的服务器不可达：$url（检查桌面端是否在运行、两机是否同一网络）');
+    }
     final envUrl = Platform.environment['NONDESIGN_SERVER'];
     if (envUrl != null && envUrl.isNotEmpty) {
       final ok = await _healthy(envUrl, attempts: 12);

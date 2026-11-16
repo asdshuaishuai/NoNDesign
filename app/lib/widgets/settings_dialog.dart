@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/api.dart';
 import '../core/models.dart';
 import '../core/keys.dart';
 import '../core/store.dart';
@@ -25,6 +26,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   String _query = '';
   late final TextEditingController _keyController;
   late final TextEditingController _baseController;
+  late final TextEditingController _serverUrlController;
   List<AcpAgentInfo> _acpAgents = const [];
   // ACP 探测失败原因（含「本地服务未连接」）；null = 正常或未探测。
   String? _acpError;
@@ -38,6 +40,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     super.initState();
     final store = context.read<AppStore>();
     _keyController = TextEditingController(text: store.settings.apiKey);
+    _serverUrlController = TextEditingController(text: store.settings.serverUrl);
     _baseController = TextEditingController(text: store.settings.baseUrl);
     _stepsController = TextEditingController(text: store.settings.maxSteps.toString());
     _stepsFocus.addListener(() { if (mounted) setState(() {}); });
@@ -80,6 +83,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   @override
   void dispose() {
     _keyController.dispose();
+    _serverUrlController.dispose();
     _baseController.dispose();
     _stepsController.dispose();
     _stepsFocus.dispose();

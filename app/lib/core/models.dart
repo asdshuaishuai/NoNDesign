@@ -447,6 +447,10 @@ class AppSettings {
   /// 3D 工作台当前项目名（'' = 无）。工作台视图切换会 dispose 状态，
   /// 项目名持久化让「切走再回来」续接同一项目（跨会话亦然）。
   String threeProjectName;
+  /// 「连接桌面」模式：桌面端服务器地址（如 http://192.168.1.5:8799）。
+  /// 非空时 launch 优先连接它（移动端无法本地跑 Python 服务器）；
+  /// 留空且本地 spawn 失败时回落 PLAN 直连（Dart AI SDK）。
+  String serverUrl;
 
   AppSettings({
     this.providerId = 'deepseek',
@@ -459,6 +463,7 @@ class AppSettings {
     this.acpAgentId,
     this.acpAgentName,
     this.threeProjectName = '',
+    this.serverUrl = '',
   });
 
   Map<String, dynamic> toJson() => {
@@ -472,6 +477,7 @@ class AppSettings {
         'acpAgentId': acpAgentId,
         'acpAgentName': acpAgentName,
         'threeProjectName': threeProjectName,
+        'serverUrl': serverUrl,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> m) => AppSettings(
@@ -485,6 +491,7 @@ class AppSettings {
         acpAgentId: m['acpAgentId']?.toString(),
         acpAgentName: m['acpAgentName']?.toString(),
         threeProjectName: (m['threeProjectName'] ?? '').toString(),
+        serverUrl: (m['serverUrl'] ?? '').toString(),
       );
 }
 
