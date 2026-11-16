@@ -146,7 +146,11 @@ class ClearSessionRequest(BaseModel):
 @app.get("/health")
 async def health() -> dict[str, Any]:
     try:
-        info = engine().version_info()
+        # version_info 是同步 wasm 直调（engine RLock + epoch deadline）：
+        # agent run 在线程池持锁时，事件循环上直调可被阻塞至单次调用上限
+        # 30s——/health 冻结即全服务冻结（/agent/cancel、SSE 推送一并停摆），
+        # 与 /engine/render 同走 to_thread。stats 是纯 Python 计数，无需切。
+        info = await asyncio.to_thread(engine().version_info)
         return {
             "ok": True,
             "version": APP_VERSION,
@@ -189,7 +193,8 @@ async def themes() -> dict[str, Any]:
 
 @app.get("/engine/ops")
 async def ops() -> dict[str, Any]:
-    return {"ok": True, "ops": engine().list_ops()}
+    # 同 /health：list_ops 是持 RLock 的同步 wasm 调用，丢线程池执行。
+    return {"ok": True, "ops": await asyncio.to_thread(engine().list_ops)}
 
 
 @app.post("/engine/render")
@@ -394,93 +399,9 @@ async def acp_new_session(req: AcpNewSessionRequest) -> dict[str, Any]:
     return await acp_registry.create(req.agent, str(workspace_path))
 
 
-@app.get("/project/export/3d")
-async def export_3d(mbt: str, board: str) -> dict[str, Any]:
-    """轨道 C（3DCodeVerse 式插件）：画板 → 自包含 three.js 场景 HTML。
-
-    节点树无损映射（rect→拉伸盒 + z 按层级、text→CanvasTexture 贴图平面、
-    fill→材质色），摄像机初始正视可旋转/缩放——空间维度让布局关系一眼
-    可见（对照 arXiv:2610.22341 的执行/测量/视觉三反馈，浏览器即执行面）。"""
-    env = await asyncio.to_thread(engine().render, mbt)
-    if not env.get("ok"):
-        raise HTTPException(status_code=400, detail=str(env.get("error")))
-    ab = next((b for b in env.get("artboards") or []
-               if isinstance(b, dict) and b.get("id") == board), None)
-    if ab is None:
-        raise HTTPException(status_code=404, detail="board not found")
-    nodes = []
-    for n in ab.get("nodes") or []:
-        st = n.get("style") or {}
-        if st.get("visible") is False:
-            continue
-        nodes.append({
-            "x": n.get("x", 0), "y": n.get("y", 0),
-            "w": n.get("w", 0), "h": n.get("h", 0),
-            "z": float(n.get("order", 0)) * 2,
-            "fill": (st.get("fill") or "#DDDDDD").strip(),
-            "radius": st.get("radius", 0),
-            "text": (n.get("text") or "").strip()[:120],
-            "fontSize": st.get("font_size", 14),
-            "textColor": (st.get("text_color") or "#333333").strip(),
-        })
-    html = _THREE_TEMPLATE.replace("__BOARD_JSON__", json.dumps({
-        "width": ab.get("width", 390), "height": ab.get("height", 844),
-        "name": ab.get("name") or board, "nodes": nodes,
-    }, ensure_ascii=False))
-    ws = Path.home() / "Documents" / "NoNDesign"
-    ws.mkdir(parents=True, exist_ok=True)
-    out = ws / f"board-{board}-3d.html"
-    out.write_text(html, "utf-8")
-    return {"ok": True, "file": str(out), "nodes": len(nodes)}
-
-
-_THREE_TEMPLATE = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>NoNDesign 3D</title>
-<style>body{margin:0;overflow:hidden;background:#0b0d12}#info{position:fixed;top:10px;left:10px;color:#8a93a6;font:12px monospace}</style>
-</head><body><div id="info">拖动旋转 · 滚轮缩放 · 右键平移</div>
-<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
-<script type="module">
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-const DATA = __BOARD_JSON__;
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b0d12);
-const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 1, 8000);
-camera.position.set(DATA.width/2, -DATA.height/2, 900);
-const renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(innerWidth, innerHeight);
-document.body.appendChild(renderer.domElement);
-new OrbitControls(camera, renderer.domElement);
-scene.add(new THREE.AmbientLight(0xffffff, 1.1));
-const dl = new THREE.DirectionalLight(0xffffff, 0.7); dl.position.set(400, -400, 600); scene.add(dl);
-function txtMesh(n) {
-  const c = document.createElement('canvas'); c.width = 512; c.height = Math.max(64, Math.ceil(512 * n.h / Math.max(1, n.w)));
-  const g = c.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0,0,c.width,c.height);
-  g.fillStyle = n.textColor; g.font = `${Math.round(n.fontSize*2)}px sans-serif`;
-  const lines = (n.text||'').split('\n'); lines.forEach((l,i)=>g.fillText(l, 16, 40+i*Math.round(n.fontSize*2.4)));
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-  return new THREE.Mesh(new THREE.BoxGeometry(n.w, n.h, 2), [
-    new THREE.MeshBasicMaterial({color:0xcccccc}),
-    new THREE.MeshBasicMaterial({color:0xcccccc}),
-    new THREE.MeshBasicMaterial({map:t}),
-    new THREE.MeshBasicMaterial({color:0xcccccc}),
-    new THREE.MeshBasicMaterial({color:0xcccccc}),
-    new THREE.MeshBasicMaterial({color:0xcccccc}),
-  ]);
-}
-for (const n of DATA.nodes) {
-  const color = new THREE.Color(n.fill && n.fill[0]==='#' ? n.fill : 0xdddddd);
-  const mesh = n.text
-    ? txtMesh(n)
-    : new THREE.Mesh(new THREE.BoxGeometry(n.w, n.h, 6), new THREE.MeshStandardMaterial({color, roughness:.85}));
-  mesh.position.set(n.x + n.w/2, n.y + n.h/2, n.z);
-  scene.add(mesh);
-}
-const grid = new THREE.GridHelper(Math.max(DATA.width, DATA.height)*2, 20, 0x223, 0x1a1e28);
-grid.position.set(DATA.width/2, DATA.height/2, -12); scene.add(grid);
-function loop(){ requestAnimationFrame(loop); renderer.render(scene, camera); }
-loop();
-</script></body></html>"""
+# （已删 /project/export/3d 死路由，2026-11-17 审查批次：全仓零调用方，且 mbt 走
+#  GET query 参数——真实文档必撞 h11 请求行/头 16KB 上限直接 400，与 figma 路由
+#  留档的同款 bug（大 mbt 不能走 query）。3D 能力由 /three/* 工作台承载。）
 
 
 @app.post("/project/export/figma")
@@ -751,9 +672,11 @@ async def hotapp_delete(req: HotAppDeleteRequest) -> dict[str, Any]:
 
 
 @app.post("/hotapp/db/{name}/exec")
-def hotapp_db_exec(name: str, req: HotAppDbRequest) -> dict[str, Any]:
-    """SQLite 桥：页面 window.NoN.db.exec 的唯一落点（同步路由走线程池）。"""
-    return _hotapp_guard(hotapp.db_exec, name, req.sql, req.params or [])
+async def hotapp_db_exec(name: str, req: HotAppDbRequest) -> dict[str, Any]:
+    """SQLite 桥：页面 window.NoN.db.exec 的唯一落点。async + 应用锁
+    （与 generate/refine/delete 串行——无锁时 sqlite3.connect 会在半删
+    目录里凭空重建 app.db）+ to_thread 跑同步 SQL，不占事件循环。"""
+    return await _hotapp_guard_async(hotapp.db_exec_locked, name, req.sql, req.params or [])
 
 
 @app.get("/portfolio")
@@ -944,6 +867,19 @@ async def video_render(req: VideoRenderRequest) -> dict[str, Any]:
     return {"ok": True, "job": job}
 
 
+def _sweep_review_dirs(max_age_s: float = 3600.0) -> None:
+    """清扫 review-* 残留目录：崩溃/断电留下的半截目录 + 旧共享目录 review-tmp。
+    评审子进程 timeout 60s——mtime 超过 1h 的 review-* 不可能在飞，删除安全；
+    正常路径的目录由 video_review 的 finally 即用即删（本函数只兜残留）。"""
+    now = time.time()
+    for d in _VIDEO_ROOT.glob("review-*"):
+        try:
+            if now - d.stat().st_mtime > max_age_s:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
+
+
 def _prune_video_jobs(keep: int = 20) -> None:
     """_VIDEO_JOBS 与 _VIDEO_ROOT 的 job 目录只保留最近 keep 个（dict 插入序
     = 创建序，删最旧）；running 中的 job 一样按容量轮换（上限内不受影响）。"""
@@ -1010,23 +946,30 @@ async def video_review(req: VideoRenderRequest) -> dict[str, Any]:
     import subprocess as sp
     import uuid
     _VIDEO_ROOT.mkdir(parents=True, exist_ok=True)
+    _sweep_review_dirs()
     # 并发评审互不覆盖输入（共享 review-tmp 曾相互覆写 timeline/spec）
     d = _VIDEO_ROOT / f"review-{uuid.uuid4().hex[:8]}"
     d.mkdir(parents=True)
-    tl_file = d / "timeline.json"
-    tl_file.write_text(json.dumps(req.timeline, ensure_ascii=False, indent=1), "utf-8")
-    if isinstance(req.spec, dict):
-        # 同 render：按 timeline 引用名落盘
-        (d / Path(str(req.timeline.get("spec") or "spec.json")).name).write_text(
-            json.dumps(req.spec, ensure_ascii=False, indent=1), "utf-8")
-    script = Path(__file__).resolve().parent.parent / "plugins" / "video-engine" / "review.py"
-    # to_thread 不能带 kwargs 直传 sp.run 的第二位置参数（bufsize）——lambda 包齐
-    proc = await asyncio.to_thread(lambda: sp.run(
-        [sys.executable, str(script), str(tl_file)],
-        capture_output=True, text=True, timeout=60,
-        cwd=str(Path(__file__).resolve().parent.parent)))
-    return {"ok": proc.returncode == 0, "exit": proc.returncode,
-            "output": (proc.stdout + proc.stderr)[-3000:]}
+    try:
+        tl_file = d / "timeline.json"
+        tl_file.write_text(json.dumps(req.timeline, ensure_ascii=False, indent=1), "utf-8")
+        if isinstance(req.spec, dict):
+            # 同 render：按 timeline 引用名落盘
+            (d / Path(str(req.timeline.get("spec") or "spec.json")).name).write_text(
+                json.dumps(req.spec, ensure_ascii=False, indent=1), "utf-8")
+        script = Path(__file__).resolve().parent.parent / "plugins" / "video-engine" / "review.py"
+        # to_thread 不能带 kwargs 直传 sp.run 的第二位置参数（bufsize）——lambda 包齐
+        proc = await asyncio.to_thread(lambda: sp.run(
+            [sys.executable, str(script), str(tl_file)],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(Path(__file__).resolve().parent.parent)))
+        return {"ok": proc.returncode == 0, "exit": proc.returncode,
+                "output": (proc.stdout + proc.stderr)[-3000:]}
+    finally:
+        # review 目录是纯暂存输入（review.py 只读不写产物，结果全在 response
+        # 里）——用完即删；曾无任何清理路径，每次评审落一个 review-<hex>
+        # 目录、磁盘无界增长（残留兜底见 _sweep_review_dirs）。
+        shutil.rmtree(d, ignore_errors=True)
 
 
 # 入口必须在文件末尾：视频/作品集等路由定义在本行之上，若提前运行 uvicorn，

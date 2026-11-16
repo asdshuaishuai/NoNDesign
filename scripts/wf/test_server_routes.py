@@ -37,10 +37,25 @@ def main() -> int:
     if '"Cache-Control": "no-store"' not in source:
         failures.append("hotapp page must disable caching (hot update reload)")
 
+    # 事件循环纪律：/health 与 /engine/ops 的 wasm 直调必须走 to_thread——
+    # engine RLock 被 agent 线程持有时，事件循环直调可被阻塞至单次调用
+    # 上限 30s，/health 冻结即全服务冻结（/engine/render 注释自证的不变量）。
+    if "await asyncio.to_thread(engine().version_info)" not in source:
+        failures.append("/health must call version_info via to_thread (event-loop freeze)")
+    if "await asyncio.to_thread(engine().list_ops)" not in source:
+        failures.append("/engine/ops must call list_ops via to_thread (event-loop freeze)")
+
+    # SQLite 桥必须经应用锁（与 generate/refine/delete 串行）：无锁时
+    # sqlite3.connect 会在半删目录里凭空重建 app.db，同名重建被 app_exists 卡死。
+    if "hotapp.db_exec_locked" not in source:
+        failures.append("/hotapp/db route must go through db_exec_locked (per-app lock)")
+
     sys.path.insert(0, str(MAIN.parent))
     import main as server_main  # noqa: E402  (import registers all routes)
 
     paths = {getattr(route, "path", "") for route in server_main.app.routes}
+    # hotapp 全路由面 + 作品集两条：入口顺序漏注册（/video 404 同类缺陷）
+    # 在新功能面上也必须被抓住，不能只锚 db 桥一条。
     for path in (
         "/video/sample",
         "/video/review",
@@ -48,10 +63,25 @@ def main() -> int:
         "/video/render/status",
         "/video/frame",
         "/three/scene/{name}.js",
+        "/hotapp/generate",
+        "/hotapp/refine",
+        "/hotapp/page/{name}",
+        "/hotapp/list",
+        "/hotapp/delete",
         "/hotapp/db/{name}/exec",
+        "/portfolio",
+        "/portfolio/delete",
     ):
         if path not in paths:
             failures.append(f"missing route {path}")
+
+    # 死路由不许回潮（2026-11-17 审查批次删除）：/project/export/3d 全仓零
+    # 调用方，且 mbt 走 GET query——真实文档必撞 h11 头 16KB 上限直接 400
+    # （与 /project/export/figma 留档修复的同款 bug：大 mbt 必须走 body）。
+    if "/project/export/3d" in paths:
+        failures.append("dead route /project/export/3d must stay removed (zero callers + mbt-in-query h11 16KB bug)")
+    if "export_3d" in source or "_THREE_TEMPLATE" in source:
+        failures.append("export_3d/_THREE_TEMPLATE dead code must stay removed")
 
     if failures:
         print("FAIL")

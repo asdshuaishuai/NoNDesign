@@ -1,7 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 连接桌面模式（手输 http://<局域网 IP>）需要网络：INTERNET 此前只在
+         debug/profile manifest 里声明，manifest merger 下 release APK 完全
+         无网；targetSdk≥28 默认禁明文 HTTP，不放开则任何构建连 LAN 桌面
+         服务器（含 WebView 加载 three/hotapp 预览页）都被系统拒绝。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="nondesign"
         android:name="${applicationName}"
+        android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"

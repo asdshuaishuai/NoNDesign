@@ -13,6 +13,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "server"))
@@ -138,6 +139,119 @@ async def test_probe() -> list[str]:
     return failures
 
 
+# 握手成功但 new_session 回伪响应、随后长眠：让 start() 在 new_session
+# 校验处快速抛错（不等 30s 超时），子进程仍挂着——正是泄漏形态。
+LEAKING_AGENT = r"""
+import json, sys, time
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+for raw in sys.stdin:
+    req = json.loads(raw)
+    m, i = req.get("method"), req.get("id")
+    if m == "initialize":
+        send({"jsonrpc": "2.0", "id": i, "result": {"protocolVersion": 1, "agentCapabilities": {}}})
+    elif m == "session/new":
+        send({"jsonrpc": "2.0", "id": i, "result": {"bogus": True}})
+        time.sleep(300)
+"""
+
+
+async def test_start_failure_terminates_child() -> list[str]:
+    """start() 失败（握手超时/伪响应）必须 terminate 已 spawn 的 CLI 子进程。
+
+    此前失败路径直接抛回 create()：会话未入注册表、close() 永不可达，
+    每次失败泄漏一个孤儿进程（agent-4/server-3）。"""
+    from acp_bridge import AcpSession
+
+    failures: list[str] = []
+    with tempfile.TemporaryDirectory() as ws:
+        script = Path(ws) / "leaking_agent.py"
+        script.write_text(LEAKING_AGENT, "utf-8")
+        session = AcpSession("leak-t", "fake", [sys.executable, str(script)], ws)
+        raised = False
+        try:
+            await session.start()
+        except Exception:  # noqa: BLE001 - 任何失败形态都算
+            raised = True
+        if not raised:
+            failures.append("start() should fail on bogus session/new response")
+            await session.close()
+            return failures
+        # SIGTERM 递送需要一点时间；0.5s 后仍活着 = 泄漏。
+        for _ in range(10):
+            if session.proc is not None and session.proc.returncode is not None:
+                break
+            await asyncio.sleep(0.05)
+        rc = session.proc.returncode if session.proc is not None else None
+        if rc is None:
+            failures.append(
+                "spawned CLI child still alive after failed start() — orphan process leak")
+    return failures
+
+
+async def test_concurrent_prompt_sink_lifecycle() -> list[str]:
+    """并发 prompt：先结束者不得摘掉后来者的 sink（agent-3）。
+
+    AcpSession.lock 只覆盖装配不覆盖 prompt 生命周期——两个并发 prompt 时
+    后者换掉 client.sink；先结束者的 finally 若无条件置 None，后一个
+    prompt 的全部 assistant_delta 丢失。假 conn 以事件门控制完成顺序。"""
+    from acp.schema import AgentMessageChunk, TextContentBlock
+
+    from acp_bridge import AcpSession
+
+    failures: list[str] = []
+
+    class _GatedConn:
+        def __init__(self) -> None:
+            self.gates: dict[str, asyncio.Event] = {}
+
+        async def prompt(self, req: Any) -> Any:
+            chunk = req.prompt[0] if req.prompt else None
+            text = getattr(chunk, "text", "") or ""
+            await self.gates.setdefault(text, asyncio.Event()).wait()
+            return type("R", (), {"stop_reason": "end_turn"})()
+
+        async def cancel(self, session_id: str) -> None:  # close() 会试探
+            return None
+
+    with tempfile.TemporaryDirectory() as ws:
+        session = AcpSession("sink-t", "fake", [sys.executable, "-c", "pass"], ws)
+        conn = _GatedConn()
+        session.conn = conn  # type: ignore[assignment]
+        session.remote_session = "remote-1"
+
+        pa = await session.prompt("A")
+        pb = await session.prompt("B")  # 并发：sink 已被 B 接管
+
+        conn.gates.setdefault("A", asyncio.Event()).set()
+        terminal_a = await asyncio.wait_for(pa.queue.get(), timeout=5)
+        if terminal_a.get("type") != "done":
+            failures.append(f"prompt A terminal is {terminal_a!r}")
+        await asyncio.sleep(0.05)  # 让 A 的 finally 先跑完
+
+        # A 已结束；此刻 B 的 delta 必须仍能进 B 的队列。
+        await session.client.session_update(
+            "remote-1",
+            AgentMessageChunk(content=TextContentBlock(type="text", text="B 的增量")),
+        )
+        conn.gates.setdefault("B", asyncio.Event()).set()
+
+        b_events = []
+        while True:
+            ev = await asyncio.wait_for(pb.queue.get(), timeout=5)
+            b_events.append(ev)
+            if ev.get("type") in ("done", "failed"):
+                break
+        deltas = [e for e in b_events if e.get("type") == "assistant_delta"]
+        if not any("B 的增量" in (e.get("text") or "") for e in deltas):
+            failures.append(
+                f"prompt B lost its deltas after A finished (sink torn down cross-prompt): {b_events!r}")
+    return failures
+
+
 async def run_all() -> int:
     failures = []
     r = await main.__wrapped__() if hasattr(main, "__wrapped__") else None
@@ -156,4 +270,20 @@ if __name__ == "__main__":
         code = code or 1
     else:
         print("probe: verified/failed cases green")
+    leak_failures = _aio.run(test_start_failure_terminates_child())
+    if leak_failures:
+        print("START-FAILURE CLEANUP FAIL")
+        for f in leak_failures:
+            print(" -", f)
+        code = code or 1
+    else:
+        print("start-failure cleanup: child terminated green")
+    sink_failures = _aio.run(test_concurrent_prompt_sink_lifecycle())
+    if sink_failures:
+        print("SINK LIFECYCLE FAIL")
+        for f in sink_failures:
+            print(" -", f)
+        code = code or 1
+    else:
+        print("concurrent prompt sink lifecycle: green")
     raise SystemExit(code)

@@ -9,8 +9,14 @@ Usage:
 本地集成模式（ENGINE_LOCAL 标记，gitignored）：
   标记在场（一行 = 本地构建 wasm 路径）时，默认同步从该路径取引擎——dev 跑法
   持续使用本地构建，rebuild 后重跑本脚本即可；不会被 Release 产物静默覆盖。
-  标记缺省才走「校验现存 / 缺失时拉 Release」。生产打包/发布一律应锚定
-  Release 产物（--release），标记在场时会醒目告警。
+  标记缺省才走「校验现存 / 缺失时拉 Release」。
+
+⚠️ --release 当前是死路（2026-11-17 登记）：本仓跑 0.2 能力线，上游尚未发布
+0.2 Release——锚定的 engine-v0.1.11 资产缺 0.2 面（无 session_event_in 导出，
+真机验证 51 vs 53 个 session 导出），下载后必被 probe_engine_02 拒绝，脚本会
+在下载前 fail-fast。上游 0.2 出线后同步 RELEASE_TAG/RELEASE_ASSET/RELEASE_SHA512
+即自动恢复「生产锚定 Release」语义；在那之前唯一能过探针的来源是本地 dev
+构建（--local / ENGINE_LOCAL 标记）。
 """
 
 from __future__ import annotations
@@ -49,6 +55,35 @@ def marker_path() -> Path | None:
     return Path(text) if text else DEFAULT_LOCAL_BUILD
 
 
+def _release_anchor_predates_02() -> bool:
+    """RELEASE_TAG 锚点是否早于 0.2 能力线（"engine-v0.1.11" → minor 1）。
+
+    真机验证：0.1.11 Release 资产无 session_event_in 导出，probe_engine_02 必拒。
+    锚点升到 v0.2.x 后本判定自动放行——无需再改这里。"""
+    import re as _re
+
+    m = _re.search(r"engine-v(\d+)\.(\d+)", RELEASE_TAG)
+    return not m or int(m.group(2)) < 2
+
+
+def _fetch_release() -> bytes:
+    """下载锚定的 Release 资产并校验 sha512；锚点早于 0.2 面时 fail-fast。"""
+    if _release_anchor_predates_02():
+        raise SystemExit(
+            f"pinned release predates the 0.2 capability face: RELEASE_TAG={RELEASE_TAG}\n"
+            "  真机验证：该资产缺 session_event_in 等 0.2 导出，下载后必被 probe_engine_02 拒绝。\n"
+            "  上游发布 0.2 Release 后同步 RELEASE_TAG/RELEASE_ASSET/RELEASE_SHA512 再锚定；\n"
+            "  当前唯一能过探针的引擎来源是本地 dev 构建：scripts/sync_engine.py --local ../moonviz-dev/_build/wasm/release/build/wasm/wasm.wasm"
+        )
+    print(f"[sync_engine] downloading {URL}")
+    with urllib.request.urlopen(URL, timeout=60) as response:
+        data = response.read()
+    got = sha512(data)
+    if got != RELEASE_SHA512:
+        raise SystemExit(f"sha512 mismatch\n  expected {RELEASE_SHA512}\n  actual   {got}")
+    return data
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--local", help="copy a local wasm build (writes the ENGINE_LOCAL marker)")
@@ -67,12 +102,7 @@ def main() -> None:
     elif args.release:
         if ENGINE_LOCAL.exists():
             print(f"[sync_engine] ⚠️ ENGINE_LOCAL 在场（{marker_path()}）——本次显式锚定 Release 产物；删除标记或重跑 --local 恢复本地集成模式")
-        print(f"[sync_engine] downloading {URL}")
-        with urllib.request.urlopen(URL, timeout=60) as response:
-            data = response.read()
-        got = sha512(data)
-        if got != RELEASE_SHA512:
-            raise SystemExit(f"sha512 mismatch\n  expected {RELEASE_SHA512}\n  actual   {got}")
+        data = _fetch_release()
         source = URL
     else:
         local = marker_path()
@@ -81,7 +111,8 @@ def main() -> None:
                 raise SystemExit(
                     f"ENGINE_LOCAL 指向的本地构建缺失：{local}\n"
                     f"  先在 moonviz-dev 构建：cd {local.parents[4]} && moon build --release --target wasm wasm\n"
-                    f"  或显式回落 Release：{sys.argv[0]} --release"
+                    "  （--release 不是可用回落：锚定的 0.1.11 资产缺 0.2 面，探针必拒——"
+                    "上游 0.2 出线并更新锚点前，本地构建是唯一能过探针的来源）"
                 )
             data = local.read_bytes()
             source = f"local: {local}"
@@ -89,12 +120,7 @@ def main() -> None:
             data = WASM.read_bytes()
             source = "existing engine/moonviz.wasm"
         else:
-            print(f"[sync_engine] downloading {URL}")
-            with urllib.request.urlopen(URL, timeout=60) as response:
-                data = response.read()
-            got = sha512(data)
-            if got != RELEASE_SHA512:
-                raise SystemExit(f"sha512 mismatch\n  expected {RELEASE_SHA512}\n  actual   {got}")
+            data = _fetch_release()
             source = URL
 
     WASM.write_bytes(data)
@@ -124,6 +150,17 @@ def main() -> None:
         raise SystemExit(f"template registry shrank: {len(templates)}")
     if len(components) < 40:
         raise SystemExit(f"component registry shrank: {len(components)}")
+    # 活注册表对账：快照条数只跟自己比，抓不住引擎组件面的增删——
+    # wasm 有 list_components 活导出（真机验证 65/65 id 一致），必须逐 id 对账。
+    live_ids = {c.get("id") for c in host.list_components_live() if isinstance(c, dict)}
+    snap_ids = {c.get("id") for c in components if isinstance(c, dict)}
+    if live_ids != snap_ids:
+        raise SystemExit(
+            "engine/components.json 快照与 wasm 活注册表漂移\n"
+            f"  引擎有而快照缺：{sorted(live_ids - snap_ids)}\n"
+            f"  快照有而引擎无：{sorted(snap_ids - live_ids)}\n"
+            "  → 引擎组件面变更后必须重制 components.json 快照（agent 工具面与前端共用它）"
+        )
     build_line = probe_engine_02(host, seed)
     MANIFEST.write_text(
         json.dumps(

@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import struct
 import zlib
-from typing import Tuple
 
 import zstandard as zstd
 from argon2.low_level import Type as Argon2Type, hash_secret_raw
@@ -145,17 +144,3 @@ def decrypt_ddp(data: bytes, password: str = "") -> str:
         return raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise DdpError("ddp_mbt_not_utf8") from exc
-
-
-def save_ddp(path: str, mbt: str, password: str = "") -> dict:
-    payload = encrypt_ddp(mbt, password)
-    with open(path, "wb") as fh:
-        fh.write(payload)
-    return {"ok": True, "path": path, "bytes": len(payload)}
-
-
-def load_ddp(path: str, password: str = "") -> Tuple[str, dict]:
-    with open(path, "rb") as fh:
-        data = fh.read(MAX_CIPHERTEXT + HEADER_BYTES + 1)
-    mbt = decrypt_ddp(data, password)
-    return mbt, {"ok": True, "path": path, "bytes": len(data)}

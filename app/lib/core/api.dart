@@ -25,7 +25,10 @@ class ServerLauncher {
   static Future<ServerHandle> launch() async {
     final manual = manualBaseUrl;
     if (manual != null && manual.isNotEmpty) {
-      final url = manual.replaceAll(RegExp(r'//$'), '');
+      // 单/多尾斜杠都剥干净再进 handle：_healthy 自行剥斜杠所以健康检查
+      // 能过，但保留斜杠的 baseUrl 会让之后所有路径变成 //path 而 404
+      //（移动端「连接桌面」死锁在误导性 no models in registry）。
+      final url = manual.replaceAll(RegExp(r'/+$'), '');
       final ok = await _healthy(url, attempts: 4);
       if (ok) return ServerHandle(url, null, ['using manual server ($url)']);
       throw StateError('指定的服务器不可达：$url（检查桌面端是否在运行、两机是否同一网络）');
@@ -33,7 +36,7 @@ class ServerLauncher {
     final envUrl = Platform.environment['NONDESIGN_SERVER'];
     if (envUrl != null && envUrl.isNotEmpty) {
       final ok = await _healthy(envUrl, attempts: 12);
-      if (ok) return ServerHandle(envUrl.replaceAll(RegExp(r'/$'), ''), null, ['using NONDESIGN_SERVER']);
+      if (ok) return ServerHandle(envUrl.replaceAll(RegExp(r'/+$'), ''), null, ['using NONDESIGN_SERVER']);
     }
 
     final root = _findRoot();
@@ -161,6 +164,13 @@ class NoNDesignApi {
   final String baseUrl;
   final http.Client _client;
 
+  /// SSE 流中空闲超时：两行事件之间超过该时长视为服务端卡死（进程活、
+  /// 不发数据），收流并合成 failed 终态——否则 await for 永挂、客户端
+  /// agentBusy 永真。默认对齐 ACP 服务端自身的 600s 每事件等待预算再留
+  /// 余量（合法长操作——LLM 调用/引擎渲染——都在事件间远小于此值）；
+  /// 测试可缩短。
+  static Duration sseIdleTimeout = const Duration(seconds: 660);
+
   NoNDesignApi(this.baseUrl, [http.Client? client]) : _client = client ?? http.Client();
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
@@ -206,7 +216,14 @@ class NoNDesignApi {
       yield {'type': 'failed', 'error': 'acp_http_${response.statusCode}', 'stopReason': 'failed'};
       return;
     }
-    final lines = response.stream.transform(utf8.decoder).transform(const LineSplitter());
+    var stalled = false;
+    final lines = response.stream
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .timeout(sseIdleTimeout, onTimeout: (sink) {
+      stalled = true;
+      sink.close(); // 结束收流：下方合成 failed 终态
+    });
     await for (final line in lines) {
       if (!line.startsWith('data:')) continue;
       final payload = line.substring(5).trim();
@@ -218,6 +235,9 @@ class NoNDesignApi {
           if (value['type'] == 'done' || value['type'] == 'failed') return;
         }
       } catch (_) {}
+    }
+    if (stalled) {
+      yield {'type': 'failed', 'error': 'sse_idle_timeout', 'stopReason': 'failed'};
     }
   }
 
@@ -399,7 +419,14 @@ class NoNDesignApi {
       yield {'type': 'failed', 'error': 'agent_http_${response.statusCode}', 'stopReason': 'failed'};
       return;
     }
-    final lines = response.stream.transform(utf8.decoder).transform(const LineSplitter());
+    var stalled = false;
+    final lines = response.stream
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .timeout(sseIdleTimeout, onTimeout: (sink) {
+      stalled = true;
+      sink.close(); // 结束收流：下方合成 failed 终态
+    });
     await for (final line in lines) {
       if (!line.startsWith('data:')) continue;
       final payload = line.substring(5).trim();
@@ -415,6 +442,11 @@ class NoNDesignApi {
       } catch (_) {
         // ignore malformed SSE line
       }
+    }
+    if (stalled) {
+      // 流中空闲超时（服务端进程活但不再发数据）：合成终态，await for 的
+      // 消费方（store._runAgent）才不会永挂、agentBusy 才会释放。
+      yield {'type': 'failed', 'error': 'sse_idle_timeout', 'stopReason': 'failed'};
     }
   }
 }

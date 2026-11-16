@@ -114,7 +114,12 @@ Future<T?> showNonDialog<T>({
     barrierLabel: barrierLabel ?? 'dialog',
     barrierColor: barrierColor ?? Colors.black.withValues(alpha: 0.55),
     transitionDuration: NonMotion.slow,
-    pageBuilder: (_, __, ___) => builder(context),
+    // builder 必须拿路由自己的 context，不能拿推入方的 context：弹窗在场
+    // 时推入视图可能已被切走（根级 ⌘1–⌘7 不让位浮层）——调用点的
+    // `Navigator.pop(ctx, …)` 与 `ctx.palette` 在死 element 上前者直接
+    // TypeError（StatefulElement.state 空断言），路由 context 则始终存活
+    // 且同在 MaterialApp 主题树下，行为不变。
+    pageBuilder: (routeCtx, __, ___) => builder(routeCtx),
     transitionBuilder: (context, anim, __, child) {
       final curved = CurvedAnimation(parent: anim, curve: NonMotion.curve);
       return FadeTransition(

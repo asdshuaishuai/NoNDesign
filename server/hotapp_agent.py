@@ -319,6 +319,19 @@ def db_exec(name: str, sql: str, params: list[Any] | None = None) -> dict[str, A
         con.close()
 
 
+async def db_exec_locked(name: str, sql: str, params: list[Any] | None = None) -> dict[str, Any]:
+    """db_exec 的路由入口：与 generate/refine/delete 共用应用锁。
+
+    db_exec 是同步函数（FastAPI def 路由跑线程池），与事件循环上的 delete
+    真并行；它的 index.html 存在性检查与 sqlite3.connect（对缺失文件新建
+    空库）之间无锁无重验——与持锁 rmtree 交错就会在半删目录里凭空重建
+    app.db。锁内再跑存在性检查（等锁期间 app 可能已被 delete），SQL 本体
+    丢线程池不占事件循环。
+    """
+    async with _lock_for(name):
+        return await asyncio.to_thread(db_exec, name, sql, params)
+
+
 async def _chat(model: str, base_url: str, api_key: str, system: str, user: str) -> str:
     """单轮生成（AsyncOpenAI 原生 await——不可 to_thread 包 coroutine）。"""
     client = AsyncOpenAI(api_key=api_key or "missing", base_url=base_url or None)
@@ -330,7 +343,10 @@ async def _chat(model: str, base_url: str, api_key: str, system: str, user: str)
 
 # 读 → await LLM → 写 的窗口内，同名的 generate/refine/delete 必须串行：
 # 否则两个 refine 都读旧版、后写覆盖先写且都回 ok；delete 也会在 await
-# 期间删掉目录让写盘裸 FileNotFoundError。锁按应用名分片，不阻塞其他应用。
+# 期间删掉目录让写盘裸 FileNotFoundError。db_exec 同走此锁（见
+# db_exec_locked）——否则它与持锁 delete 竞态时 sqlite3.connect 会在半删
+# 目录里凭空重建 app.db，rmtree 随即 OSError 留幽灵目录卡死同名重建。
+# 锁按应用名分片，不阻塞其他应用。
 _app_locks: dict[str, asyncio.Lock] = {}
 
 

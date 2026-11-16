@@ -207,6 +207,8 @@ flutter build macos --debug
 - 会话 API 按 canonical MBT 键控；变更信封的 `mbt` 必须回写缓存。任何 trap/腐坏读
   都弃缓存。
 - `list_components` 用 `engine/components.json` 快照；`list_templates` 直接问引擎。
+  快照与 wasm 活注册表的一致性由 sync 探针逐 id 对账（`list_components_live()`
+  直问 wasm 导出——引擎组件面增删后快照不重制即门红，2026-11-17 起）。
 
 ## Agent 层约定
 
@@ -393,14 +395,21 @@ flutter build macos --debug
 - **字阶与文案（2026-11-14）**：全应用 8 档字阶 10/11/12/13/15/18/22/34，
   10px 可读性地板（17 档→8 档已重映射 254 处）；加文案先查这档表。运行时栈名
   （Flutter/Python 等）不进产品文案。已知缺口（深度优化轮分诊 deferred，审查轮
-  2026-11-14 复核：③ 已修，⑦⑧ 新增 to_thread 遗漏已修，其余仍成立，勿丢）：
-  ① `applyOp` 无在飞排队——HTTP 在飞窗口内第二个 op 以陈旧 mbt 提交并覆盖
-  （resize 在飞+方向键可复现，high）；② `_jumpHistory` 无在飞守卫（连按 ⌘Z
-  合并成一步，与①同根应随队列一并做）；~~③ `_NodeInteractionsEditor._entries`
+  2026-11-14 复核：③ 已修，⑦⑧ 新增 to_thread 遗漏已修，其余仍成立，勿丢；
+  2026-11-17 核心状态机批次再收 ①②）：
+  ~~① `applyOp` 无在飞排队——HTTP 在飞窗口内第二个 op 以陈旧 mbt 提交并覆盖
+  （resize 在飞+方向键可复现，high）~~（已修，9c2e246 `_opQueue` 链；2026-11-17
+  批次把 constrainLayout/⌘Z⇧⌘Z/_jumpHistory/engineHistory undo·redo/newProject/
+  openProjectPath 全部收进同一队列（`_chainOp` 单点收口），并补「两 op 在飞被
+  串行化且第二条用刷新后 mbt」回归锚 `test/store_test.dart`——此前队列被回退
+  成直发 await 不会让任何测试变红）；~~② `_jumpHistory` 无在飞守卫（连按 ⌘Z
+  合并成一步，与①同根应随队列一并做）~~（已修，2026-11-17：目标下标在链内
+  计算 + undo/redo 排队）；~~③ `_NodeInteractionsEditor._entries`
   拉回从未渲染~~（已修，2026-11-14：补渲染 + 解绑按钮；父级 `_ensureNodeInteractions`
   与本组件各自独立拉取 session_interactions 仍是重复请求，未合并——数据流改动
   留给专门一轮）；④ SSE 事件契约零测试锚点（已部分缓解：`test/store_test.dart`
-  覆盖 applyOp/undo/redo 核心路径，`/agent/run` SSE 事件契约本身仍无锚点）；
+  覆盖 applyOp/undo/redo 核心路径、SSE 空闲超时终态与 run 归属校验，
+  `/agent/run` 全事件契约仍无锚点）；
   ⑤ 多选拖拽 N 次串行 HTTP（正解是引擎批量 move op，上游提 issue）；⑥ 门禁加固
   （capability/ddp 不验 sha、compileall 只查语法、ddp_check 依赖本机文件路径）；
   ~~⑦ `list_templates`/`list_themes` 两端点 + agent compose 阶段 + `_list_templates`
@@ -445,6 +454,13 @@ flutter build macos --debug
 ## 测试与验收
 
 - `flutter test`：Welcome / Canvas / Workspace / Docs 无头渲染 + SSE 解析。
+- **Python 回归锚点在 `scripts/wf/test.sh` 门禁序列里**（先于 flutter test 逐个跑，
+  红即止；`.venv` 缺失直接报错并给建环境指引）：test_hotapp（名称校验 / SQLite 桥 /
+  作品集 + **generate/refine/delete_app 异步写路径与 `_app_locks` 同名串行不变量**，
+  变异验证过必红）、test_server_routes（入口顺序 + **hotapp/portfolio 全路由在场**）、
+  test_context_sanitize（tool 配对消毒）、test_acp_client（fake agent JSON-RPC 全链）、
+  test_doc_delta（`_DocDeltaExtractor` 跨片解码：转义 / `\uXXXX` 切断、键名切断、
+  done 惰性自复位）。新增 `scripts/wf/test_*.py` 时同步加进 test.sh 循环。
 - Python 端到端：`server/main.py` + mock OpenAI SSE → Plan/Build 两种 run，
   验证文档、生成页面、preview、cleanup、canonical 回写。
 - 引擎：`scripts/sync_engine.py` 的 render 探针；`server/engine.py` 的
@@ -454,8 +470,11 @@ flutter build macos --debug
 - **本地集成模式（ENGINE_LOCAL 标记，2026-11-13，用户决策）**：`engine/ENGINE_LOCAL`
   （gitignored，一行=构建路径）在场时 sync 默认取 `../moonviz-dev` 本地构建——dev 跑法
   持续使用本地引擎，rebuild 后重跑 `scripts/sync_engine.py` 即接回；**不会被 Release
-  产物静默覆盖**。标记缺省才回落「校验现存 / 拉取 Release」；`--release` 是显式
-  发布锚定（标记在场时告警）。引擎自报版本可能滞后 dev 构建（0.2 自报 0.1.11），
+  产物静默覆盖**。标记缺省才回落「校验现存 / 拉取 Release」。**`--release` 当前是
+  死路（2026-11-17 登记）**：锚定的 engine-v0.1.11 资产缺 0.2 面（无 session_event_in
+  导出），sync 在下载前 fail-fast——上游 0.2 出线后同步 RELEASE_TAG/ASSET/SHA512
+  即恢复「生产锚定 Release」语义，在那之前本地 dev 构建是唯一能过探针的来源。
+  引擎自报版本可能滞后 dev 构建（0.2 自报 0.1.11），
   能力面以 manifest `build_line`（行为探针判定）为准。首次设锚：
   `.venv/bin/python scripts/sync_engine.py --local ../moonviz-dev/_build/wasm/release/build/wasm/wasm.wasm`。
 

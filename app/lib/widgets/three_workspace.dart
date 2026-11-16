@@ -173,6 +173,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       ),
     );
     if (ok != true) return;
+    // 弹窗打开期间视图可能已被切走（根级 ⌘1–⌘7 不让位浮层，Workspace
+    // 重建即 dispose 本 State）——await 之后必须先验 mounted 再 setState。
+    if (!mounted) return;
     final name = nameCtl.text.trim();
     final brief = briefCtl.text.trim();
     if (name.isEmpty || brief.isEmpty) return;
@@ -317,6 +320,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         ),
       );
       if (choice == null) return;
+      // 弹窗打开期间视图可能已被切走（根级 ⌘1–⌘7 不让位浮层）——await
+      // showNonDialog 之后先验 mounted：死 State 上 setState 在 debug 抛
+      // FlutterError 且被外层 catch 吞成「项目切换静默失效」。__new__ 分支
+      // 同样要挡（_createProject 会再 showNonDialog(context)，死 context 崩）。
+      if (!mounted) return;
       if (choice == '__new__') {
         await _createProject();
         return;

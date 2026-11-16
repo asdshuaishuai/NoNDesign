@@ -71,6 +71,12 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # 离线模型注册表：server/models.json 的入库副本（scripts/sync_models.py
+  # 双写保持同步）。移动端离线（PLAN 直连/连接桌面失败）时模型选择与
+  # toolCall/protocol 门控的数据源；store.ensureBundledRegistry 消费。
+  assets:
+    - assets/models.json
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

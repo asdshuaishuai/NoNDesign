@@ -210,27 +210,39 @@ class _WelcomeState extends State<Welcome> {
                           const SizedBox(width: 44),
                           Expanded(
                             flex: 4,
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                _recentCard(context, store),
-                                const SizedBox(height: 10),
-                                _workbenchCard(context, store),
-                                const SizedBox(height: 10),
-                                _portfolioCard(context, store),
-                                const SizedBox(height: 10),
-                                _howCard(context, p),
-                                const SizedBox(height: 10),
-                                Wrap(
-                                  spacing: 5,
-                                  runSpacing: 5,
-                                  children: const [
-                                    Pill(label: '引擎门校验', icon: Icons.verified_outlined),
-                                    Pill(label: 'DDP 单文件', icon: Icons.lock_outline),
-                                    Pill(label: '前缀缓存', icon: Icons.bolt_outlined),
-                                  ],
+                            // 右列内容高随真实数据无上限增长（recent ≤6 +
+                            // 工作区/桌面 ≤8）：1440×920 实测整列溢出
+                            // 450px、1024×768 溢出 326px。改可滚动，内容短于
+                            // 视口时仍垂直居中（原 Column 的 center 语义，
+                            // minHeight 钉满视口实现）。
+                            child: LayoutBuilder(
+                              builder: (context, constraints) => SingleChildScrollView(
+                                child: ConstrainedBox(
+                                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      _recentCard(context, store),
+                                      const SizedBox(height: 10),
+                                      _workbenchCard(context, store),
+                                      const SizedBox(height: 10),
+                                      _portfolioCard(context, store),
+                                      const SizedBox(height: 10),
+                                      _howCard(context, p),
+                                      const SizedBox(height: 10),
+                                      Wrap(
+                                        spacing: 5,
+                                        runSpacing: 5,
+                                        children: const [
+                                          Pill(label: '引擎门校验', icon: Icons.verified_outlined),
+                                          Pill(label: 'DDP 单文件', icon: Icons.lock_outline),
+                                          Pill(label: '前缀缓存', icon: Icons.bolt_outlined),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ],
+                              ),
                             ),
                           ),
                         ],

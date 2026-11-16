@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart' hide Flow;
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart' show CancellationToken;
 
@@ -26,6 +27,15 @@ const _builtInBaseUrls = <String, String>{
   'minimax': 'https://api.minimax.io/v1',
   'stepfun': 'https://api.stepfun.com/v1',
 };
+
+/// 解析内置 models.json 快照（server/models.json 的入库副本）为注册表。
+/// 形状不对/为空返回 null——离线注册表是增强不是依赖，失败保持现 registry。
+ModelRegistry? parseBundledModelsSnapshot(Object? decoded) {
+  if (decoded is! Map) return null;
+  final providers = decoded['providers'];
+  if (providers is! Map || providers.isEmpty) return null;
+  return ModelRegistry.fromJson(Map<String, dynamic>.from(decoded));
+}
 
 String _baseName(String path) {
   final name = path.split(RegExp(r'[\\/]')).last;
@@ -126,13 +136,39 @@ class AppStore extends ChangeNotifier {
   Timer? _recoveryTimer;
   /// 移动直连在飞请求的本地取消令牌（无服务器 /agent/cancel 可调）。
   CancellationToken? _mobileCancel;
+  /// recovery.json 所在根目录（生产 ~/.nondesign；测试注入临时目录，
+  /// 不污染真实用户 home）。
+  @visibleForTesting
+  String recoveryDir = '${Platform.environment['HOME']}/.nondesign';
+  /// recovery 快照串行写链：run 起点/终态/doc_written/preview/周期 Timer
+  /// 多处 unawaited 并发写同一文件——两个 writeAsString（各持 fd、O_TRUNC
+  /// 从 0 写）交错可产生撕裂 JSON，下次启动 _loadRecovery 的 catch-all 会
+  /// 静默吞掉解析失败，半程任务恢复快照无声丢失。所有写/删经此链接力，
+  /// 后写覆盖先写。
+  Future<void> _recoveryWriteQueue = Future.value();
 
   /// 在飞 op 串行队列：HTTP 往返窗口内第二个 op 若不等前一条 _commit，
   /// 会以陈旧 mbt 为基底提交并覆盖（丢改动——缩放松手两连发×方向键×
   /// inspector 编辑任意组合均可触发）。所有画布变更入口统一走
   /// applyOp 链式排队，链内每条读取 `mbt` 前必须等上一条提交完成；
   /// 失败不毒化链（_applyOpNow 内部吞异常返回 false）。
+  /// 入口清单（缺一即重新打开交错窗口）：applyOp / autoFix / applySource /
+  /// constrainLayout / _jumpHistory（⌘Z/⇧⌘Z/历史面板）/ engineHistory
+  /// undo·redo / newProject / openProjectPath。
   Future<void> _opQueue = Future.value();
+
+  /// 把一个变更任务排到 _opQueue 链尾：任务在链内执行（此刻前一条已
+  /// _commit），读到的 mbt/history 才是新鲜的。异常不毒化链——任务自身
+  /// 应吞异常返回失败（与 _applyOpNow 的约定一致），onError 只是二道防线。
+  Future<T> _chainOp<T>(Future<T> Function() task) {
+    final next = _opQueue.then((_) => task());
+    _opQueue = next.then<void>((_) {}, onError: (Object _) {});
+    return next;
+  }
+
+  /// 测试锚点：等 op 队列排空（undo() 等 void 入口拿不到返回 Future）。
+  @visibleForTesting
+  Future<void> get opQueueIdle => _opQueue;
 
   ModelInfo? get model {
     final found = registry.find(settings.providerId, settings.modelId);
@@ -216,10 +252,21 @@ class AppStore extends ChangeNotifier {
       // 移动端没有 server/main.py，也无法 spawn Python：launch 失败是
       // 正常形态（连接桌面 / PLAN 直连二选一），不能把用户钉死在错误
       // 死屏——降级为离线就绪，api 依赖的加载全部跳过。
+      // 例外：配置过「连接桌面」地址却连不上（mobileDegradedBootError
+      // 非空）必须显性报错——静默降级会让用户以为已连接，直到进 3D/
+      // 热应用才撞上散点提示；bootError 屏自带重试/设置/离线继续三出路。
       if ((Platform.isIOS || Platform.isAndroid) && _server == null) {
+        final visible = mobileDegradedBootError(e, settings.serverUrl);
+        if (visible != null) {
+          bootError = visible;
+          ready = false;
+          notifyListeners();
+          return;
+        }
         api = null;
         bootError = null;
         if (prefs != null) recent = _loadRecent(prefs);
+        await ensureBundledRegistry();
         await _loadRecovery();
         ready = true;
         _recoveryTimer ??= Timer.periodic(const Duration(seconds: 20), (_) => _persistRecovery());
@@ -229,6 +276,31 @@ class AppStore extends ChangeNotifier {
       bootError = e.toString();
       ready = false;
       notifyListeners();
+    }
+  }
+
+  /// 移动端 boot 降级分支的失败可见性裁决：配置过「连接桌面」地址却连不上
+  /// → 返回错误文案（bootError 屏显性呈现）；未配置地址 → null（launch
+  /// 失败是移动端正常离线形态，PLAN 直连可用，静默降级）。
+  static String? mobileDegradedBootError(Object error, String serverUrl) {
+    if (serverUrl.trim().isEmpty) return null;
+    return error.toString();
+  }
+
+  /// 离线兜底注册表：app/assets/models.json 是 server/models.json 的入库
+  /// 副本（scripts/sync_models.py 双写保持同步）。服务器 /models 拿不到时
+  /// （移动端 PLAN 直连 / 离线继续），模型选择与 toolCall/protocol 门控
+  /// 仍有数据源，不再恒空。幂等：registry 已有更权威的服务器快照时不覆盖。
+  /// [load] 仅供测试注入（widget test 的 flutter/assets 通道无人应答，
+  /// rootBundle 会挂死而非抛错）。
+  Future<void> ensureBundledRegistry({Future<String> Function(String path)? load}) async {
+    if (registry.providers.isNotEmpty) return;
+    try {
+      final raw = await (load ?? rootBundle.loadString)('assets/models.json');
+      final parsed = parseBundledModelsSnapshot(jsonDecode(raw));
+      if (parsed != null) registry = parsed;
+    } catch (_) {
+      // 资产缺失/损坏：保持空 registry，离线回退尽力而为。
     }
   }
 
@@ -249,6 +321,9 @@ class AppStore extends ChangeNotifier {
   Future<void> continueOffline() async {
     api = null;
     bootError = null;
+    // 离线（含移动端 PLAN 直连）也需要模型清单数据源——服务器快照拿不到
+    // 时回退内置副本，模型选择与能力门控不空转。
+    await ensureBundledRegistry();
     ready = true;
     notifyListeners();
     await _loadRecovery();
@@ -566,8 +641,31 @@ class AppStore extends ChangeNotifier {
     String device = 'mobile',
     String? templateId,
     bool empty = false,
+  }) {
+    if (api == null) return Future.value(false);
+    // agentBusy 门（core-1）：run 在飞时切项目，在飞 run 的 done/failed
+    // 事件随后会把旧项目的 canonical mbt 提交进新项目（静默覆盖新项目
+    // 内容）；此前这里还硬置 agentBusy=false，把在飞 run 的状态位也拆了。
+    if (agentBusy) {
+      _toast('NoN 正在工作', '等这一轮结束再新建项目。');
+      return Future.value(false);
+    }
+    // 同 op 队列串行：在飞 op 提交完才换项目，反向排队的 op 落在新项目
+    // 上会被引擎按未知 id 拒绝（可恢复），不会静默覆盖。
+    return _chainOp(() => _newProjectNow(
+          name: name,
+          device: device,
+          templateId: templateId,
+          empty: empty,
+        ));
+  }
+
+  Future<bool> _newProjectNow({
+    String name = 'untitled',
+    String device = 'mobile',
+    String? templateId,
+    bool empty = false,
   }) async {
-    if (api == null) return false;
     final sizes = {'mobile': [390, 844], 'web': [1280, 800], 'desktop': [1440, 900]};
     final size = sizes[device] ?? sizes['mobile']!;
     _invalidateAcpSession(); // 新项目 → 新工作区 → ACP 会话重建
@@ -590,8 +688,6 @@ class AppStore extends ChangeNotifier {
         view = 'design';
         panel = 'project';
         rightTab = 'agent';
-        agentBusy = false;
-        agentPhase = 'idle';
         timeline = [];
         // 上一项目 run 的流式/思考残留不进新项目面板（孤立 stream 行 + thinking tile）。
         streamText = '';
@@ -604,6 +700,13 @@ class AppStore extends ChangeNotifier {
       }
       final op = templateId != null ? 'template $templateId home' : 'create home ${size[0]} ${size[1]}';
       final res = await api!.apply('', op);
+      // HTTP 往返期间有 run 启动（入口门之后的小竞态窗口）：此刻换项目
+      // 会把 run 的终态 canonical 提交进新项目——放弃交换（服务端 apply
+      // 对空 mbt 无需回滚）。
+      if (agentBusy) {
+        _toast('NoN 正在工作', '等这一轮结束再新建项目。');
+        return false;
+      }
       if (res['ok'] != true) {
         _toast('新建失败', res['error']?.toString());
         return false;
@@ -620,8 +723,6 @@ class AppStore extends ChangeNotifier {
       view = 'design';
       panel = 'project';
       rightTab = 'agent';
-      agentBusy = false;
-      agentPhase = 'idle';
       timeline = [];
       // 上一项目 run 的流式/思考残留不进新项目面板（孤立 stream 行 + thinking tile）。
       streamText = '';
@@ -638,8 +739,19 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  Future<OpenResult> openProjectPath(String path, {String password = ''}) async {
-    if (api == null) return OpenResult.failed;
+  Future<OpenResult> openProjectPath(String path, {String password = ''}) {
+    if (api == null) return Future.value(OpenResult.failed);
+    // agentBusy 门（core-1）：与 newProject 同根——run 在飞时切项目，
+    // 在飞 run 的终态 canonical 会覆盖刚打开的项目。
+    if (agentBusy) {
+      _toast('NoN 正在工作', '等这一轮结束再打开项目。');
+      return Future.value(OpenResult.failed);
+    }
+    // 同 op 队列串行：旧项目在飞 op 先提交，打开的整篇 _commit 后落。
+    return _chainOp(() => _openProjectPathNow(path, password: password));
+  }
+
+  Future<OpenResult> _openProjectPathNow(String path, {String password = ''}) async {
     _invalidateAcpSession(); // 切项目 → ACP 会话重建
     try {
       var res = await api!.openProject(path, password: password);
@@ -652,6 +764,12 @@ class AppStore extends ChangeNotifier {
       final rendered = await api!.render(openedMbt);
       if (rendered['ok'] != true) {
         _toast('项目无法渲染', rendered['error']?.toString());
+        return OpenResult.failed;
+      }
+      // 两次 HTTP 往返期间有 run 启动：放弃交换（/project/open 只读解密，
+      // 无服务端副作用可弃），避免在飞 run 的终态 canonical 覆盖新项目。
+      if (agentBusy) {
+        _toast('NoN 正在工作', '等这一轮结束再打开项目。');
         return OpenResult.failed;
       }
       hasProject = true;
@@ -792,11 +910,8 @@ class AppStore extends ChangeNotifier {
   }
 
   /// 画布变更统一入口：op 串行入队（跨入口互斥），返回链尾结果。
-  Future<bool> applyOp(String op, {bool silent = false}) {
-    final next = _opQueue.then((_) => _applyOpNow(op, silent: silent));
-    _opQueue = next; // Future<bool> 赋给 Future<void> 队列字段：链续接
-    return next;
-  }
+  Future<bool> applyOp(String op, {bool silent = false}) =>
+      _chainOp(() => _applyOpNow(op, silent: silent));
 
   Future<bool> _applyOpNow(String op, {bool silent = false}) async {
     if (api == null || agentBusy) {
@@ -982,11 +1097,7 @@ class AppStore extends ChangeNotifier {
   /// 自动修复同样是画布变更，必须与 applyOp 同队列串行——绕过队列的
   /// 整篇 _commit 会与在飞 op 的 HTTP 往返交错，以陈旧 mbt 为基底提交
   /// （丢改动；队列注释宣称的不变量对所有变更入口成立）。
-  Future<bool> autoFix() {
-    final next = _opQueue.then((_) => _autoFixNow());
-    _opQueue = next; // Future<bool> 赋给 Future<void> 队列字段：链续接
-    return next;
-  }
+  Future<bool> autoFix() => _chainOp(_autoFixNow);
 
   Future<bool> _autoFixNow() async {
     if (api == null || activeBoard == null) return false;
@@ -1061,11 +1172,7 @@ class AppStore extends ChangeNotifier {
   /// deepDesign「校验并渲染」对齐：把源码编辑器的整篇提交走引擎校验
   /// （render 面，比 op 路径更严——真实重叠债会拒绝），通过即 commit。
   /// 与 applyOp/autoFix 同队列串行（整篇覆盖型提交更需要排队防交错）。
-  Future<bool> applySource(String text) {
-    final next = _opQueue.then((_) => _applySourceNow(text));
-    _opQueue = next; // Future<bool> 赋给 Future<void> 队列字段：链续接
-    return next;
-  }
+  Future<bool> applySource(String text) => _chainOp(() => _applySourceNow(text));
 
   Future<bool> _applySourceNow(String text) async {
     if (api == null || agentBusy) {
@@ -1122,7 +1229,11 @@ class AppStore extends ChangeNotifier {
   /// Layout intent via /engine/constrain (session_constrain), e.g. 居中 / 等间距 /
   /// 网格 3. The success envelope carries canonical mbt without the render face,
   /// so we re-render before committing (same guard shape as the agent done path).
-  Future<bool> constrainLayout(String intent) async {
+  /// 与 applyOp/autoFix 同队列串行（core-2）：与在飞 op 的 HTTP 往返交错
+  /// 会以陈旧 mbt 为基底提交——队列注释宣称的不变量对所有变更入口成立。
+  Future<bool> constrainLayout(String intent) => _chainOp(() => _constrainLayoutNow(intent));
+
+  Future<bool> _constrainLayoutNow(String intent) async {
     if (api == null || agentBusy) {
       if (agentBusy) _toast('NoN 正在工作', '等这一轮结束再改画布。');
       return false;
@@ -1159,23 +1270,40 @@ class AppStore extends ChangeNotifier {
   }
 
   void undo() {
-    if (agentBusy || historyIndex <= 0) return;
-    _jumpHistory(historyIndex - 1);
+    // 边界检查只在链内做：调用期读 historyIndex 会拿到在飞 op 提交前的
+    // 旧下标，连按 ⌘Z 合并/丢失（已知缺口②）。agentBusy 快速路径保留。
+    if (agentBusy) return;
+    _chainOp(() => _historyStepNow(-1));
   }
 
   void redo() {
-    if (agentBusy || historyIndex >= history.length - 1) return;
-    _jumpHistory(historyIndex + 1);
+    if (agentBusy) return;
+    _chainOp(() => _historyStepNow(1));
   }
 
-  Future<void> jumpHistory(int index) => _jumpHistory(index);
+  /// 排队的历史步进（⌘Z/⇧⌘Z）：目标下标必须在链内（前一条提交后）计算
+  /// ——调用期急着算 historyIndex±1 会在在飞 op 未提交时读到旧下标，
+  /// 连按两次合并成一步/撤销丢失（已知缺口②「与①同根应随队列一并做」，
+  /// 本轮收口）。
+  Future<void> _historyStepNow(int delta) async {
+    if (agentBusy) return;
+    if (delta < 0 && historyIndex <= 0) return;
+    if (delta > 0 && historyIndex >= history.length - 1) return;
+    await _jumpHistoryNow(historyIndex + delta);
+  }
+
+  Future<void> jumpHistory(int index) => _chainOp(() => _jumpHistoryNow(index));
 
   /// Engine-side version control (session_history). `command` is the
   /// sub-command expression: `init <board>`, `commit`, `log`, `undo`, `redo`,
   /// `diff <from> <to>`. Returns the engine envelope for panel display —
   /// nothing commits automatically except undo/redo jumps, whose canonical
   /// mbt is re-rendered and committed when present.
-  Future<Map<String, dynamic>> engineHistory(String command) async {
+  /// undo/redo 的重渲染提交是画布变更，与 applyOp 同队列串行（core-2）。
+  Future<Map<String, dynamic>> engineHistory(String command) =>
+      _chainOp(() => _engineHistoryNow(command));
+
+  Future<Map<String, dynamic>> _engineHistoryNow(String command) async {
     if (api == null || agentBusy) {
       return {'ok': false, 'error': agentBusy ? 'agent_busy' : 'no_server'};
     }
@@ -1195,8 +1323,8 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  Future<void> _jumpHistory(int index) async {
-    if (api == null || index < 0 || index >= history.length) return;
+  Future<void> _jumpHistoryNow(int index) async {
+    if (api == null || agentBusy || index < 0 || index >= history.length) return;
     final target = history[index];
     final res = await api!.render(target);
     if (res['ok'] != true) {
@@ -1371,8 +1499,14 @@ class AppStore extends ChangeNotifier {
       _toast('正在停止', '移动直连请求已中断。');
       return;
     }
-    await api?.cancelAgent(runId!);
-    _toast('正在停止', '当前这一步结束后生效。');
+    // /agent/cancel 超时/网络异常不得从按钮回调逸出为未处理异步异常
+    // （postJson 默认 30s 超时；取消失败也要让用户知道下一步动作）。
+    try {
+      await api?.cancelAgent(runId!);
+      _toast('正在停止', '当前这一步结束后生效。');
+    } catch (e) {
+      _toast('停止请求失败', '可等流自行结束，或重试停止。$e');
+    }
   }
 
   /// PLAN 移动直连：ai_sdk_dart 本地循环。事件面最小对齐（user 行/notes/
@@ -1486,6 +1620,12 @@ class AppStore extends ChangeNotifier {
       _toast('非 OpenAI 兼容协议不可用', '请选择 OpenAI 兼容端点（MiniMax 亦提供 /v1）。');
       return false;
     }
+    // run 起点的 mbt 快照必须取在 op 队列排空之后：在飞 op 尚未 _commit
+    // 就启动 run，服务端会拿着旧 canonical 干活，终态回来覆盖掉该 op
+    // （丢更新——与 op 队列同一类，只是边界换到 run 起点）。排队中的 op
+    // 各自 ≤30s HTTP 超时，这里至多等一条链。
+    await _opQueue;
+    if (agentBusy) return false; // 排队等待期间有并发 run 启动：让位
     runId = DateTime.now().microsecondsSinceEpoch % 0x7fffffff;
     agentBusy = true;
     agentPhase = mode == 'plan' ? 'planning' : mode == 'refine' ? 'refining' : 'building';
@@ -1531,15 +1671,27 @@ class AppStore extends ChangeNotifier {
     };
 
     var success = false;
+    var orphaned = false;
+    final myRun = runId!;
     try {
       await for (final event in api!.agentRun(body)) {
+        // run 归属校验（core-1 兜底）：SSE 事件不携带 run id，以 stream
+        // 启动时捕获的 runId 为归属令牌——store.runId 被换（项目切换等
+        // 路径）即本 run 已废弃，剩余事件（含 done/failed 的 canonical
+        // 提交）整流丢弃，旧项目内容不得写进当前项目。入口门已挡住常规
+        // 路径，这里是结构性兜底。
+        if (runId != myRun) {
+          orphaned = true;
+          break;
+        }
         await _handleAgentEvent(event);
         if (event['type'] == 'done') success = true;
       }
       // 终态兜底：服务端进程崩溃/被杀时 socket 正常关闭、await for 无异常
       // 返回——没有 done 也没有 failed 事件。此时合成失败终态卡 + toast，
       // 并把悬挂的 running 工具条目收尾，避免时间线无声结束。
-      if (!success && agentError == null) {
+      // 废弃 run 不合成（它已不属于当前时间线）。
+      if (!orphaned && !success && agentError == null) {
         agentError = '连接中断：服务端未返回终态事件';
         for (final item in timeline) {
           if (item.kind == 'tool' && item.running) {
@@ -1775,8 +1927,7 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _loadRecovery() async {
     try {
-      final path = '${Platform.environment['HOME']}/.nondesign/recovery.json';
-      final file = File(path);
+      final file = File('$recoveryDir/recovery.json');
       if (!await file.exists()) return;
       final raw = jsonDecode(await file.readAsString());
       if (raw is Map && raw['mbt'] is String) {
@@ -1800,9 +1951,8 @@ class AppStore extends ChangeNotifier {
       }
     }
     try {
-      final dir = '${Platform.environment['HOME']}/.nondesign';
-      await Directory(dir).create(recursive: true);
-      await File('$dir/recovery.json').writeAsString(jsonEncode({
+      await Directory(recoveryDir).create(recursive: true);
+      final payload = jsonEncode({
         'mbt': mbt,
         'docs': docs.toJson(),
         'view': view,
@@ -1819,9 +1969,24 @@ class AppStore extends ChangeNotifier {
                 'partialMbt': _liveCanonical ?? '',
               }
             : null,
-      }));
+      });
+      // 串行写链（core-5）：本方法被 run 起点/终态/doc_written/preview 与
+      // 周期 Timer 多处 unawaited 并发调用，两个 writeAsString（各持 fd、
+      // truncate 从 0 写）交错可产生撕裂 JSON——下次启动 _loadRecovery 的
+      // catch-all 会静默吞掉解析失败，半程恢复快照无声丢失。后写覆盖先写。
+      final write = _recoveryWriteQueue
+          .then((_) => File('$recoveryDir/recovery.json').writeAsString(payload));
+      _recoveryWriteQueue = write.then<void>((_) {}, onError: (Object _) {});
+      await write;
     } catch (_) {}
   }
+
+  /// 测试锚点：直驱一份快照 + 等写链排空（应用代码走内部各调用点）。
+  @visibleForTesting
+  Future<void> debugPersistRecovery({bool force = false}) => _persistRecovery(force: force);
+
+  @visibleForTesting
+  Future<void> get recoveryWritesIdle => _recoveryWriteQueue;
 
   void _invalidateAcpSession() {
     final sid = _acpSessionId;
@@ -1888,8 +2053,12 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> _clearRecovery() async {
+    // 删除同样入写链：与在飞快照写交错会出现「删后又复活旧内容」。
     try {
-      await File('${Platform.environment['HOME']}/.nondesign/recovery.json').delete();
+      final del = _recoveryWriteQueue
+          .then((_) => File('$recoveryDir/recovery.json').delete());
+      _recoveryWriteQueue = del.then<void>((_) {}, onError: (Object _) {});
+      await del;
     } catch (_) {}
   }
 
@@ -1927,6 +2096,7 @@ class AppStore extends ChangeNotifier {
   void dispose() {
     _deltaTimer?.cancel();
     _thinkingTimer?.cancel(); // 与 _deltaTimer 对称：pending 合帧不得在 dispose 后触发
+    _docTimer?.cancel(); // 同上（core-4）：pending doc_delta 冲刷会 notifyListeners 于已销毁的 notifier
     _previewTimer?.cancel();
     _recoveryTimer?.cancel();
     _server?.dispose();

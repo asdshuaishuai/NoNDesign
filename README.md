@@ -135,6 +135,11 @@ Flutter Welcome/Canvas/Workspace/Docs 无头渲染、Dart SSE 解析、下拉菜
 .venv/bin/python scripts/wf/ddp_check.py <真实 .ddp>  # 解密+渲染探针
 ```
 
+`test.sh` 先跑五个 Python 回归锚点——hotapp（安全 + generate/refine/delete_app
+异步写路径与并发锁不变量）、服务端路由在场（含 hotapp/portfolio 全路由）、tool
+配对消毒、ACP 客户端全链、write_doc 流式增量解码——任何一份红即止，随后才是
+`flutter test`。
+
 ## 安全与边界
 
 - 服务端只绑定 `127.0.0.1`，无远程监听；这是本地桌面工具的信任边界。

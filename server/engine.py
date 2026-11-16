@@ -246,6 +246,17 @@ class EngineHost:
     def list_components(self) -> list[Any]:
         return list(self.components)
 
+    def list_components_live(self) -> list[Any]:
+        """wasm 活组件注册表（区别于 list_components 的 components.json 快照）。
+
+        快照只多 description 字段、id 集与活注册表必须一致——sync_engine 用
+        两者做 id 集对账，引擎升级后快照漂移即门红（对齐 deepDesign 探针
+        自动裁剪组件快照的纪律）。"""
+        with self.lock:
+            self._ensure()
+            out = self._parse(self._call_raw("list_components"))
+            return out if isinstance(out, list) else out.get("data", [])
+
     def has_export(self, name: str) -> bool:
         with self.lock:
             self._ensure()
@@ -327,8 +338,11 @@ class EngineHost:
                 if name in NO_ARG_SESSION:
                     out = self._parse(self._call_raw(name, handle))
                 else:
-                    if arg is not None:
-                        self._slot_arg(arg)
+                    # arg 省略（None）时压空槽，绝不复用上一次调用残留的 arg 槽——
+                    # 槽内容跨调用驻留，曾把上一轮的 artboard 静默喂给本调用：
+                    # query_nodes("a1") 之后无参再调，返回 a1 的节点且 ok:true
+                    # （真机探针实证）。空槽由引擎显式拒绝（unknown_artboard）。
+                    self._slot_arg(arg if arg is not None else "")
                     in_name = f"{name}_in"
                     fn = in_name if in_name in self.exports else name
                     out = self._parse(self._call_raw(fn, handle))

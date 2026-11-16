@@ -16,11 +16,21 @@
      ATTACH/PRAGMA/VACUUM 拒绝、非标量参数拒绝、缺应用拒绝，页面注入
      window.NoN.db 桥。
   6) 旧目录迁移：a2ui 应用并入 hotapps，旧作品集条目归一为 hotapp 且路径自愈。
+  7) 异步写路径（generate/refine/delete_app，mock LLM）：app_exists 拒绝、
+     写失败清理半成品、refine fail-closed（坏回复/短 HTML 不覆盖旧版）、
+     await 窗口外部删除 → no_app 而非裸 FileNotFoundError、_app_locks
+     同名串行（并发 refine 无丢更新：后者读前者产物）、delete_app 清目录
+     与作品集。
+  8) db_exec_locked 与 delete 同锁串行：持锁删除期间 db_exec 必须等待；
+     锁释放后重验 no_app，不得在已删目录里凭空重建 app.db（半删目录 +
+     幽灵 app.db 卡死同名重建的竞态回归）。
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -302,6 +312,9 @@ def main() -> int:
         real_root = Path.home() / "Documents" / "NoNDesign" / "hotapps"
         check("no writes outside temp root", not (real_root / "bounce-demo_2").exists())
 
+    # ---- 7) 异步写路径 + _app_locks 并发不变量 ----
+    _run_async_write_cases(failures)
+
     if failures:
         print("FAIL")
         for f in failures:
@@ -309,6 +322,217 @@ def main() -> int:
         return 1
     print("hotapp: all cases green")
     return 0
+
+
+def _padded(marker: str) -> str:
+    """带标记且总量过 _html_ok 200 字符门的正文。"""
+    return f"{marker} " + "x" * 220
+
+
+def _chat_returning(text: str):
+    async def _fake(*args: object) -> str:
+        return text
+    return _fake
+
+
+def _run_async_write_cases(failures: list[str]) -> None:
+    """异步写路径（generate/refine/delete_app）与 _app_locks 串行不变量。"""
+    asyncio.run(_async_write_cases(failures))
+
+
+async def _async_write_cases(failures: list[str]) -> None:
+    def check(name: str, cond: bool, detail: str = "") -> None:
+        if not cond:
+            failures.append(f"{name}: {detail}")
+
+    async def expect_error(name: str, awaitable, needle: str = "") -> None:
+        try:
+            await awaitable
+        except hotapp.HotAppError as e:
+            check(name, needle in str(e), str(e))
+        except Exception as e:  # noqa: BLE001 - 测试要区分错误类型
+            check(name, False, f"wrong exception {type(e).__name__}: {e}")
+        else:
+            check(name, False, "no exception raised")
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        root = tmp / "hotapp"
+        root.mkdir()
+        outside = tmp / "outside"
+        outside.mkdir()
+        sentinel = outside / "keep.txt"
+        sentinel.write_text("do not delete", "utf-8")
+        home = tmp / "home"
+        portfolio = tmp / "portfolio" / "index.json"
+
+        hotapp._app_locks.clear()  # 单 asyncio.run 单事件循环，锁状态从零开始
+
+        with mock.patch.object(hotapp, "HOTAPP_ROOT", root), \
+                mock.patch.object(hotapp, "PORTFOLIO_FILE", portfolio), \
+                mock.patch("pathlib.Path.home", return_value=home):
+            chat_ok = _chat_returning("```html\n" + _doc(_padded("gen-v1")) + "\n```")
+
+            # generate 成功：落盘 + meta + 作品集登记
+            with mock.patch.object(hotapp, "_chat", chat_ok):
+                res = await hotapp.generate("gen-app", "生成测试", "m", "http://b", "k")
+            check("generate ok", res.get("ok") is True and res.get("name") == "gen-app", repr(res))
+            gen_file = root / "gen-app" / "index.html"
+            check("generate writes index", gen_file.exists() and "gen-v1" in gen_file.read_text("utf-8"))
+            gen_meta = json.loads((root / "gen-app" / "meta.json").read_text("utf-8"))
+            check("generate writes meta", gen_meta.get("name") == "gen-app"
+                  and gen_meta.get("kind") == "hotapp", repr(gen_meta))
+            check("generate registers portfolio",
+                  any(e.get("ref") == "gen-app" for e in hotapp.portfolio_list()["items"]))
+
+            # generate 同名拒绝：app_exists 且不烧 LLM
+            calls: list[object] = []
+
+            async def chat_spy(*args: object) -> str:
+                calls.append(args)
+                return _doc(_padded("never"))
+
+            with mock.patch.object(hotapp, "_chat", chat_spy):
+                await expect_error("generate rejects existing name",
+                                   hotapp.generate("gen-app", "再来", "m", "b", "k"), "app_exists")
+            check("app_exists rejected without LLM call", not calls, str(len(calls)))
+
+            # generate 写失败：半成品目录清干净，同名重试不被 app_exists 挡住
+            def boom_write(path: Path, text: str) -> None:
+                raise OSError("disk full")
+
+            with mock.patch.object(hotapp, "_chat", chat_ok), \
+                    mock.patch.object(hotapp, "_atomic_write", boom_write):
+                await expect_error("generate write failure reported",
+                                   hotapp.generate("wfail-app", "写盘失败", "m", "b", "k"),
+                                   "app_write_failed")
+            check("failed generate cleans half dir", not (root / "wfail-app").exists())
+
+            with mock.patch.object(hotapp, "_chat", chat_ok):
+                res2 = await hotapp.generate("wfail-app", "重试", "m", "b", "k")
+            check("retry after cleanup succeeds",
+                  res2.get("ok") is True and (root / "wfail-app" / "index.html").exists(), repr(res2))
+
+            # refine 成功覆盖 + fail-closed 两路（坏回复 / 短 HTML 旧版保留）
+            rapp = root / "ref-app"
+            rapp.mkdir()
+            (rapp / "index.html").write_text(_doc(_padded("ref-v0")), "utf-8")
+            with mock.patch.object(hotapp, "_chat", _chat_returning(_doc(_padded("ref-v1")))):
+                r = await hotapp.refine("ref-app", "改一版", "m", "b", "k")
+            check("refine ok", r.get("ok") is True and r.get("reload") is True, repr(r))
+            check("refine overwrites html",
+                  "ref-v1" in (rapp / "index.html").read_text("utf-8"))
+
+            with mock.patch.object(hotapp, "_chat", _chat_returning("抱歉，无法输出 HTML")):
+                await expect_error("refine rejects non-html reply",
+                                   hotapp.refine("ref-app", "x", "m", "b", "k"), "html_parse_failed")
+            check("non-html reply keeps old version",
+                  "ref-v1" in (rapp / "index.html").read_text("utf-8"))
+
+            with mock.patch.object(hotapp, "_chat", _chat_returning("<html><body>短</body></html>")):
+                await expect_error("refine rejects short html",
+                                   hotapp.refine("ref-app", "x", "m", "b", "k"), "html_invalid")
+            check("short html keeps old version",
+                  "ref-v1" in (rapp / "index.html").read_text("utf-8"))
+
+            await expect_error("refine missing app",
+                               hotapp.refine("no-such-app", "x", "m", "b", "k"), "no_app")
+
+            # await 窗口外部删除（portfolio_delete 是不持应用锁的同步删除路径）：
+            # refine 回写前重查目录 → no_app 业务拒绝，不裸 FileNotFoundError
+            dapp = root / "extdel-app"
+            dapp.mkdir()
+            (dapp / "index.html").write_text(_doc(_padded("ext-v0")), "utf-8")
+            in_flight = asyncio.Event()
+            release = asyncio.Event()
+
+            async def chat_blocked(*args: object) -> str:
+                in_flight.set()
+                await release.wait()
+                return _doc(_padded("ext-v2"))
+
+            with mock.patch.object(hotapp, "_chat", chat_blocked):
+                task = asyncio.create_task(hotapp.refine("extdel-app", "慢改", "m", "b", "k"))
+                await asyncio.wait_for(in_flight.wait(), 5)
+                hotapp.portfolio_delete("hotapp", "extdel-app")
+                release.set()
+                await expect_error("refine after external delete fails closed", task, "no_app")
+            check("externally deleted dir stays gone", not dapp.exists())
+
+            # _app_locks 同名串行：读 → await LLM → 写 窗口内第二个 refine
+            # 必须等锁——它读到的是第一个的产物（丢更新整类消除），最终文件=后写
+            lock_dir = root / "lock-app"
+            lock_dir.mkdir()
+            (lock_dir / "index.html").write_text(_doc(_padded("lock-v0")), "utf-8")
+            seen: list[str] = []
+            first_started = asyncio.Event()
+            release_first = asyncio.Event()
+            counter = {"n": 0}
+
+            async def chat_seq(model: str, base_url: str, api_key: str,
+                               system: str, user: str) -> str:
+                seen.append(user)
+                counter["n"] += 1
+                if counter["n"] == 1:
+                    first_started.set()
+                    await release_first.wait()
+                    return _doc(_padded("lock-v1"))
+                return _doc(_padded("lock-v2"))
+
+            with mock.patch.object(hotapp, "_chat", chat_seq):
+                t1 = asyncio.create_task(hotapp.refine("lock-app", "第一改", "m", "b", "k"))
+                await asyncio.wait_for(first_started.wait(), 5)
+                t2 = asyncio.create_task(hotapp.refine("lock-app", "第二改", "m", "b", "k"))
+                await asyncio.sleep(0.05)  # 给 t2 机会（错误地）抢进 chat
+                check("second refine waits on app lock", len(seen) == 1, f"chat calls: {len(seen)}")
+                release_first.set()
+                r1, r2 = await t1, await t2
+            check("both serialized refines ok",
+                  r1.get("ok") is True and r2.get("ok") is True, f"{r1!r} {r2!r}")
+            check("second refine reads first output",
+                  len(seen) == 2 and "lock-v1" in seen[1], f"seen={len(seen)}")
+            final_html = (lock_dir / "index.html").read_text("utf-8")
+            check("final html is second refine output",
+                  "lock-v2" in final_html and "lock-v1" not in final_html, repr(final_html[:60]))
+
+            # delete_app：删目录 + 清作品集；缺失诚实 no_app
+            fapp = root / "del-app"
+            fapp.mkdir()
+            (fapp / "index.html").write_text(_doc(), "utf-8")
+            hotapp.portfolio_upsert("hotapp", "del-app", "待删", str(fapp / "index.html"))
+            res3 = await hotapp.delete_app("del-app")
+            check("delete_app ok", res3.get("ok") is True, repr(res3))
+            check("delete_app removes dir", not fapp.exists())
+            check("delete_app drops portfolio entry",
+                  all(e.get("ref") != "del-app" for e in hotapp.portfolio_list()["items"]))
+            await expect_error("delete_app missing", hotapp.delete_app("del-app"), "no_app")
+
+            # ---- 8) db_exec_locked 与 delete 同锁（半删目录幽灵 app.db 竞态） ----
+            # db_exec 是同步函数（def 路由跑线程池），与事件循环上的 delete 真并行；
+            # 无锁时它的 index.html 检查与 sqlite3.connect（缺失文件即新建空库）
+            # 之间无重验——与持锁 rmtree 交错会在半删目录里凭空重建 app.db。
+            race = root / "dbrace-app"
+            race.mkdir()
+            (race / "index.html").write_text(_doc(), "utf-8")
+            made = await hotapp.db_exec_locked(
+                "dbrace-app", "CREATE TABLE IF NOT EXISTS t(x TEXT)")
+            check("locked db create", made.get("ok") is True, repr(made))
+            ins = await hotapp.db_exec_locked(
+                "dbrace-app", "INSERT INTO t(x) VALUES(?)", ["甲"])
+            check("locked db insert params flow", ins.get("rowcount") == 1, repr(ins))
+
+            async with hotapp._lock_for("dbrace-app"):  # 模拟持锁 delete 进行中
+                task = asyncio.create_task(
+                    hotapp.db_exec_locked("dbrace-app", "SELECT COUNT(*) FROM t"))
+                await asyncio.sleep(0.15)
+                check("db_exec waits for app lock", not task.done(),
+                      "db_exec ran concurrently with a lock-holding delete")
+                shutil.rmtree(race)  # delete_app 在锁内做的就是这件事
+            await expect_error("db_exec revalidates after lock release", task, "no_app")
+            check("no ghost app dir after delete race", not race.exists(), str(race))
+            check("no ghost app.db", not (race / "app.db").exists())
+
+            check("async sentinel survives", sentinel.exists())
 
 
 if __name__ == "__main__":

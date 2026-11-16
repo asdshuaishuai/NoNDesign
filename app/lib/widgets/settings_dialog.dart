@@ -61,6 +61,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     store.settings.maxSteps =
         (int.tryParse(_stepsController.text) ?? store.settings.maxSteps).clamp(4, 600);
     await store.saveSettings();
+    // 双写盘（SharedPreferences + settings.json）在飞期间弹窗可能已被
+    // 关闭（窄窗口）——await 之后先验 mounted，防 setState-after-dispose。
+    if (!mounted) return;
     setState(() => _stepsSavedFlash = true);
     Future.delayed(const Duration(milliseconds: 1400), () {
       if (mounted) setState(() => _stepsSavedFlash = false);

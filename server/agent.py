@@ -211,7 +211,11 @@ class _DocDeltaExtractor:
         return "".join(out)
 
 
+@dataclass
 class AgentContext:
+    # @dataclass 在 31f6eac 被 _DocDeltaExtractor 的插入顶掉过一次：每个
+    # /agent/run 在构造 ctx 时即 TypeError（零事件失败）。字段带 field(
+    # default_factory=...)，裸类不产生 __init__ —— 本装饰器是构造前提。
     engine: EngineHost
     mode: str
     mbt: str
@@ -245,7 +249,7 @@ class AgentContext:
         )
 
 
-def _commit(ctx: AgentContext, op_label: str, envelope: dict[str, Any]) -> dict[str, Any]:
+async def _commit(ctx: AgentContext, op_label: str, envelope: dict[str, Any]) -> dict[str, Any]:
     ok = envelope.get("ok") is True
     if ok and isinstance(envelope.get("mbt"), str):
         ctx.mbt = envelope["mbt"]
@@ -253,7 +257,10 @@ def _commit(ctx: AgentContext, op_label: str, envelope: dict[str, Any]) -> dict[
         ctx.preview()
     out = compact_envelope(envelope)
     if ok:
-        out["state"] = ctx.state()
+        # state 卡经 state_summary 触发两次 engine.session（缓存 miss 时压
+        # 整篇 canonical 分块入槽）——与 generate/apply 同走 to_thread，
+        # 不在事件循环上直调 wasm。
+        out["state"] = await asyncio.to_thread(ctx.state)
     return out
 
 
@@ -273,7 +280,7 @@ def _make_tools(ctx: AgentContext) -> list[Any]:
             # 同步 wasm 调用不进事件循环：generate 可达秒级，直调会冻结
             # /agent/cancel 与 SSE 推送。RLock 保证与 REST 路由线程互斥。
             env = await asyncio.to_thread(ctx.engine.generate, ctx.mbt, intent, name or "", effective)
-            out = _commit(ctx, f"generate {intent}", env)
+            out = await _commit(ctx, f"generate {intent}", env)
             ctx.emit(
                 {
                     "type": "tool_end",
@@ -317,7 +324,7 @@ def _make_tools(ctx: AgentContext) -> list[Any]:
             # 回写缓存。信封只带 {ok, mbt}（无 artboards 面）——compact_envelope
             # 与 state 卡均可承接。同时丢线程池，不阻塞事件循环。
             env = await asyncio.to_thread(ctx.engine.session, "session_apply_agent", ctx.mbt, op)
-            out = _commit(ctx, op, env)
+            out = await _commit(ctx, op, env)
             ctx.emit(
                 {
                     "type": "tool_end",
@@ -336,7 +343,9 @@ def _make_tools(ctx: AgentContext) -> list[Any]:
             """Read the document. No args returns a compact outline (boards, node ids,
             flows). With artboard, returns that board's source block for exact values."""
             if not artboard:
-                return {"ok": True, "outline": compose_project_map(ctx.engine, ctx.mbt)}
+                # outline 现查现新（list_artboards/flows/逐板 query_nodes），
+                # 会话缓存 miss 时压整篇 canonical——丢线程池执行。
+                return {"ok": True, "outline": await asyncio.to_thread(compose_project_map, ctx.engine, ctx.mbt)}
             section = artboard_section(ctx.mbt, artboard)
             if section is None:
                 return {"ok": False, "error": f"unknown_artboard:{artboard}"}
@@ -369,7 +378,7 @@ def _make_tools(ctx: AgentContext) -> list[Any]:
             if kind == "export_svg" and isinstance(env.get("data"), dict) and isinstance(env["data"].get("svg"), str):
                 svg = env["data"]["svg"]
                 env["data"] = {"ok": True, "chars": len(svg), "preview": svg[:1200]}
-            env["state"] = ctx.state()
+            env["state"] = await asyncio.to_thread(ctx.state)
             return env
 
         tools.append(function_tool(_inspect, name_override="inspect", strict_mode=False))
@@ -513,7 +522,11 @@ class AgentRun:
         )
         self.ctx = ctx
 
-        project_map = compose_project_map(engine, mbt)
+        # 同步 wasm 直调不进事件循环：compose_project_map 在会话缓存 miss 时
+        # 要把整篇 canonical 分块压入 in 槽（100KB≈324ms、300KB≈989ms 实测），
+        # 期间 /agent/cancel、/health、SSE 推送全部冻结——与下方
+        # list_templates 同走 to_thread。
+        project_map = await asyncio.to_thread(compose_project_map, engine, mbt)
         templates = await asyncio.to_thread(engine.list_templates)
         cfg = {
             "mode": req.mode,

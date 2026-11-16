@@ -24,6 +24,8 @@ scene.js 执行契约（预览页加载）：
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -208,17 +210,60 @@ def _proj_dir(name: str) -> Path:
     return THREE_ROOT / safe
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    """同目录临时文件 + fsync + os.replace：写盘永不 truncate 出半截文件
+    （对齐 hotapp_agent 的同名纪律——build-state.json 自称状态权威，
+    非原子 write_text 一次崩溃就把它写成半截 JSON）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _initial_state() -> dict[str, Any]:
+    return {"current": PASSES[0]["id"],
+            "passes": [{"id": p["id"], "status": "pending", "attempts": 0, "evidence": []}
+                       for p in PASSES],
+            "loop_max": LOOP_MAX, "blocked": False, "blocked_reason": ""}
+
+
 def read_state(name: str) -> dict[str, Any]:
     d = _proj_dir(name)
     state_file = d / "build-state.json"
     if not state_file.exists():
         raise ThreeError(f"no_project:{name}")
-    return json.loads(state_file.read_text("utf-8"))
+    try:
+        state = json.loads(state_file.read_text("utf-8"))
+        if not isinstance(state, dict):
+            raise ValueError("state is not a JSON object")
+    except (json.JSONDecodeError, OSError, ValueError):
+        # 半截状态文件（原子写落地前的崩溃残留 / 手编损坏）：备份 .bak 留证据，
+        # 重置为初始 pass——不从对话记忆重建进度（那是状态权威纪律），宁可从
+        # blockout 重跑；原文件半截内容对推进毫无可信度。
+        try:
+            os.replace(state_file, state_file.with_name(state_file.name + ".bak"))
+        except OSError:
+            pass
+        state = _initial_state()
+        write_state(name, state)
+        append_history(name, {"action": "state-corrupt-reset", "pass": "-",
+                              "summary": "build-state.json 损坏，已备份 .bak 并重置为初始 pass"})
+    return state
 
 
 def write_state(name: str, state: dict[str, Any]) -> None:
-    (_proj_dir(name) / "build-state.json").write_text(
-        json.dumps(state, ensure_ascii=False, indent=1), "utf-8")
+    _atomic_write(_proj_dir(name) / "build-state.json",
+                  json.dumps(state, ensure_ascii=False, indent=1))
 
 
 def append_history(name: str, entry: dict[str, Any]) -> None:
@@ -299,10 +344,7 @@ async def new_project(name: str, brief: str, model: str, base_url: str,
     # spec 成功后才落盘目录（LLM/解析失败不留残骸目录——project_exists 事故实证）
     d.mkdir(parents=True, exist_ok=True)
     (d / "three-spec.json").write_text(json.dumps(spec, ensure_ascii=False, indent=1), "utf-8")
-    state = {"current": PASSES[0]["id"],
-             "passes": [{"id": p["id"], "status": "pending", "attempts": 0, "evidence": []}
-                        for p in PASSES],
-             "loop_max": LOOP_MAX, "blocked": False, "blocked_reason": ""}
+    state = _initial_state()
     write_state(name, state)
     append_history(name, {"action": "new", "pass": "-", "summary": spec.get("summary", "")})
     return {"ok": True, "spec": spec, "state": state, "dir": str(d)}
@@ -501,7 +543,12 @@ def read_project(name: str) -> dict[str, Any]:
     history = []
     hist_file = d / "history.jsonl"
     if hist_file.exists():
-        history = [json.loads(l) for l in hist_file.read_text("utf-8").splitlines()[-50:]]
+        # 单行坏档（崩溃时 append 写了半行）跳过，不让它 500 整个项目读取。
+        for l in hist_file.read_text("utf-8").splitlines()[-50:]:
+            try:
+                history.append(json.loads(l))
+            except (json.JSONDecodeError, ValueError):
+                continue
     return {"ok": True, "name": name, "spec": spec, "state": read_state(name),
             "scene_js": scene, "history": history, "dir": str(d)}
 
@@ -510,10 +557,20 @@ def list_projects() -> dict[str, Any]:
     items = []
     if THREE_ROOT.exists():
         for d in sorted(THREE_ROOT.iterdir()):
-            if (d / "build-state.json").exists():
-                st = json.loads((d / "build-state.json").read_text("utf-8"))
-                items.append({"name": d.name, "current": st.get("current"),
-                              "blocked": st.get("blocked", False)})
+            sf = d / "build-state.json"
+            if not sf.exists():
+                continue
+            try:
+                st = json.loads(sf.read_text("utf-8"))
+                if not isinstance(st, dict):
+                    raise ValueError("not an object")
+            except (json.JSONDecodeError, OSError, ValueError):
+                # 单个项目状态损坏不得 500 整个列表——标注 corrupt 让用户看见；
+                # 点击项目即触发 read_state 的 .bak 自愈重置。
+                items.append({"name": d.name, "current": "corrupt", "blocked": True})
+                continue
+            items.append({"name": d.name, "current": st.get("current"),
+                          "blocked": st.get("blocked", False)})
     return {"ok": True, "projects": items}
 
 

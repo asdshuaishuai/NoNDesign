@@ -400,7 +400,9 @@ class _NoNDesignAcpClient(Client):
     def __init__(self, workspace: str) -> None:
         self.workspace = Path(workspace).resolve()
         # 当前 prompt 的事件汇（AcpSession.prompt 挂上、终态后摘除）。
-        # 单会话串行 prompt（AcpSession.lock 串行化），一个 sink 足够。
+        # 注意 AcpSession.lock 只覆盖装配不覆盖 prompt 生命周期：并发 prompt
+        # 会替换 sink，先结束者只摘走自己的 sink（身份比对），不得把后来者
+        # 刚挂上的队列一并置 None——那会掐掉后一个 prompt 的全部 delta。
         self.sink: asyncio.Queue[dict[str, Any]] | None = None
         self._tool_seq = 0
 
@@ -506,8 +508,20 @@ class AcpSession:
         self.conn = ClientSideConnection(self.client, self.proc.stdin, self.proc.stdout)
         # 会话建立也实测（probe 已验证过的命令同样可能偶发挂起）——30s 无响应
         # 视为启动失败，交由上层报错而非永久悬挂。
-        await asyncio.wait_for(self.conn.initialize(PROTOCOL_VERSION), timeout=30)
-        resp = await asyncio.wait_for(self.conn.new_session(cwd=self.workspace, mcp_servers=[]), timeout=30)
+        try:
+            await asyncio.wait_for(self.conn.initialize(PROTOCOL_VERSION), timeout=30)
+            resp = await asyncio.wait_for(self.conn.new_session(cwd=self.workspace, mcp_servers=[]), timeout=30)
+        except Exception:
+            # 失败路径就地 terminate 已 spawn 的 CLI 子进程：此时会话未入
+            # 注册表，close() 永不可达，不杀即孤儿（每次失败泄漏一个——
+            # npx 候选 initialize/new_session 超时是常态事件）。与
+            # _probe_command 的 finally 同一纪律。
+            if self.proc.returncode is None:
+                try:
+                    self.proc.terminate()
+                except ProcessLookupError:
+                    pass
+            raise
         self.remote_session = resp.session_id
 
     async def prompt(self, text: str) -> _PendingPrompt:
@@ -534,7 +548,11 @@ class AcpSession:
                     pending.queue.put_nowait({"type": "failed", "error": f"{type(exc).__name__}: {exc}"})
                 finally:
                     pending.done = True
-                    self.client.sink = None
+                    # 只摘走自己的 sink：锁不覆盖 prompt 生命周期，并发时
+                    # client.sink 可能已被下一个 prompt 换成别的队列——
+                    # 无条件置 None 会丢掉后一个 prompt 的全部 delta。
+                    if self.client.sink is pending.queue:
+                        self.client.sink = None
 
             self._task = asyncio.create_task(_run())
             return pending
