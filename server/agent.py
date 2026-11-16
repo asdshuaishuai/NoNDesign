@@ -521,7 +521,7 @@ class AgentRun:
                         if not isinstance(b, dict) or not b.get("id"):
                             continue
                         bid = b["id"]
-                        if bid == "SEED_BOARD" or (b.get("nodes") or 0) in (0, None):
+                        if bid == SEED_BOARD or (b.get("nodes") or 0) in (0, None):
                             continue
                         try:
                             c = await asyncio.to_thread(
@@ -545,8 +545,13 @@ class AgentRun:
                               "detail": "、".join(f"{b}:{p}项poor" for b, _s, p in targets)})
                     for bid, _n, poor_n in targets:
                         ctx.emit({"type": "note", "label": "修复轮", "detail": f"{bid} · {poor_n} 项 poor → auto_fix"})
-                        await asyncio.to_thread(
+                        fixed = await asyncio.to_thread(
                             ctx.engine.session, "session_auto_fix", ctx.mbt, bid)
+                        # canonical 必须回灌：信封顶层带 mbt（SESSION_MUTATING 面，
+                        # engine.session:335）。此前返回值被丢弃——复评永远看
+                        # 修复前的文档，且最终交付的 mbt 缺 auto_fix 成果。
+                        if isinstance(fixed, dict) and fixed.get("ok") and isinstance(fixed.get("mbt"), str):
+                            ctx.mbt = fixed["mbt"]
                     await asyncio.sleep(0)
 
             final_text = ctx.finished["summary"] or "".join(text_parts)
