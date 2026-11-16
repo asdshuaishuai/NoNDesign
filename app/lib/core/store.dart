@@ -92,6 +92,9 @@ class AppStore extends ChangeNotifier {
   /// 同一治理。
   String _thinkingBuffer = '';
   Timer? _thinkingTimer;
+  /// doc_delta 同一 80ms 合帧治理（PLAN 文档正文逐片 notify 是全树放大器）。
+  String _docBuffer = '';
+  Timer? _docTimer;
   Timer? _previewTimer;
   String? _previewMbt;
   // ---- 中断恢复：运行进度落盘（2026-11-14）----
@@ -1410,15 +1413,17 @@ class AppStore extends ChangeNotifier {
         });
         return; // 同 assistant_delta：缓冲后跳过 switch 尾部通知
       case 'doc_delta':
-        // PLAN 阶段 write_doc 参数流式增量：正文边写边推进（80ms SSE 合帧
-        // 在传输层已做）；doc_written 全量到达时清缓冲（全量事件是正确性兜底）。
-        final piece = (event['text'] ?? '').toString();
-        if (piece.isNotEmpty) {
-          liveDocText += piece;
-          notifyListeners();
-        }
-        break;
+        // PLAN 阶段 write_doc 参数流式增量：正文边写边推进。同
+        // assistant/thinking 的 80ms 合帧（逐片 notify 是全树重建放大器）；
+        // doc_written 全量到达时先冲刷尾巴再清缓冲（全量事件是兜底）。
+        _docBuffer += (event['text'] ?? '').toString();
+        _docTimer ??= Timer(const Duration(milliseconds: 80), () {
+          _docTimer = null;
+          _flushDoc();
+        });
+        return;
       case 'doc_written':
+        _flushDoc();
         final kind = (event['kind'] ?? '').toString();
         final content = (event['content'] ?? '').toString();
         if (kind == 'prd') docs.prd = content;
@@ -1530,6 +1535,14 @@ class AppStore extends ChangeNotifier {
     thinkingText += _thinkingBuffer;
     if (thinkingText.length > 6000) thinkingText = thinkingText.substring(thinkingText.length - 6000);
     _thinkingBuffer = '';
+    notifyListeners();
+  }
+
+  /// 冲刷 doc_delta 缓冲（doc_written 全量到达前把尾巴落进直播正文）。
+  void _flushDoc() {
+    if (_docBuffer.isEmpty) return;
+    liveDocText += _docBuffer;
+    _docBuffer = '';
     notifyListeners();
   }
 

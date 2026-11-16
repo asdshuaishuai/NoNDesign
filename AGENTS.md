@@ -54,6 +54,7 @@ app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板�
   读数恒 0（首版冒烟真机抓出）。渲染前全量预编译（fail-closed：
   语法/符号错误在第一帧前报干净）。三标杆示例在 examples/（物理摩擦力
   = 真实性门面，读数 v=17.47=x·T 实测吻合）。
+- **审查批次（2026-11-16 下午，9c2e246 + 31f6eac）**：36 条发现（四路审计 + 逐条独立复核）→ 两批落地 29 项。关键面：op 在飞串行队列（丢更新整类消除）、EngineSvgPrep svg 兼容预处理（feDropShadow 改写白名单链 + 网络 image 预取 data:——flutter_svg 渲染链只支持 data: URL 的实锤复现）、3D 状态机竞态封堵（run_pass await 后重读盘上状态只写 status）、done 终态 500、turntable 四方位取证 + spec 手编回灌、插件视图三出路（返回按钮/根级 ⌘5⌘6/Esc）、检查器补原版外观与布局入口（阴影/描边/斜体/dash/尺寸模式/容器布局）、**演示墨迹随项目文档持久**（nondesign:ink 尾块幂等注入/打开解析，对齐原版 inkPersist）、**3D 预览离线化**（three.module.js vendored + MiniOrbit 自实现轨道，unpkg 单点消除）、**PLAN 文档流式直播**（_DocDeltaExtractor 提取 write_doc 参数 content 增量，7 例单测；客户端 docs_view 自动切流式渲染视图）。
 - **3D 制作工作台**（C1 骨架已落地，方案见 docs/plan-plugins.md 轨道 C；server/three_agent.py + /three/* 端点 + widgets/three_workspace.dart，mock LLM 全链 E2E 11 步绿）：
   LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引外部
   浏览器/headless）——执行错误 window.onerror 回传、场景几何自检、

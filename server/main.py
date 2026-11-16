@@ -317,7 +317,10 @@ async def project_open(req: OpenProjectRequest) -> dict[str, Any]:
 @app.get("/project/list")
 async def project_list(dir: str | None = None) -> dict[str, Any]:
     target = Path(dir).expanduser() if dir else WORKSPACE_DIR
-    target.mkdir(parents=True, exist_ok=True)
+    # 只读列出：不再对调用方任意 dir mkdir（此前 GET 参数即可在磁盘任意
+    # 位置创建目录）；目录不存在直接 400。
+    if not target.exists():
+        raise HTTPException(status_code=400, detail=f"dir_not_found:{target}")
     items = []
     for path in sorted(target.glob("*.ddp")):
         try:
@@ -878,7 +881,9 @@ async def video_sample(timeline: str, spec: str) -> dict[str, Any]:
     tl_path = (base / timeline).resolve()
     sp_path = (base / spec).resolve()
     for f in (tl_path, sp_path):
-        if not str(f).startswith(str(base)) or not f.exists():
+        # 前缀 startswith 会被兄弟目录（examples-evil）绕过——resolve 后要求
+        # 精确落在 base 之内（path 相对判定，False 即拒）。
+        if base not in f.parents or not f.exists():
             raise HTTPException(status_code=400, detail=f"invalid_sample:{f.name}")
     return {"ok": True,
             "timeline": json.loads(tl_path.read_text("utf-8")),
