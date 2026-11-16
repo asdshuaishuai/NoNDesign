@@ -507,6 +507,48 @@ class AgentRun:
                 }
                 return
             await _cleanup_document(ctx)
+
+            # ---- RSI 视觉修复循环（3DCodeVerse harness 三反馈的 2D 映射：
+            # engine critique = 测量+视觉评审，auto_fix = 定向修复）----
+            # 逐屏 critique，评分<95 或违例>0 的屏先 auto_fix 再复评，
+            # 至多 2 轮；全程时间线可见。
+            if req.mode != "plan":
+                for rnd in range(1, 3):
+                    arts = ctx.engine.session("session_list_artboards", ctx.mbt)
+                    boards = (arts.get("data") or []) if isinstance(arts, dict) else []
+                    targets = []
+                    for b in boards:
+                        if not isinstance(b, dict) or not b.get("id"):
+                            continue
+                        bid = b["id"]
+                        if bid == "SEED_BOARD" or (b.get("nodes") or 0) in (0, None):
+                            continue
+                        try:
+                            c = await asyncio.to_thread(
+                                ctx.engine.session, "session_critique", ctx.mbt, bid)
+                            data = c.get("data") if isinstance(c, dict) else None
+                            # 信封实形（真机探针）：data.results = [{principle,
+                            # score(1-5), verdict(poor/good), observation, advice}]。
+                            # 触发条件：任一原则 verdict=poor。
+                            results = (data or {}).get("results", []) if isinstance(data, dict) else []
+                            poor = [r for r in results
+                                    if isinstance(r, dict) and r.get("verdict") == "poor"]
+                            if poor:
+                                targets.append((bid, len(results), len(poor)))
+                        except Exception:
+                            continue
+                    if not targets:
+                        if rnd == 1:
+                            ctx.emit({"type": "note", "label": "质量审查", "detail": "全部屏幕通过原则评审（无 poor 项）"})
+                        break
+                    ctx.emit({"type": "review_round", "round": rnd,
+                              "detail": "、".join(f"{b}:{p}项poor" for b, _s, p in targets)})
+                    for bid, _n, poor_n in targets:
+                        ctx.emit({"type": "note", "label": "修复轮", "detail": f"{bid} · {poor_n} 项 poor → auto_fix"})
+                        await asyncio.to_thread(
+                            ctx.engine.session, "session_auto_fix", ctx.mbt, bid)
+                    await asyncio.sleep(0)
+
             final_text = ctx.finished["summary"] or "".join(text_parts)
             stop_reason = ctx.finished["stop_reason"] if ctx.finished["value"] else ("text_only" if req.mode != "plan" and ctx.remote_calls == 0 else "done")
             yield {"type": "usage", **usage, "contextWindow": req.context_window}
