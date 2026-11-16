@@ -105,11 +105,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     // 手机窄屏：860×600 会被 Dialog 夹到 ~310×600，176px 侧栏只剩 ~98px 内容区。
     // 窄屏改全屏弹层 + 顶部横向导航条，宽屏保持原双栏。
     final narrow = MediaQuery.sizeOf(context).width < 700;
+    // 移动端没有本地 agent/引擎，第三方智能体（ACP）不可用：入口整体隐藏，
+    // 只保留 NoN 内置管线（用户裁决 2026-11-16）。
+    final mobile = Theme.of(context).platform == TargetPlatform.iOS ||
+        Theme.of(context).platform == TargetPlatform.android;
     final navItems = <(String, IconData, String)>[
       ('models', Icons.memory, '模型与端点'),
       ('appearance', Icons.palette_outlined, '外观与交互'),
       ('agent', Icons.speed, '上下文与缓存'),
-      ('acp', Icons.hub_outlined, '外部智能体'),
+      if (!mobile) ('acp', Icons.hub_outlined, '外部智能体'),
       ('about', Icons.info_outline, '关于'),
     ];
     final content = Padding(
@@ -117,7 +121,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       child: switch (_tab) {
         'appearance' => _appearance(context, store),
         'agent' => _agent(context, store),
-        'acp' => _acp(context, store),
+        'acp' => mobile ? _models(context, store) : _acp(context, store),
         'about' => _about(context, store),
         _ => _models(context, store),
       },

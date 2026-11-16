@@ -24,10 +24,11 @@ AppStore _store({bool project = false}) {
   return store;
 }
 
-Widget _wrap(AppStore store, Widget child) => ChangeNotifierProvider<AppStore>.value(
+Widget _wrap(AppStore store, Widget child, {TargetPlatform platform = TargetPlatform.iOS}) =>
+    ChangeNotifierProvider<AppStore>.value(
       value: store,
       child: MaterialApp(
-        theme: AppTheme.build(dark: true),
+        theme: AppTheme.build(dark: true).copyWith(platform: platform),
         builder: (context, child) => withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
         home: child,
       ),
@@ -110,5 +111,33 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('模型与端点'), findsOneWidget);
+    // iPad 同样属于移动端：第三方智能体入口隐藏。
+    expect(find.text('外部智能体'), findsNothing);
+  });
+
+  testWidgets('desktop settings keeps the external agent tab', (tester) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = _store();
+    await tester.pumpWidget(_wrap(
+      store,
+      Builder(builder: (context) {
+        return Scaffold(
+          body: Center(
+            child: ElevatedButton(
+              onPressed: () => showSettingsDialog(context),
+              child: const Text('open'),
+            ),
+          ),
+        );
+      }),
+      platform: TargetPlatform.macOS,
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(tester.takeException(), isNull);
+    expect(find.text('外部智能体'), findsOneWidget);
   });
 }

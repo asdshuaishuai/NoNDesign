@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart' hide Flow;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart' show CancellationToken;
@@ -1221,6 +1222,13 @@ class AppStore extends ChangeNotifier {
   /// 发消息给外部 ACP 智能体（设置里选择后生效）。会话幂等：同一
   /// 项目+agent 复用已建立的连接；事件形状与 NoN 管线同族，时间线直接复用。
   Future<bool> runAcp(String text) async {
+    // 移动端没有本地 agent/引擎：第三方智能体（ACP）不可用，强制走 NoN 内置
+    //（设置里残留 acpAgentId 也不放行——用户裁决 2026-11-16）。
+    if (defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android) {
+      _toast('移动端不支持第三方智能体', '请使用 NoN 内置管线（文档直连 / 连接桌面）。');
+      return false;
+    }
     if (api == null || agentBusy) {
       if (agentBusy) _toast('NoN 正在工作', '等这一轮结束再发。');
       return false;

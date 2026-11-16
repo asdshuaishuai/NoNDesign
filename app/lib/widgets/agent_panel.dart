@@ -71,7 +71,10 @@ class _AgentPanelState extends State<AgentPanel> {
     _showJumpPill = false;
     _followBottom(animate: true);
     // 外部智能体（ACP）接管发送：模式芯片无意义，文本直达该 CLI。
-    final external = store.settings.acpAgentId;
+    // 移动端没有本地 agent/引擎：即使设置里残留 acpAgentId 也强制走 NoN 内置。
+    final mobile = Theme.of(context).platform == TargetPlatform.iOS ||
+        Theme.of(context).platform == TargetPlatform.android;
+    final external = mobile ? null : store.settings.acpAgentId;
     if (external != null && external.isNotEmpty) {
       await store.runAcp(text);
       return;
@@ -136,7 +139,9 @@ class _AgentPanelState extends State<AgentPanel> {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final p = context.palette;
-    final external = store.settings.acpAgentId?.isNotEmpty == true;
+    final mobile = Theme.of(context).platform == TargetPlatform.iOS ||
+        Theme.of(context).platform == TargetPlatform.android;
+    final external = !mobile && store.settings.acpAgentId?.isNotEmpty == true;
     final agentLabel = external
         ? (store.settings.acpAgentName ?? store.settings.acpAgentId!) + ' · ACP'
         : 'NoN 内置';

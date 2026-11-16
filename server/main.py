@@ -630,9 +630,12 @@ async def three_preview(name: str) -> str:
     return _three_guard(three.preview_html, name)
 
 
-@app.get("/three/scene/{name}.js", response_class=PlainTextResponse)
-async def three_scene(name: str) -> str:
-    return _three_guard(three.scene_js, name)
+@app.get("/three/scene/{name}.js")
+async def three_scene(name: str) -> PlainTextResponse:
+    """scene.js 必须按 JavaScript MIME 返回：预览模板用动态 import() 加载，
+    WKWebView/Chromium 都会拒绝 text/plain 的模块脚本（iPhone 17 真机实证：
+    "'text/plain' is not a valid JavaScript MIME type for module script"）。"""
+    return PlainTextResponse(_three_guard(three.scene_js, name), media_type="application/javascript")
 
 
 _THREE_VENDOR_WHITELIST = {"three.module.js": "application/javascript"}
@@ -859,10 +862,6 @@ def main() -> None:
     uvicorn.run(app, host=args.host, port=port, reload=args.reload, log_level="info")
 
 
-if __name__ == "__main__":
-    main()
-
-
 # ---------- 轨道 B 客户端面：视频工作台（调独立插件 plugins/video-engine/，
 # 端点只是调用方——引擎本身零服务器依赖，subprocess 独立进程） ----------
 
@@ -1011,3 +1010,9 @@ async def video_review(req: VideoRenderRequest) -> dict[str, Any]:
         cwd=str(Path(__file__).resolve().parent.parent)))
     return {"ok": proc.returncode == 0, "exit": proc.returncode,
             "output": (proc.stdout + proc.stderr)[-3000:]}
+
+
+# 入口必须在文件末尾：视频/作品集等路由定义在本行之上，若提前运行 uvicorn，
+# 脚本启动路径（桌面 App 与移动端连接所用）会漏注册这些端点（真机 404 实证）。
+if __name__ == "__main__":
+    main()

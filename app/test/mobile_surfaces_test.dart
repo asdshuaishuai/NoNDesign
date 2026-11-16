@@ -27,10 +27,11 @@ AppStore _store({bool project = false}) {
   return store;
 }
 
-Widget _wrap(AppStore store, Widget child) => ChangeNotifierProvider<AppStore>.value(
+Widget _wrap(AppStore store, Widget child, {TargetPlatform platform = TargetPlatform.iOS}) =>
+    ChangeNotifierProvider<AppStore>.value(
       value: store,
       child: MaterialApp(
-        theme: AppTheme.build(dark: true),
+        theme: AppTheme.build(dark: true).copyWith(platform: platform),
         builder: (context, child) => withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
         home: child,
       ),
@@ -109,6 +110,8 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('设置'), findsOneWidget);
       expect(find.text('模型与端点'), findsOneWidget);
+      // 移动端没有本地 agent：第三方智能体（ACP）入口必须隐藏。
+      expect(find.text('外部智能体'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
     });
 
@@ -144,7 +147,8 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(_wrap(_store(), const Scaffold(body: VideoWorkspace())));
+    await tester.pumpWidget(_wrap(_store(), const Scaffold(body: VideoWorkspace()),
+        platform: TargetPlatform.macOS));
     await tester.pump(const Duration(milliseconds: 150));
     expect(tester.takeException(), isNull);
     expect(find.text('标杆示例'), findsOneWidget);

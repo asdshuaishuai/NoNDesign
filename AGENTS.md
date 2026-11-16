@@ -71,6 +71,21 @@ app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板�
   回归：`tablet_layout_test.dart`（768 竖屏双栏/左栏+右栏 sheet、1024 横屏
   三栏、视频/A2UI/作品集/设置）+ 手机测试全量 **54 项绿**；模拟器 iPad Pro 11
   竖屏与 iPhone 17 截图复核。
+- **移动端能力面实测与第三方智能体禁用（2026-11-16 深夜）**：① **ACP 在移动端
+  禁用**（用户裁决）：设置页隐藏「外部智能体」、Agent 面板强制 NoN 内置
+  （残留 acpAgentId 不生效）、`store.runAcp` 在 iOS/Android 直接拒绝并提示。
+  ② **真机 DDP 渲染验证**：iPhone 17 连接桌面服务打开 `nopass.ddp` → 引擎解密/
+  渲染 3 块 390×844 画板 / 34 节点，CanvasView 正常出图（OpenResult.opened）。
+  ③ **3D 真机空白根因**：`/three/scene/{name}.js` 以 text/plain 返回，WKWebView
+  拒绝模块脚本（"'text/plain' is not a valid JavaScript MIME type for module
+  script"）→ 改 `application/javascript`，iPhone 上土星场景正常渲染。
+  ④ **视频端点脚本启动漏注册**：`if __name__ == "__main__": main()` 位于
+  /video/* 路由之前，桌面 App/移动端按脚本启动时 `/video/sample` 等 404 →
+  入口移到文件末尾；真机验证示例加载、环② spec 对照 PASS（8.0s）、后台渲染
+  出帧条带。回归锚点 `scripts/wf/test_server_routes.py`（入口顺序 + scene MIME +
+  六条路由在场）。**能力矩阵**：设计/画布/3D/视频/A2UI 在移动端均需连接桌面
+  服务（引擎 wasm、three 预览、resvg/ffmpeg、LLM 都在桌面）；离线移动端只有
+  PLAN 直连文档（Dart SDK），不承诺引擎能力。
 - **插件工作台 UI 与设计板块解耦**（用户裁决 2026-11-16 二次确认）：
   `app/lib/plugins/registry.dart` 是注册表——每插件一个 PluginDef（id/
   图标/builder），视图路由 `plugin:<id>`，顶栏入口与 ⌘5/⌘6… 快捷键按
