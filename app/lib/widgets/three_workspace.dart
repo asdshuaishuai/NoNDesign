@@ -289,6 +289,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       setState(() {
         _project = choice;
         _lastError = '';
+        // 项目边界复位规范编辑守卫：A 项目未保存的规范编辑不能带进 B——
+        // 不复位会让 _refresh 跳过回灌，编辑器停在 A 的 JSON，_saveSpec
+        // 却把 A 内容以 B 的名义落盘（标题已显示 B，全程无提示）。
+        _specDirty = false;
       });
       store.setThreeProjectName(choice);
       _mountPreview();

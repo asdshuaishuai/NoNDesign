@@ -138,6 +138,7 @@ DropdownMenu<T> nonSelect<T>(
   InputDecoration? decoration,
   Widget? hint,
   bool expanded = false,
+  bool enabled = true,
 }) {
   final p = context.palette;
   // M3 DropdownMenu：菜单行是 MenuItemButton，行高可经 entry style 收敛到
@@ -161,6 +162,7 @@ DropdownMenu<T> nonSelect<T>(
   ];
   return DropdownMenu<T>(
     initialSelection: value,
+    enabled: enabled,
     hintText: decoration?.hintText ?? (hint is Text ? hint.data : null),
     enableFilter: false,
     enableSearch: false,

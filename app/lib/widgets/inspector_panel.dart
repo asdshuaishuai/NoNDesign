@@ -312,7 +312,16 @@ class _InspectorState extends State<Inspector> {
               label: '宽模式',
               value: node.widthMode,
               options: const ['fixed', 'hug', 'fill'],
-              onChanged: (v) => store.updateNode(node.id, {'width_mode': v}),
+              onChanged: (v) {
+                // 引擎 width_mode 只认 hug/fill（fixed 落 _ => () 无操作，
+                // op 却「成功」零反馈）；回固定尺寸走 resizeNode 同款配方：
+                // w= 写死当前渲染尺寸（只动本轴，不碰另一轴的模式）。
+                if (v == 'fixed') {
+                  store.updateNode(node.id, {'width_mode': v, 'w': node.w.round()});
+                } else {
+                  store.updateNode(node.id, {'width_mode': v});
+                }
+              },
             ),
           ),
           const SizedBox(width: 4),
@@ -321,7 +330,13 @@ class _InspectorState extends State<Inspector> {
               label: '高模式',
               value: node.heightMode,
               options: const ['fixed', 'hug', 'fill'],
-              onChanged: (v) => store.updateNode(node.id, {'height_mode': v}),
+              onChanged: (v) {
+                if (v == 'fixed') {
+                  store.updateNode(node.id, {'height_mode': v, 'h': node.h.round()});
+                } else {
+                  store.updateNode(node.id, {'height_mode': v});
+                }
+              },
             ),
           ),
         ],
@@ -343,6 +358,10 @@ class _InspectorState extends State<Inspector> {
               label: '对齐方式',
               value: node.layoutJustify,
               options: const ['start', 'center', 'end'],
+              // 引擎 gap/justify/padding 在 layout=None 时全部静默忽略
+              // （None => ()）；无布局方向就禁用 + 提示，杜绝静默丢输入。
+              enabled: node.layoutDir != 'none',
+              disabledHint: '先选容器布局方向',
               onChanged: (v) => store.updateNode(node.id, {'justify': v}),
             ),
           ),
@@ -351,9 +370,15 @@ class _InspectorState extends State<Inspector> {
       const SizedBox(height: 5),
       Row(
         children: [
-          _NumField(label: '间距', value: node.layoutGap, onCommit: (v) => store.updateNode(node.id, {'gap': v})),
+          _NumField(
+            label: '间距', value: node.layoutGap, enabled: node.layoutDir != 'none', disabledHint: '先选布局',
+            onCommit: (v) => store.updateNode(node.id, {'gap': v}),
+          ),
           const SizedBox(width: 4),
-          _NumField(label: '内边距', value: node.layoutPadding, onCommit: (v) => store.updateNode(node.id, {'padding': v})),
+          _NumField(
+            label: '内边距', value: node.layoutPadding, enabled: node.layoutDir != 'none', disabledHint: '先选布局',
+            onCommit: (v) => store.updateNode(node.id, {'padding': v}),
+          ),
         ],
       ),
       const SizedBox(height: 12),
@@ -617,7 +642,9 @@ class _NumField extends StatefulWidget {
   final String label;
   final double value;
   final ValueChanged<double> onCommit;
-  const _NumField({required this.label, required this.value, required this.onCommit});
+  final bool enabled;
+  final String? disabledHint;
+  const _NumField({required this.label, required this.value, required this.onCommit, this.enabled = true, this.disabledHint});
 
   @override
   State<_NumField> createState() => _NumFieldState();
@@ -656,10 +683,13 @@ class _NumFieldState extends State<_NumField> {
         height: 29,
         child: TextField(
           controller: _controller,
+          enabled: widget.enabled,
           style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink),
           decoration: InputDecoration(
             prefixText: '${widget.label} ',
             prefixStyle: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
+            hintText: widget.enabled ? null : widget.disabledHint,
+            hintStyle: TextStyle(fontSize: 10, color: p.ink4),
             contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
           ),
           onSubmitted: (_) => _commit(),
@@ -784,7 +814,11 @@ class _SelectField extends StatelessWidget {
   final String value;
   final List<String> options;
   final ValueChanged<String> onChanged;
-  const _SelectField({required this.label, required this.value, required this.options, required this.onChanged});
+  final bool enabled;
+  /// 禁用态的占位提示（值一并隐藏，让提示可见——如 layout=none 时
+  /// justify/gap/padding 被引擎静默忽略，禁用 + 提示杜绝静默丢输入）。
+  final String? disabledHint;
+  const _SelectField({required this.label, required this.value, required this.options, required this.onChanged, this.enabled = true, this.disabledHint});
 
   @override
   Widget build(BuildContext context) {
@@ -795,7 +829,9 @@ class _SelectField extends StatelessWidget {
         Text(label, style: TextStyle(fontSize: 10, color: p.ink4)),
         const SizedBox(height: 2),
         nonSelect<String>(context,
-          value: options.contains(value) ? value : options.first,
+          value: enabled ? (options.contains(value) ? value : options.first) : null,
+          enabled: enabled,
+          hint: (!enabled && disabledHint != null) ? Text(disabledHint!) : null,
             decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 7, vertical: 6)),
           items: [
             for (final o in options)

@@ -505,6 +505,9 @@ class AppStore extends ChangeNotifier {
         // 上一项目 run 的流式/思考残留不进新项目面板（孤立 stream 行 + thinking tile）。
         streamText = '';
         thinkingText = '';
+        // 上一项目的演示墨迹不随 mbtWithInk（⌘S）持久进新项目——newProject
+        // 是项目切换边界（非运行中 op），清运行态批注不违反 restoreInks 注释。
+        demoInks = {};
         notifyListeners();
         return true;
       }
@@ -532,6 +535,8 @@ class AppStore extends ChangeNotifier {
       // 上一项目 run 的流式/思考残留不进新项目面板（孤立 stream 行 + thinking tile）。
       streamText = '';
       thinkingText = '';
+      // 同空分支：演示墨迹是项目态不是应用态，换项目即清。
+      demoInks = {};
       history = [];
       _commit(res);
       _toast('项目已创建', '$projectName · ${size[0]}×${size[1]}');
@@ -883,7 +888,16 @@ class AppStore extends ChangeNotifier {
     return applyOp('responsive $activeBoard');
   }
 
-  Future<bool> autoFix() async {
+  /// 自动修复同样是画布变更，必须与 applyOp 同队列串行——绕过队列的
+  /// 整篇 _commit 会与在飞 op 的 HTTP 往返交错，以陈旧 mbt 为基底提交
+  /// （丢改动；队列注释宣称的不变量对所有变更入口成立）。
+  Future<bool> autoFix() {
+    final next = _opQueue.then((_) => _autoFixNow());
+    _opQueue = next; // Future<bool> 赋给 Future<void> 队列字段：链续接
+    return next;
+  }
+
+  Future<bool> _autoFixNow() async {
     if (api == null || activeBoard == null) return false;
     try {
       final res = await api!.session(mbt, 'session_auto_fix', activeBoard);
@@ -955,7 +969,14 @@ class AppStore extends ChangeNotifier {
 
   /// deepDesign「校验并渲染」对齐：把源码编辑器的整篇提交走引擎校验
   /// （render 面，比 op 路径更严——真实重叠债会拒绝），通过即 commit。
-  Future<bool> applySource(String text) async {
+  /// 与 applyOp/autoFix 同队列串行（整篇覆盖型提交更需要排队防交错）。
+  Future<bool> applySource(String text) {
+    final next = _opQueue.then((_) => _applySourceNow(text));
+    _opQueue = next; // Future<bool> 赋给 Future<void> 队列字段：链续接
+    return next;
+  }
+
+  Future<bool> _applySourceNow(String text) async {
     if (api == null || agentBusy) {
       if (agentBusy) _toast('NoN 正在工作', '等这一轮结束再改画布。');
       return false;
@@ -1280,6 +1301,11 @@ class AppStore extends ChangeNotifier {
     thinkingText = '';
     _deltaBuffer = '';
     _thinkingBuffer = '';
+    // doc 直播同 run 生命周期：上一失败 run 的半截文档/未冲刷缓冲不进
+    // 本轮直播（docs_view 以 liveDocText 非空判定直播，残留会在 PLAN run
+    // 置 view='docs' 的第一帧就被当成新文档渲染；新 doc_delta 也会先拼上残留）。
+    liveDocText = '';
+    _docBuffer = '';
     usage = const {};
     timeline = [
       TimelineEntry.user(instruction),
@@ -1334,6 +1360,10 @@ class AppStore extends ChangeNotifier {
     } finally {
       _flushStreamAsAssistant();
       _flushThinking();
+      // 失败 run 的 doc 尾巴就地丢弃（成功路径 doc_written 已冲刷+清零，
+      // 这里只可能剩失败 run 未冲刷的缓冲；清空后挂起的 80ms doc timer
+      // 空转返回，不再把残尾拼进任何后续直播）。
+      _docBuffer = '';
       agentBusy = false;
       streamText = '';
       agentPhase = 'idle';

@@ -112,6 +112,15 @@ class MiniOrbit {
     );
     camera.lookAt(this.pan);
   }
+  // 直写 goal+spherical 绕过阻尼——turntable 四方位等编排路径需要确定性
+  // 视角：update() 只从自持 spherical 重建 camera.position（从不读回），
+  // 直设 camera.position 会被下一帧 update() 立即覆写回旧视角。
+  setView(theta, phi) {
+    this.goal.theta = theta;
+    this.goal.phi = phi;
+    this.spherical.theta = theta;
+    this.spherical.phi = phi;
+  }
 }
 const controls = new MiniOrbit(camera, renderer.domElement, new THREE.Vector3(0, 0, 0));
 addEventListener('resize', () => {
@@ -139,13 +148,14 @@ function __measure(){
   return { meshes, triangles: Math.round(tris), bounds: {x:+size.x.toFixed(2), y:+size.y.toFixed(2), z:+size.z.toFixed(2)}, user: metrics };
 }
 let lastSent = 0;
-renderer.setAnimationLoop(() => {
+function __loop(){
   if (userUpdate) { try { userUpdate(clock.getDelta()); } catch(e){} }
   controls.update();
   renderer.render(scene, camera);
   const now = performance.now();
   if (now - lastSent > 2000) { lastSent = now; __report({kind:'metrics', payload: __measure()}); }
-});
+}
+renderer.setAnimationLoop(__loop);
 // —— 视觉反馈桥（环③）：截图给评审 agent（preserveDrawingBuffer 开启）。
 // tag 进 evidence 文件名；turntable 四方位取证（img2threejs：单视角不是
 // 模型的证据——正面八轮通过、帽子长在胯上的事故即此）。——
@@ -156,23 +166,25 @@ window.__non3d_screenshot = function(tag){
 window.__non3d_turntable = function(){
   if (!window.__non3d_turning) {
     window.__non3d_turning = true;
-    const target = controls.target.clone();
-    const saved = camera.position.clone();
-    const offset = saved.clone().sub(target);
-    const dist = Math.max(offset.length(), 4);
-    const baseY = saved.y;
-    const baseAngle = Math.atan2(offset.x, offset.z);
+    // 截图期间暂停动画循环：__loop 每帧 controls.update() 会用阻尼态
+    // spherical 重建 camera.position，把直设的取证视角立即覆写回旧值
+    // （四张截图同一视角的事故根因——turntable 直设 + update 覆写双败）。
+    renderer.setAnimationLoop(null);
+    const baseAngle = Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z);
+    const phi0 = controls.spherical.phi; // 保持原仰角与距离，只转方位
     const angles = [0, 90, 180, 270];
     let i = 0;
     const step = () => {
       if (i >= angles.length) {
-        camera.position.copy(saved); controls.update();
+        controls.setView(baseAngle, phi0);
+        renderer.render(scene, camera);
+        clock.getDelta(); // 吞掉暂停期的 dt，恢复后用户动画不瞬移
+        renderer.setAnimationLoop(__loop);
         window.__non3d_turning = false;
         return;
       }
       const a = baseAngle + angles[i] * Math.PI / 180;
-      camera.position.set(target.x + dist * Math.sin(a), baseY, target.z + dist * Math.cos(a));
-      controls.update();
+      controls.setView(a, phi0);
       renderer.render(scene, camera);
       __report({kind:'screenshot', payload: renderer.domElement.toDataURL('image/png'), tag: 'turn-' + angles[i]});
       i++;
@@ -347,21 +359,30 @@ async def run_pass(name: str, model: str, base_url: str, api_key: str,
         write_state(name, state)
         append_history(name, {"action": "blocked", "pass": state["current"], "summary": state["blocked_reason"]})
         raise ThreeError(state["blocked_reason"])
+    pid = cur["id"]  # 本次实际生成的 pass；await 期间状态可能被并发推进
     system, user = _pass_prompt(name)
     raw = await _chat(model, base_url, api_key, thinking, system, user)
     js = _extract_js(raw)
     (_proj_dir(name) / "scene.js").write_text(js, "utf-8")
-    # await 之后重读盘上状态再写回：run 期间并发 feedback（error/metrics/
-    # screenshot）可能已推进 attempts/blocked/evidence——旧快照整写会把它
-    # 们覆盖掉（状态机绕过：blocked 门复活）。本函数只拥有 status 字段。
+    # await 之后重读盘上状态，按 pid 键控写回：run 期间并发 feedback（error/
+    # metrics/screenshot）可能已推进 attempts/blocked/evidence——旧快照整写
+    # 会把它们覆盖掉（状态机绕过：blocked 门复活）。本函数只拥有 status 字段。
+    # 键控到 pid 而非「重读时刻的 current」：若 await 期间 continue_pass 已
+    # 推进到下一 pass，按 current 找会把无生成地标的下一 pass 标 generated
+    # （scene.js 内容其实是上一 pass 的），推进到 done 则误报 state_corrupt。
     state2 = read_state(name)
-    cur2 = next((p for p in state2["passes"] if p["id"] == state2["current"]), None)
-    if cur2 is None:
-        raise ThreeError("state_corrupt: current pass 不存在")
+    cur2 = next((p for p in state2["passes"] if p["id"] == pid), None)
+    if cur2 is None or state2.get("current") != pid:
+        # 已被推进/越界：不写状态、保留 scene.js、如实返回——绝不把别的
+        # pass 标 generated。
+        append_history(name, {"action": "generate", "pass": pid, "stale": True, "chars": len(js)})
+        return {"ok": True, "pass": pid, "stale": True, "chars": len(js), "state": state2,
+                "note": f"{pid} 的 scene.js 已生成落盘；await 期间状态已推进到 "
+                        f"{state2.get('current')}，未改写状态（如需重生成请切回该 pass 后重跑）"}
     cur2["status"] = "generated"
     write_state(name, state2)
-    append_history(name, {"action": "generate", "pass": state2["current"], "chars": len(js)})
-    return {"ok": True, "pass": state2["current"], "chars": len(js), "state": state2}
+    append_history(name, {"action": "generate", "pass": pid, "chars": len(js)})
+    return {"ok": True, "pass": pid, "chars": len(js), "state": state2}
 
 
 async def feedback(name: str, kind: str, payload: Any) -> dict[str, Any]:

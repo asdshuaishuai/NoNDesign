@@ -113,9 +113,25 @@ class _DocDeltaExtractor:
         self.uni = ""
         self.done = False
 
+    def _reset(self) -> None:
+        self.buf = ""
+        self.state = "seek_key"
+        self.escape = False
+        self.pending_uni = 0
+        self.uni = ""
+        self.done = False
+
     def feed(self, delta: str) -> str:
-        if self.done or not delta:
+        if not delta:
             return ""
+        if self.done:
+            # plan 契约是同 run 依次 write_doc(prd)→write_doc(ui)（两份齐才算
+            # 交付），而 doc_streamer 惰性创建后贯穿同一 consume 流式循环——
+            # 前一份 content 闭引号（done）后仍会继续流入后续工具参数增量。
+            # 惰性自复位回 seek_key 找下一份文档的 content 键：第二份文档
+            # （ui）的直播才不致全部丢弃（不依赖 SDK 的工具边界事件时序；
+            # doc_written 全量仍是正确性兜底，这里只修流式 UX）。
+            self._reset()
         self.buf += delta
         out: list[str] = []
         i = 0

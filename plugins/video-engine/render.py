@@ -275,11 +275,6 @@ def _esc(s: str) -> str:
 def _element_svg(el, t_scene: float, T: float, env: dict, resolve) -> str:
     alpha, dy, scale = _anim_factor(el.get("anim"), t_scene)
     mx, my, motion_absolute = _motion_offset(el.get("motion"), t_scene, T, env, resolve)
-    if motion_absolute:
-        # orbit/path 完全决定位置：元素自身 x/y 不叠加（入场 dy 仍生效）
-        base_override = True
-    else:
-        base_override = False
     if alpha <= 0.01:
         return ""
     kind = el.get("type")
@@ -287,8 +282,13 @@ def _element_svg(el, t_scene: float, T: float, env: dict, resolve) -> str:
     opacity = float(el.get("opacity", 1.0)) * alpha
     parts = [f'opacity="{opacity:.3f}"']
 
-    def px(v, axis):
-        return 0.0 if motion_absolute else resolve(_maybe_expr(v, _EXPR_SYM, _EXPR_CACHE), t_scene, T, env, axis)
+    def px(v, axis, size=False):
+        # 位置/尺寸语义拆分：orbit/path（motion_absolute）完全决定位置——
+        # 元素自身 x/y/cx/cy/线段端点/锚点返回 0（由 mx/my 接管）；尺寸类
+        # （w/h/r/rx/ry，size=True）恒解析——绝对运动只接管锚点，不清元素
+        # 尺寸（此前整条表达式归零，元素渲染成零尺寸隐形）。
+        val = resolve(_maybe_expr(v, _EXPR_SYM, _EXPR_CACHE), t_scene, T, env, axis)
+        return 0.0 if (motion_absolute and not size) else val
 
     if kind == "text":
         x = px(el.get("x", "50%"), "x") + mx
@@ -314,8 +314,8 @@ def _element_svg(el, t_scene: float, T: float, env: dict, resolve) -> str:
     if kind == "rect":
         x = px(el.get("x", 0), "x") + mx
         y = px(el.get("y", 0), "y") + my  # motion 纵向分量（vy/orbit-cy/path）与其余元素类型同语义
-        w = px(el.get("w", 100), "x") * scale
-        h = px(el.get("h", 60), "y") * scale
+        w = px(el.get("w", 100), "x", size=True) * scale
+        h = px(el.get("h", 60), "y", size=True) * scale
         cx, cy = x + w / 2, y + h / 2  # 缩放绕中心，x/y = 左上角
         rx = float(el.get("radius", 8))
         body = (f'<rect x="{cx - w/2:.1f}" y="{cy + dy - h/2:.1f}"'
@@ -325,14 +325,14 @@ def _element_svg(el, t_scene: float, T: float, env: dict, resolve) -> str:
     if kind == "circle":
         cx = px(el.get("cx", "50%"), "x") + mx
         cy = px(el.get("cy", "50%"), "y") + dy + my
-        r = px(el.get("r", 40), "x") * scale
+        r = px(el.get("r", 40), "x", size=True) * scale
         return f'<g {" ".join(parts)}><circle cx="{cx:.1f}" cy="{cy:.1f}" r="{r:.1f}" fill="{color}"/></g>'
 
     if kind == "ellipse":
         cx = px(el.get("cx", "50%"), "x") + mx
         cy = px(el.get("cy", "50%"), "y") + dy + my
-        rx = px(el.get("rx", 50), "x") * scale
-        ry = px(el.get("ry", 30), "y") * scale
+        rx = px(el.get("rx", 50), "x", size=True) * scale
+        ry = px(el.get("ry", 30), "y", size=True) * scale
         return f'<g {" ".join(parts)}><ellipse cx="{cx:.1f}" cy="{cy:.1f}" rx="{rx:.1f}" ry="{ry:.1f}" fill="{color}"/></g>'
 
     if kind == "line":
@@ -377,8 +377,8 @@ def _element_svg(el, t_scene: float, T: float, env: dict, resolve) -> str:
     if kind == "image":
         x = px(el.get("x", 0), "x") + mx
         y = px(el.get("y", 0), "y") + dy + my
-        w = px(el.get("w", 200), "x") * scale
-        h = px(el.get("h", 200), "y") * scale
+        w = px(el.get("w", 200), "x", size=True) * scale
+        h = px(el.get("h", 200), "y", size=True) * scale
         path = el.get("path", "")
         if not path:
             return ""
