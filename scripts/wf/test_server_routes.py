@@ -31,6 +31,12 @@ def main() -> int:
     if 'media_type="application/javascript"' not in source:
         failures.append("three scene endpoint is missing application/javascript MIME")
 
+    if "connect-src 'self'" not in source:
+        failures.append("hotapp page CSP must allow same-origin SQLite bridge")
+
+    if '"Cache-Control": "no-store"' not in source:
+        failures.append("hotapp page must disable caching (hot update reload)")
+
     sys.path.insert(0, str(MAIN.parent))
     import main as server_main  # noqa: E402  (import registers all routes)
 
@@ -42,6 +48,7 @@ def main() -> int:
         "/video/render/status",
         "/video/frame",
         "/three/scene/{name}.js",
+        "/hotapp/db/{name}/exec",
     ):
         if path not in paths:
             failures.append(f"missing route {path}")

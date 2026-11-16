@@ -9,7 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:nondesign/core/models.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
-import 'package:nondesign/widgets/a2ui_workspace.dart';
+import 'package:nondesign/widgets/hotapp_workspace.dart';
 import 'package:nondesign/widgets/portfolio_view.dart';
 import 'package:nondesign/widgets/settings_dialog.dart';
 import 'package:nondesign/widgets/video_workspace.dart';
@@ -82,8 +82,8 @@ void main() {
     expect(find.text('加载示例后点「渲染」'), findsOneWidget);
   });
 
-  testWidgets('A2UI and portfolio fit iPad portrait', (tester) async {
-    await _pumpAt(tester, const Scaffold(body: A2uiWorkspace()), _tabletPortrait);
+  testWidgets('热应用 and portfolio fit iPad portrait', (tester) async {
+    await _pumpAt(tester, const Scaffold(body: HotAppWorkspace()), _tabletPortrait);
     await _pumpAt(tester, const Scaffold(body: PortfolioView()), _tabletPortrait);
   });
 

@@ -1,6 +1,7 @@
 # AGENTS.md — NoNDesign
 
-AI 原生原型设计工具的桌面客户端。**一句话 → 产品需求设计文档 → 完整可交互原型**。
+AI 原生创作工作台。**一句话 → 产品需求设计文档 → 完整可交互原型**；同一工作台
+还能做 3D 场景、代码生成视频与带 SQLite 数据库的 NoN 热应用。
 
 **技术栈（用户决策，2026-11-13）：Flutter 3.50（macOS 主目标；linux/windows 平台壳已就位）+ Python OpenAI Agents SDK。
 不要重新引入 Bun、Tauri 或任何 JS 前端运行时。**
@@ -17,18 +18,24 @@ plugins/      独立插件：video-engine/ 代码生成视频（零 Flutter/服�
 app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板块解耦）
 ```
 
-- **A2UI 小应用引擎 + 作品集（2026-11-16 立项，灵闪/Dots 式）**：小应用 =
-  **自包含单 HTML**（全内联零外链，动画优先 canvas/SVG/CSS keyframes）——
+- **NoN 热应用引擎 + 作品集（2026-11-16 立项，灵闪/Dots 式）**：热应用 =
+  **自包含单 HTML + SQLite**（全内联零外链，动画优先 canvas/SVG/CSS keyframes）——
   「热更新」= 覆盖文件 + WebView reload（与 3D 同构；Flutter 热更新无官方
-  能力不务实）。server/a2ui_agent.py（generate/refine/page/list/delete +
-  fail-closed：结构校验不过拒绝覆盖——旧版仍在热更新无损坏风险）+
-  **作品集横切收藏夹**（portfolio/index.json 聚合 a2ui/video/three 三类，
-  存量 mp4/3d 自动补扫）；客户端 a2ui_workspace.dart（对话式修改条即
-  热更新入口）+ portfolio_view.dart（类型过滤网格/打开直达/移除）；
-  registry 第 3 插件 a2ui（⌘7），portfolio 独立视图（主页卡 + 标题栏入口）。
+  能力不务实）。server/hotapp_agent.py（generate/refine/page/list/delete +
+  **db_exec** + fail-closed：结构校验不过拒绝覆盖——旧版仍在热更新无损坏风险）。
+  **持久层统一 SQLite**：每应用 `app.db`，页面经注入的
+  `window.NoN.db.exec(sql, params)` 调 `POST /hotapp/db/{name}/exec`
+  （单语句、参数化、禁 ATTACH/DETACH/PRAGMA/VACUUM/LOAD_EXTENSION；
+  业务数据禁 localStorage/IndexedDB/cookie——WebView 重载即丢）。
+  应用目录 `~/Documents/NoNDesign/hotapps`（旧 `hotapp`/`a2ui` 目录启动时
+  自动并入，作品集旧条目归一为 hotapp）；**作品集横切收藏夹**
+  （portfolio/index.json 聚合 hotapp/video/three 三类，存量 mp4/3d 自动补扫）；
+  客户端 hotapp_workspace.dart（对话式修改条即热更新入口）+
+  portfolio_view.dart（类型过滤网格/打开直达/移除）；registry 第 3 插件
+  hotapp（⌘7），portfolio 独立视图（主页卡 + 标题栏入口）。
   v1 质量环 = 结构/外链校验（全内联零外链硬门；服务端在 `</body>` 前注入
-  window.onerror/unhandledrejection → NONA2UI 桥回传，页面 CSP 第二道
-  防线）；视觉截图（canvas toDataURL）v2。
+  DB 桥 + window.onerror/unhandledrejection → NONHOTAPP 桥回传，页面 CSP
+  `connect-src 'self'` 第二道防线）；视觉截图（canvas toDataURL）v2。
 - **移动客户端（2026-11-16 立项，双层架构）**：ios/android 平台目标已生成
   （iOS debug 构建 38.7s 实证通过；**Android toolchain 缺失**——SDK 未装，
   apk 构建待装后验证）。主页 welcome 加「工作台」插件区（注册表驱动）。
@@ -56,7 +63,7 @@ app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板�
   收紧（tab 紧凑、动作改图标态、键盘提示隐藏）；空画布卡限宽 + Expanded + Wrap；
   视频窄屏改单列滚动（配置在上、预览固定 280 高）；设置弹窗窄屏全屏 + 顶部横向
   导航条；状态栏/画布 HUD 的桌面键盘提示在窄屏隐藏。回归：
-  `app/test/mobile_surfaces_test.dart`（402/390 × 视频/3D/A2UI/作品集/文档/设计/
+  `app/test/mobile_surfaces_test.dart`（402/390 × 视频/3D/热应用/作品集/文档/设计/
   演示/设置/底部 sheet 共 19 项 + 宽屏视频双栏）；全量 48 项测试绿；模拟器截图
   复核文档/设计/视频/设置四屏。
 - **响应式字号与 iPad 三档布局（2026-11-16 深夜）**：字号在渲染期统一缩放——
@@ -69,7 +76,7 @@ app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板�
   表面、不改 MediaQuery（builder 里恒 800×600）——手机/平板测试必须设
   `tester.view.physicalSize`；修正前「手机宽度」测试实际跑的是桌面分支。
   回归：`tablet_layout_test.dart`（768 竖屏双栏/左栏+右栏 sheet、1024 横屏
-  三栏、视频/A2UI/作品集/设置）+ 手机测试全量 **54 项绿**；模拟器 iPad Pro 11
+  三栏、视频/热应用/作品集/设置）+ 手机测试全量 **54 项绿**；模拟器 iPad Pro 11
   竖屏与 iPhone 17 截图复核。
 - **移动端能力面实测与第三方智能体禁用（2026-11-16 深夜）**：① **ACP 在移动端
   禁用**（用户裁决）：设置页隐藏「外部智能体」、Agent 面板强制 NoN 内置
@@ -83,7 +90,7 @@ app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板�
   /video/* 路由之前，桌面 App/移动端按脚本启动时 `/video/sample` 等 404 →
   入口移到文件末尾；真机验证示例加载、环② spec 对照 PASS（8.0s）、后台渲染
   出帧条带。回归锚点 `scripts/wf/test_server_routes.py`（入口顺序 + scene MIME +
-  六条路由在场）。**能力矩阵**：设计/画布/3D/视频/A2UI 在移动端均需连接桌面
+  六条路由在场）。**能力矩阵**：设计/画布/3D/视频/热应用 在移动端均需连接桌面
   服务（引擎 wasm、three 预览、resvg/ffmpeg、LLM 都在桌面）；离线移动端只有
   PLAN 直连文档（Dart SDK），不承诺引擎能力。
 - **插件工作台 UI 与设计板块解耦**（用户裁决 2026-11-16 二次确认）：

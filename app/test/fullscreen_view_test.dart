@@ -4,7 +4,7 @@
 // 覆盖 nav-1/nav-2/tests-5/mobile-1 的回归点：
 //  - 无项目时 portfolio / plugin:<id> 仍路由到 Workspace；
 //  - 全屏视图在 Scaffold 内（其 SnackBar 才有 ScaffoldMessenger 宿主）；
-//  - A2UI/作品集顶栏有返回设计出口；
+//  - 热应用/作品集顶栏有返回设计出口；
 //  - boot 先读设置再 launch（连接桌面地址赶得上本次启动）；
 //  - ⌘N/⌘O/⌘S/⌘Z/⌘K 只在根级绑定，不在 workspace 重复。
 import 'dart:io';
@@ -43,7 +43,7 @@ void main() {
 
   test('All full-screen views expose a visible back control', () {
     for (final path in [
-      'lib/widgets/a2ui_workspace.dart',
+      'lib/widgets/hotapp_workspace.dart',
       'lib/widgets/portfolio_view.dart',
       'lib/widgets/three_workspace.dart',
       'lib/widgets/video_workspace.dart',

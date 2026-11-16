@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../widgets/a2ui_workspace.dart';
+import '../widgets/hotapp_workspace.dart';
 import '../widgets/three_workspace.dart';
 import '../widgets/video_workspace.dart';
 
@@ -46,11 +46,11 @@ final List<PluginDef> pluginRegistry = [
     builder: () => const VideoWorkspace(),
   ),
   PluginDef(
-    id: 'a2ui',
-    title: 'A2UI 小应用',
-    tooltip: 'A2UI 小应用 ⌘7',
+    id: 'hotapp',
+    title: 'NoN 热应用',
+    tooltip: 'NoN 热应用 ⌘7',
     icon: Icons.auto_fix_high_outlined,
-    builder: () => const A2uiWorkspace(),
+    builder: () => const HotAppWorkspace(),
   ),
 ];
 

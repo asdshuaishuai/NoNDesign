@@ -353,10 +353,10 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// A2UI 工作台当前应用名（'' = 无）：同 threeProjectName，切走后回来
+  /// NoN 热应用工作台当前应用名（'' = 无）：同 threeProjectName，切走后回来
   /// 仍停在原应用并自动重挂载。
-  void setA2uiApp(String name) {
-    settings.a2uiApp = name;
+  void setHotApp(String name) {
+    settings.hotappApp = name;
     saveSettings();
     notifyListeners();
   }

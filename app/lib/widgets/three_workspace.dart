@@ -17,7 +17,7 @@ import 'common.dart';
 bool _wkRegistered = false;
 
 /// 作品集「打开」直载：切视图前设置，ThreeWorkspace.initState 消费后清空
-/// （与 a2uiLoadOnOpen 同构的跨实例传名通道）。
+/// （与 hotAppLoadOnOpen 同构的跨实例传名通道）。
 String? threeLoadOnOpen;
 
 const _passLabels = {

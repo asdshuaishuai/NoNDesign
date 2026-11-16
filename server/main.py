@@ -28,7 +28,7 @@ sys.path.insert(0, str(SERVER_DIR))
 
 import acp_bridge  # noqa: E402
 import three_agent as three  # noqa: E402（轨道 C：3D 工作台，依赖 SERVER_DIR 已入 path）
-import a2ui_agent as a2ui  # noqa: E402（A2UI 小应用引擎 + 作品集，同上）
+import hotapp_agent as hotapp  # noqa: E402（NoN 热应用引擎 + 作品集，同上）
 from acp_bridge import AcpRegistry, detect_agents, probe_all as acp_bridge_probe_all  # noqa: E402
 from agent import AgentRunManager, AgentRunRequest  # noqa: E402
 from context import clear_session_file, parse_metadata, with_metadata  # noqa: E402
@@ -653,9 +653,9 @@ async def three_vendor(filename: str) -> PlainTextResponse:
     return PlainTextResponse(f.read_text("utf-8"), media_type=mime)
 
 
-# ---------- A2UI 小应用引擎 + 作品集（灵闪/Dots 式自成一体小应用） ----------
+# ---------- NoN 热应用引擎 + 作品集（灵闪/Dots 式自成一体热应用） ----------
 
-class A2uiGenerateRequest(BaseModel):
+class HotAppGenerateRequest(BaseModel):
     name: str
     brief: str
     model: str = ""
@@ -663,7 +663,7 @@ class A2uiGenerateRequest(BaseModel):
     api_key: str = ""
 
 
-class A2uiRefineRequest(BaseModel):
+class HotAppRefineRequest(BaseModel):
     name: str
     instruction: str
     model: str = ""
@@ -671,8 +671,13 @@ class A2uiRefineRequest(BaseModel):
     api_key: str = ""
 
 
-class A2uiDeleteRequest(BaseModel):
+class HotAppDeleteRequest(BaseModel):
     name: str
+
+
+class HotAppDbRequest(BaseModel):
+    sql: str
+    params: list[Any] | None = None
 
 
 class PortfolioDeleteRequest(BaseModel):
@@ -680,74 +685,86 @@ class PortfolioDeleteRequest(BaseModel):
     ref: str
 
 
-def _a2ui_guard(fn, *args):
+def _hotapp_guard(fn, *args):
     try:
         return fn(*args)
-    except a2ui.A2uiError as e:
+    except hotapp.HotAppError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except (OSError, ValueError) as e:
         # 文件系统/JSON 意外错误不裸 500：给可诊断的明确 detail。
-        raise HTTPException(status_code=500, detail=f"a2ui_io_error: {e}")
+        raise HTTPException(status_code=500, detail=f"hotapp_io_error: {e}")
 
 
-async def _a2ui_guard_async(coro_fn, *args):
+async def _hotapp_guard_async(coro_fn, *args):
     try:
         return await coro_fn(*args)
-    except a2ui.A2uiError as e:
+    except hotapp.HotAppError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except (OSError, ValueError) as e:
-        raise HTTPException(status_code=500, detail=f"a2ui_io_error: {e}")
+        raise HTTPException(status_code=500, detail=f"hotapp_io_error: {e}")
 
 
 # 生成页是本机服务同源执行的自包含 HTML：CSP 只放行内联脚本/样式与
-# data:/blob: 资源，禁一切网络回连与表单/框架嵌入（外链已被 _html_ok 拒绝，
-# CSP 是第二道防线）。
-_A2UI_PAGE_CSP = (
+# data:/blob: 资源；connect-src 'self' 只为 SQLite 桥（/hotapp/db/*/exec）
+# 放行同源请求，其余网络回连、表单与框架嵌入全部禁止（外链已被 _html_ok
+# 拒绝，CSP 是第二道防线）。
+_HOTAPP_PAGE_CSP = (
     "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
     "img-src data: blob:; font-src data:; media-src data: blob:; "
-    "connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 
 
-@app.post("/a2ui/generate")
-async def a2ui_generate(req: A2uiGenerateRequest) -> dict[str, Any]:
-    """一句话 → 自包含动画 HTML 小应用（落盘即热更新）。"""
-    return await _a2ui_guard_async(a2ui.generate, req.name, req.brief, req.model,
+@app.post("/hotapp/generate")
+async def hotapp_generate(req: HotAppGenerateRequest) -> dict[str, Any]:
+    """一句话 → 自包含动画 HTML 热应用（落盘即热更新）。"""
+    return await _hotapp_guard_async(hotapp.generate, req.name, req.brief, req.model,
                                    req.base_url, req.api_key)
 
 
-@app.post("/a2ui/refine")
-async def a2ui_refine(req: A2uiRefineRequest) -> dict[str, Any]:
+@app.post("/hotapp/refine")
+async def hotapp_refine(req: HotAppRefineRequest) -> dict[str, Any]:
     """对话式修改（reload=true 提示 WebView 重载）。"""
-    return await _a2ui_guard_async(a2ui.refine, req.name, req.instruction, req.model,
+    return await _hotapp_guard_async(hotapp.refine, req.name, req.instruction, req.model,
                                    req.base_url, req.api_key)
 
 
-@app.get("/a2ui/page/{name}", response_class=HTMLResponse)
-async def a2ui_page(name: str) -> HTMLResponse:
-    html = _a2ui_guard(a2ui.page_html, name)
-    return HTMLResponse(html, headers={"Content-Security-Policy": _A2UI_PAGE_CSP})
+@app.get("/hotapp/page/{name}", response_class=HTMLResponse)
+async def hotapp_page(name: str) -> HTMLResponse:
+    html = _hotapp_guard(hotapp.page_html, name)
+    # no-store：refine 覆盖 index.html 后 WebView reload 必须拿到新版本，
+    # 不能被 HTTP 缓存挡住（「热更新」语义的一部分）。
+    return HTMLResponse(html, headers={
+        "Content-Security-Policy": _HOTAPP_PAGE_CSP,
+        "Cache-Control": "no-store",
+    })
 
 
-@app.get("/a2ui/list")
-async def a2ui_list() -> dict[str, Any]:
-    return _a2ui_guard(a2ui.list_apps)
+@app.get("/hotapp/list")
+async def hotapp_list() -> dict[str, Any]:
+    return _hotapp_guard(hotapp.list_apps)
 
 
-@app.post("/a2ui/delete")
-async def a2ui_delete(req: A2uiDeleteRequest) -> dict[str, Any]:
-    return await _a2ui_guard_async(a2ui.delete_app, req.name)
+@app.post("/hotapp/delete")
+async def hotapp_delete(req: HotAppDeleteRequest) -> dict[str, Any]:
+    return await _hotapp_guard_async(hotapp.delete_app, req.name)
+
+
+@app.post("/hotapp/db/{name}/exec")
+def hotapp_db_exec(name: str, req: HotAppDbRequest) -> dict[str, Any]:
+    """SQLite 桥：页面 window.NoN.db.exec 的唯一落点（同步路由走线程池）。"""
+    return _hotapp_guard(hotapp.db_exec, name, req.sql, req.params or [])
 
 
 @app.get("/portfolio")
 async def portfolio_list() -> dict[str, Any]:
-    """作品集聚合：a2ui / video / three 三类产物（存量自动补扫）。"""
-    return _a2ui_guard(a2ui.portfolio_list)
+    """作品集聚合：hotapp / video / three 三类产物（存量自动补扫）。"""
+    return _hotapp_guard(hotapp.portfolio_list)
 
 
 @app.post("/portfolio/delete")
 async def portfolio_delete(req: PortfolioDeleteRequest) -> dict[str, Any]:
-    return _a2ui_guard(a2ui.portfolio_delete, req.kind, req.ref)
+    return _hotapp_guard(hotapp.portfolio_delete, req.kind, req.ref)
 
 
 @app.post("/acp/prompt")

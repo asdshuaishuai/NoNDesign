@@ -27,7 +27,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
 
     // 移动端启动降级后的主页（无服务器、无项目）。
-    expect(find.text('把想法变成\n可以点的产品'), findsOneWidget);
+    expect(find.text('把想法变成\n能用的作品'), findsOneWidget);
 
     // 主页工作台卡 → 插件视图（无项目也必须能路由）。
     await tester.tap(find.text('3D 工作台'));
@@ -39,6 +39,6 @@ void main() {
     await tester.tap(find.byIcon(Icons.arrow_back));
     await tester.pump(const Duration(milliseconds: 400));
     expect(store.view, 'design');
-    expect(find.text('把想法变成\n可以点的产品'), findsOneWidget);
+    expect(find.text('把想法变成\n能用的作品'), findsOneWidget);
   });
 }

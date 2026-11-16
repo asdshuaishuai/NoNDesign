@@ -42,8 +42,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       expect(tester.takeException(), isNull);
       expect(find.byKey(const ValueKey('welcome-narrow')), findsOneWidget);
-      expect(find.text('把想法变成\n可以点的产品'), findsOneWidget);
-      expect(find.text('开始设计'), findsOneWidget);
+      expect(find.text('把想法变成\n能用的作品'), findsOneWidget);
+      expect(find.text('开始创作'), findsOneWidget);
     });
   }
 

@@ -1,8 +1,10 @@
 # NoNDesign
 
-AI-native 产品设计工作室：**一句话 → 产品需求设计文档 → 完整可交互原型**。
+AI-native 创作工作台：**一句话 → 产品需求设计文档 → 完整可交互原型**，同一工作台
+还能做 3D 场景、代码生成视频与带 SQLite 数据库的 NoN 热应用。
 
 - **桌面端**：Flutter 3.50（macOS）+ 原生 CustomPainter 画布
+- **工作台**：交互原型 / 3D 场景 / 代码生成视频 / NoN 热应用（HTML + SQLite）
 - **智能层**：Python + OpenAI Agents SDK（`openai-agents`）
 - **引擎**：MoonViz classic wasm（wasmtime 进程内宿主；version 字符串报 0.1.11，产物实际含 0.2 手势/历史/规范提取能力）
 - **持久化**：DDP 单文件（zstd + Argon2id + XChaCha20-Poly1305 / 免密 CRC32）

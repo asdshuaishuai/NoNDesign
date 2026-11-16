@@ -3,11 +3,11 @@ import 'package:provider/provider.dart';
 
 import '../core/store.dart';
 import '../core/theme.dart';
-import 'a2ui_workspace.dart';
+import 'hotapp_workspace.dart';
 import 'common.dart';
 import 'three_workspace.dart';
 
-/// 作品集（横切收藏夹）：聚合 a2ui 小应用 / 视频渲染 / 3D 场景三类产物，
+/// 作品集（横切收藏夹）：聚合热应用 / 视频渲染 / 3D 场景三类产物，
 /// 网格卡片 + 类型过滤 + 打开/移除。历史产物自动补扫（存量 mp4/3D 场景
 /// 首次进入即可见）。
 class PortfolioView extends StatefulWidget {
@@ -17,9 +17,9 @@ class PortfolioView extends StatefulWidget {
   State<PortfolioView> createState() => _PortfolioViewState();
 }
 
-const _kindLabel = {'a2ui': '小应用', 'video': '视频', 'three': '3D'};
+const _kindLabel = {'hotapp': '热应用', 'video': '视频', 'three': '3D'};
 const _kindIcon = {
-  'a2ui': Icons.auto_fix_high_outlined,
+  'hotapp': Icons.auto_fix_high_outlined,
   'video': Icons.movie_outlined,
   'three': Icons.view_in_ar_outlined,
 };
@@ -59,19 +59,19 @@ class _PortfolioViewState extends State<PortfolioView> {
     final ref = item['ref']?.toString() ?? '';
     if (kind == null || ref.isEmpty) return;
     final title = (item['title'] ?? ref).toString();
-    final deletesSource = kind == 'a2ui';
-    // 15px 垃圾桶不能是「一键删源码」：a2ui 二次确认并明说不恢复；
+    final deletesSource = kind == 'hotapp';
+    // 15px 垃圾桶不能是「一键删源码」：hotapp 二次确认并明说不恢复；
     // video/three 明说只隐藏不删产物（否则用户以为文件没了）。
     final ok = await showNonDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: ctx.palette.panel,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text(deletesSource ? '删除小应用源码？' : '从作品集移除？',
+        title: Text(deletesSource ? '删除热应用源码？' : '从作品集移除？',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
         content: Text(
           deletesSource
-              ? '将删除源码目录（不可恢复）：\n~/Documents/NoNDesign/a2ui/$ref'
+              ? '将删除源码目录与 SQLite 数据库（不可恢复）：\n~/Documents/NoNDesign/hotapps/$ref'
               : '仅从收藏夹隐藏，不删除产物：\n$title',
           style: TextStyle(fontSize: 13, height: 1.5, color: ctx.palette.ink2),
         ),
@@ -102,9 +102,9 @@ class _PortfolioViewState extends State<PortfolioView> {
     final api = store.api;
     final kind = item['kind'] as String?;
     if (api == null) return;
-    if (kind == 'a2ui') {
-      a2uiLoadOnOpen = item['ref'] as String?;
-      store.setView('plugin:a2ui');
+    if (kind == 'hotapp') {
+      hotAppLoadOnOpen = item['ref'] as String?;
+      store.setView('plugin:hotapp');
     } else if (kind == 'video') {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('视频产物：${item['path']}')));
     } else if (kind == 'three') {
@@ -176,7 +176,7 @@ class _PortfolioViewState extends State<PortfolioView> {
                     const SizedBox(height: 12),
                     Text('还没有作品', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: p.ink2)),
                     const SizedBox(height: 6),
-                    Text('生成的小应用、视频与 3D 场景会自动收进这里',
+                    Text('生成的热应用、视频与 3D 场景会自动收进这里',
                         style: TextStyle(fontSize: 12, color: p.ink4)),
                   ]),
                 )

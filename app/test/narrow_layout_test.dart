@@ -8,7 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:nondesign/core/models.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
-import 'package:nondesign/widgets/a2ui_workspace.dart';
+import 'package:nondesign/widgets/hotapp_workspace.dart';
 import 'package:nondesign/widgets/three_workspace.dart';
 import 'package:nondesign/widgets/title_bar.dart';
 import 'package:nondesign/widgets/video_workspace.dart';
@@ -70,7 +70,7 @@ void main() {
   });
 
   for (final entry in const {
-    'A2UI': A2uiWorkspace(),
+    '热应用': HotAppWorkspace(),
     '3D': ThreeWorkspace(),
     'Video': VideoWorkspace(),
   }.entries) {

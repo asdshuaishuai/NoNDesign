@@ -104,7 +104,7 @@ class _WelcomeState extends State<Welcome> {
                           Text('NoNDesign',
                               maxLines: 1, overflow: TextOverflow.ellipsis,
                               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
-                          Text('AI PRODUCT DESIGN STUDIO',
+                          Text('AI CREATION STUDIO',
                               maxLines: 1, overflow: TextOverflow.ellipsis,
                               style: TextStyle(fontSize: 10, letterSpacing: 1.6, color: p.ink4)),
                         ],
@@ -156,7 +156,7 @@ class _WelcomeState extends State<Welcome> {
                                     children: [
                                       Icon(Icons.auto_awesome, size: 11, color: p.accent),
                                       const SizedBox(width: 5),
-                                      Text('一句话 → 设计文档 → 可交互原型',
+                                      Text('文档 · 原型 · 3D · 视频 · 热应用',
                                           style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: p.accent)),
                                     ],
                                   ),
@@ -166,7 +166,7 @@ class _WelcomeState extends State<Welcome> {
                                   shaderCallback: (bounds) => LinearGradient(
                                     colors: [p.accent, p.accent2, p.danger.withValues(alpha: 0.85)],
                                   ).createShader(bounds),
-                                  child: const Text('把想法变成\n可以点的产品',
+                                  child: const Text('把想法变成\n能用的作品',
                                       style: TextStyle(
                                         fontSize: 44,
                                         height: 1.08,
@@ -177,8 +177,8 @@ class _WelcomeState extends State<Welcome> {
                                 ),
                                 const SizedBox(height: 14),
                                 Text(
-                                  '描述目标用户和核心流程。NoN 会先写 PRD、UI 说明与设计规范，再把每一屏画到画布上，'
-                                  '连线、状态、交互都经 MoonViz 引擎校验。',
+                                  '描述你要解决的问题和受众。NoN 会先写设计文档，再把它变成可交互原型；'
+                                  '同一个工作台里还能做 3D 场景、代码生成的视频，以及带 SQLite 数据库的热应用。',
                                   style: TextStyle(fontSize: 13, height: 1.65, color: p.ink3),
                                 ),
                                 if (store.recovery != null) ...[
@@ -281,7 +281,7 @@ class _WelcomeState extends State<Welcome> {
                 children: [
                   Icon(Icons.auto_awesome, size: 11, color: p.accent),
                   const SizedBox(width: 5),
-                  Text('一句话 → 设计文档 → 可交互原型',
+                  Text('文档 · 原型 · 3D · 视频 · 热应用',
                       style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: p.accent)),
                 ],
               ),
@@ -292,7 +292,7 @@ class _WelcomeState extends State<Welcome> {
             shaderCallback: (bounds) => LinearGradient(
               colors: [p.accent, p.accent2, p.danger.withValues(alpha: 0.85)],
             ).createShader(bounds),
-            child: const Text('把想法变成\n可以点的产品',
+            child: const Text('把想法变成\n能用的作品',
                 style: TextStyle(
                   fontSize: 34,
                   height: 1.1,
@@ -303,7 +303,8 @@ class _WelcomeState extends State<Welcome> {
           ),
           const SizedBox(height: 12),
           Text(
-            '描述目标用户和核心流程。NoN 会先写 PRD、UI 说明与设计规范，再把每一屏画到画布上，连线、状态、交互都经 MoonViz 引擎校验。',
+            '描述你要解决的问题和受众。NoN 会先写设计文档，再把它变成可交互原型；'
+            '同一个工作台里还能做 3D 场景、代码生成的视频，以及带 SQLite 数据库的热应用。',
             style: TextStyle(fontSize: 12.5, height: 1.6, color: p.ink3),
           ),
           if (store.recovery != null) ...[
@@ -408,7 +409,7 @@ class _WelcomeState extends State<Welcome> {
                 icon: store.agentBusy
                     ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5))
                     : const Icon(Icons.auto_awesome, size: 13),
-                label: const Text('开始设计', style: TextStyle(fontSize: 12)),
+                label: const Text('开始创作', style: TextStyle(fontSize: 12)),
               );
               if (constraints.maxWidth < 520) {
                 return Column(
@@ -458,6 +459,7 @@ class _WelcomeState extends State<Welcome> {
     final statuses = {
       'three': store.settings.threeProjectName.isEmpty ? '未开始' : store.settings.threeProjectName,
       'video': '无声版 · 六类标杆示例',
+      'hotapp': 'HTML + SQLite · 覆盖即热更新',
     };
     return Container(
       padding: const EdgeInsets.all(13),
@@ -503,7 +505,7 @@ class _WelcomeState extends State<Welcome> {
     );
   }
 
-  /// 作品集入口卡：聚合小应用/视频/3D 三类产物，快速查看与使用。
+  /// 作品集入口卡：聚合热应用/视频/3D 三类产物，快速查看与使用。
   Widget _portfolioCard(BuildContext context, AppStore store) {
     final p = context.palette;
     return InkWell(
@@ -522,7 +524,7 @@ class _WelcomeState extends State<Welcome> {
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('作品集', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.ink)),
-              Text('小应用 · 视频 · 3D 场景——生成过的都在这里', style: TextStyle(fontSize: 10, color: p.ink4)),
+              Text('热应用 · 视频 · 3D 场景——生成过的都在这里', style: TextStyle(fontSize: 10, color: p.ink4)),
             ]),
           ),
           Icon(Icons.chevron_right, size: 15, color: p.ink4),
@@ -683,10 +685,10 @@ class _WelcomeState extends State<Welcome> {
           Text('NON 的工作方式', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
           const SizedBox(height: 9),
           for (final row in [
-            ('01', '理解', '从 brief 推导页面图与核心流程'),
-            ('02', '规范', '先定配色、字号、间距与圆角'),
-            ('03', '生成', '逐屏生成并自检引擎规范'),
-            ('04', '连线', '把可点元素接到目标画板'),
+            ('01', '描述', '说清问题、受众与想要的作品形态'),
+            ('02', '规范', '文档、配色与设计规范先行'),
+            ('03', '生成', '原型 / 3D / 视频 / 热应用按需产出'),
+            ('04', '打磨', '门校验、对话修改、所有操作可撤销'),
           ])
             Padding(
               padding: const EdgeInsets.only(bottom: 7),

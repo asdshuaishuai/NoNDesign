@@ -9,7 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:nondesign/core/models.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
-import 'package:nondesign/widgets/a2ui_workspace.dart';
+import 'package:nondesign/widgets/hotapp_workspace.dart';
 import 'package:nondesign/widgets/play_view.dart';
 import 'package:nondesign/widgets/portfolio_view.dart';
 import 'package:nondesign/widgets/settings_dialog.dart';
@@ -63,9 +63,9 @@ void main() {
       expect(find.text('直接制作 3D'), findsOneWidget);
     });
 
-    testWidgets('A2UI workspace body fits ${width.toInt()}px', (tester) async {
-      await _pumpAt(tester, const Scaffold(body: A2uiWorkspace()), width);
-      expect(find.text('A2UI 小应用'), findsWidgets);
+    testWidgets('热应用 workspace body fits ${width.toInt()}px', (tester) async {
+      await _pumpAt(tester, const Scaffold(body: HotAppWorkspace()), width);
+      expect(find.text('NoN 热应用'), findsWidgets);
     });
 
     testWidgets('portfolio fits ${width.toInt()}px', (tester) async {

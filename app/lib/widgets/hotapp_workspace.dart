@@ -10,27 +10,28 @@ import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
 
-/// A2UI 小应用工作台（灵闪/Dots 式自成一体应用）：一句话 → LLM 生成
+/// NoN 热应用工作台（灵闪/Dots 式自成一体应用）：一句话 → LLM 生成
 /// **自包含动画 HTML**（全内联零外链，canvas/SVG/CSS keyframes）→
 /// WebView 即运行时（离线可用）；对话式修改 = 覆盖文件 + reload 即热更新。
-/// 生成的小应用自动登记进作品集。
+/// 业务数据经注入的 `window.NoN.db.exec` 落 SQLite（每应用一个 app.db）。
+/// 生成的热应用自动登记进作品集。
 ///
 /// v1 质量环 = 服务端结构/外链校验 + WebView onerror/unhandledrejection
-/// 经 NONA2UI 桥回传（服务端在 `</body>` 前注入包装脚本）；视觉截图 v2。
+/// 经 NONHOTAPP 桥回传（服务端在 `</body>` 前注入包装脚本）；视觉截图 v2。
 bool _wkRegistered = false;
 
-/// 作品集「打开」直载：切视图前设置，A2uiWorkspace.initState 消费后清空
+/// 作品集「打开」直载：切视图前设置，HotAppWorkspace.initState 消费后清空
 /// （registry builder 无参，跨实例传名的轻量通道）。
-String? a2uiLoadOnOpen;
+String? hotAppLoadOnOpen;
 
-class A2uiWorkspace extends StatefulWidget {
-  const A2uiWorkspace({super.key});
+class HotAppWorkspace extends StatefulWidget {
+  const HotAppWorkspace({super.key});
 
   @override
-  State<A2uiWorkspace> createState() => _A2uiWorkspaceState();
+  State<HotAppWorkspace> createState() => _HotAppWorkspaceState();
 }
 
-class _A2uiWorkspaceState extends State<A2uiWorkspace> {
+class _HotAppWorkspaceState extends State<HotAppWorkspace> {
   String? _app;
   String _title = '';
   bool _busy = false;
@@ -48,9 +49,9 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
       WebKitWebViewPlatform.registerWith();
       _wkRegistered = true;
     }
-    final pending = a2uiLoadOnOpen;
-    a2uiLoadOnOpen = null;
-    final saved = context.read<AppStore>().settings.a2uiApp;
+    final pending = hotAppLoadOnOpen;
+    hotAppLoadOnOpen = null;
+    final saved = context.read<AppStore>().settings.hotappApp;
     final app = pending ?? (saved.isNotEmpty ? saved : null);
     if (app != null && app.isNotEmpty) {
       _app = app;
@@ -58,7 +59,7 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
         if (!mounted || _app == null) return;
         // 持久化推迟到首帧后：initState 里 notifyListeners 会在构建期
         // 触发祖先重建（setState during build）。
-        if (pending != null) store.setA2uiApp(app);
+        if (pending != null) store.setHotApp(app);
         _mount(_app!);
         setState(() {});
       });
@@ -80,7 +81,7 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
     _lastError = '';
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..addJavaScriptChannel('NONA2UI', onMessageReceived: _onBridgeMessage)
+      ..addJavaScriptChannel('NONHOTAPP', onMessageReceived: _onBridgeMessage)
       ..setNavigationDelegate(NavigationDelegate(
         onWebResourceError: (error) {
           if (!mounted) return;
@@ -88,7 +89,7 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
               '页面加载失败：${error.description}（${error.errorCode}）');
         },
       ))
-      ..loadRequest(Uri.parse(api.a2uiPageUrl(name)));
+      ..loadRequest(Uri.parse(api.hotAppPageUrl(name)));
   }
 
   void _onBridgeMessage(JavaScriptMessage msg) {
@@ -108,17 +109,17 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
       _lastError = '';
       _notes.add('切换到 $name');
     });
-    store.setA2uiApp(name);
+    store.setHotApp(name);
     _mount(name);
   }
 
-  /// 应用列表/切换入口（api.a2uiList）；列表里可新建或删除。
+  /// 应用列表/切换入口（api.hotAppList）；列表里可新建或删除。
   Future<void> _showAppList() async {
     final api = store.api;
     if (api == null) return;
     Map<String, dynamic> res;
     try {
-      res = await api.a2uiList();
+      res = await api.hotAppList();
     } catch (e) {
       if (mounted) _toast('应用列表失败', '$e');
       return;
@@ -133,20 +134,20 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
       context: context,
       builder: (ctx) => SimpleDialog(
         backgroundColor: ctx.palette.panel,
-        title: Text('A2UI 小应用', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+        title: Text('NoN 热应用', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
         children: [
           SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, '__new__'),
             child: Row(children: [
               Icon(Icons.add, size: 16, color: ctx.palette.accent),
               const SizedBox(width: 8),
-              const Text('新建小应用…'),
+              const Text('新建热应用…'),
             ]),
           ),
           if (apps.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: Text('还没有小应用', style: TextStyle(fontSize: 12, color: ctx.palette.ink4)),
+              child: Text('还没有热应用', style: TextStyle(fontSize: 12, color: ctx.palette.ink4)),
             ),
           for (final a in apps)
             SimpleDialogOption(
@@ -185,9 +186,9 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
       builder: (ctx) => AlertDialog(
         backgroundColor: ctx.palette.panel,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('删除小应用？', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+        title: Text('删除热应用？', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
         content: Text(
-          '将删除源码目录 ~/Documents/NoNDesign/a2ui/$app，不可恢复。',
+          '将删除源码目录与数据库 ~/Documents/NoNDesign/hotapps/$app，不可恢复。',
           style: TextStyle(fontSize: 13, height: 1.5, color: ctx.palette.ink2),
         ),
         actions: [
@@ -203,7 +204,7 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
     if (!mounted || ok != true) return;
     setState(() => _busy = true);
     try {
-      final res = await api.a2uiDelete(app);
+      final res = await api.hotAppDelete(app);
       if (!mounted) return;
       if (res['ok'] == true) {
         setState(() {
@@ -213,7 +214,7 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
           _lastError = '';
           _notes.add('已删除 $app');
         });
-        store.setA2uiApp('');
+        store.setHotApp('');
         _toast('已删除', '源码目录已移除（不可恢复）。');
       } else {
         _toast('删除被拒', '${res['detail'] ?? res['error']}');
@@ -231,7 +232,7 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
     final s = store.settings;
     if (api == null) return;
     if (s.apiKey.isEmpty) {
-      _toast('先配置模型', 'A2UI 生成需要 API Key。');
+      _toast('先配置模型', '热应用生成需要 API Key。');
       return;
     }
     final nameCtl = TextEditingController();
@@ -241,7 +242,7 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
       builder: (ctx) => AlertDialog(
         backgroundColor: ctx.palette.panel,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('生成小应用', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+        title: Text('生成热应用', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
         content: SizedBox(
           width: 420,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -278,7 +279,7 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
     if (name.isEmpty || brief.isEmpty) return;
     setState(() => _busy = true);
     try {
-      final res = await api.a2uiGenerate(
+      final res = await api.hotAppGenerate(
         name: name, brief: brief,
         model: s.modelId, baseUrl: s.baseUrl, apiKey: s.apiKey,
       );
@@ -290,9 +291,9 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
           _lastError = '';
           _notes.add('已生成（${res['bytes']} 字节）');
         });
-        store.setA2uiApp(name);
+        store.setHotApp(name);
         _mount(name);
-        _toast('小应用已生成', '点动画可以加速；下方输入框可继续修改。');
+        _toast('热应用已生成', '点动画可以加速；下方输入框可继续修改。');
       } else {
         _toast('生成被拒', '${res['detail'] ?? res['error']}');
       }
@@ -315,13 +316,13 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
     if (api == null || app == null || instruction.trim().isEmpty) return;
     setState(() => _busy = true);
     try {
-      final res = await api.a2uiRefine(
+      final res = await api.hotAppRefine(
         name: app, instruction: instruction.trim(),
         model: s.modelId, baseUrl: s.baseUrl, apiKey: s.apiKey,
       );
       if (!mounted) return; // dispose 后不得 setState（旧代码异常被吞导致静默丢失）
       if (res['ok'] == true) {
-        _controller?.loadRequest(Uri.parse(api.a2uiPageUrl(app))); // reload = 热更新
+        _controller?.loadRequest(Uri.parse(api.hotAppPageUrl(app))); // reload = 热更新
         setState(() => _notes.add('已修改：${instruction.trim()}'));
         _toast('已热更新', '预览已重载（${res['bytes']} 字节）。');
       } else {
@@ -382,7 +383,7 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
             const SizedBox(width: 8),
             ConstrainedBox(
               constraints: BoxConstraints(maxWidth: narrow ? 110 : 400),
-              child: Text(_app == null ? 'A2UI 小应用' : 'A2UI · $_app',
+              child: Text(_app == null ? 'NoN 热应用' : '热应用 · $_app',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
@@ -390,8 +391,8 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
             const SizedBox(width: 10),
             if (!narrow)
               Tooltip(
-                message: _title.isEmpty ? '自包含动画 HTML · 覆盖即热更新' : _title,
-                child: Text(_title.isEmpty ? '自包含动画 HTML · 覆盖即热更新' : '$_title · 覆盖即热更新',
+                message: _title.isEmpty ? 'HTML + SQLite · 覆盖即热更新' : _title,
+                child: Text(_title.isEmpty ? 'HTML + SQLite · 覆盖即热更新' : '$_title · 覆盖即热更新',
                     maxLines: 1, overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 11, color: p.ink4)),
               ),
@@ -413,7 +414,7 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
                 icon: Icons.refresh,
                 label: '重载',
                 compact: narrow,
-                onTap: () => _controller?.loadRequest(Uri.parse(store.api!.a2uiPageUrl(_app!))),
+                onTap: () => _controller?.loadRequest(Uri.parse(store.api!.hotAppPageUrl(_app!))),
               ),
           ]);
           }),
@@ -448,13 +449,13 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
           ),
         Expanded(
           child: _app == null
-              ? _EmptyA2ui(onCreate: _busy ? null : _create)
+              ? _EmptyHotApp(onCreate: _busy ? null : _create)
               : Column(children: [
                   Expanded(
                     child: _controller == null
                         ? Center(
                             child: Text(
-                              api == null ? '未连接桌面服务器——A2UI 需要服务端生成与托管' : '加载中…',
+                              api == null ? '未连接桌面服务器——热应用需要服务端生成与托管' : '加载中…',
                               style: TextStyle(fontSize: 12, color: p.ink3),
                             ),
                           )
@@ -495,8 +496,8 @@ class _A2uiWorkspaceState extends State<A2uiWorkspace> {
   }
 }
 
-class _EmptyA2ui extends StatelessWidget {
-  const _EmptyA2ui({required this.onCreate});
+class _EmptyHotApp extends StatelessWidget {
+  const _EmptyHotApp({required this.onCreate});
   final VoidCallback? onCreate;
 
   @override
@@ -506,14 +507,14 @@ class _EmptyA2ui extends StatelessWidget {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.auto_fix_high_outlined, size: 44, color: p.ink4),
         const SizedBox(height: 14),
-        Text('A2UI 小应用', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.ink)),
+        Text('NoN 热应用', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.ink)),
         const SizedBox(height: 6),
         SizedBox(
           width: 400,
           child: Text(
-            '一句话生成自成一体的小应用：动画、演示、可玩的交互。\n'
-            '自包含单 HTML——离线可用、覆盖即热更新、生成即进作品集。\n'
-            '适合快速做出可分享的动画小件与演示组件。',
+            '一句话生成自成一体的热应用：动画、演示、可玩的交互。\n'
+            '自包含单 HTML + SQLite——离线可用、覆盖即热更新、生成即进作品集。\n'
+            '适合快速做出可分享的动画小件、演示组件与轻量工具。',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12, color: p.ink3, height: 1.7),
           ),
@@ -522,7 +523,7 @@ class _EmptyA2ui extends StatelessWidget {
         FilledButton.icon(
           onPressed: onCreate, // 生成中禁点：否则可并发触发两次生成
           icon: const Icon(Icons.add, size: 16),
-          label: const Text('生成第一个小应用'),
+          label: const Text('生成第一个热应用'),
         ),
       ]),
     );
@@ -561,4 +562,4 @@ class _TopBtn extends StatelessWidget {
 }
 
 /// JSON 调试辅助（notes 序列化）。
-String a2uiNotesJson(List<String> notes) => jsonEncode(notes.map((n) => {'note': n}).toList());
+String hotAppNotesJson(List<String> notes) => jsonEncode(notes.map((n) => {'note': n}).toList());

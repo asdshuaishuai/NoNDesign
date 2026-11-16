@@ -313,30 +313,30 @@ class NoNDesignApi {
   /// 应用内 WebView 的执行面 URL（服务器实时 serve 的 three.js 预览页）。
   String threePreviewUrl(String name) => '$baseUrl/three/preview/${Uri.encodeQueryComponent(name)}';
 
-  // ---------- A2UI 小应用引擎 + 作品集 ----------
+  // ---------- NoN 热应用引擎 + 作品集 ----------
 
-  Future<Map<String, dynamic>> a2uiGenerate({
+  Future<Map<String, dynamic>> hotAppGenerate({
     required String name, required String brief,
     required String model, required String baseUrl, required String apiKey,
-  }) => postJson('/a2ui/generate', {
+  }) => postJson('/hotapp/generate', {
         'name': name, 'brief': brief, 'model': model,
         'base_url': baseUrl, 'api_key': apiKey,
       }, timeout: const Duration(minutes: 10));
 
-  Future<Map<String, dynamic>> a2uiRefine({
+  Future<Map<String, dynamic>> hotAppRefine({
     required String name, required String instruction,
     required String model, required String baseUrl, required String apiKey,
-  }) => postJson('/a2ui/refine', {
+  }) => postJson('/hotapp/refine', {
         'name': name, 'instruction': instruction, 'model': model,
         'base_url': baseUrl, 'api_key': apiKey,
       }, timeout: const Duration(minutes: 10));
 
-  Future<Map<String, dynamic>> a2uiList() => getJson('/a2ui/list');
-  Future<Map<String, dynamic>> a2uiDelete(String name) =>
-      postJson('/a2ui/delete', {'name': name});
+  Future<Map<String, dynamic>> hotAppList() => getJson('/hotapp/list');
+  Future<Map<String, dynamic>> hotAppDelete(String name) =>
+      postJson('/hotapp/delete', {'name': name});
 
-  /// A2UI 小应用的执行面 URL（自包含动画 HTML，WebView 即运行时）。
-  String a2uiPageUrl(String name) => '$baseUrl/a2ui/page/${Uri.encodeQueryComponent(name)}';
+  /// NoN 热应用的执行面 URL（自包含动画 HTML，WebView 即运行时）。
+  String hotAppPageUrl(String name) => '$baseUrl/hotapp/page/${Uri.encodeQueryComponent(name)}';
 
   Future<Map<String, dynamic>> portfolio() => getJson('/portfolio');
   Future<Map<String, dynamic>> portfolioDelete(String kind, String ref) =>

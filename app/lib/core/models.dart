@@ -447,8 +447,8 @@ class AppSettings {
   /// 3D 工作台当前项目名（'' = 无）。工作台视图切换会 dispose 状态，
   /// 项目名持久化让「切走再回来」续接同一项目（跨会话亦然）。
   String threeProjectName;
-  /// A2UI 工作台当前应用名（'' = 无）：工作台 dispose 后回来仍停在原应用。
-  String a2uiApp;
+  /// NoN 热应用工作台当前应用名（'' = 无）：工作台 dispose 后回来仍停在原应用。
+  String hotappApp;
   /// 视频工作台：当前示例下标 + 在飞/最近的渲染 job（回来可接回轮询）。
   int videoSampleIdx;
   String videoJob;
@@ -470,7 +470,7 @@ class AppSettings {
     this.acpAgentId,
     this.acpAgentName,
     this.threeProjectName = '',
-    this.a2uiApp = '',
+    this.hotappApp = '',
     this.videoSampleIdx = 0,
     this.videoJob = '',
     Map<String, String>? threeSpecDrafts,
@@ -488,7 +488,7 @@ class AppSettings {
         'acpAgentId': acpAgentId,
         'acpAgentName': acpAgentName,
         'threeProjectName': threeProjectName,
-        'a2uiApp': a2uiApp,
+        'hotappApp': hotappApp,
         'videoSampleIdx': videoSampleIdx,
         'videoJob': videoJob,
         'threeSpecDrafts': threeSpecDrafts,
@@ -506,7 +506,7 @@ class AppSettings {
         acpAgentId: m['acpAgentId']?.toString(),
         acpAgentName: m['acpAgentName']?.toString(),
         threeProjectName: (m['threeProjectName'] ?? '').toString(),
-        a2uiApp: (m['a2uiApp'] ?? '').toString(),
+        hotappApp: (m['hotappApp'] ?? '').toString(),
         videoSampleIdx: (m['videoSampleIdx'] is num) ? (m['videoSampleIdx'] as num).toInt() : 0,
         videoJob: (m['videoJob'] ?? '').toString(),
         threeSpecDrafts: (m['threeSpecDrafts'] is Map)
