@@ -1,0 +1,101 @@
+{
+  "fps": 30,
+  "width": 1280,
+  "height": 720,
+  "background": "#10141F",
+  "spec": "spec.json",
+  "scenes": [
+    {
+      "duration": 2.0,
+      "background": "#10141F",
+      "elements": [
+        { "type": "text", "text": "有丝分裂 · 间期", "x": "50%", "y": 80,
+          "size": 36, "color": "#FFFFFF", "weight": "700", "anim": { "in": "fade", "dur": 0.5 } },
+        { "type": "circle", "cx": "50%", "cy": "52%", "r": 170, "color": "#1B2338",
+          "anim": { "in": "pop", "dur": 0.5 } },
+        { "type": "circle", "cx": "50%", "cy": "52%", "r": 96, "color": "#25406B",
+          "anim": { "in": "pop", "dur": 0.5, "delay": 0.2 } },
+        { "type": "text", "text": "细胞核", "x": "50%", "y": 404, "size": 18, "color": "#8FB3FF",
+          "anim": { "in": "fade", "dur": 0.4, "delay": 0.5 } },
+        { "type": "text", "text": "DNA 复制：每条染色体形成两条姐妹染色单体", "x": "50%", "y": 640,
+          "size": 24, "color": "#9AA3B2", "anim": { "in": "rise", "dur": 0.5, "delay": 0.8 } }
+      ]
+    },
+    {
+      "duration": 2.0,
+      "background": "#10141F",
+      "elements": [
+        { "type": "text", "text": "前期", "x": "50%", "y": 80,
+          "size": 36, "color": "#FFFFFF", "weight": "700", "anim": { "in": "fade", "dur": 0.4 } },
+        { "type": "circle", "cx": "50%", "cy": "52%", "r": 170, "color": "#1B2338" },
+        { "type": "circle", "cx": "50%", "cy": "52%", "r": 96, "color": "#25406B" },
+        { "type": "line", "x1": 560, "y1": 330, "x2": 620, "y2": 352, "color": "#FFB65C", "stroke_width": 9,
+          "anim": { "in": "pop", "dur": 0.4, "delay": 0.2 } },
+        { "type": "line", "x1": 668, "y1": 330, "x2": 722, "y2": 306, "color": "#FFB65C", "stroke_width": 9,
+          "anim": { "in": "pop", "dur": 0.4, "delay": 0.35 } },
+        { "type": "line", "x1": 596, "y1": 402, "x2": 660, "y2": 416, "color": "#FFB65C", "stroke_width": 9,
+          "anim": { "in": "pop", "dur": 0.4, "delay": 0.5 } },
+        { "type": "text", "text": "染色质凝缩为染色体（X 形短棒示意）", "x": "50%", "y": 640,
+          "size": 24, "color": "#9AA3B2", "anim": { "in": "rise", "dur": 0.5, "delay": 0.7 } }
+      ]
+    },
+    {
+      "duration": 2.0,
+      "background": "#10141F",
+      "elements": [
+        { "type": "text", "text": "中期", "x": "50%", "y": 80,
+          "size": 36, "color": "#FFFFFF", "weight": "700", "anim": { "in": "fade", "dur": 0.4 } },
+        { "type": "circle", "cx": "50%", "cy": "52%", "r": 170, "color": "#1B2338" },
+        { "type": "circle", "cx": "50%", "cy": "52%", "r": 96, "color": "#25406B" },
+        { "type": "line", "x1": 480, "y1": 374, "x2": 800, "y2": 374, "color": "#3A4358",
+          "stroke_width": 2, "anim": { "in": "fade", "dur": 0.3 } },
+        { "type": "line", "x1": 540, "y1": 366, "x2": 572, "y2": 382, "color": "#FFB65C", "stroke_width": 9,
+          "anim": { "in": "pop", "dur": 0.3, "delay": 0.2 } },
+        { "type": "line", "x1": 620, "y1": 364, "x2": 652, "y2": 384, "color": "#FFB65C", "stroke_width": 9,
+          "anim": { "in": "pop", "dur": 0.3, "delay": 0.35 } },
+        { "type": "line", "x1": 700, "y1": 364, "x2": 732, "y2": 382, "color": "#FFB65C", "stroke_width": 9,
+          "anim": { "in": "pop", "dur": 0.3, "delay": 0.5 } },
+        { "type": "text", "text": "赤道板", "x": 812, "y": 380, "size": 15, "color": "#7C8CFF",
+          "anchor": "start", "anim": { "in": "fade", "dur": 0.3, "delay": 0.6 } },
+        { "type": "text", "text": "染色体排列在细胞中央赤道板", "x": "50%", "y": 640,
+          "size": 24, "color": "#9AA3B2", "anim": { "in": "rise", "dur": 0.5, "delay": 0.7 } }
+      ]
+    },
+    {
+      "duration": 2.0,
+      "background": "#10141F",
+      "elements": [
+        { "type": "text", "text": "后期", "x": "50%", "y": 80,
+          "size": 36, "color": "#FFFFFF", "weight": "700", "anim": { "in": "fade", "dur": 0.4 } },
+        { "type": "circle", "cx": "50%", "cy": "52%", "r": 170, "color": "#1B2338" },
+        { "type": "circle", "cx": "50%", "cy": "52%", "r": 96, "color": "#25406B" },
+        { "type": "line", "x1": 548, "y1": 360, "x2": 580, "y2": 388, "color": "#FFB65C", "stroke_width": 9 },
+        { "type": "line", "x1": 700, "y1": 360, "x2": 732, "y2": 388, "color": "#FFB65C", "stroke_width": 9 },
+        { "type": "arrow", "x1": 640, "y1": 374, "x2": 548, "y2": 374, "color": "#6FA8FF",
+          "stroke_width": 3, "head": 13, "anim": { "in": "fade", "dur": 0.4, "delay": 0.3 } },
+        { "type": "arrow", "x1": 640, "y1": 374, "x2": 732, "y2": 374, "color": "#6FA8FF",
+          "stroke_width": 3, "head": 13, "anim": { "in": "fade", "dur": 0.4, "delay": 0.3 } },
+        { "type": "text", "text": "着丝点分裂：姐妹染色单体分别移向两极", "x": "50%", "y": 640,
+          "size": 24, "color": "#9AA3B2", "anim": { "in": "rise", "dur": 0.5, "delay": 0.7 } }
+      ]
+    },
+    {
+      "duration": 2.0,
+      "background": "#10141F",
+      "elements": [
+        { "type": "text", "text": "末期", "x": "50%", "y": 80,
+          "size": 36, "color": "#FFFFFF", "weight": "700", "anim": { "in": "fade", "dur": 0.4 } },
+        { "type": "circle", "cx": "50%", "cy": "52%", "r": 190, "color": "#1B2338",
+          "anim": { "in": "pop", "dur": 0.6 } },
+        { "type": "circle", "cx": 560, "cy": 374, "r": 58, "color": "#25406B",
+          "anim": { "in": "pop", "dur": 0.5, "delay": 0.3 } },
+        { "type": "circle", "cx": 720, "cy": 374, "r": 58, "color": "#25406B",
+          "anim": { "in": "pop", "dur": 0.5, "delay": 0.45 } },
+        { "type": "line", "x1": 640, "y1": 230, "x2": 640, "y2": 500, "color": "#3A4358",
+          "stroke_width": 3, "anim": { "in": "fade", "dur": 0.5, "delay": 0.8 } },
+        { "type": "text", "text": "核膜重建 · 胞质分裂 → 两个子细胞", "x": "50%", "y": 640,
+          "size": 24, "color": "#9AA3B2", "anim": { "in": "rise", "dur": 0.5, "delay": 1.0 } }
+      ]
+    }
+  ]
+}

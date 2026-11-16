@@ -1,95 +1,99 @@
-# 扩展规划：产出质量 RSI · Figma 双向 · 3D 插件 · 演示视频插件
+# 插件轨道规划（2026-11-16 用户逐轨裁决定稿）
 
-> 2026-11-16 定稿。四个轨道，按强制性排序。核心哲学（用户定案）：**常规模型
-> 无法原生达到高阶模型的一次成型能力，我们用递归视觉修复（执行 → 测量 →
-> 视觉评审 → 定向修复）把它们的空间/视觉能力榨到位**——参照
-> 3DCodeVerse Harness（arXiv:2610.22341）的三反馈结构（执行日志 / 空间
-> 测量 / rubric 视觉评审）。
+> **边界总表**：Figma / 3D / 视频 = **客户端能力加强**，与 MoonViz 引擎
+> 解耦（不改引擎、不依赖引擎产物）；**RSI 递归视觉修复 = design 模块
+> 内置质量环**（原型 UI 设计用），不是插件。核心哲学（用户定案）：常规模型
+> 无法原生达到高阶模型的一次成型能力，用递归视觉修复（执行 → 测量 →
+> 视觉评审 → 定向修复）把它们的空间/视觉能力榨到位——参照
+> 3DCodeVerse（arXiv:2610.22341）三反馈结构。
+
+执行顺序（用户批准）：**A → B → C → D**，每轨独立提交、门禁全绿再进下一轨。
 
 ---
 
-## 轨道 A（强制性）：Figma 双向
+## A · Figma 双向（强制性）—— ✅ 已落地（fix 72491c6）
 
-### 现状与可行路（leanrea 分析 + 社区调研结论）
-- `.fig` 是 Figma 私有二进制（KFS 分块容器），**无公开 schema**；Figma
-  官方明确警告第三方解析（file-extension.info 佐证）。fig2sketch 证明了
-  逆向可行但方向是 .fig→.sketch 单向。
-- Figma 桌面版（Electron 126.6.14，本机实测 asar 解包）：
-  - `File → Open File Browser` 支持 **`.fig/.svg/.png/.pdf` 直接打开**；
-  - 插件系统走 `manifest.json` 开发目录（ExtensionFileType:
-    MANIFEST/CODE/UI，chokidar 热监听——`main.js` 实读证据）；
-  - 插件 API 可以**创建真实可编辑的 Figma 节点**（Frame/Text/Rectangle…）。
-- **结论（不是照抄 .fig 逆向）**：以 SVG（Figma 原生导入、矢量可编辑）+
-  官方插件 API 双向桥接，保真度与可编辑性最优，零私有格式逆向。
+- 服务端 `/project/export/figma`：每板引擎自渲染 SVG + nondesign.json
+  manifest + README，落 `~/Documents/NoNDesign/NoNDesign-figma-<ts>/`。
+- figma-plugin/（manifest.json + code.js + ui.html）：Import nondesign.json
+  → Frame/Text/Rectangle 真实可编辑图层；Export 选区 → NoNDesign JSON。
+- 客户端：项目菜单「导出 Figma 包」。
+- **两处真机实证修复**（72491c6）：
+  ① 路由错挂 `/acp/prompt`（FastAPI 同路径先注册者胜出 → ACP 对话全部
+  422）→ 改回正确路由 + body 传 mbt（大文档不进 query，h11 头 16KB 上限）；
+  ② 插件 Import 读顶层 n.x/n.w——manifest 几何在 `n.rect`，顶层全
+  undefined → 图层塌原点；geomOf() 兼容读取 + 按钮组件 Frame+Text 组合。
+- 真机验证：uvicorn 起服 → /acp/prompt 恢复 ACP 语义 → 出包 2 板全字段。
 
-### 实现（本轮落地）
-1. **导出**：`/project/export/figma` → `NoNDesign-figma-<ts>/`：
-   - 每板 `board-<id>.svg`（引擎自渲染，Figma 拖入即矢量图层）；
-   - `nondesign.json`（节点树 manifest：板/节点/样式/flows）；
-   - `README.txt`（导入三法）。
-2. **Figma 插件源码**（仓库 `figma-plugin/`）：`manifest.json` +
-   `code.js` + `ui.html`：
-   - **Import**：读 nondesign.json → 逐板建 Frame，节点映射为
-     Rectangle/Text/Image（真实可编辑 Figma 图层，含 fill/radius/字号）；
-   - **Export**：序列化当前选区 → NoNDesign JSON（`nodes` 数组）→
-     下载，粘贴进 `.mbt.md`（由 NoN 侧 `place` ops 物化）。
-3. **UI**：顶栏导出菜单加「导出 Figma 包」。
+## B · 代码生成视频引擎（独立插件，与引擎完全无关）—— ✅ 本轮落地
+
+**范围（用户裁决）**：不只是科普——全套代码可生成视频：理化生地数学
+教育演示、简笔画、经典影视简单复刻、观赏性动画（沙雕风格）。**双强制
+纪律**：规范/剧本先行（管线硬门）+ RSI 递归评审。
+
+### 落地面（plugins/video-engine/）
+- **spec 硬门**：timeline 必须携带 spec（science：定律/假设/参数量纲/
+  公式/事实核查清单；screenplay：风格锚/调色板/角色部件/beats/gags），
+  缺失 → `spec_missing` exit 2。规范即环②的对照物。
+- **expr 符号声明闭包**：数值属性可写 `{"expr": "0.5*a*t*t"}`，自定义
+  标识符必须在 spec.params ∪ spec.formulas——「想当然」的裸坐标进不来
+  （`undeclared_symbol` 拒绝）。物理演示的位置由公式算出，不靠手绘。
+- **元素**：text（含 textValue 实时读数）/ rect / circle / ellipse /
+  line / arrow / polyline / image；anim（fade/rise/pop）+ motion
+  （linear/orbit/path，值可 expr）。
+- **RSI 三环**：① render 内结构校验（含渲染前全量预编译 fail-closed）
+  ② review.py 机械对照（符号闭包/beats 落片长/facts 形状）
+  ③ 抽帧+对照提示词 → 评审 agent vision 打分（修复 ≤3 轮）。
+- **冒烟实证**：三示例全链路出片；确定性（同 timeline 同 md5）；物理
+  读数 v=17.47=3.882×4.5 精确吻合；undeclared_symbol / spec_missing
+  拒绝路径 exit=2 实测。
+- **真 bug 登记并修复**：含 t/T 的公式曾在 T=0 常量化 → 运动钉死起点、
+  读数恒 0；现时间相关公式求值期展开（Expr 驻留 env 递归求值）。
 
 ### 后续（不本轮）
-- .fig 只读解析（KFS zip → 部分内容提取）作为增强，跟随 fig2sketch
-  的发现节奏。
+- 化学（配平校验）/数学（manim 风构造）/地理（色阶图例）规范模板细化
+- 音轨/旁白（TTS 时间轴对齐）
+
+## C · 3D 制作工作台（客户端插件）—— 📋 定稿待施工
+
+**定位（用户裁决）**：不是 2D 画板 3D 化预览，而是**直接制作 3D**——
+LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引外部浏览器、
+不引 headless）。与原型（DDP/引擎）并列的新项目类型，独立存储
+（`~/Documents/NoNDesign/3d/`，scene.js + spec.json），不走 .mbt.md/.ddp。
+
+- **三反馈闭环**（3DCodeVerse 式）：① 执行反馈 window.onerror 回传；
+  ② 场景几何自检（物体数/AABB/相机包含）；③ `canvas.toDataURL()` 截图
+  （renderer preserveDrawingBuffer）→ vision 评审。WebView reload 即迭代。
+- **吸收 img2threejs 设计理念**（用户点名强化）：
+  - 分阶段雕塑，永不一次性出场景：blockout → structure → form →
+    material → lighting → interaction 分 pass 生成，每 pass 只碰当前层；
+  - spec 先行 + 质量契约（组件层级/材质/灯光/锚点/复杂度评估）+
+    detail inventory（身份细节必须映射 spec 条目，不许 prose）；
+  - build-state.json 状态门禁：每步先查状态、完成必带 evidence，禁止从
+    对话记忆重建进度；修复轮上限（每 pass 3 次/总 6 次）；
+  - **确定性几何门先行，AI vision 殿后**：turntable 四方位截图（单视角
+    不是证据）、自相交检测、attachment anchor 校验，全过才轮到 vision；
+  - fail-closed：门不过不交付，BLOCKED 保留证据 refine-spec，不许通用
+    场景糊弄；生成代码不是重建决策的唯一副本（手改回灌 spec）。
+- 输入模态：文字 brief / 参考图（img2threejs 式图→程序化 3D 重建：
+  macro→meso→micro 分层观察、身份特征清单、单视角盲区显式声明）/ 图+文。
+- 技术底座已预验证：webview_flutter_wkwebview 3.27.2 macOS 支持 +
+  `WebKitWebViewPlatform.registerWith()`（真实 API 名）+ profile 构建链接。
+- 后续：GLTF 真 3D 资产（3dcodeverse 语料模型）、动画时间轴、多场景分镜。
+
+## D · RSI 审查与增强（design 模块内置）—— 📋 待施工
+
+- 审查 agent.py review 循环对 0.2 引擎 critique 信封（results[].
+  verdict poor/good）的解析正确性；
+- （可选增强）SVG→PNG 抽帧 → vision 图评进 run 循环。
 
 ---
 
-## 轨道 B（质量核心）：递归视觉修复（RSI 循环）
+## 状态总表
 
-### 设计（3DCodeVerse 三反馈映射到 2D 设计域）
-| 3DCodeVerse | NoNDesign 对应 |
-|---|---|
-| 执行反馈（build/runtime 日志） | op 失败信封 / validate 门错误 |
-| 测量反馈（尺寸/碰撞/连通） | engine `critique`（评分/分类/违例数）+ `lint` + `infer_missing` |
-| 视觉反馈（rubric VLM 多视角） | 渲染 SVG 上屏即视觉；vision 模型选中时可加图评（后续） |
-
-### 实现（本轮落地）
-- build/refine 终态后进入 **review 循环 ≤2 轮**（固定，无新设置项）：
-  1. 对每屏跑 `critique`（评分 <95 或违例>0 触发修复轮）；
-  2. 把 critique findings 拼成定向修复指令再入 run（同一 agent 会话，
-     前缀缓存友好）；
-  3. 时间线逐轮可见（`review_round` note）；
-  4. 达标（全部 ≥95 且 0 违例）或轮次耗尽即收，finish 条目记录轮数。
-- prompts 增补自审清单节（对照引擎规范硬标准）。
-
----
-
-## 轨道 C（插件）：3D 预览导出（3DCodeVerse 式 Three.js）
-
-3DCodeVerse 语料含 **Three.js 场景代码**——我们的画板（绝对定位节点树）
-可以无损映射为 Three.js 场景：rect→BoxGeometry(z 深度按层级)、text→
-CanvasTexture 贴图平面、fill→材质色/渐变纹理。
-
-- **实现**：`/project/export/3d` → 自包含 `board-<id>-3d.html`
-  （three.js CDN + OrbitControls + 节点→拉伸盒 + 文本贴图 + 摄像机
-  初始正视，可旋转/缩放/飞行）。
-- **插件化**：独立端点 + 导出菜单项；后续可换 3dcodeverse 语料微调的
-  模型生成真 3D 资产（GLTF 落画布 image 节点）。
-
----
-
-## 轨道 D（插件）：演示视频录制
-
-- **客户端**：play_view 加「录制」按钮——RepaintBoundary 逐屏截帧
-  （自动按 flow 走一遍演示路径，每屏 2s × 30fps 采样），PNG 落
-  `~/Documents/NoNDesign/frames-<ts>/`。
-- **编码**：ffmpeg 在场直接合成 mp4（跨帧插值用 -framerate 30）；不在场
-  生成 `make-video.sh` 一键脚本。
-- **后续**：接视频生成模型（图首帧 → 运镜视频）作可选增强。
-
----
-
-## 优先级与状态
-| 轨道 | 状态 |
-|---|---|
-| A Figma | **本轮落地**（强制性） |
-| B RSI 循环 | **本轮落地**（质量核心） |
-| C 3D 导出 | 本轮骨架（端点+导出器） |
-| D 视频 | 本轮骨架（录帧+ffmpeg 脚本） |
+| 轨道 | 状态 | 提交 |
+|---|---|---|
+| A Figma 双向 | ✅ 落地（含两处真机修复） | 72491c6 |
+| B 视频引擎 | ✅ 落地（spec 硬门 + expr 闭包 + RSI 三环 + 三示例） | 本轮 |
+| C 3D 工作台 | 📋 定稿待施工（img2threejs 理念已吸收进方案） | — |
+| D RSI 审查 | 📋 待施工 | — |

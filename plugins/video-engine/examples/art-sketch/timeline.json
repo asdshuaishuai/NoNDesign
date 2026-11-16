@@ -1,0 +1,184 @@
+{
+  "fps": 30,
+  "width": 1280,
+  "height": 720,
+  "background": "#FAF6EE",
+  "spec": "screenplay.json",
+  "scenes": [
+    {
+      "duration": 5.0,
+      "background": "#FAF6EE",
+      "elements": [
+        {
+          "type": "line",
+          "x1": 120,
+          "y1": 600,
+          "x2": 1160,
+          "y2": 600,
+          "color": "#111111",
+          "stroke_width": 5
+        },
+        {
+          "type": "ellipse",
+          "cx": {
+            "expr": "420 + 360 * min(1, t / 1.5)"
+          },
+          "cy": {
+            "expr": "430 - 120 * hop"
+          },
+          "r": {
+            "expr": "34 * (1 - 0.35 * (squash + squat))"
+          },
+          "color": "#111111",
+          "rx": {
+            "expr": "40.8 * (1 + 0.2 * (squash + squat))"
+          },
+          "ry": {
+            "expr": "34 * (1 - 0.35 * (squash + squat))"
+          }
+        },
+        {
+          "type": "line",
+          "x1": {
+            "expr": "420 + 360 * min(1, t / 1.5)"
+          },
+          "y1": {
+            "expr": "464 - 120 * hop"
+          },
+          "x2": {
+            "expr": "420 + 360 * min(1, t / 1.5)"
+          },
+          "y2": {
+            "expr": "544 - 90 * hop"
+          },
+          "color": "#111111",
+          "stroke_width": 6
+        },
+        {
+          "type": "line",
+          "x1": {
+            "expr": "420 + 360 * min(1, t / 1.5)"
+          },
+          "y1": {
+            "expr": "490 - 105 * hop"
+          },
+          "x2": {
+            "expr": "356 + 360 * min(1, t / 1.5)"
+          },
+          "y2": {
+            "expr": "524 - 60 * hop"
+          },
+          "color": "#111111",
+          "stroke_width": 5
+        },
+        {
+          "type": "line",
+          "x1": {
+            "expr": "420 + 360 * min(1, t / 1.5)"
+          },
+          "y1": {
+            "expr": "490 - 105 * hop"
+          },
+          "x2": {
+            "expr": "484 + 360 * min(1, t / 1.5)"
+          },
+          "y2": {
+            "expr": "524 - 60 * hop"
+          },
+          "color": "#111111",
+          "stroke_width": 5
+        },
+        {
+          "type": "line",
+          "x1": {
+            "expr": "420 + 360 * min(1, t / 1.5)"
+          },
+          "y1": {
+            "expr": "544 - 90 * hop"
+          },
+          "x2": {
+            "expr": "396 + 360 * min(1, t / 1.5)"
+          },
+          "y2": {
+            "expr": "600 - 20 * hop"
+          },
+          "color": "#111111",
+          "stroke_width": 5
+        },
+        {
+          "type": "line",
+          "x1": {
+            "expr": "420 + 360 * min(1, t / 1.5)"
+          },
+          "y1": {
+            "expr": "544 - 90 * hop"
+          },
+          "x2": {
+            "expr": "444 + 360 * min(1, t / 1.5)"
+          },
+          "y2": {
+            "expr": "600 - 20 * hop"
+          },
+          "color": "#111111",
+          "stroke_width": 5
+        },
+        {
+          "type": "polyline",
+          "points": [
+            [
+              700,
+              470
+            ],
+            [
+              760,
+              430
+            ],
+            [
+              830,
+              445
+            ],
+            [
+              880,
+              425
+            ]
+          ],
+          "color": "#4ECDC4",
+          "stroke_width": 4,
+          "anim": {
+            "in": "fade",
+            "dur": 0.3,
+            "delay": 3.6
+          }
+        },
+        {
+          "type": "text",
+          "text": "再来一次！",
+          "x": 900,
+          "y": 420,
+          "size": 26,
+          "color": "#111111",
+          "anchor": "middle",
+          "weight": "700",
+          "anim": {
+            "in": "pop",
+            "dur": 0.35,
+            "delay": 3.8
+          }
+        },
+        {
+          "type": "text",
+          "text": "沙雕简笔 · 挤压拉伸是灵魂",
+          "x": "50%",
+          "y": 668,
+          "size": 20,
+          "color": "#B8AD99",
+          "anim": {
+            "in": "fade",
+            "dur": 0.5,
+            "delay": 4.2
+          }
+        }
+      ]
+    }
+  ]
+}

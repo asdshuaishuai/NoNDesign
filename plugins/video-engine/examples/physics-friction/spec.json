@@ -1,0 +1,38 @@
+{
+  "kind": "science",
+  "subject": "斜面上的滑动摩擦力：为什么滑块匀加速下滑",
+  "domain": "physics",
+  "laws": [
+    "滑动摩擦力 f = μN，N 为法向压力（斜面上 N = mg·cosθ）",
+    "牛顿第二定律：沿斜面方向 ma = mg·sinθ − μmg·cosθ"
+  ],
+  "assumptions": [
+    "滑块视为质点，忽略空气阻力",
+    "斜面与滑块均为刚体，μ 全程为常数",
+    "画面几何按 tan30°≈0.577 布置（底 600px、高 346px），像素舍入误差忽略"
+  ],
+  "params": {
+    "g": 9.8,
+    "theta_deg": 30,
+    "mu": 0.12,
+    "scale_px_per_m": 200
+  },
+  "formulas": [
+    { "name": "theta", "expr": "radians(theta_deg)" },
+    { "name": "a", "expr": "g * (sin(theta) - mu * cos(theta))" },
+    { "name": "u1", "expr": "min(1, 0.5 * a * scale_px_per_m * t * t / 693)" },
+    { "name": "u2", "expr": "min(1, 0.5 * a * scale_px_per_m * T * T / 693)" },
+    { "name": "v", "expr": "a * T" },
+    { "name": "xm", "expr": "0.5 * a * T * T" }
+  ],
+  "facts": [
+    "a = 9.8·(sin30° − 0.12·cos30°) ≈ 3.88 m/s² > 0，滑块确实下滑",
+    "斜边 693px 对应实际 3.47m；由 0.5·a·t²=3.47 解得 t≈1.34s 滑到底，之后静止",
+    "速度读数 v = a·T 随时间线性增大，位移读数为时间的二次函数",
+    "受力三箭头方向：重力竖直向下、法向垂直斜面向上、摩擦沿斜面向上（阻碍下滑）"
+  ],
+  "storyboard": [
+    { "note": "斜面+滑块从顶部起动，重力/法向/摩擦三箭头跟随滑块", "duration": 3.5 },
+    { "note": "滑到底后镜头保留斜面，叠加大号实时读数 v 与 x（用全局时间 T 保持物理连续）", "duration": 4.5 }
+  ]
+}

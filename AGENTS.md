@@ -8,10 +8,49 @@ AI 原生原型设计工具的桌面客户端。**一句话 → 产品需求设�
 ## 架构边界（改代码前先读）
 
 ```
-app/          Flutter UI + 原生 CustomPainter 画布（无 WebView、无 HTML）
+app/          Flutter UI + 原生 CustomPainter 画布（无 WebView、无 HTML；
+              3D 工作台落地后唯一 WebView 是应用内预览，见插件轨道）
 server/       Python FastAPI + OpenAI Agents SDK + wasmtime 引擎宿主 + DDP
 engine/       MoonViz classic wasm（纯 WASM MVP、零 import）+ components.json
+figma-plugin/ Figma 双向插件（manifest.json 开发目录，可编辑图层双向桥）
+plugins/      独立插件：video-engine/ 代码生成视频（零 Flutter/服务器依赖）
 ```
+
+- **插件轨道与引擎解耦**（用户裁决 2026-11-16，详见 docs/plan-plugins.md）：
+  **Figma 双向桥 / 3D 制作工作台 / 代码生成视频 = 客户端能力加强**，不改
+  引擎、不依赖引擎产物；**RSI 递归视觉修复例外——design 模块内置质量环**
+  （run 循环里逐屏 critique → auto_fix ≤2 轮），不是插件。
+- **Figma**（已落地）：服务端 `/project/export/figma`（SVG 包 +
+  nondesign.json manifest）+ figma-plugin/ 双向桥。⚠️ 事故登记×2：
+  ① 路由曾错挂 `/acp/prompt`（FastAPI 同路径先注册者胜出 → ACP 对话
+  全部命中导出函数 422）——改 `/project/export/figma` + RenderRequest
+  body（大 mbt 不能走 query，h11 头 16KB 上限）；② 插件 Import 曾读
+  顶层 n.x/n.w——引擎 manifest 几何在 `n.rect`（真机 dump 实证），
+  顶层字段全 undefined，导入图层塌到原点——geomOf() 兼容读取。
+- **代码生成视频**（已落地，`plugins/video-engine/`，独立管线）：
+  timeline DSL → 逐帧确定性 SVG → resvg（CJK 已验证）→ ffmpeg。
+  **双强制纪律是管线硬门不是提示词**：① spec 先行（science/screenplay
+  两形态，`spec_missing` exit 2）；② expr 符号声明闭包（自定义标识符
+  必须在 spec.params ∪ spec.formulas，`undeclared_symbol` 拒绝——
+  「想当然」的裸坐标进不来）。RSI 三环：结构校验（render 内）→
+  spec 对照（review.py 机械）→ 抽帧+提示词给评审 agent vision 打分
+  （scripts do enforcement; agent vision does judgment）。
+  ⚠️ 真 bug 登记：**含 t/T 的公式曾在 T=0 常量化**——时间相关公式必须
+  求值期展开（Expr 留在 env，Name 求值时递归），否则运动钉死在起点、
+  读数恒 0（首版冒烟真机抓出）。渲染前全量预编译（fail-closed：
+  语法/符号错误在第一帧前报干净）。三标杆示例在 examples/（物理摩擦力
+  = 真实性门面，读数 v=17.47=x·T 实测吻合）。
+- **3D 制作工作台**（规划定稿，见 docs/plan-plugins.md 轨道 C）：
+  LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引外部
+  浏览器/headless）——执行错误 window.onerror 回传、场景几何自检、
+  canvas.toDataURL 截图给 vision 评审，三反馈驱动 RSI 修复轮。
+  吸收 img2threejs：spec 先行 + 分 pass 生成（blockout→structure→form→
+  material→lighting）+ build-state.json 状态门禁 + 确定性几何门先行
+  （turntable 四方位/自相交/锚点）、AI vision 殿后 + fail-closed（门不过
+  不交付）。3D 项目独立存储（~/Documents/NoNDesign/3d/），不走 .mbt.md/
+  .ddp（「唯一事实源」纪律只管 2D 原型线）。平台注册：wkwebview 3.27.2
+  真实 API 是 `WebKitWebViewPlatform.registerWith()`（无 endorsed macOS
+  实现，首次使用前幂等注册）。
 
 - **唯一事实源**：一份 canonical `.mbt.md`。人类画布操作（HumanGate）与 Agent 操作
   （AgentGate）都必须经引擎校验后回写同一份文档；`.ddp` 只是它的认证加密容器。

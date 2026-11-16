@@ -1,0 +1,73 @@
+{
+  "fps": 30,
+  "width": 1280,
+  "height": 720,
+  "background": "#0E1220",
+  "spec": "spec.json",
+  "scenes": [
+    {
+      "duration": 3.5,
+      "background": "#0E1220",
+      "elements": [
+        { "type": "text", "text": "斜面上的滑动摩擦力", "x": "50%", "y": 64,
+          "size": 40, "color": "#FFFFFF", "weight": "700",
+          "anim": { "in": "fade", "dur": 0.5 } },
+        { "type": "text", "text": "θ = 30°   μ = 0.12   刚体·质点·无空气阻力", "x": "50%", "y": 106,
+          "size": 20, "color": "#9AA3B2",
+          "anim": { "in": "fade", "dur": 0.5, "delay": 0.4 } },
+        { "type": "polyline", "points": [[240, 580], [840, 580], [840, 234], [240, 580]],
+          "color": "#3A4358", "stroke_width": 4, "fill": "#161B2C",
+          "anim": { "in": "fade", "dur": 0.5 } },
+        { "type": "line", "x1": 160, "y1": 580, "x2": 1160, "y2": 580,
+          "color": "#3A4358", "stroke_width": 4 },
+        { "type": "text", "text": "30°", "x": 282, "y": 566, "size": 18, "color": "#7C8CFF",
+          "anchor": "start", "anim": { "in": "fade", "dur": 0.4, "delay": 0.6 } },
+        { "type": "rect", "x": { "expr": "810 - 600*u1" }, "y": { "expr": "216 + 346*u1" },
+          "w": 60, "h": 36, "radius": 6, "color": "#FFB65C" },
+        { "type": "arrow", "x1": { "expr": "840 - 600*u1" }, "y1": { "expr": "252 + 346*u1" },
+          "x2": { "expr": "840 - 600*u1" }, "y2": { "expr": "344 + 346*u1" },
+          "color": "#FF8A7A", "stroke_width": 3, "head": 13,
+          "anim": { "in": "fade", "dur": 0.4, "delay": 1.0 } },
+        { "type": "arrow", "x1": { "expr": "840 - 600*u1" }, "y1": { "expr": "234 + 346*u1" },
+          "x2": { "expr": "795 - 600*u1" }, "y2": { "expr": "156 + 346*u1" },
+          "color": "#6FA8FF", "stroke_width": 3, "head": 13,
+          "anim": { "in": "fade", "dur": 0.4, "delay": 1.4 } },
+        { "type": "arrow", "x1": { "expr": "840 - 600*u1" }, "y1": { "expr": "234 + 346*u1" },
+          "x2": { "expr": "909 - 600*u1" }, "y2": { "expr": "194 + 346*u1" },
+          "color": "#C792EA", "stroke_width": 3, "head": 13,
+          "anim": { "in": "fade", "dur": 0.4, "delay": 1.8 } },
+        { "type": "text", "text": "mg", "x": { "expr": "858 - 600*u1" }, "y": { "expr": "330 + 346*u1" },
+          "size": 16, "color": "#FF8A7A", "anchor": "start",
+          "anim": { "in": "fade", "dur": 0.4, "delay": 1.2 } },
+        { "type": "text", "text": "N", "x": { "expr": "776 - 600*u1" }, "y": { "expr": "160 + 346*u1" },
+          "size": 16, "color": "#6FA8FF", "anchor": "end",
+          "anim": { "in": "fade", "dur": 0.4, "delay": 1.6 } },
+        { "type": "text", "text": "f = μN", "x": { "expr": "915 - 600*u1" }, "y": { "expr": "186 + 346*u1" },
+          "size": 16, "color": "#C792EA", "anchor": "start",
+          "anim": { "in": "fade", "dur": 0.4, "delay": 2.0 } },
+        { "type": "text", "text": "a = g(sinθ − μcosθ) ≈ 3.88 m/s²", "x": "50%", "y": 660,
+          "size": 24, "color": "#FFB65C", "weight": "700",
+          "anim": { "in": "rise", "dur": 0.5, "delay": 2.2 } }
+      ]
+    },
+    {
+      "duration": 4.5,
+      "background": "#0E1220",
+      "elements": [
+        { "type": "polyline", "points": [[240, 580], [840, 580], [840, 234], [240, 580]],
+          "color": "#3A4358", "stroke_width": 4, "fill": "#161B2C" },
+        { "type": "line", "x1": 160, "y1": 580, "x2": 1160, "y2": 580,
+          "color": "#3A4358", "stroke_width": 4 },
+        { "type": "rect", "x": { "expr": "810 - 600*u2" }, "y": { "expr": "216 + 346*u2" },
+          "w": 60, "h": 36, "radius": 6, "color": "#FFB65C" },
+        { "type": "text", "textValue": { "expr": "v", "format": "v = {:.2f} m/s" },
+          "x": 880, "y": 200, "size": 44, "color": "#FFB65C", "anchor": "middle", "weight": "700" },
+        { "type": "text", "textValue": { "expr": "xm", "format": "x = {:.2f} m" },
+          "x": 880, "y": 270, "size": 44, "color": "#6FA8FF", "anchor": "middle", "weight": "700" },
+        { "type": "text", "text": "时间 T 从片头起算：位移按 0.5·a·T² 增长（二次），速度按 a·T 增长（线性）",
+          "x": "50%", "y": 660, "size": 20, "color": "#9AA3B2",
+          "anim": { "in": "rise", "dur": 0.5, "delay": 0.6 } }
+      ]
+    }
+  ]
+}
