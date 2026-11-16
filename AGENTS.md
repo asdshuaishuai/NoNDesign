@@ -122,6 +122,15 @@ flutter build macos --debug
   popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
   再写一份局部样式。
 
+- **引擎渐变/italic 真相（2026-11-16 探针修正）**：引擎原生支持渐变与
+  斜体——语法是 **Paint v2 DSL**：`fill=linear:#c1:#c2@deg`（radial 同形
+  无 @deg）、`italic=true`；**不是 CSS `linear-gradient(...)`**（写入会
+  以原始串存 fill，svg 输出非法属性）。R2 曾把 CSS 解析加进
+  ArtboardPainter——保留为旧信封回退，SVG 在场时由引擎渲染（defs 合成
+  + fill url 引用自动完成）。NoN 侧不再需要自解析新渐变。
+  已知边界：place k=v 对 rotate=/blur= 仍静默丢弃（update 路径 ok），
+  上游 issue 材料已备。
+
 - **引擎自渲染为内容层唯一真源（2026-11-16 用户定案）**：引擎 0.2-dev 的
   render 信封每板携带完整 svg（<style> 系统字体/defs 三档 feDropShadow/
   rotate transform/网络 <image>+clip-path/板底 rect 全在，真机探针实证）——

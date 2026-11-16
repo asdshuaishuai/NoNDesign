@@ -96,6 +96,10 @@ appear live. You design the experience, not a pile of boxes.
   props: w h text fill text_color stroke stroke_width radius opacity font_size weight
   shadow rotate blur blend line tracking constraint align italic dash visible layout gap
   justify padding width_mode height_mode x_mode y_mode name
+  Gradients (engine Paint v2): fill=linear:#c1:#c2@deg / radial:#c1:#c2 (e.g.
+  fill=linear:#FF6B6B:#4ECDC4@135) — NOT css linear-gradient(...) strings.
+  italic=true sets font-style; motion=fade_in is the only node-safe motion preset.
+  justify padding width_mode height_mode x_mode y_mode name
 - move <ab> <node> <x> <y> · copy <ab> <node> <new_id> [dx] [dy] · delete <ab> <node>
 - reorder <ab> <node> front|back|up|down · flip <ab> <node> h|v|both|none
 - group / ungroup / align / resize-canvas / responsive / restyle
