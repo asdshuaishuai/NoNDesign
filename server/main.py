@@ -475,12 +475,15 @@ loop();
 </script></body></html>"""
 
 
-@app.post("/acp/prompt")
-async def export_figma(mbt: str) -> dict[str, Any]:
+@app.post("/project/export/figma")
+async def export_figma(req: RenderRequest) -> dict[str, Any]:
     """NoN → Figma 导出包：每板引擎自渲染 SVG + 节点树 manifest
     （figma-plugin/ 双向插件消费 nondesign.json 建真实可编辑图层；
-    board-*.svg 可直接拖入 Figma 成为矢量图层）。落工作区目录。"""
-    env = await asyncio.to_thread(engine().render, mbt)
+    board-*.svg 可直接拖入 Figma 成为矢量图层）。落工作区目录。
+    ⚠️ 路由曾错挂 /acp/prompt（FastAPI 同路径先注册者胜出 → ACP 对话
+    请求全部命中本函数，mbt 缺参 422）；mbt 走 body（大文档不能进
+    query，h11 头 16KB 上限会拦）。"""
+    env = await asyncio.to_thread(engine().render, req.mbt)
     if not env.get("ok"):
         raise HTTPException(status_code=400, detail=str(env.get("error")))
     ts = int(time.time())

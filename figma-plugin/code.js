@@ -65,23 +65,57 @@ figma.ui.onmessage = async (msg) => {
 
 let made2 = 0;
 
+// 引擎 manifest 的几何在 n.rect（真机实证 {x,y,w,h}），不是顶层 n.x——
+// 顶层字段读取曾让所有导入图层塌到 (0,0)。
+function geomOf(n) {
+  const r = n.rect || n;
+  return {
+    x: typeof r.x === 'number' ? r.x : 0,
+    y: typeof r.y === 'number' ? r.y : 0,
+    w: typeof r.w === 'number' && r.w > 0 ? r.w : 100,
+    h: typeof r.h === 'number' && r.h > 0 ? r.h : 40,
+  };
+}
+
 function makeNode(n) {
   const st = n.style || {};
-  if ((n.text || '').trim() && (st.font_size || 14) !== 14 || n.component === 'body_text' || n.component === 'heading') {
+  const g = geomOf(n);
+  const txt = (n.text || '').trim();
+  // 纯文本节点：kind=text 或 body_text/heading 组件。
+  const isPlain = n.kind === 'text' || n.component === 'body_text' || n.component === 'heading';
+  if (isPlain && txt) {
     const t = figma.createText();
-    t.characters = n.text || '';
+    t.characters = txt;
     t.fontSize = st.font_size || 14;
     t.fills = [{ type: 'SOLID', color: hexToRgb(st.text_color || '#14161A') }];
-    t.x = n.x; t.y = n.y;
-    try { t.resize(n.w, n.h); } catch (e) {}
+    t.x = g.x; t.y = g.y;
+    try { t.resize(g.w, g.h); } catch (e) {}
     return t;
   }
+  if (txt) {
+    // 带文案的实体组件（按钮/chip…）：Frame 底色 + Text 子节点，两个都真实可编辑。
+    const f = figma.createFrame();
+    f.x = g.x; f.y = g.y;
+    f.resize(g.w, g.h);
+    f.cornerRadius = Math.min(st.radius || 0, Math.min(g.w, g.h) / 2);
+    if (st.radius >= 999) f.cornerRadius = Math.min(g.w, g.h) / 2;
+    f.fills = [{ type: 'SOLID', color: hexToRgb(st.fill && st.fill[0] !== '#' ? '#DDDDDD' : st.fill || '#FFFFFF') }];
+    const t = figma.createText();
+    t.characters = txt;
+    t.fontSize = st.font_size || 14;
+    t.fills = [{ type: 'SOLID', color: hexToRgb(st.text_color || '#14161A') }];
+    f.appendChild(t);
+    // 水平垂直居中（按钮文案规范位）。
+    t.x = Math.max(0, (g.w - t.width) / 2);
+    t.y = Math.max(0, (g.h - t.height) / 2);
+    return f;
+  }
   const r = figma.createRectangle();
-  r.resize(n.w, n.h);
-  r.x = n.x; r.y = n.y;
-  r.cornerRadius = Math.min(st.radius || 0, Math.min(n.w, n.h) / 2);
+  r.resize(g.w, g.h);
+  r.x = g.x; r.y = g.y;
+  r.cornerRadius = Math.min(st.radius || 0, Math.min(g.w, g.h) / 2);
+  if (st.radius >= 999) r.cornerRadius = Math.min(g.w, g.h) / 2;
   r.fills = [{ type: 'SOLID', color: hexToRgb(st.fill && st.fill[0] !== '#' ? '#DDDDDD' : st.fill || '#FFFFFF') }];
-  if (st.radius >= 999) r.cornerRadius = Math.min(n.w, n.h) / 2;
   return r;
 }
 

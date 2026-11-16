@@ -229,6 +229,11 @@ class NoNDesignApi {
       postJson('/engine/generate', {'mbt': mbt, 'intent': intent, 'name': name, 'spec': spec});
   Future<Map<String, dynamic>> exportHtml(String mbt) => postJson('/engine/export-html', {'mbt': mbt});
 
+  /// Figma 双向包（客户端插件能力，与引擎解耦）：board-*.svg 拖入即
+  /// 矢量图层，nondesign.json 走 figma-plugin 建可编辑图层。服务器落盘。
+  Future<Map<String, dynamic>> exportFigma(String mbt) =>
+      postJson('/project/export/figma', {'mbt': mbt});
+
   /// Layout intent (session_constrain): `intent` is a phrase like 居中 / 等间距 /
   /// 网格 3. Engine returns a canonical envelope {ok, id, x, mbt} — no render
   /// face; cannot_parse failures carry the intent vocabulary in `error`.

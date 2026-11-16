@@ -58,6 +58,8 @@ class TitleBar extends StatelessWidget {
                   await store.exportHtml();
                 case 'svg':
                   await store.exportSvg();
+                case 'figma':
+                  await store.exportFigma();
                 case 'shortcuts':
                   onShortcuts();
                 default:
@@ -73,6 +75,7 @@ class TitleBar extends StatelessWidget {
               const PopupMenuDivider(),
               _menu(context, 'html', Icons.download_outlined, '导出 HTML 原型', modCombo('⇧⌘H')),
               _menu(context, 'svg', Icons.image_outlined, '导出当前画板 SVG', ''),
+              _menu(context, 'figma', Icons.layers_outlined, '导出 Figma 包', ''),
               if (store.recent.isNotEmpty) ...[
                 const PopupMenuDivider(),
                 _sectionLabel(context, '最近项目'),

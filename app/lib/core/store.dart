@@ -597,6 +597,25 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  /// 导出 Figma 包：服务器落盘 ~/Documents/NoNDesign/NoNDesign-figma-<ts>/，
+  /// 不弹保存框；toast 携带目录。返回 true = 落盘成功。
+  Future<bool> exportFigma() async {
+    if (api == null) return false;
+    try {
+      final res = await api!.exportFigma(mbt);
+      if (res['ok'] != true || res['dir'] is! String) {
+        _toast('导出 Figma 包失败', res['error']?.toString());
+        return false;
+      }
+      final boards = res['boards'];
+      _toast('已导出 Figma 包（${boards is num ? boards : '?'} 板）', res['dir'] as String);
+      return true;
+    } catch (e) {
+      _toast('导出 Figma 包失败', e.toString());
+      return false;
+    }
+  }
+
   Future<bool> exportSvg() async {
     if (api == null || activeBoard == null) return false;
     try {
