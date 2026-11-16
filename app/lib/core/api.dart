@@ -29,6 +29,20 @@ class ServerLauncher {
     if (root == null) {
       throw StateError('server/main.py not found; set NONDESIGN_SERVER or run from the repo');
     }
+    // 偶发竞态自愈（2026-11-16 真机弹窗实证：旧实例退出与 spawn 交错的窗口
+    // 里端口文件/看门狗互踩，一次 spawn 失败）：清场后重试一次再报错。
+    try {
+      return await _spawnFromRoot(root);
+    } on StateError {
+      final metaFile = File('${Platform.environment['HOME']}/.nondesign/server.json');
+      try {
+        if (metaFile.existsSync()) metaFile.deleteSync();
+      } catch (_) {}
+      return await _spawnFromRoot(root);
+    }
+  }
+
+  static Future<ServerHandle> _spawnFromRoot(String root) async {
     final python = _findPython(root);
     final logs = <String>[];
     // A stale port file from a previous run can otherwise win the race and
