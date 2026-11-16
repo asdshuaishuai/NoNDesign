@@ -86,7 +86,8 @@ class _WelcomeState extends State<Welcome> {
               ),
             ),
           ),
-          Column(
+          SafeArea(
+            child: Column(
             children: [
               Container(
                 height: 60,
@@ -95,16 +96,20 @@ class _WelcomeState extends State<Welcome> {
                   children: [
                     const NonLogo(size: 26),
                     const SizedBox(width: 9),
-                    Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('NoNDesign', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
-                        Text('AI PRODUCT DESIGN STUDIO',
-                            style: TextStyle(fontSize: 10, letterSpacing: 1.6, color: p.ink4)),
-                      ],
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('NoNDesign',
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
+                          Text('AI PRODUCT DESIGN STUDIO',
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 10, letterSpacing: 1.6, color: p.ink4)),
+                        ],
+                      ),
                     ),
-                    const Spacer(),
                     const SizedBox(width: 6),
                     IconAction(
                       icon: store.settings.theme == 'light' ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
@@ -118,7 +123,12 @@ class _WelcomeState extends State<Welcome> {
                   ],
                 ),
               ),
-              Expanded(
+              if (MediaQuery.of(context).size.width < 900)
+                Expanded(
+                  child: _mobileBody(context, store),
+                )
+              else
+                Expanded(
                 child: Center(
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 1120),
@@ -190,81 +200,9 @@ class _WelcomeState extends State<Welcome> {
                                   ),
                                 ],
                                 const SizedBox(height: 22),
-                                Container(
-                                  padding: const EdgeInsets.all(9),
-                                  decoration: BoxDecoration(
-                                    color: p.panel.withValues(alpha: 0.9),
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(color: p.lineStrong),
-                                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 50, offset: const Offset(0, 24))],
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      TextField(
-                                        controller: _brief,
-                                        minLines: 3,
-                                        maxLines: 5,
-                                        style: TextStyle(fontSize: 13, height: 1.55, color: p.ink),
-                                        decoration: InputDecoration(
-                                          hintText: '例如：做一个面向自由职业者的发票工具。需要登录、发票列表、新建发票、客户管理和设置；风格专业、克制，移动端优先。',
-                                          hintStyle: TextStyle(fontSize: 13, height: 1.55, color: p.ink4),
-                                          border: InputBorder.none,
-                                          enabledBorder: InputBorder.none,
-                                          focusedBorder: InputBorder.none,
-                                          filled: false,
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                                        ),
-                                        onSubmitted: (_) => _start(store),
-                                      ),
-                                      Row(
-                                        children: [
-                                          for (final example in ['电商 App', 'SaaS 仪表盘', 'AI 助手', '个人作品集'])
-                                            Padding(
-                                              padding: const EdgeInsets.only(right: 4),
-                                              child: InkWell(
-                                                borderRadius: BorderRadius.circular(4),
-                                                onTap: () => _brief.text = '做一个$example：先写 PRD 与 UI 说明，再生成完整可交互原型。移动端优先，风格现代克制。',
-                                                child: Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                                  decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
-                                                  child: Text(example, style: TextStyle(fontSize: 10, color: p.ink3)),
-                                                ),
-                                              ),
-                                            ),
-                                          const Spacer(),
-                                          FilledButton.icon(
-                                            style: FilledButton.styleFrom(
-                                              backgroundColor: p.accent,
-                                              foregroundColor: Colors.white,
-                                              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-                                            ),
-                                            onPressed: store.agentBusy ? null : () => _start(store),
-                                            icon: store.agentBusy
-                                                ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5))
-                                                : const Icon(Icons.auto_awesome, size: 13),
-                                            label: const Text('开始设计', style: TextStyle(fontSize: 12)),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                                _briefCard(context, store),
                                 const SizedBox(height: 10),
-                                Row(
-                                  children: [
-                                    Text('${modCombo('⌘↵')} 开始', style: TextStyle(fontSize: 10, color: p.ink4)),
-                                    const SizedBox(width: 10),
-                                    InkWell(
-                                      onTap: () => showNewProjectFlow(context),
-                                      child: Text('空白项目', style: TextStyle(fontSize: 10, color: p.ink4)),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    InkWell(
-                                      onTap: () => openProjectFlow(context, ''),
-                                      child: Text('打开 DDP', style: TextStyle(fontSize: 10, color: p.ink4)),
-                                    ),
-                                  ],
-                                ),
+                                _briefHints(context),
                               ],
                             ),
                           ),
@@ -304,13 +242,206 @@ class _WelcomeState extends State<Welcome> {
                 height: 34,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Text('NoNDesign v0.1 · MoonViz engine · 模型与端点来自 models.dev · 所有操作可撤销',
-                    style: TextStyle(fontSize: 10, color: p.ink4)),
+                    textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10, height: 1.3, color: p.ink4)),
               ),
+            ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 手机窄屏主页：单列滚动。真机实测（iPhone 17 / 402×874）桌面双栏在手机宽度下
+  /// 右溢 198px、底溢 327px（右列被压成单字竖排、开始按钮叠到作品集卡上）——
+  /// 窄屏改走这条单列路径，宽屏双栏原样保留。
+  Widget _mobileBody(BuildContext context, AppStore store) {
+    final p = context.palette;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: p.accentSoft,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: p.accent.withValues(alpha: 0.25)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.auto_awesome, size: 11, color: p.accent),
+                  const SizedBox(width: 5),
+                  Text('一句话 → 设计文档 → 可交互原型',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: p.accent)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          ShaderMask(
+            shaderCallback: (bounds) => LinearGradient(
+              colors: [p.accent, p.accent2, p.danger.withValues(alpha: 0.85)],
+            ).createShader(bounds),
+            child: const Text('把想法变成\n可以点的产品',
+                style: TextStyle(
+                  fontSize: 34,
+                  height: 1.1,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -1.0,
+                  color: Colors.white,
+                )),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '描述目标用户和核心流程。NoN 会先写 PRD、UI 说明与设计规范，再把每一屏画到画布上，连线、状态、交互都经 MoonViz 引擎校验。',
+            style: TextStyle(fontSize: 12.5, height: 1.6, color: p.ink3),
+          ),
+          if (store.recovery != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: p.warn.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: p.warn.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(child: Text('检测到上次未保存的工作', style: TextStyle(fontSize: 11, color: p.warn))),
+                  TextButton(onPressed: store.restoreRecovery, child: const Text('恢复', style: TextStyle(fontSize: 11))),
+                  TextButton(onPressed: store.discardRecovery, child: const Text('忽略', style: TextStyle(fontSize: 11))),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          _briefCard(context, store),
+          const SizedBox(height: 8),
+          _briefHints(context),
+          const SizedBox(height: 16),
+          _workbenchCard(context, store),
+          const SizedBox(height: 10),
+          _portfolioCard(context, store),
+          const SizedBox(height: 10),
+          _recentCard(context, store),
+          const SizedBox(height: 10),
+          _howCard(context, p),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 5,
+            runSpacing: 5,
+            children: const [
+              Pill(label: '引擎门校验', icon: Icons.verified_outlined),
+              Pill(label: 'DDP 单文件', icon: Icons.lock_outline),
+              Pill(label: '前缀缓存', icon: Icons.bolt_outlined),
             ],
           ),
         ],
       ),
+    );
+  }
+
+  /// 输入卡（宽屏与窄屏共用）。窄屏下 chips 与开始按钮改用 Wrap + 换行，
+  /// 避免在 198px 宽的双栏列里 chips+按钮横向溢出（真机实证）。
+  Widget _briefCard(BuildContext context, AppStore store) {
+    final p = context.palette;
+    return Container(
+      padding: const EdgeInsets.all(9),
+      decoration: BoxDecoration(
+        color: p.panel.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: p.lineStrong),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 50, offset: const Offset(0, 24))],
+      ),
+      child: Column(
+        children: [
+          TextField(
+            controller: _brief,
+            minLines: 3,
+            maxLines: 5,
+            style: TextStyle(fontSize: 13, height: 1.55, color: p.ink),
+            decoration: InputDecoration(
+              hintText: '例如：做一个面向自由职业者的发票工具。需要登录、发票列表、新建发票、客户管理和设置；风格专业、克制，移动端优先。',
+              hintStyle: TextStyle(fontSize: 13, height: 1.55, color: p.ink4),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              filled: false,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            ),
+            onSubmitted: (_) => _start(store),
+          ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final examples = [
+                for (final example in ['电商 App', 'SaaS 仪表盘', 'AI 助手', '个人作品集'])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(4),
+                      onTap: () => _brief.text = '做一个$example：先写 PRD 与 UI 说明，再生成完整可交互原型。移动端优先，风格现代克制。',
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
+                        child: Text(example, style: TextStyle(fontSize: 10, color: p.ink3)),
+                      ),
+                    ),
+                  ),
+              ];
+              final button = FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: p.accent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+                ),
+                onPressed: store.agentBusy ? null : () => _start(store),
+                icon: store.agentBusy
+                    ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5))
+                    : const Icon(Icons.auto_awesome, size: 13),
+                label: const Text('开始设计', style: TextStyle(fontSize: 12)),
+              );
+              if (constraints.maxWidth < 520) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Wrap(spacing: 4, runSpacing: 6, children: examples),
+                    const SizedBox(height: 8),
+                    Align(alignment: Alignment.centerRight, child: button),
+                  ],
+                );
+              }
+              return Row(children: [...examples, const Spacer(), button]);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _briefHints(BuildContext context) {
+    final p = context.palette;
+    return Row(
+      children: [
+        Text('${modCombo('⌘↵')} 开始', style: TextStyle(fontSize: 10, color: p.ink4)),
+        const SizedBox(width: 10),
+        InkWell(
+          onTap: () => showNewProjectFlow(context),
+          child: Text('空白项目', style: TextStyle(fontSize: 10, color: p.ink4)),
+        ),
+        const SizedBox(width: 10),
+        InkWell(
+          onTap: () => openProjectFlow(context, ''),
+          child: Text('打开 DDP', style: TextStyle(fontSize: 10, color: p.ink4)),
+        ),
+      ],
     );
   }
 

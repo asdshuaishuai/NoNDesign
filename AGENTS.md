@@ -40,6 +40,15 @@ app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板�
   write_doc 工具语义对齐 server PLAN；工具参数无流式增量，事件式而非
   逐字直播；RSI 依赖引擎不在直连范围）。store._runAgent 分流：
   api==null && mode==plan && 有 key → _runMobilePlan。
+- **移动端真机验证（2026-11-16 晚，iPhone 17 / iOS 27.2 模拟器）**：Xcode 27 的
+  Simulator runtime 已装；`flutter build ios --simulator --debug` 30–46s。真机截图
+  抓出 Welcome 桌面双栏在 402×874 下右溢 198px、底溢 327px（右列被压成单字竖排、
+  开始按钮叠到作品集卡上）→ 窄屏改单列滚动 + SafeArea + 输入卡 chips 换行
+  （welcome.dart 的 `_mobileBody`/`_briefCard`）；`app/test/welcome_mobile_test.dart`
+  锚定 402/390/375 无溢出、1440 保持双栏；`integration_test/mobile_smoke_test.dart`
+  在模拟器实测 Welcome→3D 工作台→返回。**Android**：SDK platforms/build-tools/NDK
+  28.2 已装，但 `flutter build apk --debug` 在 Gradle 9.5/AGP 9.3.1 下启动即挂起
+  （daemon 无网络活动、无任务输出），待专项排查。
 - **插件工作台 UI 与设计板块解耦**（用户裁决 2026-11-16 二次确认）：
   `app/lib/plugins/registry.dart` 是注册表——每插件一个 PluginDef（id/
   图标/builder），视图路由 `plugin:<id>`，顶栏入口与 ⌘5/⌘6… 快捷键按
