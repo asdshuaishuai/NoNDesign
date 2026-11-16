@@ -106,10 +106,40 @@ renderer.setAnimationLoop(() => {
   const now = performance.now();
   if (now - lastSent > 2000) { lastSent = now; __report({kind:'metrics', payload: __measure()}); }
 });
-// —— 视觉反馈桥（环③）：截图给评审 agent（preserveDrawingBuffer 开启）——
-window.__non3d_screenshot = function(){
+// —— 视觉反馈桥（环③）：截图给评审 agent（preserveDrawingBuffer 开启）。
+// tag 进 evidence 文件名；turntable 四方位取证（img2threejs：单视角不是
+// 模型的证据——正面八轮通过、帽子长在胯上的事故即此）。——
+window.__non3d_screenshot = function(tag){
   const data = renderer.domElement.toDataURL('image/png');
-  __report({kind:'screenshot', payload: data});
+  __report({kind:'screenshot', payload: data, tag: tag || 'shot'});
+};
+window.__non3d_turntable = function(){
+  if (!window.__non3d_turning) {
+    window.__non3d_turning = true;
+    const target = controls.target.clone();
+    const saved = camera.position.clone();
+    const offset = saved.clone().sub(target);
+    const dist = Math.max(offset.length(), 4);
+    const baseY = saved.y;
+    const baseAngle = Math.atan2(offset.x, offset.z);
+    const angles = [0, 90, 180, 270];
+    let i = 0;
+    const step = () => {
+      if (i >= angles.length) {
+        camera.position.copy(saved); controls.update();
+        window.__non3d_turning = false;
+        return;
+      }
+      const a = baseAngle + angles[i] * Math.PI / 180;
+      camera.position.set(target.x + dist * Math.sin(a), baseY, target.z + dist * Math.cos(a));
+      controls.update();
+      renderer.render(scene, camera);
+      __report({kind:'screenshot', payload: renderer.domElement.toDataURL('image/png'), tag: 'turn-' + angles[i]});
+      i++;
+      setTimeout(step, 150);
+    };
+    step();
+  }
 };
 setTimeout(() => __report({kind:'metrics', payload: __measure()}), 300);
 </script></body></html>"""
@@ -302,9 +332,15 @@ async def feedback(name: str, kind: str, payload: Any) -> dict[str, Any]:
     elif kind == "screenshot":
         ev_dir = _proj_dir(name) / "evidence"
         ev_dir.mkdir(exist_ok=True)
+        # payload 可为纯 dataUrl 字符串或 {data, tag}（turntable 方位取证命名）
+        tag = ""
+        data = payload
+        if isinstance(payload, dict):
+            tag = "".join(c for c in str(payload.get("tag", "")) if c.isalnum() or c in "-_")[:24]
+            data = payload.get("data", "")
         n = len(cur["evidence"]) + 1
-        img = ev_dir / f"{state['current']}-{n}.png"
-        data = str(payload)
+        img = ev_dir / f"{state['current']}-{tag or 'shot'}-{n:02d}.png"
+        data = str(data)
         if data.startswith("data:image/png;base64,"):
             data = data[len("data:image/png;base64,"):]
         import base64
@@ -312,7 +348,7 @@ async def feedback(name: str, kind: str, payload: Any) -> dict[str, Any]:
         cur["evidence"].append(img.name)
         cur["status"] = "generated"  # 有截图证据，等待 continue 判定
         append_history(name, {"action": "evidence", "pass": state["current"],
-                              "kind": "screenshot", "file": img.name})
+                              "kind": "screenshot", "file": img.name, "tag": tag})
         status = "evidence-ok"
     else:
         raise ThreeError(f"invalid_feedback_kind:{kind}")
@@ -347,6 +383,28 @@ def continue_pass(name: str, summary: str = "") -> dict[str, Any]:
     write_state(name, state)
     append_history(name, {"action": "done", "pass": "-", "summary": "全部 pass verified"})
     return {"ok": True, "current": "done", "done": True}
+
+
+def save_spec(name: str, spec: dict[str, Any]) -> dict[str, Any]:
+    """规范手编回灌（img2threejs：手改必须落 spec，不许只改代码）。
+    最小校验：components/acceptance 非空（与 new_project 同门）。"""
+    d = _proj_dir(name)
+    if not (d / "build-state.json").exists():
+        raise ThreeError(f"no_project:{name}")
+    if not spec.get("components") or not spec.get("acceptance"):
+        raise ThreeError("spec_invalid: components/acceptance 必填")
+    (d / "three-spec.json").write_text(json.dumps(spec, ensure_ascii=False, indent=1), "utf-8")
+    append_history(name, {"action": "refine-spec", "pass": "-",
+                          "summary": str(spec.get("title") or spec.get("summary") or "")[:120]})
+    return {"ok": True}
+
+
+def read_spec(name: str) -> dict[str, Any]:
+    d = _proj_dir(name)
+    f = d / "three-spec.json"
+    if not f.exists():
+        raise ThreeError(f"no_project:{name}")
+    return {"ok": True, "spec": json.loads(f.read_text("utf-8"))}
 
 
 def read_project(name: str) -> dict[str, Any]:

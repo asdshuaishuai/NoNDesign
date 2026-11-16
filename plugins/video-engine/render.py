@@ -435,6 +435,8 @@ def main() -> int:
     for name, src in formulas.items():
         formula_exprs[name] = Expr(src, allowed)
 
+    if not tl.get("scenes"):
+        raise RenderRejected("no_scenes: timeline.scenes 为空——渲染 0 帧只会让 ffmpeg 产出坏片")
     fps = int(sys.argv[sys.argv.index("--fps") + 1]) if "--fps" in sys.argv else int(tl.get("fps", 30))
     keep_svg = "--keep-svg" in sys.argv
     W, H = int(tl.get("width", 1280)), int(tl.get("height", 720))

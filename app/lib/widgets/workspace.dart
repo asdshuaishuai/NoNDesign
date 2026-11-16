@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../core/keys.dart';
+import '../plugins/registry.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'canvas_view.dart';
@@ -12,12 +13,20 @@ import 'common.dart';
 import 'docs_view.dart';
 import 'left_panel.dart';
 import 'play_view.dart';
-import 'three_workspace.dart';
 import 'rail.dart';
 import 'right_panel.dart';
 import 'settings_dialog.dart';
 import 'status_bar.dart';
 import 'title_bar.dart';
+
+/// 插件快捷键数字键池（⌘5 起）；池容量即同时可注册插件数上限。
+const _pluginDigitKeys = [
+  LogicalKeyboardKey.digit5,
+  LogicalKeyboardKey.digit6,
+  LogicalKeyboardKey.digit7,
+  LogicalKeyboardKey.digit8,
+  LogicalKeyboardKey.digit9,
+];
 
 class Workspace extends StatefulWidget {
   const Workspace({super.key});
@@ -39,7 +48,9 @@ class _WorkspaceState extends State<Workspace> {
     final store = context.watch<AppStore>();
     final p = context.palette;
     if (store.view == 'play') return const PlayView();
-    if (store.view == 'three') return const ThreeWorkspace();
+    // 插件工作台路由（plugin:<id>）：注册表驱动，与设计板块解耦。
+    final pluginView = pluginWorkspaceFor(store.view);
+    if (pluginView != null) return pluginView;
     return CallbackShortcuts(
       bindings: {
       modKey(LogicalKeyboardKey.keyK): _command,
@@ -56,7 +67,9 @@ class _WorkspaceState extends State<Workspace> {
       modKey(LogicalKeyboardKey.digit2): () => store.setView('docs'),
       modKey(LogicalKeyboardKey.digit3): () => store.setView('source'),
       modKey(LogicalKeyboardKey.digit4): () => store.setView('play'),
-      modKey(LogicalKeyboardKey.digit5): () => store.setView('three'),
+      // 插件快捷键 ⌘5/⌘6/…：注册表顺序派生（新增插件零接线）。
+      for (var i = 0; i < pluginRegistry.length && i < _pluginDigitKeys.length; i++)
+        modKey(_pluginDigitKeys[i]): () => store.setView('plugin:${pluginRegistry[i].id}'),
       modKey(LogicalKeyboardKey.digit0): () {
         store.setView('design');
         store.bumpFit();
@@ -425,7 +438,8 @@ class _BoardTabs extends StatelessWidget {
           ),
           IconAction(icon: Icons.code, tooltip: 'MBT 源码 ${modCombo('⌘3')}', size: 26, onTap: () => store.setView('source')),
           IconAction(icon: Icons.play_arrow_outlined, tooltip: '演示模式 ${modCombo('⌘4')}', size: 26, onTap: () => store.setView('play')),
-          IconAction(icon: Icons.view_in_ar_outlined, tooltip: '3D 工作台 ${modCombo('⌘5')}', size: 26, onTap: () => store.setView('three')),
+          for (final def in pluginRegistry)
+            IconAction(icon: def.icon, tooltip: def.tooltip, size: 26, onTap: () => store.setView('plugin:${def.id}')),
           const SizedBox(width: 4),
           TextButton.icon(
             onPressed: () => store.setView('docs'),

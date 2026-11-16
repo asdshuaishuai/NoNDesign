@@ -14,8 +14,16 @@ server/       Python FastAPI + OpenAI Agents SDK + wasmtime 引擎宿主 + DDP
 engine/       MoonViz classic wasm（纯 WASM MVP、零 import）+ components.json
 figma-plugin/ Figma 双向插件（manifest.json 开发目录，可编辑图层双向桥）
 plugins/      独立插件：video-engine/ 代码生成视频（零 Flutter/服务器依赖）
+app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板块解耦）
 ```
 
+- **插件工作台 UI 与设计板块解耦**（用户裁决 2026-11-16 二次确认）：
+  `app/lib/plugins/registry.dart` 是注册表——每插件一个 PluginDef（id/
+  图标/builder），视图路由 `plugin:<id>`，顶栏入口与 ⌘5/⌘6… 快捷键按
+  注册顺序动态派生（workspace.dart 的 _pluginDigitKeys 数字键池容量 =
+  并存插件上限）。新增插件零散落接线：写工作台 widget + 注册一条即可。
+  3D 项目名持久化在 AppSettings.threeProjectName（工作台视图切换即
+  dispose，不持久化会「切走再回来全丢」）。
 - **插件轨道与引擎解耦**（用户裁决 2026-11-16，详见 docs/plan-plugins.md）：
   **Figma 双向桥 / 3D 制作工作台 / 代码生成视频 = 客户端能力加强**，不改
   引擎、不依赖引擎产物；**RSI 递归视觉修复例外——design 模块内置质量环**
@@ -27,7 +35,13 @@ plugins/      独立插件：video-engine/ 代码生成视频（零 Flutter/服�
   body（大 mbt 不能走 query，h11 头 16KB 上限）；② 插件 Import 曾读
   顶层 n.x/n.w——引擎 manifest 几何在 `n.rect`（真机 dump 实证），
   顶层字段全 undefined，导入图层塌到原点——geomOf() 兼容读取。
-- **代码生成视频**（已落地，`plugins/video-engine/`，独立管线）：
+- **代码生成视频**（已落地，`plugins/video-engine/`，独立管线；视频工作台
+  UI + /video/* 端点已接——sample/review 环②/render 后台 job 轮询/帧
+  serve；**无声版**，用户裁决音轨旁白暂不做。⚠️ 真 bug×3 登记：① mp4
+  产物名错位（render.py 写 frames.mp4，job 查 <jobid>.mp4）；② spec
+  落盘曾固定 spec.json 文件名——art-sketch 引 screenplay.json 会 miss
+  （load_spec 相对引用），必须按 timeline 引用名落盘；③ to_thread 直传
+  sp.run 的 kwargs dict 会落进 bufsize 位置参数——lambda 包齐。）：
   timeline DSL → 逐帧确定性 SVG → resvg（CJK 已验证）→ ffmpeg。
   **双强制纪律是管线硬门不是提示词**：① spec 先行（science/screenplay
   两形态，`spec_missing` exit 2）；② expr 符号声明闭包（自定义标识符

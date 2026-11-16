@@ -47,6 +47,10 @@
 - **冒烟实证**：三示例全链路出片；确定性（同 timeline 同 md5）；物理
   读数 v=17.47=3.882×4.5 精确吻合；undeclared_symbol / spec_missing
   拒绝路径 exit=2 实测。
+- **视频工作台（无声版，用户裁决音轨旁白暂不做）**：插件化 UI
+  （plugin:video 视图）——加载标杆示例 → 环②结果面板 → 后台渲染
+  （job 轮询，冒烟降帧 6-30fps 可调）→ 帧条带预览（/video/frame 带目录
+  穿越防护）。art/phys 双示例端到端 done+mp4 实证。
 - **真 bug 登记并修复**：含 t/T 的公式曾在 T=0 常量化 → 运动钉死起点、
   读数恒 0；现时间相关公式求值期展开（Expr 驻留 env 递归求值）。
 
@@ -75,6 +79,10 @@ LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引�
     不是证据）、自相交检测、attachment anchor 校验，全过才轮到 vision；
   - fail-closed：门不过不交付，BLOCKED 保留证据 refine-spec，不许通用
     场景糊弄；生成代码不是重建决策的唯一副本（手改回灌 spec）。
+- **C2 强化（本轮落地）**：turntable 四方位取证（单视角不是证据——
+  0/90/180/270 相机环绕各截一帧进 evidence，tag 命名）；规范手编回灌
+  （/three/spec/save + 工作台「规范」pane——img2threejs 纪律：手改落
+  spec 不许只改代码，components/acceptance 门复检）。
 - 输入模态：文字 brief / 参考图（img2threejs 式图→程序化 3D 重建：
   macro→meso→micro 分层观察、身份特征清单、单视角盲区显式声明）/ 图+文。
 - 技术底座已预验证：webview_flutter_wkwebview 3.27.2 macOS 支持 +

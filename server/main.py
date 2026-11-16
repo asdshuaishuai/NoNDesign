@@ -552,6 +552,11 @@ class ThreeContinueRequest(BaseModel):
     summary: str = ""
 
 
+class ThreeSpecSaveRequest(BaseModel):
+    name: str
+    spec: dict[str, Any]
+
+
 def _three_guard(fn, *args):
     try:
         return fn(*args)
@@ -591,6 +596,17 @@ async def three_feedback(req: ThreeFeedbackRequest) -> dict[str, Any]:
 async def three_continue(req: ThreeContinueRequest) -> dict[str, Any]:
     """评审通过推进下一 pass（必须有 evidence——每步必带证据）。"""
     return _three_guard(three.continue_pass, req.name, req.summary)
+
+
+@app.post("/three/spec/save")
+async def three_spec_save(req: ThreeSpecSaveRequest) -> dict[str, Any]:
+    """规范手编回灌（img2threejs：手改落 spec，不许只改代码）。"""
+    return _three_guard(three.save_spec, req.name, req.spec)
+
+
+@app.get("/three/spec")
+async def three_spec(name: str) -> dict[str, Any]:
+    return _three_guard(three.read_spec, name)
 
 
 @app.get("/three/project")
@@ -728,3 +744,116 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# ---------- 轨道 B 客户端面：视频工作台（调独立插件 plugins/video-engine/，
+# 端点只是调用方——引擎本身零服务器依赖，subprocess 独立进程） ----------
+
+class VideoRenderRequest(BaseModel):
+    timeline: dict[str, Any]
+    # spec 与 timeline 成对（管线硬门：render/review 都要求 spec 同目录）。
+    spec: dict[str, Any] | None = None
+    fps: int = 10  # 工作台冒烟预览默认降帧（全量 30fps 逐帧光栅化很慢）
+
+
+_VIDEO_JOBS: dict[str, dict[str, Any]] = {}
+_VIDEO_ROOT = Path.home() / "Documents" / "NoNDesign" / "video"
+
+
+@app.post("/video/render")
+async def video_render(req: VideoRenderRequest) -> dict[str, Any]:
+    """后台跑 render.py（job 轮询制：255 帧全量要 1-2 分钟，HTTP 同步会超时）。
+    无声版（用户裁决：音轨/旁白暂不做）。"""
+    import uuid
+    job = uuid.uuid4().hex[:12]
+    _VIDEO_ROOT.mkdir(parents=True, exist_ok=True)
+    d = _VIDEO_ROOT / job
+    d.mkdir(exist_ok=True)
+    tl_file = d / "timeline.json"
+    tl_file.write_text(json.dumps(req.timeline, ensure_ascii=False, indent=1), "utf-8")
+    if isinstance(req.spec, dict):
+        # 按 timeline 引用名落盘（art-sketch 引 screenplay.json、其余 spec.json——
+        # 固定文件名会让 load_spec 的相对引用 miss：art 渲染 failed 实证）
+        (d / Path(str(req.timeline.get("spec") or "spec.json")).name).write_text(
+            json.dumps(req.spec, ensure_ascii=False, indent=1), "utf-8")
+    _VIDEO_JOBS[job] = {"status": "running", "dir": str(d / "frames"), "log": "", "mp4": "", "frames": 0}
+    script = Path(__file__).resolve().parent.parent / "plugins" / "video-engine" / "render.py"
+
+    def _run() -> None:
+        import subprocess as sp
+        py = str(Path(sys.executable))
+        proc = sp.run([py, str(script), str(tl_file), str(d / "frames"),
+                       "--fps", str(max(1, min(30, req.fps)))],
+                      capture_output=True, text=True, timeout=600)
+        j = _VIDEO_JOBS[job]
+        j["log"] = (proc.stdout + proc.stderr)[-2000:]
+        if proc.returncode == 0:
+            # render.py 的 mp4 产物名 = <frames 目录名>.mp4 → d/frames.mp4
+            mp4 = d / "frames.mp4"
+            j["status"] = "done"
+            j["mp4"] = str(mp4) if mp4.exists() else ""
+            j["frames"] = len(list((d / "frames").glob("frame_*.png")))
+        else:
+            j["status"] = "failed"
+        _VIDEO_JOBS[job] = j
+
+    asyncio.get_running_loop().run_in_executor(None, _run)
+    return {"ok": True, "job": job}
+
+
+@app.get("/video/render/status")
+async def video_render_status(job: str) -> dict[str, Any]:
+    j = _VIDEO_JOBS.get(job)
+    if j is None:
+        raise HTTPException(status_code=404, detail=f"no_job:{job}")
+    return {"ok": True, **j}
+
+
+@app.get("/video/frame")
+async def video_frame(path: str, n: int = 0) -> PlainTextResponse:
+    """serve 渲染帧（path 限定在已注册 job 的 frames 目录内——防目录穿越）。"""
+    for j in _VIDEO_JOBS.values():
+        frames_dir = j.get("dir", "")
+        base = Path(frames_dir).resolve()
+        target = (base / f"frame_{n:05d}.png").resolve()
+        if str(target).startswith(str(base)) and target.exists():
+            return PlainTextResponse(target.read_bytes(), media_type="image/png")
+    raise HTTPException(status_code=404, detail="frame_not_found")
+
+
+@app.get("/video/sample")
+async def video_sample(timeline: str, spec: str) -> dict[str, Any]:
+    """读仓库标杆示例（timeline+spec 成对）。路径白名单校验（防穿越）。"""
+    _VIDEO_ROOT.mkdir(parents=True, exist_ok=True)
+    base = (Path(__file__).resolve().parent.parent / "plugins" / "video-engine" / "examples").resolve()
+    tl_path = (base / timeline).resolve()
+    sp_path = (base / spec).resolve()
+    for f in (tl_path, sp_path):
+        if not str(f).startswith(str(base)) or not f.exists():
+            raise HTTPException(status_code=400, detail=f"invalid_sample:{f.name}")
+    return {"ok": True,
+            "timeline": json.loads(tl_path.read_text("utf-8")),
+            "spec": json.loads(sp_path.read_text("utf-8"))}
+
+
+@app.post("/video/review")
+async def video_review(req: VideoRenderRequest) -> dict[str, Any]:
+    """环②机械对照（review.py）：符号闭包/beats 落片长/facts 形状。"""
+    import subprocess as sp
+    _VIDEO_ROOT.mkdir(parents=True, exist_ok=True)
+    d = _VIDEO_ROOT / "review-tmp"
+    d.mkdir(exist_ok=True)
+    tl_file = d / "timeline.json"
+    tl_file.write_text(json.dumps(req.timeline, ensure_ascii=False, indent=1), "utf-8")
+    if isinstance(req.spec, dict):
+        # 同 render：按 timeline 引用名落盘
+        (d / Path(str(req.timeline.get("spec") or "spec.json")).name).write_text(
+            json.dumps(req.spec, ensure_ascii=False, indent=1), "utf-8")
+    script = Path(__file__).resolve().parent.parent / "plugins" / "video-engine" / "review.py"
+    # to_thread 不能带 kwargs 直传 sp.run 的第二位置参数（bufsize）——lambda 包齐
+    proc = await asyncio.to_thread(lambda: sp.run(
+        [sys.executable, str(script), str(tl_file)],
+        capture_output=True, text=True, timeout=60,
+        cwd=str(Path(__file__).resolve().parent.parent)))
+    return {"ok": proc.returncode == 0, "exit": proc.returncode,
+            "output": (proc.stdout + proc.stderr)[-3000:]}

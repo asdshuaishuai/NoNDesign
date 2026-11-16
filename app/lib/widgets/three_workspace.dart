@@ -37,7 +37,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   Map<String, dynamic>? _state;
   Map<String, dynamic>? _spec;
   String _sceneJs = '';
-  bool _showSource = false;
+  // 面板三态：预览 / 源码 / 规范（规范手编 = img2threejs 的 refine-spec 面）。
+  String _face = 'preview';
+  final _specCtl = TextEditingController();
   bool _busy = false;
   WebViewController? _controller;
   String _lastError = '';
@@ -48,6 +50,12 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     if (!_wkRegistered) {
       WebKitWebViewPlatform.registerWith();
       _wkRegistered = true;
+    }
+    // 视图切换会 dispose 本工作台——从持久化项目名续接（跨会话亦然）。
+    final saved = store.settings.threeProjectName;
+    if (saved.isNotEmpty) {
+      _project = saved;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
     }
   }
 
@@ -65,6 +73,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _state = (res['state'] as Map?)?.cast<String, dynamic>();
           _spec = (res['spec'] as Map?)?.cast<String, dynamic>();
           _sceneJs = (res['scene_js'] as String?) ?? '';
+          _specCtl.text = const JsonEncoder.withIndent('  ').convert(_spec);
         });
       }
     } catch (_) {}
@@ -130,6 +139,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _state = (res['state'] as Map?)?.cast<String, dynamic>();
           _lastError = '';
         });
+        store.setThreeProjectName(name);
         _mountPreview();
         _toast('规范已生成（${(_spec?['components'] as List?)?.length ?? 0} 组件）', '点「生成当前层」开始 blockout。');
       } else {
@@ -167,7 +177,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       } else if (kind == 'metrics') {
         await api.threeFeedback(_project!, 'metrics', data['payload']);
       } else if (kind == 'screenshot') {
-        await api.threeFeedback(_project!, 'screenshot', data['payload']);
+        await api.threeFeedback(_project!, 'screenshot',
+            {'data': data['payload'], 'tag': data['tag'] ?? 'shot'});
       }
       await _refresh();
     } catch (_) {}
@@ -216,6 +227,30 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     }
   }
 
+  /// 规范手编回灌（客户端先验 JSON，服务器再过 components/acceptance 门）。
+  Future<void> _saveSpec() async {
+    final api = store.api;
+    if (api == null || _project == null) return;
+    Map<String, dynamic> parsed;
+    try {
+      parsed = (jsonDecode(_specCtl.text) as Map).cast<String, dynamic>();
+    } catch (e) {
+      _toast('JSON 解析失败', '$e');
+      return;
+    }
+    try {
+      final res = await api.postJson('/three/spec/save', {'name': _project, 'spec': parsed});
+      if (res['ok'] == true) {
+        _toast('规范已回灌', '后续生成层将使用新规范（refine-spec）');
+        await _refresh();
+      } else {
+        _toast('保存被拒', '${res['detail']}');
+      }
+    } catch (e) {
+      _toast('保存失败', '$e');
+    }
+  }
+
   void _toast(String title, String detail) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(title)));
@@ -254,29 +289,37 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
             const SizedBox(width: 8),
             _TopBtn(icon: Icons.auto_awesome_outlined, label: '生成当前层', onTap: _busy || _project == null ? null : _runPass),
             _TopBtn(icon: Icons.camera_alt_outlined, label: '截图', onTap: _project == null ? null : () => _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()')),
+            // turntable 四方位（img2threejs：单视角不是模型的证据）
+            _TopBtn(icon: Icons.rotate_90_degrees_ccw_outlined, label: '四方位取证', onTap: _project == null ? null : () => _controller?.runJavaScript('window.__non3d_turntable && window.__non3d_turntable()')),
             _TopBtn(icon: Icons.check_rounded, label: '通过并继续', onTap: _busy || _project == null ? null : _continue),
             _TopBtn(icon: Icons.refresh, label: '刷新预览', onTap: _project == null ? null : () => _controller?.loadRequest(Uri.parse(store.api!.threePreviewUrl(_project!)))),
-            _TopBtn(
-              icon: _showSource ? Icons.visibility_outlined : Icons.code_outlined,
-              label: _showSource ? '预览' : '源码',
-              onTap: _project == null ? null : () => setState(() => _showSource = !_showSource),
-            ),
+            for (final f in const [('preview', '预览', Icons.visibility_outlined), ('source', '源码', Icons.code_outlined), ('spec', '规范', Icons.rule_outlined)])
+              _TopBtn(
+                icon: f.$3,
+                label: f.$2,
+                onTap: _project == null ? null : () => setState(() => _face = f.$1),
+              ),
           ]),
         ),
         Expanded(
           child: _project == null
               ? _EmptyNew(onCreate: _createProject, busy: _busy)
-              : _showSource
-                  ? SingleChildScrollView(
+              : switch (_face) {
+                  'source' => SingleChildScrollView(
                       padding: const EdgeInsets.all(14),
                       child: SelectableText(
                         _sceneJs.isEmpty ? '// 尚无 scene.js——点「生成当前层」' : _sceneJs,
                         style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: p.ink2, height: 1.5),
                       ),
-                    )
-                  : (_controller == null
+                    ),
+                  'spec' => _SpecPane(
+                      controller: _specCtl,
+                      onSave: () => _saveSpec(),
+                    ),
+                  _ => (_controller == null
                       ? const Center(child: Text('加载预览…'))
                       : WebViewWidget(controller: _controller!)),
+                },
         ),
       ],
     );
@@ -369,5 +412,48 @@ class _TopBtn extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+
+/// 规范手编面板：编辑 three-spec.json → 回灌（refine-spec 纪律面）。
+class _SpecPane extends StatelessWidget {
+  const _SpecPane({required this.controller, required this.onSave});
+  final TextEditingController controller;
+  final VoidCallback onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+        child: Row(children: [
+          Text('three-spec.json', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.ink2, fontFamily: 'monospace')),
+          const Spacer(),
+          OutlinedButton.icon(
+            onPressed: onSave,
+            icon: const Icon(Icons.save_outlined, size: 14),
+            label: const Text('回灌规范', style: TextStyle(fontSize: 12)),
+          ),
+        ]),
+      ),
+      Expanded(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: TextField(
+            controller: controller,
+            maxLines: null,
+            expands: true,
+            style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: p.ink2, height: 1.5),
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: p.panel2,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: p.line)),
+            ),
+          ),
+        ),
+      ),
+    ]);
   }
 }

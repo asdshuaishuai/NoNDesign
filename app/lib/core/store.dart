@@ -272,6 +272,14 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 3D 工作台当前项目名（'' = 无）：跨视图/跨会话续接同一项目
+  /// （工作台视图切换即 dispose，内存态不保活）。
+  void setThreeProjectName(String name) {
+    settings.threeProjectName = name;
+    saveSettings();
+    notifyListeners();
+  }
+
   void setDocsTab(String value) {
     docsTab = value;
     notifyListeners();

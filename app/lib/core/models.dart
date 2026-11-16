@@ -423,6 +423,9 @@ class AppSettings {
   String? acpAgentId;
   /// 选中 agent 的显示名（选定时随 id 一起持久化，输入框 pill 用）。
   String? acpAgentName;
+  /// 3D 工作台当前项目名（'' = 无）。工作台视图切换会 dispose 状态，
+  /// 项目名持久化让「切走再回来」续接同一项目（跨会话亦然）。
+  String threeProjectName;
 
   AppSettings({
     this.providerId = 'deepseek',
@@ -434,6 +437,7 @@ class AppSettings {
     this.theme = 'dark',
     this.acpAgentId,
     this.acpAgentName,
+    this.threeProjectName = '',
   });
 
   Map<String, dynamic> toJson() => {
@@ -446,6 +450,7 @@ class AppSettings {
         'theme': theme,
         'acpAgentId': acpAgentId,
         'acpAgentName': acpAgentName,
+        'threeProjectName': threeProjectName,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> m) => AppSettings(
@@ -458,6 +463,7 @@ class AppSettings {
         theme: (m['theme'] ?? 'dark').toString(),
         acpAgentId: m['acpAgentId']?.toString(),
         acpAgentName: m['acpAgentName']?.toString(),
+        threeProjectName: (m['threeProjectName'] ?? '').toString(),
       );
 }
 
