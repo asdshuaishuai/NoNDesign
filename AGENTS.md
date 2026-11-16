@@ -49,6 +49,16 @@ app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板�
   在模拟器实测 Welcome→3D 工作台→返回。**Android**：SDK platforms/build-tools/NDK
   28.2 已装，但 `flutter build apk --debug` 在 Gradle 9.5/AGP 9.3.1 下启动即挂起
   （daemon 无网络活动、无任务输出），待专项排查。
+- **移动端第二轮优化（2026-11-16 深夜，402×874 全界面真实渲染审计）**：文档视图
+  tab 行右溢 58px、文档工具条/底部提示条各右溢 246px、空画布卡固定 520 宽、
+  视频工作台 300px 固定配置列把帧预览压到 102px、设置弹窗 860×600 被夹成 310 宽、
+  Workspace/插件/作品集全无 SafeArea。修复：统一 SafeArea；DocsView 工具条窄屏
+  收紧（tab 紧凑、动作改图标态、键盘提示隐藏）；空画布卡限宽 + Expanded + Wrap；
+  视频窄屏改单列滚动（配置在上、预览固定 280 高）；设置弹窗窄屏全屏 + 顶部横向
+  导航条；状态栏/画布 HUD 的桌面键盘提示在窄屏隐藏。回归：
+  `app/test/mobile_surfaces_test.dart`（402/390 × 视频/3D/A2UI/作品集/文档/设计/
+  演示/设置/底部 sheet 共 19 项 + 宽屏视频双栏）；全量 48 项测试绿；模拟器截图
+  复核文档/设计/视频/设置四屏。
 - **插件工作台 UI 与设计板块解耦**（用户裁决 2026-11-16 二次确认）：
   `app/lib/plugins/registry.dart` 是注册表——每插件一个 PluginDef（id/
   图标/builder），视图路由 `plugin:<id>`，顶栏入口与 ⌘5/⌘6… 快捷键按

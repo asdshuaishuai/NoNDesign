@@ -102,79 +102,108 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final p = context.palette;
+    // 手机窄屏：860×600 会被 Dialog 夹到 ~310×600，176px 侧栏只剩 ~98px 内容区。
+    // 窄屏改全屏弹层 + 顶部横向导航条，宽屏保持原双栏。
+    final narrow = MediaQuery.sizeOf(context).width < 700;
+    final navItems = <(String, IconData, String)>[
+      ('models', Icons.memory, '模型与端点'),
+      ('appearance', Icons.palette_outlined, '外观与交互'),
+      ('agent', Icons.speed, '上下文与缓存'),
+      ('acp', Icons.hub_outlined, '外部智能体'),
+      ('about', Icons.info_outline, '关于'),
+    ];
+    final content = Padding(
+      padding: EdgeInsets.all(narrow ? 14 : 18),
+      child: switch (_tab) {
+        'appearance' => _appearance(context, store),
+        'agent' => _agent(context, store),
+        'acp' => _acp(context, store),
+        'about' => _about(context, store),
+        _ => _models(context, store),
+      },
+    );
     return Dialog(
+      insetPadding: narrow ? EdgeInsets.zero : const EdgeInsets.all(24),
       backgroundColor: p.panel,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.lineStrong)),
+      shape: narrow
+          ? const RoundedRectangleBorder()
+          : RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.lineStrong)),
       child: SizedBox(
-        width: 860,
-        height: 600,
-        child: Column(
-          children: [
-            Container(
-              height: 54,
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
-              child: Row(
-                children: [
-                  Text('设置', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
-                  const SizedBox(width: 8),
-                  Text('模型、外观与 Agent 上下文策略', style: TextStyle(fontSize: 11, color: p.ink3)),
-                  const Spacer(),
-                  IconAction(icon: Icons.close, tooltip: '关闭', size: 26, onTap: () => Navigator.pop(context)),
-                ],
+        width: narrow ? double.infinity : 860,
+        height: narrow ? double.infinity : 600,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Container(
+                height: 54,
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+                child: Row(
+                  children: [
+                    Text('设置', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
+                    if (!narrow) ...[
+                      const SizedBox(width: 8),
+                      Text('模型、外观与 Agent 上下文策略', style: TextStyle(fontSize: 11, color: p.ink3)),
+                    ],
+                    const Spacer(),
+                    IconAction(icon: Icons.close, tooltip: '关闭', size: 26, onTap: () => Navigator.pop(context)),
+                  ],
+                ),
               ),
-            ),
-            Expanded(
-              child: Row(
-                children: [
-                  Container(
-                    width: 176,
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: p.panel2.withValues(alpha: 0.3),
-                      border: Border(right: BorderSide(color: p.line)),
-                    ),
-                    child: Column(
-                      children: [
-                        _nav(context, 'models', Icons.memory, '模型与端点'),
-                        _nav(context, 'appearance', Icons.palette_outlined, '外观与交互'),
-                        _nav(context, 'agent', Icons.speed, '上下文与缓存'),
-                        _nav(context, 'acp', Icons.hub_outlined, '外部智能体'),
-                        _nav(context, 'about', Icons.info_outline, '关于'),
-                      ],
-                    ),
+              if (narrow)
+                Container(
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: p.panel2.withValues(alpha: 0.3),
+                    border: Border(bottom: BorderSide(color: p.line)),
                   ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: switch (_tab) {
-                        'appearance' => _appearance(context, store),
-                        'agent' => _agent(context, store),
-                        'acp' => _acp(context, store),
-                        'about' => _about(context, store),
-                        _ => _models(context, store),
-                      },
-                    ),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(children: [
+                      for (final item in navItems) _nav(context, item.$1, item.$2, item.$3, compact: true),
+                    ]),
                   ),
-                ],
+                ),
+              Expanded(
+                child: narrow
+                    ? content
+                    : Row(
+                        children: [
+                          Container(
+                            width: 176,
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: p.panel2.withValues(alpha: 0.3),
+                              border: Border(right: BorderSide(color: p.line)),
+                            ),
+                            child: Column(
+                              children: [
+                                for (final item in navItems) _nav(context, item.$1, item.$2, item.$3),
+                              ],
+                            ),
+                          ),
+                          Expanded(child: content),
+                        ],
+                      ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _nav(BuildContext context, String id, IconData icon, String label) {
+  Widget _nav(BuildContext context, String id, IconData icon, String label, {bool compact = false}) {
     final p = context.palette;
     final active = _tab == id;
     return InkWell(
       borderRadius: BorderRadius.circular(8),
       onTap: () => setState(() => _tab = id),
       child: Container(
-        height: 34,
-        margin: const EdgeInsets.only(bottom: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 9),
+        height: compact ? 32 : 34,
+        margin: compact ? const EdgeInsets.only(right: 4) : const EdgeInsets.only(bottom: 2),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 9),
         decoration: BoxDecoration(
           color: active ? p.panel : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
@@ -183,7 +212,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           children: [
             Icon(icon, size: 14, color: active ? p.accent : p.ink4),
             const SizedBox(width: 7),
-            Text(label, style: TextStyle(fontSize: 12, color: active ? p.ink : p.ink3)),
+            Text(label,
+                maxLines: 1,
+                style: TextStyle(fontSize: 12, color: active ? p.ink : p.ink3)),
           ],
         ),
       ),

@@ -428,10 +428,14 @@ class _WelcomeState extends State<Welcome> {
 
   Widget _briefHints(BuildContext context) {
     final p = context.palette;
+    // 手机没有键盘：快捷键提示不显示，只留可点的动作。
+    final narrow = MediaQuery.sizeOf(context).width < 700;
     return Row(
       children: [
-        Text('${modCombo('⌘↵')} 开始', style: TextStyle(fontSize: 10, color: p.ink4)),
-        const SizedBox(width: 10),
+        if (!narrow) ...[
+          Text('${modCombo('⌘↵')} 开始', style: TextStyle(fontSize: 10, color: p.ink4)),
+          const SizedBox(width: 10),
+        ],
         InkWell(
           onTap: () => showNewProjectFlow(context),
           child: Text('空白项目', style: TextStyle(fontSize: 10, color: p.ink4)),

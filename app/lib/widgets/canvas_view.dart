@@ -632,7 +632,9 @@ class _CanvasViewState extends State<CanvasView> {
                       border: Border.all(color: p.line),
                     ),
                     child: Text(
-                      '${boards.length} 画板 · space 拖动 · ${modCombo('⌘')}滚轮缩放',
+                      MediaQuery.sizeOf(context).width < 700
+                          ? '${boards.length} 画板'
+                          : '${boards.length} 画板 · space 拖动 · ${modCombo('⌘')}滚轮缩放',
                       style: TextStyle(fontSize: 10, color: p.ink4),
                     ),
                   ),
@@ -1524,9 +1526,15 @@ class _EmptyCanvas extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    // 固定 520 宽在手机（画布可用 ~344）会溢出；限宽到可用宽度并给文字留
+    // Expanded，按钮换行。宽屏仍保持 520 的卡片宽度。
     return Center(
-      child: Container(
-        width: 520,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Container(
+        width: double.infinity,
         padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
           color: p.panel.withValues(alpha: 0.94),
@@ -1550,27 +1558,34 @@ class _EmptyCanvas extends StatelessWidget {
                   child: const Icon(Icons.auto_awesome, size: 17, color: Colors.white),
                 ),
                 const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('从一句话开始', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
-                    Text('NoN 先写产品文档与设计规范，再把原型画到画布上。',
-                        style: TextStyle(fontSize: 11, color: p.ink3)),
-                  ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('从一句话开始', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
+                      Text('NoN 先写产品文档与设计规范，再把原型画到画布上。',
+                          style: TextStyle(fontSize: 11, color: p.ink3)),
+                    ],
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 14),
-            Text('在右侧 NoN 面板描述你的产品；或先用文档页生成 PRD。',
-                style: TextStyle(fontSize: 12, height: 1.6, color: p.ink3)),
+            Text(
+              MediaQuery.sizeOf(context).width < 700
+                  ? '在底部 NoN 面板描述你的产品；或先用文档页生成 PRD。'
+                  : '在右侧 NoN 面板描述你的产品；或先用文档页生成 PRD。',
+              style: TextStyle(fontSize: 12, height: 1.6, color: p.ink3),
+            ),
             const SizedBox(height: 10),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 FilledButton(
                   onPressed: () => store.setRightTab('agent'),
                   child: const Text('打开 NoN'),
                 ),
-                const SizedBox(width: 8),
                 OutlinedButton(
                   onPressed: () => store.setView('docs'),
                   child: const Text('先写文档'),
@@ -1578,6 +1593,8 @@ class _EmptyCanvas extends StatelessWidget {
               ],
             ),
           ],
+        ),
+          ),
         ),
       ),
     );

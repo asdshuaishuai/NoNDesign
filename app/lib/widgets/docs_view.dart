@@ -101,36 +101,56 @@ class _DocsViewState extends State<DocsView> {
           height: 48,
           padding: const EdgeInsets.symmetric(horizontal: 14),
           decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
-          child: Row(
-            children: [
-              _tab(context, store, 'prd', Icons.description_outlined, '产品需求', store.docs.prd.isNotEmpty),
-              const SizedBox(width: 2),
-              _tab(context, store, 'ui', Icons.layers_outlined, 'UI 说明', store.docs.ui.isNotEmpty),
-              const SizedBox(width: 2),
-              _tab(context, store, 'spec', Icons.palette_outlined, '设计规范', true),
-              const Spacer(),
-              if (store.agentBusy) ...[
-                SizedBox(width: 11, height: 11, child: CircularProgressIndicator(strokeWidth: 1.5, color: p.accent)),
-                const SizedBox(width: 6),
-                Text(store.agentPhase == 'planning' ? 'NoN 正在写文档…' : 'NoN 正在工作…',
-                    style: TextStyle(fontSize: 10, color: p.accent)),
-                const SizedBox(width: 10),
+          child: LayoutBuilder(builder: (context, constraints) {
+            // 窄屏（手机 390–410）：三个 tab + 「生成原型」按钮曾右溢 58px。
+            // tab 收紧内边距、动作按钮改图标态，文字进度提示让位给 spinner。
+            final narrow = constraints.maxWidth < 520;
+            return Row(
+              children: [
+                _tab(context, store, 'prd', Icons.description_outlined, '产品需求', store.docs.prd.isNotEmpty, compact: narrow),
+                const SizedBox(width: 2),
+                _tab(context, store, 'ui', Icons.layers_outlined, 'UI 说明', store.docs.ui.isNotEmpty, compact: narrow),
+                const SizedBox(width: 2),
+                _tab(context, store, 'spec', Icons.palette_outlined, '设计规范', true, compact: narrow),
+                const Spacer(),
+                if (store.agentBusy) ...[
+                  SizedBox(width: 11, height: 11, child: CircularProgressIndicator(strokeWidth: 1.5, color: p.accent)),
+                  if (!narrow) ...[
+                    const SizedBox(width: 6),
+                    Text(store.agentPhase == 'planning' ? 'NoN 正在写文档…' : 'NoN 正在工作…',
+                        style: TextStyle(fontSize: 10, color: p.accent)),
+                    const SizedBox(width: 10),
+                  ],
+                ],
+                if (narrow)
+                  IconButton(
+                    tooltip: '生成原型',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.auto_awesome, size: 16),
+                    onPressed: store.agentBusy || store.docs.prd.trim().isEmpty
+                        ? null
+                        : () {
+                            store.setView('design');
+                            store.runBuild('请根据 PRD 与 UI 说明生成完整可交互原型。先规划页面连接，再逐屏生成，最后连线并自检。');
+                          },
+                  )
+                else
+                  OutlinedButton(
+                    onPressed: store.agentBusy || store.docs.prd.trim().isEmpty
+                        ? null
+                        : () {
+                            store.setView('design');
+                            store.runBuild('请根据 PRD 与 UI 说明生成完整可交互原型。先规划页面连接，再逐屏生成，最后连线并自检。');
+                          },
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.auto_awesome, size: 12),
+                      SizedBox(width: 4),
+                      Text('生成原型'),
+                    ]),
+                  ),
               ],
-              OutlinedButton(
-                onPressed: store.agentBusy || store.docs.prd.trim().isEmpty
-                    ? null
-                    : () {
-                        store.setView('design');
-                        store.runBuild('请根据 PRD 与 UI 说明生成完整可交互原型。先规划页面连接，再逐屏生成，最后连线并自检。');
-                      },
-                child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.auto_awesome, size: 12),
-                  SizedBox(width: 4),
-                  Text('生成原型'),
-                ]),
-              ),
-            ],
-          ),
+            );
+          }),
         ),
         Expanded(
           child: tab == 'spec'
@@ -143,7 +163,8 @@ class _DocsViewState extends State<DocsView> {
     );
   }
 
-  Widget _tab(BuildContext context, AppStore store, String id, IconData icon, String label, bool done) {
+  Widget _tab(BuildContext context, AppStore store, String id, IconData icon, String label, bool done,
+      {bool compact = false}) {
     final p = context.palette;
     final active = store.docsTab == id;
     return InkWell(
@@ -151,7 +172,7 @@ class _DocsViewState extends State<DocsView> {
       onTap: () => store.setDocsTab(id),
       child: Container(
         height: 28,
-        padding: const EdgeInsets.symmetric(horizontal: 9),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 9),
         decoration: BoxDecoration(
           color: active ? p.panel2 : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
@@ -159,8 +180,8 @@ class _DocsViewState extends State<DocsView> {
         child: Row(
           children: [
             Icon(icon, size: 12, color: active ? p.accent : p.ink4),
-            const SizedBox(width: 5),
-            Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: active ? p.ink : p.ink3)),
+            SizedBox(width: compact ? 4 : 5),
+            Text(label, style: TextStyle(fontSize: compact ? 11 : 12, fontWeight: FontWeight.w500, color: active ? p.ink : p.ink3)),
             if (done)
               Padding(
                 padding: const EdgeInsets.only(left: 5),
@@ -248,28 +269,47 @@ class _DocsViewState extends State<DocsView> {
       children: [
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-          child: Row(
-            children: [
-              Pill(label: kind == 'prd' ? 'PRD' : 'UI SPEC', color: p.accent, background: p.accentSoft),
-              const SizedBox(width: 8),
-              Text(_charCountOf(source), style: TextStyle(fontSize: 10, color: p.ink4)),
-              const Spacer(),
-              _toggle(context, _preview, '预览', Icons.visibility_outlined, () => setState(() => _preview = true)),
-              const SizedBox(width: 2),
-              _toggle(context, !_preview, '编辑', Icons.edit_outlined, () => setState(() => _preview = false)),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                onPressed: store.agentBusy
-                    ? null
-                    : () => store.runPlan('请基于当前文档继续完善 ${kind == 'prd' ? 'PRD' : 'UI 说明'}。保留已有有效内容，补全缺失的边界、状态与验收标准。'),
-                child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.auto_fix_high, size: 12),
-                  SizedBox(width: 4),
-                  Text('让 NoN 完善'),
-                ]),
-              ),
-            ],
-          ),
+          child: LayoutBuilder(builder: (context, constraints) {
+            // 窄屏：Pill + 字数 + 预览/编辑 + 「让 NoN 完善」曾右溢 246px。
+            // 窄屏下切换与完善按钮改图标态（带 tooltip），正文区不受挤压。
+            final narrow = constraints.maxWidth < 560;
+            return Row(
+              children: [
+                Pill(label: kind == 'prd' ? 'PRD' : 'UI SPEC', color: p.accent, background: p.accentSoft),
+                const SizedBox(width: 8),
+                Text(_charCountOf(source), style: TextStyle(fontSize: 10, color: p.ink4)),
+                const Spacer(),
+                _toggle(context, _preview, '预览', Icons.visibility_outlined, () => setState(() => _preview = true),
+                    compact: narrow),
+                const SizedBox(width: 2),
+                _toggle(context, !_preview, '编辑', Icons.edit_outlined, () => setState(() => _preview = false),
+                    compact: narrow),
+                const SizedBox(width: 8),
+                if (narrow)
+                  IconButton(
+                    tooltip: '让 NoN 完善',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.auto_fix_high, size: 16),
+                    onPressed: store.agentBusy
+                        ? null
+                        : () => store.runPlan(
+                            '请基于当前文档继续完善 ${kind == 'prd' ? 'PRD' : 'UI 说明'}。保留已有有效内容，补全缺失的边界、状态与验收标准。'),
+                  )
+                else
+                  OutlinedButton(
+                    onPressed: store.agentBusy
+                        ? null
+                        : () => store.runPlan(
+                            '请基于当前文档继续完善 ${kind == 'prd' ? 'PRD' : 'UI 说明'}。保留已有有效内容，补全缺失的边界、状态与验收标准。'),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.auto_fix_high, size: 12),
+                      SizedBox(width: 4),
+                      Text('让 NoN 完善'),
+                    ]),
+                  ),
+              ],
+            );
+          }),
         ),
         Expanded(
           child: SingleChildScrollView(
@@ -335,26 +375,38 @@ class _DocsViewState extends State<DocsView> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
           decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
-          child: Row(
-            children: [
-              Text('Markdown · 存在 .mbt.md 的 nondesign 标记里，随 DDP 一起走',
-                  style: TextStyle(fontSize: 10, color: p.ink4)),
-              const Spacer(),
-              Text('${modCombo('⌘↵')} 生成原型', style: TextStyle(fontSize: 10, color: p.ink4)),
-            ],
-          ),
+          child: LayoutBuilder(builder: (context, constraints) {
+            // 手机窄屏：长说明 + 快捷键提示曾右溢 246px。窄屏省略说明、隐藏
+            // 键盘快捷键（手机没有键盘）。
+            final narrow = constraints.maxWidth < 560;
+            return Row(
+              children: [
+                Expanded(
+                  child: Text('Markdown · 存在 .mbt.md 的 nondesign 标记里，随 DDP 一起走',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 10, color: p.ink4)),
+                ),
+                if (!narrow) ...[
+                  const SizedBox(width: 8),
+                  Text('${modCombo('⌘↵')} 生成原型', style: TextStyle(fontSize: 10, color: p.ink4)),
+                ],
+              ],
+            );
+          }),
         ),
       ],
     );
   }
 
-  Widget _toggle(BuildContext context, bool active, String label, IconData icon, VoidCallback onTap) {
+  Widget _toggle(BuildContext context, bool active, String label, IconData icon, VoidCallback onTap,
+      {bool compact = false}) {
     final p = context.palette;
-    return InkWell(
+    final body = InkWell(
       borderRadius: BorderRadius.circular(6),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 7, vertical: 4),
         decoration: BoxDecoration(
           color: active ? p.panel3 : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
@@ -362,12 +414,15 @@ class _DocsViewState extends State<DocsView> {
         child: Row(
           children: [
             Icon(icon, size: 11, color: active ? p.ink2 : p.ink4),
-            const SizedBox(width: 3),
-            Text(label, style: TextStyle(fontSize: 11, color: active ? p.ink2 : p.ink4)),
+            if (!compact) ...[
+              const SizedBox(width: 3),
+              Text(label, style: TextStyle(fontSize: 11, color: active ? p.ink2 : p.ink4)),
+            ],
           ],
         ),
       ),
     );
+    return compact ? Tooltip(message: label, child: body) : body;
   }
 }
 

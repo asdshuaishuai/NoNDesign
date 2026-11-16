@@ -547,14 +547,17 @@ class _EmptyNew extends StatelessWidget {
         const SizedBox(height: 14),
         Text('直接制作 3D', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.ink)),
         const SizedBox(height: 6),
-        SizedBox(
-          width: 380,
-          child: Text(
-            '一句话目标 → 规范先行（组件/材质/相机/验收标准）→ 分层生成\n'
-            '占位 → 结构 → 造型 → 材质 → 灯光 → 交互，应用内实时预览，\n'
-            '执行错误/测量/截图三反馈自动驱动修复轮。',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: p.ink3, height: 1.7),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 380),
+            child: Text(
+              '一句话目标 → 规范先行（组件/材质/相机/验收标准）→ 分层生成\n'
+              '占位 → 结构 → 造型 → 材质 → 灯光 → 交互，应用内实时预览，\n'
+              '执行错误/测量/截图三反馈自动驱动修复轮。',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: p.ink3, height: 1.7),
+            ),
           ),
         ),
         const SizedBox(height: 18),

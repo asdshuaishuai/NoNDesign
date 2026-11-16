@@ -206,10 +206,6 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final status = _jobState?['status']?.toString();
-    final total = _tl == null
-        ? 0.0
-        : ((_tl!['scenes'] as List?)?.fold<double>(0, (a, s) => a + ((s['duration'] as num?)?.toDouble() ?? 0)) ?? 0);
     return Column(
       children: [
         Container(
@@ -250,100 +246,138 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           }),
         ),
         Expanded(
-          child: Row(children: [
-            // 左：配置列
-            Container(
-              width: 300,
-              decoration: BoxDecoration(border: Border(right: BorderSide(color: p.line))),
-              padding: const EdgeInsets.all(14),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Text('标杆示例', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.ink2)),
-                const SizedBox(height: 8),
-                for (var i = 0; i < _samples.length; i++)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: InkWell(
-                      onTap: () {
-                        setState(() => _sampleIdx = i);
-                        store.setVideoState(sampleIdx: i);
-                      },
-                      borderRadius: BorderRadius.circular(8),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: i == _sampleIdx ? p.accentSoft : p.panel2,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: i == _sampleIdx ? p.accent : p.line),
-                        ),
-                        child: Text(_samples[i].label, style: TextStyle(fontSize: 12, color: i == _sampleIdx ? p.accent : p.ink2)),
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 10),
-                Row(children: [
-                  Text('fps ${_fps.round()}', style: TextStyle(fontSize: 12, color: p.ink2)),
-                  Expanded(
-                    child: Slider(
-                      value: _fps,
-                      min: 6, max: 30, divisions: 12,
-                      label: '${_fps.round()}',
-                      activeColor: p.accent,
-                      onChanged: (v) => setState(() => _fps = v),
-                    ),
-                  ),
-                ]),
-                Text('片长 ${total.toStringAsFixed(1)}s · 冒烟预览降帧（成片再 30fps 全量）',
-                    style: TextStyle(fontSize: 10, color: p.ink4)),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: _busy ? null : _loadSample,
-                  icon: const Icon(Icons.upload_file, size: 15),
-                  label: const Text('加载示例'),
+          child: LayoutBuilder(builder: (context, constraints) {
+            // 手机窄屏：300px 固定配置列会把帧预览压到 ~100px（无溢出但不可用）。
+            // 窄屏改单列滚动：配置在上、预览固定高度在下。
+            final narrow = constraints.maxWidth < 700;
+            if (narrow) {
+              return SingleChildScrollView(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _configColumn(context, narrow: true),
+                    const SizedBox(height: 8),
+                    SizedBox(height: 280, child: _previewPane(context)),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _busy || _tl == null ? null : _render,
-                  icon: const Icon(Icons.play_circle_outlined, size: 15),
-                  label: const Text('渲染（后台）'),
-                ),
-                const SizedBox(height: 14),
-                if (_reviewOutput.isNotEmpty) ...[
-                  Row(children: [
-                    Icon(Icons.rule_outlined, size: 14, color: p.ink3),
-                    const SizedBox(width: 5),
-                    Text('环② spec 对照', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.ink2)),
-                  ]),
-                  const SizedBox(height: 6),
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
-                      child: SingleChildScrollView(
-                        child: SelectableText(_reviewOutput,
-                            style: TextStyle(fontSize: 11, fontFamily: 'monospace', color: p.ink3, height: 1.5)),
-                      ),
-                    ),
-                  ),
-                ],
-              ]),
-            ),
-            // 右：帧预览
-            Expanded(
-              child: _previewCount > 0
-                  ? _FrameStrip(baseUrl: store.api?.baseUrl ?? '', count: _previewCount, jobDir: _jobState?['dir']?.toString() ?? '')
-                  : Center(
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.movie_outlined, size: 42, color: p.ink4),
-                        const SizedBox(height: 12),
-                        Text(status == 'running' ? '渲染中…（逐帧确定性光栅化）' : '加载示例后点「渲染」',
-                            style: TextStyle(fontSize: 12, color: p.ink3)),
-                      ]),
-                    ),
-            ),
-          ]),
+              );
+            }
+            return Row(children: [
+              SizedBox(width: 300, child: _configColumn(context, narrow: false)),
+              Expanded(child: _previewPane(context)),
+            ]);
+          }),
         ),
       ],
     );
+  }
+
+  /// 配置列（宽屏固定 300 / 窄屏整宽纵向排列）。
+  Widget _configColumn(BuildContext context, {required bool narrow}) {
+    final p = context.palette;
+    final total = _tl == null
+        ? 0.0
+        : ((_tl!['scenes'] as List?)?.fold<double>(0, (a, s) => a + ((s['duration'] as num?)?.toDouble() ?? 0)) ?? 0);
+    final reviewBox = Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
+      child: SingleChildScrollView(
+        child: SelectableText(_reviewOutput,
+            style: TextStyle(fontSize: 11, fontFamily: 'monospace', color: p.ink3, height: 1.5)),
+      ),
+    );
+    return Container(
+      width: narrow ? double.infinity : 300,
+      decoration: BoxDecoration(
+        border: narrow ? null : Border(right: BorderSide(color: p.line)),
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        mainAxisSize: narrow ? MainAxisSize.min : MainAxisSize.max,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('标杆示例', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.ink2)),
+          const SizedBox(height: 8),
+          for (var i = 0; i < _samples.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: InkWell(
+                onTap: () {
+                  setState(() => _sampleIdx = i);
+                  store.setVideoState(sampleIdx: i);
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: i == _sampleIdx ? p.accentSoft : p.panel2,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: i == _sampleIdx ? p.accent : p.line),
+                  ),
+                  child: Text(_samples[i].label, style: TextStyle(fontSize: 12, color: i == _sampleIdx ? p.accent : p.ink2)),
+                ),
+              ),
+            ),
+          const SizedBox(height: 10),
+          Row(children: [
+            Text('fps ${_fps.round()}', style: TextStyle(fontSize: 12, color: p.ink2)),
+            Expanded(
+              child: Slider(
+                value: _fps,
+                min: 6, max: 30, divisions: 12,
+                label: '${_fps.round()}',
+                activeColor: p.accent,
+                onChanged: (v) => setState(() => _fps = v),
+              ),
+            ),
+          ]),
+          Text('片长 ${total.toStringAsFixed(1)}s · 冒烟预览降帧（成片再 30fps 全量）',
+              style: TextStyle(fontSize: 10, color: p.ink4)),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _busy ? null : _loadSample,
+            icon: const Icon(Icons.upload_file, size: 15),
+            label: const Text('加载示例'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy || _tl == null ? null : _render,
+            icon: const Icon(Icons.play_circle_outlined, size: 15),
+            label: const Text('渲染（后台）'),
+          ),
+          const SizedBox(height: 14),
+          if (_reviewOutput.isNotEmpty) ...[
+            Row(children: [
+              Icon(Icons.rule_outlined, size: 14, color: p.ink3),
+              const SizedBox(width: 5),
+              Text('环② spec 对照', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.ink2)),
+            ]),
+            const SizedBox(height: 6),
+            if (narrow) SizedBox(height: 160, child: reviewBox) else Expanded(child: reviewBox),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 帧预览（加载前是空态提示）。
+  Widget _previewPane(BuildContext context) {
+    final p = context.palette;
+    final status = _jobState?['status']?.toString();
+    return _previewCount > 0
+        ? _FrameStrip(
+            baseUrl: store.api?.baseUrl ?? '',
+            count: _previewCount,
+            jobDir: _jobState?['dir']?.toString() ?? '')
+        : Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.movie_outlined, size: 42, color: p.ink4),
+              const SizedBox(height: 12),
+              Text(status == 'running' ? '渲染中…（逐帧确定性光栅化）' : '加载示例后点「渲染」',
+                  style: TextStyle(fontSize: 12, color: p.ink3)),
+            ]),
+          );
   }
 }
 

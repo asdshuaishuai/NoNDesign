@@ -13,6 +13,8 @@ class StatusBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final p = context.palette;
+    // 手机没有键盘：⌘K 命令面板提示不显示（命中区仍在，可点）。
+    final narrow = MediaQuery.sizeOf(context).width < 700;
     final input = (store.usage['inputTokens'] as num?)?.toDouble() ?? 0;
     final cached = (store.usage['cachedTokens'] as num?)?.toDouble() ?? 0;
     final cacheRate = input > 0 ? (cached / input * 100).round() : 0;
@@ -86,16 +88,17 @@ class StatusBar extends StatelessWidget {
                 overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: p.ink4)),
           ),
           const SizedBox(width: 10),
-          InkWell(
-            onTap: onCommand,
-            child: Row(
-              children: [
-                Icon(Icons.keyboard_command_key, size: 10, color: p.ink4),
-                const SizedBox(width: 2),
-                Text('K', style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
-              ],
+          if (!narrow)
+            InkWell(
+              onTap: onCommand,
+              child: Row(
+                children: [
+                  Icon(Icons.keyboard_command_key, size: 10, color: p.ink4),
+                  const SizedBox(width: 2),
+                  Text('K', style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );

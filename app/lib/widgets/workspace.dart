@@ -51,16 +51,19 @@ class _WorkspaceState extends State<Workspace> {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final p = context.palette;
-    if (store.view == 'play') return const PlayView();
+    if (store.view == 'play') {
+      return Scaffold(backgroundColor: p.bg, body: const SafeArea(child: PlayView()));
+    }
     // 作品集/插件工作台：不进设计壳（无项目也可达）。仍包 Scaffold——
     // 这些视图内的 SnackBar 需要 ScaffoldMessenger 的 Scaffold 祖先
     // （旧实现早退裸视图，debug 断言、release 静默不显示）。
+    // SafeArea：移动端状态栏 / Home 指示条不压顶栏与底部操作（真机实证）。
     if (store.view == 'portfolio') {
-      return Scaffold(backgroundColor: p.bg, body: const PortfolioView());
+      return Scaffold(backgroundColor: p.bg, body: const SafeArea(child: PortfolioView()));
     }
     final pluginView = pluginWorkspaceFor(store.view);
     if (pluginView != null) {
-      return Scaffold(backgroundColor: p.bg, body: pluginView);
+      return Scaffold(backgroundColor: p.bg, body: SafeArea(child: pluginView));
     }
     return CallbackShortcuts(
       bindings: {
@@ -91,7 +94,9 @@ class _WorkspaceState extends State<Workspace> {
           backgroundColor: p.bg,
           // 窄屏（390–410 手机/窄窗）：58 + 252 + 348 固定面板会把画布
           // 压到 0。左右栏折叠成底部 sheet，画布保住可用宽度；宽屏不变。
-          body: LayoutBuilder(
+          // SafeArea：iOS 状态栏 / Home 指示条不压标题栏与状态栏。
+          body: SafeArea(
+            child: LayoutBuilder(
             builder: (context, constraints) {
               final narrow = constraints.maxWidth < 900;
               return Column(
@@ -119,6 +124,7 @@ class _WorkspaceState extends State<Workspace> {
                 ],
               );
             },
+            ),
           ),
         ),
       ),
