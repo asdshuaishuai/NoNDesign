@@ -326,6 +326,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             },
           )),
           const SizedBox(height: 12),
+          // Agent 运行时（docs/plan-dart-agent-migration.md P0）：内置 Dart
+          // 循环 vs 桌面服务。移动端默认 dart（PLAN/Refine 无需服务器），
+          // 桌面默认 server（全功能，含整屏生成与 RSI 评审）。
+          _runtimePicker(context, store),
+          const SizedBox(height: 12),
           // 手机「连接桌面」的唯一输入口：旧实现控制器建了却从未绑定，
           // 地址无处填写 → launch 永远连不上桌面服务器。
           _labeled(context, '桌面服务器（手机连接桌面模式）', TextField(
@@ -555,8 +560,85 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     );
   }
 
-  List<String> _levels(ModelInfo model) {
-    final out = <String>{'auto'};
+  /// Agent 运行时切换（内置 Dart / 桌面服务）。默认值由平台解析
+  /// （models.dart defaultAgentRuntime：移动端 dart、桌面 server）；
+  /// 显式选择不静默降级——server 未连接、dart 缺引擎桥都会显性报错。
+  Widget _runtimePicker(BuildContext context, AppStore store) {
+    final p = context.palette;
+    final mobile = Theme.of(context).platform == TargetPlatform.iOS ||
+        Theme.of(context).platform == TargetPlatform.android;
+    final items = <(String, String, IconData, String)>[
+      ('dart', '内置 Dart', Icons.bolt_outlined, '循环在客户端执行；画布变更仍经引擎门'),
+      ('server', '桌面服务', Icons.dns_outlined, '/agent/run 全功能（整屏生成 + 质量环）'),
+    ];
+    final runtime = store.settings.agentRuntime;
+    final warn = runtime == agentRuntimeServer && mobile && store.settings.serverUrl.trim().isEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            for (final item in items)
+              Expanded(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () async {
+                    if (store.settings.agentRuntime == item.$1) return;
+                    store.settings.agentRuntime = item.$1;
+                    await store.saveSettings();
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: runtime == item.$1 ? p.accentSoft : p.panel2.withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: runtime == item.$1 ? p.accent : p.line),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(item.$3,
+                            size: 15,
+                            color: runtime == item.$1 ? p.accent : p.ink3),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('${item.$2}${mobile && item.$1 == 'dart' || !mobile && item.$1 == 'server' ? '（默认）' : ''}',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: p.ink)),
+                              Text(item.$4,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 10, color: p.ink4)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 5),
+        Text(
+          warn
+              ? '「桌面服务」运行时未配置桌面服务器地址——下方填入桌面端地址后方可运行。'
+              : mobile
+                  ? '内置 Dart：PLAN / Refine 无需服务器即可运行；Build 需连接桌面（引擎门）。'
+                  : '内置 Dart 后循环在客户端执行，画布变更仍经引擎 AgentGate 校验。',
+          style: TextStyle(fontSize: 10, height: 1.4, color: warn ? p.warn : p.ink4),
+        ),
+      ],
+    );
+  }
+
+  List<String> _levels(ModelInfo model) {    final out = <String>{'auto'};
     for (final opt in model.reasoningOptions) {
       if (opt is Map) {
         if (opt['type'] == 'effort' && opt['values'] is List) {
@@ -609,6 +691,47 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   ),
                 ),
             ],
+          ),
+          const SizedBox(height: 18),
+          const SectionLabel('主面'),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              for (final item in [(true, '聊天流', Icons.forum_outlined), (false, '经典 Welcome', Icons.home_outlined)])
+                Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () async {
+                      if (store.settings.chatStreamHome == item.$1) return;
+                      store.settings.chatStreamHome = item.$1;
+                      await store.saveSettings();
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: store.settings.chatStreamHome == item.$1 ? p.accentSoft : p.panel2.withValues(alpha: 0.45),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: store.settings.chatStreamHome == item.$1 ? p.accent : p.line),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(item.$3, size: 16, color: store.settings.chatStreamHome == item.$1 ? p.accent : p.ink3),
+                          const SizedBox(width: 8),
+                          Text(item.$2, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: p.ink)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            store.settings.chatStreamHome
+                ? '聊天流是默认主面；顶栏「工作区」进设计视图，Esc 返回聊天流。'
+                : '启动停留在经典 Welcome；可从顶栏「聊天流」进入聊天流。',
+            style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4),
           ),
           const SizedBox(height: 18),
           const SectionLabel('快捷键'),

@@ -25,11 +25,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
+import openai
 from openai import AsyncOpenAI
 
 THREE_ROOT = Path.home() / "Documents" / "NoNDesign" / "3d"
@@ -204,7 +206,10 @@ class ThreeError(Exception):
 
 
 def _proj_dir(name: str) -> Path:
-    safe = "".join(c for c in name if c.isalnum() or c in "-_")
+    # ASCII 白名单（issue three-4）：Python isalnum 对 CJK 也为真，旧过滤曾放行
+    # 中文项目名落盘，与错误文案/UI 新建提示「字母数字-下划线」全部矛盾。
+    # 名称来自 HTTP body，是不可信字符串——白名单收紧后行为与提示一致。
+    safe = "".join(c for c in name if c.isascii() and (c.isalnum() or c in "-_"))
     if not safe or safe != name:
         raise ThreeError(f"invalid_name:{name} —— 只允许字母数字-下划线")
     return THREE_ROOT / safe
@@ -281,15 +286,28 @@ async def _chat(model: str, base_url: str, api_key: str, thinking: str,
     # 响应侧保持宽容，请求侧非标字段只加不删）。
     if thinking and thinking in ("low", "medium", "high"):
         kwargs["extra_body"] = {"reasoning_effort": thinking}
-    resp = await client.chat.completions.create(
-        messages=[{"role": "system", "content": system},
-                  {"role": "user", "content": user}],
-        **kwargs)
+    try:
+        resp = await client.chat.completions.create(
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": user}],
+            **kwargs)
+    except openai.OpenAIError as e:
+        # SDK 全异常族（AuthenticationError/APIConnectionError/…都继承
+        # OpenAIError）——此前裸抛直达端点层变 500 "Internal Server Error"
+        # 零诊断（issue three-3：401 mock 实测）。包 ThreeError 带类型与
+        # 状态码诊断，端点层转 400 可读错误面。
+        status = getattr(e, "status_code", None)
+        raise ThreeError(
+            f"llm_error:{type(e).__name__}:{status if status is not None else '-'}: {str(e)[:300]}"
+        ) from e
+    if not resp.choices:
+        raise ThreeError("llm_error: 响应无 choices（网关返回空补全）")
     return resp.choices[0].message.content or ""
 
 
 def _extract_json(text: str) -> dict[str, Any]:
-    """从回复中提取 JSON（```json 围栏或裸 JSON）。"""
+    """从回复中提取 JSON（```json 围栏或裸 JSON）。JSONDecodeError 也包
+    ThreeError：含花括号的非 JSON 回复此前裸抛直达 500 零诊断（issue three-3）。"""
     text = text.strip()
     if "```" in text:
         for seg in text.split("```"):
@@ -303,7 +321,12 @@ def _extract_json(text: str) -> dict[str, Any]:
     end = text.rfind("}")
     if start < 0 or end <= start:
         raise ThreeError("spec_parse_failed: 模型未返回 JSON")
-    return json.loads(text[start:end + 1])
+    try:
+        return json.loads(text[start:end + 1])
+    except json.JSONDecodeError as e:
+        raise ThreeError(
+            f"spec_parse_failed: JSON 解析失败（{e.msg} @pos {e.pos}）：{text[start:end + 1][:120]!r}"
+        ) from e
 
 
 def _extract_js(text: str) -> str:
@@ -350,10 +373,27 @@ async def new_project(name: str, brief: str, model: str, base_url: str,
     return {"ok": True, "spec": spec, "state": state, "dir": str(d)}
 
 
+def _read_spec_json(d: Path) -> dict[str, Any]:
+    """读 spec（唯一入口）：JSONDecodeError 包 ThreeError 带诊断。spec 是
+    手编文件（UI 编辑器回灌 + 人工直改都有），损坏不能变裸 500——
+    与 build-state.json 的损坏自愈不同：spec 损坏不自愈重置（spec 是
+    生成依据不是进度状态，静默清空会让后续 pass 拿空 spec 瞎写），
+    如实报错，出路是 /three/spec/save 回灌合法 JSON（其校验门同 new）。
+    （issue three-3：手编损坏后 /three/project 与 /three/pass 双双 500。）"""
+    try:
+        spec = json.loads((d / "three-spec.json").read_text("utf-8"))
+    except json.JSONDecodeError as e:
+        raise ThreeError(
+            f"spec_corrupt: three-spec.json 损坏（{e.msg} @行 {e.lineno} 列 {e.colno}）"
+            " —— 用 /three/spec/save 回灌合法 JSON 修复"
+        ) from e
+    return spec if isinstance(spec, dict) else {}
+
+
 def _pass_prompt(name: str) -> tuple[str, str]:
     """生成当前 pass 的 (system, user) 提示。"""
     d = _proj_dir(name)
-    spec = json.loads((d / "three-spec.json").read_text("utf-8"))
+    spec = _read_spec_json(d)
     state = read_state(name)
     cur = next((p for p in state["passes"] if p["id"] == state["current"]), None)
     if cur is None:
@@ -386,7 +426,10 @@ async def run_pass(name: str, model: str, base_url: str, api_key: str,
     """执行当前 pass：LLM 生成/修补 scene.js（状态门禁：blocked 拒绝）。"""
     state = read_state(name)
     if state.get("blocked"):
-        raise ThreeError(f"blocked:{state.get('blocked_reason')} —— 先 refine-spec（重新 new 覆盖或人工改 three-spec.json）")
+        raise ThreeError(
+            f"blocked:{state.get('blocked_reason')}"
+            " —— 先 refine-spec（POST /three/spec/save 回灌新规范，保存成功即解封重试）"
+            "或 POST /three/delete 删项目重开")
     if state.get("current") == "done":
         raise ThreeError("already_done: 项目已完成，无当前 pass")
     cur = next((p for p in state["passes"] if p["id"] == state["current"]), None)
@@ -514,16 +557,55 @@ def continue_pass(name: str, summary: str = "") -> dict[str, Any]:
 
 def save_spec(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     """规范手编回灌（img2threejs：手改必须落 spec，不许只改代码）。
-    最小校验：components/acceptance 非空（与 new_project 同门）。"""
+    最小校验：components/acceptance 非空（与 new_project 同门）。
+
+    成功落盘后解除 blocked 并复位对应 pass 计数（issue three-1：错误信封
+    教用户「refine-spec 解封」，此前 save_spec 只写文件不清标志——blocked
+    是永久死锁，两剂药「重新 new 覆盖」也撞 project_exists 门）。复位 =
+    blocked pass 的 attempts 归零、状态回 pending：携带新 spec 从本层重跑，
+    旧 attempts 不清零会在下一次生成后立刻再撞 loop_max。"""
     d = _proj_dir(name)
     if not (d / "build-state.json").exists():
         raise ThreeError(f"no_project:{name}")
     if not spec.get("components") or not spec.get("acceptance"):
         raise ThreeError("spec_invalid: components/acceptance 必填")
     (d / "three-spec.json").write_text(json.dumps(spec, ensure_ascii=False, indent=1), "utf-8")
+    state = read_state(name)
+    unblocked = bool(state.get("blocked"))
+    if unblocked:
+        state["blocked"] = False
+        state["blocked_reason"] = ""
+        reset = [p for p in state["passes"] if p.get("status") == "blocked"]
+        if not reset:
+            # 兜底：标志在场但无 pass 标 blocked（历史状态形状）——复位当前层
+            curp = next((p for p in state["passes"] if p["id"] == state.get("current")), None)
+            if curp is not None:
+                reset = [curp]
+        for p in reset:
+            p["attempts"] = 0
+            p["status"] = "pending"
+        write_state(name, state)
     append_history(name, {"action": "refine-spec", "pass": "-",
+                          "unblocked": unblocked,
                           "summary": str(spec.get("title") or spec.get("summary") or "")[:120]})
-    return {"ok": True}
+    return {"ok": True, "unblocked": unblocked, "state": state}
+
+
+def delete_project(name: str) -> dict[str, Any]:
+    """真删 3D 项目目录（blocked 终局的第二条出路 + 用户主动清理）。
+
+    路径校验对齐 portfolio_delete 纪律：name 经 ``_proj_dir`` 全量白名单
+    校验，并显式断言目标只能落在 ``THREE_ROOT`` 下一层——name 来自 HTTP
+    body，空串/``..``/绝对路径绝不进 ``shutil.rmtree``（hotapp 旧实现空串
+    删整个应用根的同款事故）。此前作品集对 three 只隐藏不删（产物不归
+    作品集所有），用户唯一的删除出路是手改文件系统。"""
+    d = _proj_dir(name)
+    if d.parent != THREE_ROOT:  # 显式断言：删除目标只能落在项目根下一层
+        raise ThreeError(f"invalid_ref:{name} —— 路径越界")
+    if not d.exists():
+        raise ThreeError(f"no_project:{name}")
+    shutil.rmtree(d)
+    return {"ok": True, "name": name}
 
 
 def read_spec(name: str) -> dict[str, Any]:
@@ -531,14 +613,14 @@ def read_spec(name: str) -> dict[str, Any]:
     f = d / "three-spec.json"
     if not f.exists():
         raise ThreeError(f"no_project:{name}")
-    return {"ok": True, "spec": json.loads(f.read_text("utf-8"))}
+    return {"ok": True, "spec": _read_spec_json(d)}
 
 
 def read_project(name: str) -> dict[str, Any]:
     d = _proj_dir(name)
     if not d.exists():
         raise ThreeError(f"no_project:{name}")
-    spec = json.loads((d / "three-spec.json").read_text("utf-8")) if (d / "three-spec.json").exists() else {}
+    spec = _read_spec_json(d) if (d / "three-spec.json").exists() else {}
     scene = (d / "scene.js").read_text("utf-8") if (d / "scene.js").exists() else ""
     history = []
     hist_file = d / "history.jsonl"

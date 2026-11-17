@@ -52,6 +52,14 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   bool _busy = false;
   WebViewController? _controller;
   String _lastError = '';
+  // 预览页加载失败占位（主帧 HTTP ≥400 / 主帧资源错误）——非空时预览区
+  // 整块替换为错误占位（three-5：WKWebView 会把 /three/preview/<错名> 的
+  // 400 JSON body 原样渲染成裸 JSON 页，此前无任何回调处理）。
+  String _loadError = '';
+  // 项目状态刷新失败（_refresh 非 ok/异常）：header 下红条 + toast 显式
+  // 呈现（three-5：此前全部静默吞掉，pass chips 冻结在旧状态无提示）。
+  // 下一次成功的 _refresh 自动清除。
+  String _refreshError = '';
   // 缓存 store：dispose 里保存规范草稿时不能再 context.read（元素已停用）。
   late final AppStore _store = context.read<AppStore>();
 
@@ -119,21 +127,39 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     if (_project == null) return;
     final api = store.api;
     if (api == null) return;
+    Map<String, dynamic> res;
     try {
-      final res = await api.threeProject(_project!);
-      if (res['ok'] == true) {
-        if (!mounted) return;
-        setState(() {
-          _state = (res['state'] as Map?)?.cast<String, dynamic>();
-          _spec = (res['spec'] as Map?)?.cast<String, dynamic>();
-          _sceneJs = (res['scene_js'] as String?) ?? '';
-          if (!_specDirty) {
-            _specCtl.text = const JsonEncoder.withIndent('  ').convert(_spec);
-            _specDirty = false; // listener 在文本赋值时已置位，恢复未脏
-          }
-        });
+      res = await api.threeProject(_project!);
+    } catch (e) {
+      _refreshFailed(e.toString());
+      return;
+    }
+    if (res['ok'] != true) {
+      // 400 JSON 信封（no_project 等）在此显性化——不再静默吞掉。
+      _refreshFailed('${res['detail'] ?? res['error'] ?? 'HTTP ${res['status'] ?? '?'}'}');
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _refreshError = ''; // 刷新恢复：清错误态
+      _state = (res['state'] as Map?)?.cast<String, dynamic>();
+      _spec = (res['spec'] as Map?)?.cast<String, dynamic>();
+      _sceneJs = (res['scene_js'] as String?) ?? '';
+      if (!_specDirty) {
+        _specCtl.text = const JsonEncoder.withIndent('  ').convert(_spec);
+        _specDirty = false; // listener 在文本赋值时已置位，恢复未脏
       }
-    } catch (_) {}
+    });
+  }
+
+  /// _refresh 非 ok/异常的显式呈现（toast + header 下红条）。同 detail
+  /// 去重：桥反馈（error/metrics/screenshot）每条都跟一次 _refresh，
+  /// 服务器不可达时不重置同一条错误、不叠同文 toast。
+  void _refreshFailed(String detail) {
+    if (detail == _refreshError) return;
+    if (!mounted) return;
+    setState(() => _refreshError = detail);
+    _toast('项目状态刷新失败', detail);
   }
 
   Future<void> _createProject() async {
@@ -220,7 +246,49 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel('NON3D', onMessageReceived: _onBridgeMessage)
+      ..setNavigationDelegate(NavigationDelegate(
+        // 主帧 HTTP ≥400（如 /three/preview/<错名> 的 400 JSON）在 WKWebView
+        // 上不会进 onWebResourceError——didFail* 只报网络层失败，4xx body 会
+        // 原样渲染成裸 JSON 页。onHttpError 是 WKNavigationDelegate 的
+        // decidePolicyForNavigationResponse（onNavigationResponse 语义）桥，
+        // 据它置错误占位而非裸 JSON。
+        onHttpError: _onPreviewHttpError,
+        onWebResourceError: _onPreviewResourceError,
+        onPageStarted: _onPreviewPageStarted,
+      ))
       ..loadRequest(Uri.parse(api.threePreviewUrl(_project!)));
+  }
+
+  void _onPreviewHttpError(HttpResponseError error) {
+    final code = error.response?.statusCode;
+    if (code == null) return;
+    _setLoadError('预览加载失败：HTTP $code（检查项目名与服务器状态）');
+  }
+
+  void _onPreviewResourceError(WebResourceError error) {
+    // 子资源（图片/脚本）失败不清占位——只有主帧加载失败才整块呈现。
+    if (error.isForMainFrame == false) return;
+    _setLoadError('预览加载失败：${error.description}（${error.errorCode}）');
+  }
+
+  void _onPreviewPageStarted(String url) {
+    if (_loadError.isEmpty || !mounted) return;
+    setState(() => _loadError = ''); // 新导航开始：清旧占位，失败会再置
+  }
+
+  void _setLoadError(String msg) {
+    if (msg == _loadError) return;
+    if (!mounted) return;
+    setState(() => _loadError = msg);
+  }
+
+  /// 错误占位的重试：清占位并重新 loadRequest（controller 为空则仅复位）。
+  void _retryPreview() {
+    setState(() => _loadError = '');
+    final api = store.api;
+    if (api != null && _project != null) {
+      _controller?.loadRequest(Uri.parse(api.threePreviewUrl(_project!)));
+    }
   }
 
   /// 三反馈桥（WebView → 服务器 → build-state）：error 加修复轮、
@@ -419,10 +487,29 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       return Column(children: [
         _header(context, p, current, passes,
             width: width, phone: phone, padPortrait: padPortrait),
+        if (_refreshError.isNotEmpty) _refreshErrorBar(p),
         Expanded(child: _body(context, p, width: width)),
       ]);
     });
   }
+
+  /// 项目状态刷新失败红条（_refresh 非 ok/异常的错误态，toast 的常驻形态）。
+  Widget _refreshErrorBar(NonPalette p) => Container(
+        key: const ValueKey('three-refresh-error'),
+        width: double.infinity,
+        color: p.danger.withValues(alpha: 0.12),
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+        child: Row(children: [
+          Icon(Icons.error_outline, size: 14, color: p.danger),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text('项目状态刷新失败：$_refreshError',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, color: p.danger)),
+          ),
+        ]),
+      );
 
   Widget _header(BuildContext context, NonPalette p, String current, List<Map> passes,
       {required double width, required bool phone, required bool padPortrait}) {
@@ -634,9 +721,13 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     if (_project == null) {
       return _EmptyNew(onCreate: _createProject, busy: _busy);
     }
-    final preview = _controller == null
-        ? const Center(child: Text('加载预览…'))
-        : WebViewWidget(controller: _controller!);
+    // 加载失败占位优先（three-5）：主帧 HTTP ≥400 / 网络错误不再把服务器的
+    // 裸 JSON 渲染给用户，整块替换为可重试的错误占位。
+    final preview = _loadError.isNotEmpty
+        ? _PreviewErrorPane(message: _loadError, onRetry: _retryPreview)
+        : (_controller == null
+            ? const Center(child: Text('加载预览…'))
+            : WebViewWidget(controller: _controller!));
     final side = switch (_face) {
       'source' => SingleChildScrollView(
           padding: const EdgeInsets.all(14),
@@ -697,6 +788,40 @@ class _EmptyNew extends StatelessWidget {
           onPressed: busy ? null : onCreate,
           icon: const Icon(Icons.add, size: 16),
           label: const Text('新建 3D 项目'),
+        ),
+      ]),
+    );
+  }
+}
+
+/// 预览加载失败占位（three-5）：整块替换 WebView 区域——服务器的 4xx JSON /
+/// 网络层错误不再以裸 JSON 页呈现；重试按钮重新 loadRequest。
+class _PreviewErrorPane extends StatelessWidget {
+  const _PreviewErrorPane({required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Center(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.error_outline, size: 36, color: p.danger),
+        const SizedBox(height: 10),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Text(message,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: p.ink3, height: 1.6)),
+          ),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: onRetry,
+          icon: const Icon(Icons.refresh, size: 14),
+          label: const Text('重试加载'),
         ),
       ]),
     );

@@ -46,6 +46,15 @@ dependencies:
   ai_sdk_dart: ^3.1.0
   ai_sdk_openai: ^3.1.0
 
+  # A2UI 渲染底座（S0，见 docs/plan-chat-stream-shell.md §1/§5）：三个包独立
+  # 发版——a2ui_flutter 渲染 surface（钉 0.3.x 防 API 漂移），a2ui_agent 出
+  # 系统提示与流解析（与 flutter 同轨 0.3.x），a2ui_core 是两者共用的协议核心
+  # （自己的版本线，flutter/agent 0.3.0 都要求 ^0.7.0）。封装在
+  # lib/widgets/a2ui_card.dart，升级只改封装。
+  a2ui_flutter: ^0.3.0
+  a2ui_agent: ^0.3.0
+  a2ui_core: ^0.7.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

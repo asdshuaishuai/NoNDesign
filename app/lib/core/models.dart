@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 double _num(dynamic v, [double fallback = 0]) => (v is num) ? v.toDouble() : fallback;
 
@@ -432,6 +433,18 @@ class ModelRegistry {
   }
 }
 
+/// Agent 循环运行时（docs/plan-dart-agent-migration.md P0）：
+/// - `dart`：内置 Dart 循环（core/dart_agent.dart）——PLAN/Refine 纯本地，
+///   Build 的 design_op 仍经 HTTP 打引擎 AgentGate（绝不绕过引擎门）；
+/// - `server`：桌面服务 `/agent/run`（Python openai-agents，全功能）。
+/// 默认值按平台：移动端 dart、桌面 server（用户决策：桌面保留「桌面服务」
+/// 运行时选项，移动端默认内置 Dart）。
+const String agentRuntimeDart = 'dart';
+const String agentRuntimeServer = 'server';
+
+String defaultAgentRuntime() =>
+    (Platform.isIOS || Platform.isAndroid) ? agentRuntimeDart : agentRuntimeServer;
+
 class AppSettings {
   String providerId;
   String modelId;
@@ -458,6 +471,13 @@ class AppSettings {
   /// 非空时 launch 优先连接它（移动端无法本地跑 Python 服务器）；
   /// 留空且本地 spawn 失败时回落 PLAN 直连（Dart AI SDK）。
   String serverUrl;
+  /// Agent 循环运行时（dart | server）。缺省按平台解析（见
+  /// [defaultAgentRuntime]），旧存档无此键时自动落平台默认。
+  String agentRuntime;
+  /// 主面 = 聊天流（docs/plan-chat-stream-shell.md §2 S1，用户决策默认开）。
+  /// 关闭即回经典 Welcome；工作区经聊天流顶栏「工作区」入口进入
+  /// （桌面常驻分栏与移动画中画是 S4，不在本轮）。
+  bool chatStreamHome;
 
   AppSettings({
     this.providerId = 'deepseek',
@@ -475,7 +495,10 @@ class AppSettings {
     this.videoJob = '',
     Map<String, String>? threeSpecDrafts,
     this.serverUrl = '',
-  }) : threeSpecDrafts = threeSpecDrafts ?? {};
+    String? agentRuntime,
+    this.chatStreamHome = true,
+  })  : threeSpecDrafts = threeSpecDrafts ?? {},
+        agentRuntime = agentRuntime ?? defaultAgentRuntime();
 
   Map<String, dynamic> toJson() => {
         'providerId': providerId,
@@ -493,6 +516,8 @@ class AppSettings {
         'videoJob': videoJob,
         'threeSpecDrafts': threeSpecDrafts,
         'serverUrl': serverUrl,
+        'agentRuntime': agentRuntime,
+        'chatStreamHome': chatStreamHome,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> m) => AppSettings(
@@ -515,6 +540,14 @@ class AppSettings {
                     .map((e) => MapEntry(e.key.toString(), e.value.toString())))
             : <String, String>{},
         serverUrl: (m['serverUrl'] ?? '').toString(),
+        // 未知值（旧存档损坏/手改）不静默当 server：回落平台默认。
+        agentRuntime: switch (m['agentRuntime']) {
+          agentRuntimeDart => agentRuntimeDart,
+          agentRuntimeServer => agentRuntimeServer,
+          _ => null,
+        },
+        // 旧存档无此键：默认开（用户决策 2026-11-17，聊天流是主面）。
+        chatStreamHome: m['chatStreamHome'] is bool ? m['chatStreamHome'] as bool : true,
       );
 }
 
@@ -549,6 +582,134 @@ class AcpAgentInfo {
         note: (m['note'] ?? '').toString(),
         probeState: (m['probeState'] ?? 'unprobed').toString(),
       );
+}
+
+// ============================================================
+// 聊天流消息模型（docs/plan-chat-stream-shell.md §2 S1）
+// ============================================================
+
+/// 卡片类型：用户消息 / 进度卡（步骤+工具调用）/ 助手正文 /
+/// A2UI 交互卡（surface 消息序列）/ 产物卡（热应用/原型/视频/3D）。
+const String chatKindUser = 'user';
+const String chatKindProgress = 'progress';
+const String chatKindAssistant = 'assistant';
+const String chatKindA2ui = 'a2ui';
+const String chatKindArtifact = 'artifact';
+
+/// 产物种类（产物卡点开去哪）：原型→工作区；热应用/视频/3D→对应工作台。
+const String artifactPrototype = 'prototype';
+const String artifactHotapp = 'hotapp';
+const String artifactVideo = 'video';
+const String artifactThree = 'three';
+
+/// 进度卡里的一个步骤（复用 TimelineEntry 工具行的分类经验：running/
+/// ok/ms/明细），随聊天卡持久化。
+class ChatStep {
+  String label;
+  bool running;
+  bool ok;
+  int? ms;
+  String? detail;
+
+  ChatStep({required this.label, this.running = false, this.ok = true, this.ms, this.detail});
+
+  factory ChatStep.fromJson(dynamic raw) {
+    final m = raw is Map ? raw : const {};
+    return ChatStep(
+      label: (m['label'] ?? '').toString(),
+      running: m['running'] == true,
+      ok: m['ok'] != false,
+      ms: (m['ms'] is num) ? (m['ms'] as num).toInt() : null,
+      detail: m['detail']?.toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'label': label,
+        'running': running,
+        'ok': ok,
+        if (ms != null) 'ms': ms,
+        if (detail != null && detail!.isNotEmpty) 'detail': detail,
+      };
+}
+
+/// 聊天流的一条消息。进度卡的 steps/running/ok 与正文 text 可变（run 中
+/// 被事件推进），其余字段出生即定；序列化形态供 chat.json 落盘。
+class ChatMessage {
+  final String kind;
+  String text;
+  final List<ChatStep> steps;
+  bool running;
+  bool ok;
+  String? detail;
+  /// A2UI 卡的 surface 消息序列（与 A2uiCard.messages 静态路径同形——
+  /// 已解码的信封 map 列表，如 `{'version': '1.0', 'createSurface': {...}}`）。
+  final List<Object?>? a2uiMessages;
+  String? artifactKind;
+  String? artifactName;
+  final DateTime ts;
+
+  ChatMessage({
+    required this.kind,
+    this.text = '',
+    List<ChatStep>? steps,
+    this.running = false,
+    this.ok = true,
+    this.detail,
+    this.a2uiMessages,
+    this.artifactKind,
+    this.artifactName,
+    DateTime? ts,
+  })  : steps = steps ?? [],
+        ts = ts ?? DateTime.now();
+
+  factory ChatMessage.user(String text) => ChatMessage(kind: chatKindUser, text: text);
+
+  factory ChatMessage.assistant(String text) => ChatMessage(kind: chatKindAssistant, text: text);
+
+  factory ChatMessage.progress(String title) =>
+      ChatMessage(kind: chatKindProgress, text: title, running: true);
+
+  factory ChatMessage.a2ui(List<Object?> messages, {String? text}) =>
+      ChatMessage(kind: chatKindA2ui, text: text ?? '', a2uiMessages: messages);
+
+  /// 产物卡：标题进 artifactName，text 留给一句话描述。
+  factory ChatMessage.artifact({required String kind, required String title, String? detail}) =>
+      ChatMessage(
+        kind: chatKindArtifact,
+        text: detail ?? '',
+        artifactKind: kind,
+        artifactName: title,
+      );
+
+  factory ChatMessage.fromJson(dynamic raw) {
+    final m = raw is Map ? raw : const {};
+    return ChatMessage(
+      kind: (m['kind'] ?? '').toString(),
+      text: (m['text'] ?? '').toString(),
+      steps: ((m['steps'] as List?) ?? const []).map(ChatStep.fromJson).toList(),
+      running: m['running'] == true,
+      ok: m['ok'] != false,
+      detail: m['detail']?.toString(),
+      a2uiMessages: (m['a2ui'] as List?)?.toList(),
+      artifactKind: m['artifactKind']?.toString(),
+      artifactName: m['artifactName']?.toString(),
+      ts: DateTime.tryParse((m['ts'] ?? '').toString()) ?? DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'kind': kind,
+        'text': text,
+        if (steps.isNotEmpty) 'steps': [for (final s in steps) s.toJson()],
+        'running': running,
+        'ok': ok,
+        if (detail != null && detail!.isNotEmpty) 'detail': detail,
+        if (a2uiMessages != null) 'a2ui': a2uiMessages,
+        if (artifactKind != null) 'artifactKind': artifactKind,
+        if (artifactName != null) 'artifactName': artifactName,
+        'ts': ts.toIso8601String(),
+      };
 }
 
 class TimelineEntry {

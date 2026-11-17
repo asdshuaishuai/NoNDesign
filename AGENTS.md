@@ -470,7 +470,10 @@ flutter build macos --debug
 - **Python 回归锚点在 `scripts/wf/test.sh` 门禁序列里**（先于 flutter test 逐个跑，
   红即止；`.venv` 缺失直接报错并给建环境指引）：test_hotapp（名称校验 / SQLite 桥 /
   作品集 + **generate/refine/delete_app 异步写路径与 `_app_locks` 同名串行不变量**，
-  变异验证过必红）、test_server_routes（入口顺序 + **hotapp/portfolio 全路由在场**）、
+  变异验证过必红）、test_three（3D 工作台：ASCII 白名单 / save_spec 解封 blocked +
+  复位 pass 计数 / /three/delete 真删与越界防护 / _chat·spec 解析·损坏读取包
+  ThreeError——逐项变异验证过必红）、test_server_routes（入口顺序 +
+  **hotapp/portfolio 全路由在场**）、
   test_context_sanitize（tool 配对消毒）、test_acp_client（fake agent JSON-RPC 全链）、
   test_doc_delta（`_DocDeltaExtractor` 跨片解码：转义 / `\uXXXX` 切断、键名切断、
   done 惰性自复位）。新增 `scripts/wf/test_*.py` 时同步加进 test.sh 循环。

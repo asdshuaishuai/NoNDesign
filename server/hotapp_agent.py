@@ -35,7 +35,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, APIConnectionError, APIStatusError, OpenAIError
 
 # 复数目录是当前事实源；旧单数目录（hotapp）与 A2UI 时代目录（a2ui）由
 # _migrate_legacy_roots 一次性并入（不覆盖同名应用；迁移失败不拦主流程）。
@@ -333,11 +333,33 @@ async def db_exec_locked(name: str, sql: str, params: list[Any] | None = None) -
 
 
 async def _chat(model: str, base_url: str, api_key: str, system: str, user: str) -> str:
-    """单轮生成（AsyncOpenAI 原生 await——不可 to_thread 包 coroutine）。"""
-    client = AsyncOpenAI(api_key=api_key or "missing", base_url=base_url or None)
-    resp = await client.chat.completions.create(
-        model=model or "deepseek-chat", temperature=0.5,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
+    """单轮生成（AsyncOpenAI 原生 await——不可 to_thread 包 coroutine）。
+
+    openai SDK 异常必须就地包成 HotAppError：_hotapp_guard 只认
+    HotAppError/OSError/ValueError，SDK 异常直接穿透会变成裸 500
+    「Internal Server Error」——用户无法区分 key 无效（401）、网络断
+    （连接拒/超时）还是网关 5xx。包成 HotAppError 后端点层转 400，
+    detail 原样到达客户端 toast。
+    """
+    try:
+        client = AsyncOpenAI(api_key=api_key or "missing", base_url=base_url or None)
+        resp = await client.chat.completions.create(
+            model=model or "deepseek-chat", temperature=0.5,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
+    except APIConnectionError as e:
+        # 连接拒 / DNS 失败 / 超时（APITimeoutError 是它的子类）：服务不可达
+        raise HotAppError(
+            f"llm_unreachable: 无法连接 LLM 服务（{base_url or '默认端点'}）："
+            f"{type(e).__name__}: {str(e)[:200]}") from e
+    except APIStatusError as e:
+        # 携带 HTTP 状态码：401 key 无效 / 429 限流 / 5xx 网关故障
+        msg = getattr(e, "message", None) or str(e)
+        raise HotAppError(
+            f"llm_http_{e.status_code}: LLM 服务返回 HTTP {e.status_code}：{str(msg)[:300]}") from e
+    except OpenAIError as e:
+        raise HotAppError(f"llm_error: {type(e).__name__}: {str(e)[:300]}") from e
+    if not resp.choices:
+        raise HotAppError("llm_empty_choices: LLM 响应不含任何 choice（网关异常？）")
     return resp.choices[0].message.content or ""
 
 
@@ -476,22 +498,47 @@ def page_html(name: str) -> str:
 
 
 def list_apps() -> dict[str, Any]:
+    """目录对账清单：只列有 index.html 的应用目录，name 一律取目录名。
+
+    meta.json 与目录是两套事实源，旧实现各信一半（list 信 meta.name、
+    page/db 认目录名），漂移或缺失时列表出现三种坏形态，全部以
+    「index.html 存在 = 应用存在」对账消除：
+
+    - 死条目：meta.name ≠ 目录名 → 点了就 no_app 400（客户端只会把列表
+      名递给打开流程）。name=目录名后，列表条目必然可打开。
+    - 隐身：有 index.html 无 meta.json → 旧实现整个从列表消失（应用只能
+      靠作品集或上次保存名进入）。现在照常列出，标题退目录名。
+    - 幽灵：有 meta.json 无 index.html → page/db 都 no_app，列出只会误导。
+      存在性对账后不再出现。
+
+    坏 meta 不静默吞：单个损坏 meta 只让该应用标题退目录名并带
+    ``metaBroken`` 标记（可诊断），应用本体照常出现——旧实现注释称
+    「下一次写入自愈」，但唯一写入口 refine 是 LLM 步骤，坏 meta 会让
+    应用无限期隐身。meta.json 只贡献展示 title/updatedAt，不参与 name。
+    """
     items = []
     if HOTAPP_ROOT.exists():
         for d in sorted(HOTAPP_ROOT.iterdir()):
+            if not d.is_dir() or not (d / "index.html").exists():
+                continue
+            title = d.name
+            updated = None
+            broken = False
             m = d / "meta.json"
-            if not d.is_dir() or not m.exists():
-                continue
-            # 单个坏 meta 不让整个列表 500：跳过该应用（下一次写入自愈）。
-            try:
-                meta = json.loads(m.read_text("utf-8"))
-                if not isinstance(meta, dict):
-                    raise ValueError("meta is not an object")
-            except (json.JSONDecodeError, OSError, ValueError):
-                continue
-            items.append({"name": meta.get("name") or d.name,
-                          "title": meta.get("title") or d.name,
-                          "updatedAt": meta.get("updatedAt")})
+            if m.exists():
+                try:
+                    meta = json.loads(m.read_text("utf-8"))
+                    if isinstance(meta, dict):
+                        title = str(meta.get("title") or d.name)
+                        updated = meta.get("updatedAt")
+                    else:
+                        broken = True
+                except (json.JSONDecodeError, OSError, ValueError):
+                    broken = True
+            item: dict[str, Any] = {"name": d.name, "title": title, "updatedAt": updated}
+            if broken:
+                item["metaBroken"] = True
+            items.append(item)
     return {"ok": True, "apps": items}
 
 
@@ -590,7 +637,12 @@ def portfolio_list() -> dict[str, Any]:
             item["path"] = str(path)
             items.append(item)
     # 存量补扫：workspace 里已有但未登记的 mp4 / 3D html（首次启用作品集即可见历史产物）
-    video_root = Path.home() / "Documents" / "NoNDesign" / "video"
+    # video 扫描根 = videos/ 持久目录（render done 时 main.py::_persist_video_mp4
+    # 落盘，对齐 hotapps/3d 布局）。旧 video/ 是容量轮换管辖的 job 中间目录——
+    # 扫它会把随轮换蒸发的产物登记成作品集条目：首个完成渲染 24 次小渲染后
+    # 条目静默消失（2026-11-16 实证），video 是三类作品里唯一会被系统自动
+    # 删除产物的，本行就是那道口子。
+    video_root = Path.home() / "Documents" / "NoNDesign" / "videos"
     known = {(e.get("kind"), e.get("ref")) for e in items} | hidden
     if video_root.exists():
         for mp4 in sorted(video_root.glob("*/frames.mp4")):

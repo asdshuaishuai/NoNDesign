@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -483,6 +484,10 @@ class ThreeSpecSaveRequest(BaseModel):
     spec: dict[str, Any]
 
 
+class ThreeDeleteRequest(BaseModel):
+    name: str
+
+
 def _three_guard(fn, *args):
     try:
         return fn(*args)
@@ -526,8 +531,16 @@ async def three_continue(req: ThreeContinueRequest) -> dict[str, Any]:
 
 @app.post("/three/spec/save")
 async def three_spec_save(req: ThreeSpecSaveRequest) -> dict[str, Any]:
-    """规范手编回灌（img2threejs：手改落 spec，不许只改代码）。"""
+    """规范手编回灌（img2threejs：手改落 spec，不许只改代码）。
+    成功即解除 blocked 并复位 pass 计数（refine-spec 这剂药真正生效）。"""
     return _three_guard(three.save_spec, req.name, req.spec)
+
+
+@app.post("/three/delete")
+async def three_delete(req: ThreeDeleteRequest) -> dict[str, Any]:
+    """真删 3D 项目目录（blocked 终局出路 + 主动清理；路径校验对齐
+    portfolio_delete 纪律——白名单 + 显式断言不出 THREE_ROOT）。"""
+    return _three_guard(three.delete_project, req.name)
 
 
 @app.get("/three/spec")
@@ -814,13 +827,67 @@ class VideoRenderRequest(BaseModel):
 
 _VIDEO_JOBS: dict[str, dict[str, Any]] = {}
 _VIDEO_ROOT = Path.home() / "Documents" / "NoNDesign" / "video"
+# 持久产物目录（对齐 hotapps/3d 布局）：render done 时 frames.mp4 落到
+# videos/<job>/，作品集补扫（hotapp_agent.portfolio_list）扫这里。
+# _VIDEO_ROOT 是轮换管辖的 job 中间目录——完成品不能住在会被 rmtree 的地方。
+_VIDEO_PERSIST_ROOT = Path.home() / "Documents" / "NoNDesign" / "videos"
+# 容量预算：轮换保留的 job 记录数 == 在飞渲染并发上限。两者同源是刻意的：
+# 轮换只清终态（running 绝不逐出），在飞打满预算时新提交直接 429，
+# 不再靠逐出在飞任务腾位（2026-11-16 实证：24 并发小渲染把 running job
+# 连人带目录逐出，render.py 写帧崩溃、轮询 404）。
+_VIDEO_MAX_JOBS = 20
+
+
+def _video_payload_hash(req: VideoRenderRequest) -> str:
+    payload = json.dumps(
+        {"timeline": req.timeline, "spec": req.spec, "fps": req.fps},
+        ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _find_inflight_video_job(phash: str) -> str | None:
+    """相同 payload 的在飞 job 去重：命中即返回既有 job（直接 API 并发
+    重复提交曾各自起一个 uuid job + 一个 render.py 进程白耗 CPU/磁盘；
+    终态不参与去重——done 后再次提交是用户明确要重渲）。"""
+    for job, info in list(_VIDEO_JOBS.items()):  # 快照：_run 线程会并发改 dict
+        if info.get("status") == "running" and info.get("phash") == phash:
+            return job
+    return None
+
+
+def _persist_video_mp4(job: str, d: Path) -> str:
+    """render done：把 frames.mp4 落到持久目录 videos/<job>/（轮换够不着）。
+    返回持久路径供 job 终态与作品集扫描使用；复制失败回退 job 目录原路径
+    （持久化失败不得丢终态——mp4 在轮换前仍在 job 目录里可用）；
+    render.py 没产出 mp4 时返回空串（保持既有失败语义）。"""
+    mp4 = d / "frames.mp4"
+    if not mp4.exists():
+        return ""
+    try:
+        persist_dir = _VIDEO_PERSIST_ROOT / job
+        persist_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(mp4, persist_dir / "frames.mp4")
+        return str(persist_dir / "frames.mp4")
+    except OSError:
+        return str(mp4)
 
 
 @app.post("/video/render")
 async def video_render(req: VideoRenderRequest) -> dict[str, Any]:
     """后台跑 render.py（job 轮询制：255 帧全量要 1-2 分钟，HTTP 同步会超时）。
-    无声版（用户裁决：音轨/旁白暂不做）。"""
+    无声版（用户裁决：音轨/旁白暂不做）。
+    相同 payload 的在飞 job 按 payload 哈希去重返回既有 job（dedup=true）；
+    在飞渲染打满 _VIDEO_MAX_JOBS 时返回 429——绝不逐出在飞任务腾位。"""
     import uuid
+    phash = _video_payload_hash(req)
+    hit = _find_inflight_video_job(phash)
+    if hit is not None:
+        return {"ok": True, "job": hit, "dedup": True}
+    _prune_video_jobs(keep=_VIDEO_MAX_JOBS)
+    inflight = sum(1 for info in _VIDEO_JOBS.values() if info.get("status") == "running")
+    if inflight >= _VIDEO_MAX_JOBS:
+        raise HTTPException(status_code=429,
+                            detail=f"video_capacity_full:{inflight}_renders_in_flight")
     job = uuid.uuid4().hex[:12]
     _VIDEO_ROOT.mkdir(parents=True, exist_ok=True)
     d = _VIDEO_ROOT / job
@@ -832,8 +899,8 @@ async def video_render(req: VideoRenderRequest) -> dict[str, Any]:
         # 固定文件名会让 load_spec 的相对引用 miss：art 渲染 failed 实证）
         (d / Path(str(req.timeline.get("spec") or "spec.json")).name).write_text(
             json.dumps(req.spec, ensure_ascii=False, indent=1), "utf-8")
-    _VIDEO_JOBS[job] = {"status": "running", "dir": str(d / "frames"), "log": "", "mp4": "", "frames": 0}
-    _prune_video_jobs()
+    _VIDEO_JOBS[job] = {"status": "running", "dir": str(d / "frames"), "log": "", "mp4": "",
+                        "frames": 0, "phash": phash}
     script = Path(__file__).resolve().parent.parent / "plugins" / "video-engine" / "render.py"
 
     def _run() -> None:
@@ -851,13 +918,14 @@ async def video_render(req: VideoRenderRequest) -> dict[str, Any]:
             return
         j = _VIDEO_JOBS.get(job)
         if j is None:
-            return  # 已被 _prune_video_jobs 容量轮换清理：终态无处落，直接结束
+            return  # 防御：job 记录已被清（running 现役不会被轮换，正常不可达）
         j["log"] = (proc.stdout + proc.stderr)[-2000:]
         if proc.returncode == 0:
-            # render.py 的 mp4 产物名 = <frames 目录名>.mp4 → d/frames.mp4
-            mp4 = d / "frames.mp4"
+            # render.py 的 mp4 产物名 = <frames 目录名>.mp4 → d/frames.mp4；
+            # 完成品落持久目录 videos/——job 目录仍受容量轮换，不落盘的话
+            # 完成品会随 20 容量静默蒸发（作品集条目随之消失，video-1 实证）。
             j["status"] = "done"
-            j["mp4"] = str(mp4) if mp4.exists() else ""
+            j["mp4"] = _persist_video_mp4(job, d)
             j["frames"] = len(list((d / "frames").glob("frame_*.png")))
         else:
             j["status"] = "failed"
@@ -880,15 +948,20 @@ def _sweep_review_dirs(max_age_s: float = 3600.0) -> None:
             pass
 
 
-def _prune_video_jobs(keep: int = 20) -> None:
+def _prune_video_jobs(keep: int = _VIDEO_MAX_JOBS) -> None:
     """_VIDEO_JOBS 与 _VIDEO_ROOT 的 job 目录只保留最近 keep 个（dict 插入序
-    = 创建序，删最旧）；running 中的 job 一样按容量轮换（上限内不受影响）。"""
+    = 创建序，删最旧）。只轮换**终态**（done/failed）job 的中间目录——mp4
+    已由 _persist_video_mp4 落到 videos/，删的是纯中间产物（frames png 等）。
+    running 的 job 绝不逐出：目录被 rmtree 时 render.py 还在写帧，用户视角
+    是「提交成功的渲染凭空消失」（2026-11-16 实证，轮询直接 404）。在飞打满
+    keep 时本函数一个都清不动，容量拒绝由 /video/render 返回 429 负责。"""
     jobs = list(_VIDEO_JOBS.keys())
     while len(jobs) > keep:
         old = jobs.pop(0)
-        info = _VIDEO_JOBS.pop(old, None)
-        if not info:
-            continue
+        info = _VIDEO_JOBS.get(old)
+        if not info or info.get("status") not in ("done", "failed"):
+            continue  # 非终态：跳过（容量满时调用方 429，不逐出在飞任务）
+        _VIDEO_JOBS.pop(old, None)
         d = Path(str(info.get("dir", ""))).parent  # dir 指向 frames，父目录即 job 目录
         try:
             if d != _VIDEO_ROOT and d.resolve().is_relative_to(_VIDEO_ROOT.resolve()) and d.exists():

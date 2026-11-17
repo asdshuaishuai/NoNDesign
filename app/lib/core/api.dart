@@ -171,6 +171,14 @@ class NoNDesignApi {
   /// 测试可缩短。
   static Duration sseIdleTimeout = const Duration(seconds: 660);
 
+  /// LLM 生成类端点（3D 新建项目/跑层）的客户端超时：服务端整份生成
+  /// （spec JSON / scene.js，thinking_level 还透传 reasoning_effort）经常
+  /// 超过 postJson 默认的 30s——客户端先抛 TimeoutException 报「生成失败」，
+  /// 服务端却继续跑完落盘，重试撞 project_exists / pass_awaiting_feedback，
+  /// UI 认知与盘上状态分叉。默认 10 分钟（对齐 hotAppGenerate/hotAppRefine；
+  /// 服务端自身 _chat 用 AsyncOpenAI 默认 600s 无上限）；测试可缩短。
+  static Duration llmGenTimeout = const Duration(minutes: 10);
+
   NoNDesignApi(this.baseUrl, [http.Client? client]) : _client = client ?? http.Client();
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
@@ -304,6 +312,8 @@ class NoNDesignApi {
 
   // ---------- 轨道 C：3D 制作工作台（应用内 WebView 即执行面） ----------
 
+  /// 生成整份 spec JSON 是分钟级 LLM 调用——10 分钟超时（llmGenTimeout），
+  /// 不用 postJson 默认 30s（否则客户端先失败、服务端照常落盘，状态分叉）。
   Future<Map<String, dynamic>> threeNewProject({
     required String name, required String brief,
     required String model, required String baseUrl,
@@ -311,15 +321,16 @@ class NoNDesignApi {
   }) => postJson('/three/project/new', {
         'name': name, 'brief': brief, 'model': model, 'base_url': baseUrl,
         'api_key': apiKey, 'thinking_level': thinkingLevel,
-      });
+      }, timeout: llmGenTimeout);
 
+  /// 跑一层同样是分钟级 LLM 调用（整文件 scene.js）——同 threeNewProject。
   Future<Map<String, dynamic>> threeRunPass({
     required String name, required String model, required String baseUrl,
     required String apiKey, required String thinkingLevel,
   }) => postJson('/three/pass', {
         'name': name, 'model': model, 'base_url': baseUrl,
         'api_key': apiKey, 'thinking_level': thinkingLevel,
-      });
+      }, timeout: llmGenTimeout);
 
   Future<Map<String, dynamic>> threeFeedback(String name, String kind, [Object? payload]) =>
       postJson('/three/feedback', {'name': name, 'kind': kind, if (payload != null) 'payload': payload});

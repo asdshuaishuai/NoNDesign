@@ -11,7 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart' show CancellationToken;
 
 import 'api.dart';
-import 'mobile_agent.dart';
+import 'dart_agent.dart';
 import 'models.dart';
 
 final GlobalKey<ScaffoldMessengerState> rootMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -100,6 +100,17 @@ class AppStore extends ChangeNotifier {
   Map<String, dynamic> usage = const {};
   String? agentError;
 
+  // chat stream 主面（docs/plan-chat-stream-shell.md §2 S1）
+  /// 聊天流消息（用户/进度/A2UI/产物卡），随 chat.json 落盘。
+  List<ChatMessage> chatMessages = [];
+  /// 本轮 sendChat 的活动进度卡（对象引用——下标会被容量截断挪位）。
+  ChatMessage? _chatCard;
+  /// 本轮 run 由聊天流驱动：run 内不跳 view/rightTab（聊天流是主面，
+  /// PLAN 不把用户拽去 docs 视图、BUILD 不拽去 design 视图）。
+  bool chatActive = false;
+  /// chat.json 串行写链（与 recovery.json 同一撕裂治理）。
+  Future<void> _chatWriteQueue = Future.value();
+
   // recovery / recents
   Map<String, dynamic>? recovery;
   List<Map<String, dynamic>> recent = [];
@@ -134,8 +145,13 @@ class AppStore extends ChangeNotifier {
   /// 最近一次成功渲染的 preview canonical（run 期间的实时画布进度）。
   String? _liveCanonical;
   Timer? _recoveryTimer;
-  /// 移动直连在飞请求的本地取消令牌（无服务器 /agent/cancel 可调）。
-  CancellationToken? _mobileCancel;
+  /// 内置 Dart 循环（core/dart_agent.dart）在飞请求的本地取消令牌——
+  /// dart 运行时无论移动/桌面都无服务器取消端点可调，取消即本地中断。
+  CancellationToken? _dartAgentCancel;
+  /// 测试注入：Build 循环的模型覆盖（scripted mock），生产恒 null——
+  /// runDartAgent 经 OpenAIProvider 直连。
+  @visibleForTesting
+  Object? debugAgentModelOverride;
   /// recovery.json 所在根目录（生产 ~/.nondesign；测试注入临时目录，
   /// 不污染真实用户 home）。
   @visibleForTesting
@@ -232,6 +248,7 @@ class AppStore extends ChangeNotifier {
       components = await api!.components();
       recent = _loadRecent(prefs);
       await _loadRecovery();
+      await _loadChat();
       await refreshProjects();
       // Dev/e2e affordance: auto-open a project and/or jump to a view.
       // NONDESIGN_OPEN=/path/to.ddp  NONDESIGN_VIEW=design|docs|source|play
@@ -268,6 +285,7 @@ class AppStore extends ChangeNotifier {
         if (prefs != null) recent = _loadRecent(prefs);
         await ensureBundledRegistry();
         await _loadRecovery();
+        await _loadChat();
         ready = true;
         _recoveryTimer ??= Timer.periodic(const Duration(seconds: 20), (_) => _persistRecovery());
         notifyListeners();
@@ -327,6 +345,7 @@ class AppStore extends ChangeNotifier {
     ready = true;
     notifyListeners();
     await _loadRecovery();
+    await _loadChat();
     _recoveryTimer ??= Timer.periodic(const Duration(seconds: 20), (_) => _persistRecovery());
     notifyListeners();
   }
@@ -685,7 +704,8 @@ class AppStore extends ChangeNotifier {
         docs = Docs();
         history = [''];
         historyIndex = 0;
-        view = 'design';
+        // 聊天流驱动的建项目（sendChat 新 brief）不跳视图——聊天流是主面。
+        if (!chatActive) view = 'design';
         panel = 'project';
         rightTab = 'agent';
         timeline = [];
@@ -720,7 +740,7 @@ class AppStore extends ChangeNotifier {
       docs = Docs();
       activeBoard = (res['entry'] ?? 'home').toString();
       selectedNode = null;
-      view = 'design';
+      if (!chatActive) view = 'design'; // 同空分支：聊天流驱动不跳视图
       panel = 'project';
       rightTab = 'agent';
       timeline = [];
@@ -912,6 +932,29 @@ class AppStore extends ChangeNotifier {
   /// 画布变更统一入口：op 串行入队（跨入口互斥），返回链尾结果。
   Future<bool> applyOp(String op, {bool silent = false}) =>
       _chainOp(() => _applyOpNow(op, silent: silent));
+
+  /// Agent 变更 op 统一入口（core/dart_agent.dart Build 模式的写路径）：
+  /// 复用 applyOp 的门与队列语义——同一条 _opQueue 链（跨入口互斥，链内
+  /// 读 `mbt` 时前一条已 _commit）、同一个 _commit 采纳（history 推栈 /
+  /// render 信封 / activeBoard 矫正 / dirty）。两处刻意不同：
+  /// ① 门参数 gate:'agent'（引擎 AgentGate，比人类门严——双门语义，绝不
+  /// 降级到 human 门）；② 无 applyOp 的 agentBusy 拒绝——这是 run 自己的
+  /// 写路径（agentBusy 期间人类 op 仍被 _applyOpNow 拦住，两边不打架）。
+  /// api 未连接返回 engine_unavailable 信封（循环侧同形消费）。
+  Future<Map<String, dynamic>> applyAgentOp(String op) =>
+      _chainOp(() => _applyAgentOpNow(op));
+
+  Future<Map<String, dynamic>> _applyAgentOpNow(String op) async {
+    if (api == null) return {'ok': false, 'error': 'engine_unavailable'};
+    try {
+      final res = await api!.apply(mbt, op, gate: 'agent');
+      if (res['ok'] != true) return res;
+      _commit(res);
+      return res;
+    } catch (e) {
+      return {'ok': false, 'error': 'engine_gate_failed:$e'};
+    }
+  }
 
   Future<bool> _applyOpNow(String op, {bool silent = false}) async {
     if (api == null || agentBusy) {
@@ -1492,13 +1535,15 @@ class AppStore extends ChangeNotifier {
     if (runId == null || !agentBusy) return;
     agentPhase = 'cancelling';
     notifyListeners();
-    if (api == null) {
-      // 移动直连：没有 /agent/cancel，取消本地 SDK 在飞请求（token 透传
-      // 到 streamText 的 abortSignal）。
-      _mobileCancel?.cancel();
-      _toast('正在停止', '移动直连请求已中断。');
+    // 内置 Dart 循环在飞：无论移动/桌面都没有服务器取消端点可调——
+    // 取消即本地中断（token 透传到 streamText 的 abortSignal）。
+    final token = _dartAgentCancel;
+    if (token != null) {
+      token.cancel();
+      _toast('正在停止', '内置循环请求已中断。');
       return;
     }
+    if (api == null) return;
     // /agent/cancel 超时/网络异常不得从按钮回调逸出为未处理异步异常
     // （postJson 默认 30s 超时；取消失败也要让用户知道下一步动作）。
     try {
@@ -1509,100 +1554,402 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  /// PLAN 移动直连：ai_sdk_dart 本地循环。事件面最小对齐（user 行/notes/
-  /// 文档落盘/终态 toast），无 RSI/画布（引擎在移动端不可用）。
-  Future<bool> _runMobilePlan(String instruction, {String? baseUrl, String? model}) async {
-    runId = DateTime.now().microsecondsSinceEpoch % 0x7fffffff;
-    agentBusy = true;
-    agentPhase = 'planning';
-    _runInstruction = instruction;
-    _runStartedAt = DateTime.now().toIso8601String();
-    agentError = null;
-    streamText = '';
-    liveDocText = '';
-    _mobileCancel = CancellationToken();
-    timeline.add(TimelineEntry.user(instruction));
+  // ============================================================
+  // 聊天流主面（docs/plan-chat-stream-shell.md §2 S1）
+  // ============================================================
+
+  /// 追加一条聊天消息（容量封顶 300 条，与落盘上限同值；老的截掉）。
+  void appendChat(ChatMessage message) {
+    chatMessages.add(message);
+    if (chatMessages.length > 300) {
+      chatMessages = chatMessages.sublist(chatMessages.length - 300);
+    }
     notifyListeners();
-    try {
-      final r = await runMobilePlan(
-        instruction: instruction,
-        model: model ?? settings.modelId,
-        baseUrl: baseUrl ?? settings.baseUrl,
-        apiKey: settings.apiKey,
-        abortSignal: _mobileCancel,
-        timeout: const Duration(minutes: 10),
-        onNote: (m) {
-          timeline.add(TimelineEntry.note('移动直连', m));
-          notifyListeners();
-        },
-      );
-      if (r.ok) {
-        // 移动 PLAN 成功必须建立最小项目态：否则 hasProject 仍 false，
-        // 主界面停在 Welcome、_persistRecovery 早退，文档既看不见也救不回。
-        if (!hasProject) {
-          hasProject = true;
-          final cleaned = instruction
-              .replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), '')
-              .trim();
-          projectName = cleaned.length > 18 ? cleaned.substring(0, 18) : (cleaned.isEmpty ? 'untitled' : cleaned);
-          mbt = '';
-          render = RenderEnvelope.empty();
-          previewRender = null;
-          activeBoard = null;
-          dirty = true;
-        }
-        docs.prd = r.prd;
-        if (r.ui.isNotEmpty) docs.ui = r.ui;
-        view = 'docs';
-        docsTab = 'prd';
-        unawaited(_persistRecovery(force: true));
-        _toast('文档已生成', 'PRD${r.ui.isNotEmpty ? ' + UI 说明' : ''}（${r.prd.length} 字）');
-      } else {
-        _toast('无文档产出', '模型未调用 write_doc——重试或换模型。');
-      }
-      return r.ok;
-    } catch (e) {
-      agentError = e.toString();
-      _toast('直连失败', e.toString());
+  }
+
+  /// 聊天流发送入口：用户消息入列后按文档状态选模式——无文档先 PLAN
+  /// 再 BUILD（generateFromBrief 同一管线），有文档直接 BUILD。执行
+  /// 路由走 [_runAgent]：agentRuntime=dart → 内置 Dart 循环；server →
+  /// 桌面服务 /agent/run（现状路径平移）。
+  Future<bool> sendChat(String text) async {
+    final brief = text.trim();
+    if (brief.isEmpty) return false;
+    if (agentBusy) {
+      _toast('NoN 正在工作', '等这一轮结束再发。');
       return false;
+    }
+    appendChat(ChatMessage.user(brief));
+    unawaited(_persistChat());
+    return _runChatTurn(brief);
+  }
+
+  /// 一轮聊天 run：进度卡入列 → 事件镜像推进 → 终态收尾 + BUILD 成功
+  /// 追加产物卡（原型）。
+  Future<bool> _runChatTurn(String brief) async {
+    final fresh = !docs.hasContent;
+    final card = ChatMessage.progress(fresh ? '理解 brief，撰写产品文档' : '按指令更新原型');
+    appendChat(card);
+    _chatCard = card;
+    chatActive = true;
+    var built = false;
+    var ok = false;
+    try {
+      if (fresh) {
+        // 桌面/连接桌面：先建空项目（generateFromBrief 同一先建后用纪律）；
+        // 移动离线（api==null）不建——内置 Dart PLAN 成功后自建最小项目态
+        // （_runDartLoop 的 !hasProject 分支）。
+        if (!hasProject && api != null) {
+          final name = brief.replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), '').trim();
+          final created = await newProject(
+            name: name.length > 18 ? name.substring(0, 18) : (name.isEmpty ? 'untitled' : name),
+            empty: true,
+          );
+          if (!created) {
+            card.running = false;
+            card.ok = false;
+            card.detail = '项目创建失败';
+            return false;
+          }
+        }
+        ok = await _runAgent('plan', brief);
+        if (ok && docs.prd.trim().isNotEmpty) {
+          card.text = '规划页面并生成原型';
+          notifyListeners();
+          ok = await _runAgent(
+            'build',
+            '请根据 PRD 与 UI 说明生成完整可交互原型。先规划页面连接，再逐屏生成，最后连线并自检。\n\nBRIEF:\n$brief',
+          );
+          built = ok;
+        }
+      } else {
+        ok = await _runAgent('build', brief);
+        built = ok;
+      }
+      return ok;
     } finally {
-      _mobileCancel = null;
-      agentBusy = false;
-      agentPhase = '';
+      chatActive = false;
+      _chatCard = null;
+      card.running = false;
+      if (ok && built) {
+        card.text = '原型已生成';
+        appendChat(ChatMessage.artifact(
+          kind: artifactPrototype,
+          title: projectName,
+          detail: '可交互原型已生成，点开进入工作区',
+        ));
+      } else {
+        card.ok = ok;
+        if (!ok) card.detail ??= agentError ?? '本轮未完成';
+      }
       notifyListeners();
+      unawaited(_persistChat());
     }
   }
 
-  Future<bool> _runAgent(String mode, String instruction) async {
-    // 移动直连（PLAN 独立模式）：无服务器但有模型 key 时，Dart AI SDK
-    // 本地跑文档生成（PRD/UI），无需桌面服务器——设计/画布仍需连接。
-    if (api == null && mode == 'plan' && !agentBusy) {
-      if (settings.apiKey.trim().isEmpty) {
-        _toast('先配置模型', '独立文档模式需要 API Key（或连接桌面服务器）。');
-        return false;
-      }
-      final selected = model;
-      if (selected != null) {
-        if (!selected.toolCall) {
-          _toast('该模型不支持工具调用', 'Agent 需要 function calling。');
-          return false;
+  /// run 事件 → 活动进度卡的镜像（时间线管线不动，聊天卡并行推进）。
+  void _mirrorChatEvent(String type, Map<String, dynamic> event) {
+    final card = _chatCard;
+    if (card == null) return;
+    switch (type) {
+      case 'tool_start':
+        card.steps.add(ChatStep(label: (event['tool'] ?? 'tool').toString(), running: true));
+      case 'tool_end':
+        final tool = (event['tool'] ?? '').toString();
+        for (final s in card.steps.reversed) {
+          if (s.label == tool && s.running) {
+            s.running = false;
+            s.ok = event['ok'] != false;
+            s.ms = (event['ms'] is num) ? (event['ms'] as num).toInt() : null;
+            break;
+          }
         }
-        if (selected.protocol != 'openai') {
-          _toast('非 OpenAI 兼容协议不可用', '请选择 OpenAI 兼容端点（MiniMax 亦提供 /v1）。');
-          return false;
+      case 'note':
+        card.steps.add(ChatStep(
+          label: (event['label'] ?? '').toString(),
+          detail: (event['detail'] ?? '').toString(),
+        ));
+      case 'page_generated':
+        card.steps.add(ChatStep(
+          label: '生成画板 ${event['artboard'] ?? ''}',
+          detail: event['summary']?.toString(),
+        ));
+      case 'assistant_text':
+        // 助手正文独立成卡（不在进度卡里折叠）；streamText 此时仍被
+        // _handleAgentEvent 的同名分支持有，读同一份不清空。
+        if (event['final'] == true) {
+          final text =
+              streamText.trim().isNotEmpty ? streamText : (event['text'] ?? '').toString();
+          if (text.trim().isNotEmpty) chatMessages.add(ChatMessage.assistant(text));
         }
-      }
-      var base = settings.baseUrl.trim();
-      if (base.isEmpty) base = selected?.baseUrl.trim() ?? '';
-      if (base.isEmpty) base = _builtInBaseUrls[settings.providerId] ?? _builtInBaseUrls['openai']!;
-      if (settings.baseUrl.trim().isEmpty) {
-        settings.baseUrl = base; // 空端点曾让 OpenAIProvider 发到空 baseUrl 静默失败
-        unawaited(saveSettings());
-        _toast('已回退默认端点', base);
-      }
-      return _runMobilePlan(instruction, baseUrl: base, model: selected?.id ?? settings.modelId);
+      case 'doc_written':
+        final kind = (event['kind'] ?? '').toString();
+        final content = event['content'];
+        card.steps.add(ChatStep(
+          label: kind == 'prd' ? '撰写产品文档' : '撰写 UI 说明',
+          detail: content is String && content.isNotEmpty ? '${content.length} 字' : null,
+        ));
+      case 'design_spec_written':
+        card.steps.add(ChatStep(label: '写入设计规范'));
+      case 'failed':
+        card.detail = (event['error'] ?? 'failed').toString();
     }
-    if (api == null || agentBusy) return false;
+  }
+
+  /// A2UI 交互卡动作回流（plan §2「确认表单/参数选择 → 回流续跑」）：
+  /// 动作摘要作为用户消息入列并自动续跑一轮。agentBusy 时只提示——
+  /// 动作不丢（卡片还在流里），可稍后重发。
+  Future<void> handleChatAction(String name, Map<String, dynamic> context) async {
+    if (agentBusy) {
+      _toast('NoN 正在工作', '等这一轮结束再交互。');
+      return;
+    }
+    final ctx = context.isEmpty ? '' : ' ${jsonEncode(context)}';
+    final summary = '交互卡提交「$name」$ctx';
+    appendChat(ChatMessage.user(summary));
+    unawaited(_persistChat());
+    await _runChatTurn(summary);
+  }
+
+  /// 聊天流顶栏「工作区」入口：无项目先建空项目（先建后用纪律），再切
+  /// 设计视图。聊天主面下这是进工作区的显式唯一门（S4 分栏/PiP 之前）。
+  Future<void> openWorkspace() async {
+    if (!hasProject) {
+      final ok = await newProject(empty: true);
+      if (!ok) return;
+    }
+    setView('design');
+  }
+
+  /// 聊天记录落盘（$recoveryDir/chat.json，与 recovery 同目录、测试可注入）。
+  /// 写链串行——append/clear 与在飞写交错会产生撕裂 JSON（recovery.json
+  /// 同一治理）。
+  Future<void> _persistChat() async {
+    try {
+      await Directory(recoveryDir).create(recursive: true);
+      final payload = jsonEncode({
+        'v': 1,
+        'ts': DateTime.now().millisecondsSinceEpoch,
+        'messages': [for (final m in chatMessages) m.toJson()],
+      });
+      final write =
+          _chatWriteQueue.then((_) => File('$recoveryDir/chat.json').writeAsString(payload));
+      _chatWriteQueue = write.then<void>((_) {}, onError: (Object _) {});
+      await write;
+    } catch (_) {}
+  }
+
+  /// 重启恢复聊天记录。在跑的进度卡随进程死亡降级为失败卡（诚实呈现，
+  /// 不伪装成仍在运行）。
+  Future<void> _loadChat() async {
+    try {
+      final file = File('$recoveryDir/chat.json');
+      if (!await file.exists()) return;
+      final raw = jsonDecode(await file.readAsString());
+      if (raw is! Map) return;
+      final list = raw['messages'];
+      if (list is! List) return;
+      chatMessages = [
+        for (final e in list)
+          if (e is Map) ChatMessage.fromJson(Map<String, dynamic>.from(e)),
+      ];
+      for (final m in chatMessages) {
+        if (m.kind == chatKindProgress && m.running) {
+          m.running = false;
+          m.ok = false;
+          m.detail ??= '应用重启，运行中断';
+        }
+      }
+    } catch (_) {}
+  }
+
+  @visibleForTesting
+  Future<void> debugLoadChat() => _loadChat();
+
+  @visibleForTesting
+  Future<void> debugPersistChat() => _persistChat();
+
+  @visibleForTesting
+  Future<void> get chatWritesIdle => _chatWriteQueue;
+
+  /// 清空聊天流（含落盘记录）。
+  Future<void> clearChat() async {
+    chatMessages = [];
+    _chatCard = null;
+    try {
+      final del = _chatWriteQueue.then((_) => File('$recoveryDir/chat.json').delete());
+      _chatWriteQueue = del.then<void>((_) {}, onError: (Object _) {});
+      await del;
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  /// 内置 Dart 循环（core/dart_agent.dart，agentRuntime='dart'）。
+  /// PLAN/Refine 纯本地（无引擎依赖）；BUILD/Refine 的 design_op 经
+  /// store 锚定桥（[_StoreEngineGate]）走 applyAgentOp——applyOp 同队列
+  /// 同提交语义 + /engine/apply gate:'agent'（AgentGate——绝不绕过引擎门）。
+  /// 事件与 server SSE 同形，复用 [_handleAgentEvent] 的时间线/文档/preview 管线。
+  Future<bool> _runDartLoop(String mode, String instruction) async {
+    if (agentBusy) return false;
+    if (settings.apiKey.trim().isEmpty) {
+      _toast('先配置模型', '内置 Dart 循环需要 API Key（或连接桌面服务器）。');
+      return false;
+    }
+    final selected = model;
+    if (selected != null && !selected.toolCall) {
+      _toast('该模型不支持工具调用', 'Agent 需要 function calling。');
+      return false;
+    }
+    if (selected != null && selected.protocol != 'openai') {
+      _toast('非 OpenAI 兼容协议不可用', '请选择 OpenAI 兼容端点（MiniMax 亦提供 /v1）。');
+      return false;
+    }
+    var base = settings.baseUrl.trim();
+    if (base.isEmpty) base = selected?.baseUrl.trim() ?? '';
+    if (base.isEmpty) base = _builtInBaseUrls[settings.providerId] ?? _builtInBaseUrls['openai']!;
+    if (settings.baseUrl.trim().isEmpty) {
+      settings.baseUrl = base; // 空端点曾让 OpenAIProvider 发到空 baseUrl 静默失败
+      unawaited(saveSettings());
+      _toast('已回退默认端点', base);
+    }
+    // run 起点的 mbt 快照与 server 路径同一纪律：在飞 op 先排空再取快照，
+    // 否则终态回来会覆盖掉尚未 _commit 的 op（丢更新）。
+    await _opQueue;
+    if (agentBusy) return false; // 排队等待期间有并发 run 启动：让位
+    runId = DateTime.now().microsecondsSinceEpoch % 0x7fffffff;
+    agentBusy = true;
+    agentPhase = mode == 'plan' ? 'planning' : mode == 'refine' ? 'refining' : 'building';
+    _runInstruction = instruction;
+    _runStartedAt = DateTime.now().toIso8601String();
+    _liveCanonical = null;
+    unawaited(_persistRecovery(force: true));
+    agentError = null;
+    streamText = '';
+    thinkingText = '';
+    _deltaBuffer = '';
+    _thinkingBuffer = '';
+    // doc 直播同 run 生命周期（与 _runAgent 同根）：上一失败 run 的残尾不进本轮。
+    liveDocText = '';
+    _docBuffer = '';
+    usage = const {};
+    timeline = [
+      TimelineEntry.user(instruction),
+      TimelineEntry(
+        kind: 'phase',
+        text: mode == 'plan'
+            ? '理解 brief，撰写产品文档（内置 Dart）'
+            : mode == 'refine'
+                ? '定位改动，保持设计系统（内置 Dart）'
+                : '规划页面并落画布（内置 Dart · 引擎门）',
+      ),
+    ];
+    // 聊天流驱动的 run 不跳视图/rightTab（聊天流是主面；进工作区是
+    // 显式动作——openWorkspace）。
+    if (!chatActive) {
+      rightTab = 'agent';
+      if (mode == 'plan') view = 'docs';
+      if (mode != 'plan') view = 'design';
+    }
+    _dartAgentCancel = CancellationToken();
+    notifyListeners();
+
+    var success = false;
+    var orphaned = false;
+    final myRun = runId!;
+    final events = StreamController<Map<String, dynamic>>();
+    try {
+      final runFuture = runDartAgent(
+        request: DartAgentRequest(
+          mode: mode,
+          instruction: instruction,
+          mbt: mbt,
+          docs: docs.toJson(),
+          model: selected?.id ?? settings.modelId,
+          baseUrl: base,
+          apiKey: settings.apiKey,
+          thinkingLevel: settings.thinkingLevel,
+          maxSteps: settings.maxSteps,
+          contextWindow: selected?.context,
+        ),
+        // Build/Refine 的写路径经 store 锚定桥：design_op 落 applyAgentOp
+        // （applyOp 同队列同提交语义 + AgentGate）；检视走 HTTP 只读路由。
+        bridge: api == null ? null : _StoreEngineGate(this),
+        // 测试注入 scripted mock；生产恒 null（OpenAIProvider 直连）。
+        modelOverride: debugAgentModelOverride,
+        abortSignal: _dartAgentCancel,
+        timeout: const Duration(minutes: 10),
+        onEvent: (ev) {
+          if (!events.isClosed) events.add(ev);
+        },
+      );
+      unawaited(runFuture.whenComplete(() => unawaited(events.close())));
+      await for (final ev in events.stream) {
+        // run 归属校验（与 _runAgent 同一结构性兜底）：项目切换等路径换掉
+        // runId 即本 run 废弃，剩余事件整流丢弃。
+        if (runId != myRun) {
+          orphaned = true;
+          break;
+        }
+        await _handleAgentEvent(ev);
+        if (ev['type'] == 'done') success = true;
+      }
+      await runFuture; // 循环自身保证终态事件；这里只兜异常
+      if (!orphaned && success && mode == 'plan' && !hasProject) {
+        // 移动 PLAN 成功必须建立最小项目态：否则 hasProject 仍 false，
+        // 主界面停在 Welcome、_persistRecovery 早退，文档看不见也救不回。
+        hasProject = true;
+        final cleaned = instruction
+            .replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), '')
+            .trim();
+        projectName = cleaned.length > 18 ? cleaned.substring(0, 18) : (cleaned.isEmpty ? 'untitled' : cleaned);
+        render = RenderEnvelope.empty();
+        previewRender = null;
+        activeBoard = null;
+        dirty = true;
+        docsTab = 'prd';
+        unawaited(_persistRecovery(force: true));
+        _toast('文档已生成', '内置 Dart 直连完成。');
+      } else if (!orphaned && !success && agentError == 'doc_not_written') {
+        _toast('无文档产出', '模型未调用 write_doc——重试或换模型。');
+      }
+    } catch (e) {
+      agentError = e.toString();
+      timeline.add(TimelineEntry.finish(false, '运行失败', e.toString()));
+    } finally {
+      _dartAgentCancel = null;
+      _flushStreamAsAssistant();
+      _flushThinking();
+      _docBuffer = '';
+      agentBusy = false;
+      streamText = '';
+      agentPhase = 'idle';
+      runId = null;
+      previewRender = null;
+      notifyListeners();
+      unawaited(_persistRecovery(force: true));
+    }
+    return success;
+  }
+
+  Future<bool> _runAgent(String mode, String instruction) async {
+    if (agentBusy) return false;
+    // 运行时路由（models.dart agentRuntime）：dart = 内置 Dart 循环
+    // （PLAN/Refine 纯本地；BUILD 需引擎桥——画布变更必须过 AgentGate）；
+    // server = 桌面服务 /agent/run。显式选择的运行时不静默降级：
+    // server 未连接、dart 缺引擎桥都显性报错。
+    final dartRuntime = settings.agentRuntime == agentRuntimeDart;
+    if (dartRuntime && mode == 'build' && api == null) {
+      _toast('内置 Dart 构建需要引擎', 'Build 的画布变更必须经引擎 AgentGate——'
+          '连接桌面服务器（设置 → 桌面服务器）后重试，或切回「桌面服务」运行时。');
+      return false;
+    }
+    if (dartRuntime) {
+      return _runDartLoop(mode, instruction);
+    }
+    if (api == null) {
+      _toast('未连接桌面服务', '「桌面服务」运行时需要先连接桌面服务器'
+          '（设置 → 桌面服务器），或切回「内置 Dart」运行时。');
+      return false;
+    }
     if (settings.apiKey.trim().isEmpty) {
       _toast('先配置模型', '在设置里填入服务商 API Key。');
       return false;
@@ -1648,9 +1995,12 @@ class AppStore extends ChangeNotifier {
       TimelineEntry.user(instruction),
       TimelineEntry(kind: 'phase', text: mode == 'plan' ? '理解 brief，撰写产品文档' : mode == 'refine' ? '定位改动，保持设计系统' : '规划页面并生成原型'),
     ];
-    rightTab = 'agent';
-    if (mode == 'plan') view = 'docs';
-    if (mode != 'plan') view = 'design';
+    // 同 _runDartLoop：聊天流驱动的 run 不跳视图/rightTab。
+    if (!chatActive) {
+      rightTab = 'agent';
+      if (mode == 'plan') view = 'docs';
+      if (mode != 'plan') view = 'design';
+    }
     notifyListeners();
 
     final body = {
@@ -1726,6 +2076,10 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _handleAgentEvent(Map<String, dynamic> event) async {
     final type = (event['type'] ?? '').toString();
+    // 聊天流镜像（S1）：时间线管线原样不动，活动进度卡并行推进。
+    // 位置在 switch 之前——assistant_text 分支会消费并清空 streamText，
+    // 镜像必须先读同一份正文。
+    if (_chatCard != null) _mirrorChatEvent(type, event);
     switch (type) {
       case 'note':
         _flushStreamAsAssistant();
@@ -1818,7 +2172,12 @@ class AppStore extends ChangeNotifier {
       case 'preview':
         final b64 = event['mbt_b64']?.toString();
         if (b64 != null) {
-          _previewMbt = utf8.decode(base64Decode(b64));
+          final incoming = utf8.decode(base64Decode(b64));
+          // dart Build 的 op 已由 applyAgentOp 实时 _commit（store.mbt 即最新
+          // canonical）——同 canonical 免一次 700ms 后的重复 /engine/render；
+          // server 路径 run 中 store.mbt 不前进，preview 恒新，照常调度。
+          if (incoming == mbt) break;
+          _previewMbt = incoming;
           _previewTimer ??= Timer(const Duration(milliseconds: 700), () async {
             _previewTimer = null;
             final target = _previewMbt;
@@ -2102,4 +2461,34 @@ class AppStore extends ChangeNotifier {
     _server?.dispose();
     super.dispose();
   }
+}
+
+/// Build/Refine 循环的引擎桥（store 锚定，docs/plan-dart-agent-migration.md
+/// P1 的 Build 写路径落地）。路由表：
+/// - 变更（design_op 唯一去路）：[AppStore.applyAgentOp]——applyOp 同一条
+///   _opQueue 队列 + 同一个 _commit 采纳 + /engine/apply gate:'agent'
+///   （AgentGate，绝不绕过引擎门、绝不降级 human 门）。入参 mbt 刻意不用：
+///   链内读 store.mbt 才是新鲜的（run 在飞时 agentBusy 挡住其余写者，
+///   loop ctx.mbt 与 store.mbt 锁步）。
+/// - 检视：POST /engine/session（session_query_nodes / session_interactions /
+///   session_states / session_lint / session_critique / session_spec /
+///   session_export_svg / session_flows / session_list_artboards，只读面）。
+/// - 注册表：GET /engine/templates、GET /engine/components。
+/// read_docs 不经引擎（server 同构：docs 在 run 请求载荷里，循环本地读）。
+class _StoreEngineGate implements EngineGateBridge {
+  final AppStore store;
+  _StoreEngineGate(this.store);
+
+  @override
+  Future<Map<String, dynamic>> applyAgent(String mbt, String op) => store.applyAgentOp(op);
+
+  @override
+  Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) =>
+      store.api!.session(mbt, name, arg);
+
+  @override
+  Future<List<dynamic>> templates() => store.api!.templates();
+
+  @override
+  Future<List<dynamic>> components() => store.api!.components();
 }

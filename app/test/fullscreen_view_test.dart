@@ -66,12 +66,22 @@ void main() {
 
   test('Mobile PLAN is cancellable and establishes a minimal project state', () {
     final store = _read('lib/core/store.dart');
+    // 2026-11-17 chat-stream 改造：取消令牌从 _mobileCancel 泛化为内置
+    // Dart 循环通用的 _dartAgentCancel（桌面 agentRuntime=dart 同路径）；
+    // 取消即本地中断（token 透传 streamText abortSignal + cancelAgent 读
+    // 令牌调用 cancel）。行为契约不变：可取消 / docs-only recovery /
+    // PLAN 成功建最小项目态。
     expect(store.contains('CancellationToken()'), isTrue);
-    expect(store.contains('abortSignal: _mobileCancel'), isTrue);
-    expect(store.contains('_mobileCancel?.cancel()'), isTrue);
+    expect(store.contains('abortSignal: _dartAgentCancel'), isTrue);
+    expect(
+      RegExp(r'final token = _dartAgentCancel;[\s\S]{0,200}token\.cancel\(\)').hasMatch(store),
+      isTrue,
+      reason: 'cancelAgent 必须读到令牌并真实调用 cancel（本地中断）',
+    );
     expect(store.contains('docsOnly'), isTrue, reason: '移动端 docs-only recovery');
     expect(
-      RegExp(r'if \(!hasProject\)[\s\S]{0,400}hasProject = true').hasMatch(store),
+      RegExp(r"if \(!orphaned && success && mode == 'plan' && !hasProject\)[\s\S]{0,400}hasProject = true")
+          .hasMatch(store),
       isTrue,
       reason: '移动 PLAN 成功必须建最小项目态',
     );

@@ -24,6 +24,14 @@
   8) db_exec_locked 与 delete 同锁串行：持锁删除期间 db_exec 必须等待；
      锁释放后重验 no_app，不得在已删目录里凭空重建 app.db（半删目录 +
      幽灵 app.db 卡死同名重建的竞态回归）。
+  9) list_apps 目录对账：只列有 index.html 的目录（幽灵条目消失）、
+     name=目录名（meta.name 漂移不再是点了就 no_app 的死条目）、
+     有 html 无 meta 照常列出（不再隐身）、坏 meta 不静默吞
+     （标题退目录名 + metaBroken 标记）。
+  10) _chat 的 openai 异常包 HotAppError：连接失败 llm_unreachable、
+     HTTP 状态码 llm_http_<code>（401/429）、空 choices llm_empty_choices；
+     generate/refine 遇 LLM 故障 fail-closed（无半成品目录、旧版不覆盖、
+     同名可直接重试）。
 """
 
 from __future__ import annotations
@@ -35,6 +43,9 @@ import sys
 import tempfile
 from pathlib import Path
 from unittest import mock
+
+import httpx
+import openai
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "server"))
 
@@ -250,8 +261,9 @@ def main() -> int:
             listed = hotapp.portfolio_list()["items"]
             check("remove drops entry", all(e["ref"] != "one" for e in listed), repr(listed))
 
-            # 存量补扫：临时 HOME 下的 video/3d 产物自动出现
-            video_dir = home / "Documents" / "NoNDesign" / "video" / "clip1"
+            # 存量补扫：临时 HOME 下的 videos/3d 产物自动出现（video 扫描根 =
+            # videos/ 持久目录；旧 video/ 是容量轮换管辖的 job 中间目录）
+            video_dir = home / "Documents" / "NoNDesign" / "videos" / "clip1"
             video_dir.mkdir(parents=True)
             mp4 = video_dir / "frames.mp4"
             mp4.write_text("mp4", "utf-8")
@@ -296,17 +308,65 @@ def main() -> int:
             check("corrupt portfolio tolerated", hotapp.portfolio_list()["ok"] is True)
             check("corrupt portfolio backed up", portfolio.with_name(portfolio.name + ".bak").exists())
 
-            # 坏 meta：list_apps 跳过坏应用而非整体 500
-            bad_app = root / "bad-meta"
-            bad_app.mkdir()
-            (bad_app / "meta.json").write_text("{broken", "utf-8")
-            ok_app = root / "ok-meta"
-            ok_app.mkdir()
-            (ok_app / "meta.json").write_text(
-                json.dumps({"name": "ok-meta", "title": "OK", "updatedAt": 1}), "utf-8")
+            # ---- 9) 列表对账：目录 + index.html 是事实源，meta 只贡献展示 ----
+            # 幽灵：有 meta 无 index.html → page/db 都 no_app，列表不得出现
+            ghost = root / "ghost-app"
+            ghost.mkdir()
+            (ghost / "meta.json").write_text(
+                json.dumps({"name": "ghost-app", "title": "幽灵", "updatedAt": 1}), "utf-8")
+            # 隐身：有 index.html 无 meta → 旧实现整个消失，现在必须列出
+            (root / "bare-app").mkdir()
+            (root / "bare-app" / "index.html").write_text(_doc(), "utf-8")
+            # 死条目：meta.name 与目录名漂移 → 列表 name 必须是目录名（否则
+            # 客户端把列表名递给 page/db 就是 no_app 400）
+            drift = root / "drift-app"
+            drift.mkdir()
+            (drift / "index.html").write_text(_doc(), "utf-8")
+            (drift / "meta.json").write_text(
+                json.dumps({"name": "other-name", "title": "漂移标题", "updatedAt": 2}), "utf-8")
+            # 坏 meta：不静默吞——照常列出，标题退目录名，metaBroken 标记
+            broken_meta = root / "broken-meta-app"
+            broken_meta.mkdir()
+            (broken_meta / "index.html").write_text(_doc(), "utf-8")
+            (broken_meta / "meta.json").write_text("{broken", "utf-8")
+            # 合法 meta 但不是对象 → 同坏 meta 语义
+            nonobj = root / "nonobj-meta-app"
+            nonobj.mkdir()
+            (nonobj / "index.html").write_text(_doc(), "utf-8")
+            (nonobj / "meta.json").write_text("[1, 2]", "utf-8")
+
             apps = hotapp.list_apps()["apps"]
-            check("bad meta skipped", all(a["name"] != "bad-meta" for a in apps), repr(apps))
-            check("good app listed", any(a["name"] == "ok-meta" for a in apps), repr(apps))
+            names = {a["name"] for a in apps}
+            check("ghost (meta without html) not listed", "ghost-app" not in names, repr(apps))
+            check("meta name never leaks as list name", "other-name" not in names, repr(apps))
+            check("html-only app now listed", "bare-app" in names, repr(apps))
+            bare = next((a for a in apps if a["name"] == "bare-app"), None)
+            check("html-only title falls back to dir name",
+                  bare is not None and bare["title"] == "bare-app", repr(bare))
+            drift_item = next((a for a in apps if a["name"] == "drift-app"), None)
+            check("drifted app listed under dir name", drift_item is not None, repr(apps))
+            check("drifted meta still contributes title",
+                  drift_item is not None and drift_item["title"] == "漂移标题", repr(drift_item))
+            broken_item = next((a for a in apps if a["name"] == "broken-meta-app"), None)
+            check("broken meta app still listed", broken_item is not None, repr(apps))
+            check("broken meta title falls back to dir name",
+                  broken_item is not None and broken_item["title"] == "broken-meta-app",
+                  repr(broken_item))
+            check("broken meta flagged not swallowed",
+                  broken_item is not None and broken_item.get("metaBroken") is True,
+                  repr(broken_item))
+            nonobj_item = next((a for a in apps if a["name"] == "nonobj-meta-app"), None)
+            check("non-object meta flagged",
+                  nonobj_item is not None and nonobj_item.get("metaBroken") is True,
+                  repr(nonobj_item))
+            # 正常应用不受对账影响：name/title/updatedAt 照常来自 meta
+            legacy_item = next((a for a in apps if a["name"] == "legacy-app"), None)
+            check("healthy meta unchanged",
+                  legacy_item is not None and legacy_item["title"] == "旧应用"
+                  and not legacy_item.get("metaBroken"), repr(legacy_item))
+            # 对账后的列表条目直接可打开（name 即目录名）
+            check("listed name opens as app",
+                  "window.NoN.db" in hotapp.page_html("drift-app"))
 
         # 临时目录外不得出现任何 热应用 写入
         real_root = Path.home() / "Documents" / "NoNDesign" / "hotapps"
@@ -412,6 +472,63 @@ async def _async_write_cases(failures: list[str]) -> None:
                 res2 = await hotapp.generate("wfail-app", "重试", "m", "b", "k")
             check("retry after cleanup succeeds",
                   res2.get("ok") is True and (root / "wfail-app" / "index.html").exists(), repr(res2))
+
+            # ---- 10) LLM 错误不再裸 500：_chat 的 openai 异常包 HotAppError ----
+            # _hotapp_guard 只认 HotAppError/OSError/ValueError；SDK 异常不包
+            # 就穿透成裸 500「Internal Server Error」，无法区分 401/断网/网关 5xx。
+            req = httpx.Request("POST", "http://127.0.0.1:9/v1/chat/completions")
+
+            def _client_raising(exc: Exception):
+                def _factory(*args: object, **kwargs: object) -> mock.MagicMock:
+                    client = mock.MagicMock()
+                    client.chat.completions.create = mock.AsyncMock(side_effect=exc)
+                    return client
+                return _factory
+
+            conn_exc = openai.APIConnectionError(request=req)
+            auth_exc = openai.AuthenticationError(
+                "Invalid API key", response=httpx.Response(401, request=req), body=None)
+            rate_exc = openai.RateLimitError(
+                "rate limited", response=httpx.Response(429, request=req), body=None)
+            with mock.patch.object(hotapp, "AsyncOpenAI", _client_raising(conn_exc)):
+                await expect_error("connection error becomes HotAppError",
+                                   hotapp._chat("m", "http://127.0.0.1:9/v1", "k", "s", "u"),
+                                   "llm_unreachable")
+            with mock.patch.object(hotapp, "AsyncOpenAI", _client_raising(auth_exc)):
+                await expect_error("401 becomes HotAppError with status",
+                                   hotapp._chat("m", "b", "k", "s", "u"), "llm_http_401")
+            with mock.patch.object(hotapp, "AsyncOpenAI", _client_raising(rate_exc)):
+                await expect_error("429 becomes HotAppError with status",
+                                   hotapp._chat("m", "b", "k", "s", "u"), "llm_http_429")
+
+            # generate 遇 LLM 故障：HotAppError 传播 + fail-closed（目录不落盘，
+            # 同名可直接重试——app_exists 不会挡住失败请求的第二次尝试）
+            with mock.patch.object(hotapp, "AsyncOpenAI", _client_raising(conn_exc)):
+                await expect_error("generate LLM failure is HotAppError",
+                                   hotapp.generate("llmfail-app", "需求", "m",
+                                                   "http://127.0.0.1:9/v1", "k"),
+                                   "llm_unreachable")
+            check("failed generate leaves no half dir", not (root / "llmfail-app").exists())
+            with mock.patch.object(hotapp, "_chat", chat_ok):
+                res_retry = await hotapp.generate("llmfail-app", "重试", "m", "b", "k")
+            check("retry after LLM failure not blocked",
+                  res_retry.get("ok") is True, repr(res_retry))
+
+            # refine 同样受益（LLM 失败不覆盖旧版：异常先于写盘抛出）
+            with mock.patch.object(hotapp, "AsyncOpenAI", _client_raising(auth_exc)):
+                await expect_error("refine LLM failure is HotAppError",
+                                   hotapp.refine("wfail-app", "x", "m", "b", "k"),
+                                   "llm_http_401")
+            check("failed refine keeps old version",
+                  "gen-v1" in (root / "wfail-app" / "index.html").read_text("utf-8"))
+
+            # 空 choices（网关异常响应）也是可诊断 HotAppError，不是 IndexError 裸 500
+            empty_client = mock.MagicMock()
+            empty_client.chat.completions.create = mock.AsyncMock(
+                return_value=mock.MagicMock(choices=[]))
+            with mock.patch.object(hotapp, "AsyncOpenAI", lambda *a, **k: empty_client):
+                await expect_error("empty choices reported",
+                                   hotapp._chat("m", "b", "k", "s", "u"), "llm_empty_choices")
 
             # refine 成功覆盖 + fail-closed 两路（坏回复 / 短 HTML 旧版保留）
             rapp = root / "ref-app"

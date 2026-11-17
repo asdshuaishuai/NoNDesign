@@ -83,6 +83,15 @@ LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引�
   0/90/180/270 相机环绕各截一帧进 evidence，tag 命名）；规范手编回灌
   （/three/spec/save + 工作台「规范」pane——img2threejs 纪律：手改落
   spec 不许只改代码，components/acceptance 门复检）。
+- **blocked 死锁解除（2026-11-17 审查批次）**：/three/spec/save 成功即清
+  blocked 标志并复位对应 pass 计数（此前只写 spec 文件不清标志——错误
+  信封开的「refine-spec 解封」这剂药无效，「重新 new 覆盖」又撞
+  project_exists 门，作品集删除对 three 只隐藏不删，唯一出路是手改文件
+  系统）；新增 POST /three/delete 真删项目目录（路径校验对齐
+  portfolio_delete 纪律：白名单 + 显式断言不出 3d 根）。配套错误面：
+  _chat 的 openai 异常（401 等）与 spec JSON 解析/损坏读取全部包
+  ThreeError 带 400 诊断（此前裸 500 零诊断）；_proj_dir 白名单收紧为
+  ASCII 字母数字-_（旧 isalnum 放行 CJK 落盘，与 UI 提示矛盾）。
 - 输入模态：文字 brief / 参考图（img2threejs 式图→程序化 3D 重建：
   macro→meso→micro 分层观察、身份特征清单、单视角盲区显式声明）/ 图+文。
 - 技术底座已预验证：webview_flutter_wkwebview 3.27.2 macOS 支持 +

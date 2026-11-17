@@ -111,6 +111,13 @@ class _WelcomeState extends State<Welcome> {
                       ),
                     ),
                     const SizedBox(width: 6),
+                    // 聊天流入口（S1 主面切换）：Welcome 只在关闭
+                    // chatStreamHome 时出现，这里给出回聊天流的显式门。
+                    IconAction(
+                      icon: Icons.forum_outlined,
+                      tooltip: '聊天流',
+                      onTap: () => store.setView('chat'),
+                    ),
                     IconAction(
                       icon: store.settings.theme == 'light' ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
                       tooltip: '切换主题',

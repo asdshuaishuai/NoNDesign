@@ -11,7 +11,7 @@ if [ ! -x "$PY" ]; then
   exit 1
 fi
 
-for t in test_hotapp test_server_routes test_context_sanitize test_acp_client test_doc_delta test_engine_server_cleanup test_agent_run; do
+for t in test_hotapp test_video_jobs test_three test_server_routes test_context_sanitize test_acp_client test_doc_delta test_engine_server_cleanup test_agent_run; do
   echo "== python scripts/wf/$t.py =="
   "$PY" "$ROOT/scripts/wf/$t.py" || exit 1
 done

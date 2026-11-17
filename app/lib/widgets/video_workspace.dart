@@ -41,6 +41,16 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   String _reviewOutput = '';
   int _previewCount = 0;
 
+  /// job 轮询连续失败上限：1.2s × 25 ≈ 30s（ask 给出的放弃窗口）。网络抖动
+  /// 期间保留轮询，但服务器中途永久下线（移动端连桌面断网）必须放弃并复位
+  /// ——否则 _busy 永真、「加载示例/渲染」永久禁点（工作台死端）。
+  static const int _pollMaxFails = 25;
+  int _pollFails = 0;
+
+  /// 环② review 结论（ok/exit 解析）：null=未知/未评审/请求失败（不拦渲染，
+  /// 环①硬门在 render 内 fail-closed 兜底）；false=FAIL（禁用渲染按钮）。
+  bool? _reviewOk;
+
   AppStore get store => context.read<AppStore>();
 
   @override
@@ -90,6 +100,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           _tl = (res['timeline'] as Map).cast<String, dynamic>();
           _spec = (res['spec'] as Map?)?.cast<String, dynamic>();
           _reviewOutput = '';
+          _reviewOk = null; // 新示例待重新评审，渲染门随之重开
           _jobState = null;
           _job = null;
           _previewCount = 0;
@@ -115,11 +126,35 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     try {
       final res = await api.postJson('/video/review', {'timeline': _tl, 'spec': _spec});
       if (!mounted) return;
-      setState(() => _reviewOutput = (res['output'] ?? '').toString());
+      // ok/exit 双判（server 返回 {ok: exit==0, exit, output}）：FAIL 必须
+      // 当场禁用渲染按钮并就近亮出原因，而不是等用户点了渲染、被 render.py
+      // 独立硬门拒掉后才看到「渲染失败」（反馈滞后一拍）。
+      final exitCode = res['exit'];
+      final ok = res['ok'] == true && (exitCode is! num || exitCode.toInt() == 0);
+      setState(() {
+        _reviewOutput = (res['output'] ?? '').toString();
+        _reviewOk = ok;
+      });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _reviewOutput = '环②请求失败：$e');
+      // 评审请求失败 ≠ 评审 FAIL：不拦渲染（render 内环①硬门兜底）。
+      setState(() {
+        _reviewOutput = '环②请求失败：$e';
+        _reviewOk = null;
+      });
     }
+  }
+
+  /// 环② FAIL 的就近原因：优先抽 ✗ / REJECTED 行（机械对照的具体拒绝项，
+  /// review.py 的输出形态），抽不到退回全文。
+  String get _reviewFailReason {
+    final lines = _reviewOutput
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.contains('✗') || l.startsWith('REJECTED'))
+        .toList();
+    if (lines.isEmpty) return _reviewOutput.trim();
+    return lines.join('\n');
   }
 
   void _render() async {
@@ -132,6 +167,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       if (res['ok'] == true) {
         _job = res['job'] as String?;
         if (_job != null) store.setVideoState(job: _job); // 视图切走可接回轮询
+        _pollFails = 0; // 新任务重新计数（上一任务的失败计数不复用）
         _poll?.cancel();
         _poll = Timer.periodic(const Duration(milliseconds: 1200), (_) => _pollOnce());
       } else {
@@ -155,6 +191,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     if (job == null) return;
     try {
       final res = await api.getJson('/video/render/status?job=$job');
+      _pollFails = 0; // 任何成功响应（含失效/终态信封）都清零连续失败计数
       if (!mounted || _job != job) return; // 旧回调/已清 job：丢弃迟到结果
       // 未知 job（服务器随 App 重启，任务只在进程内存里 → 404）或任何
       // 非 ok 响应都视为终态：否则每 1.2s 轮询一个永远不存在的 job，
@@ -187,7 +224,22 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         }
       }
     } catch (_) {
-      // 网络抖动不视为终态：保留轮询，服务器恢复后可继续。
+      // 网络抖动不视为终态：保留轮询，服务器恢复后可继续；但只容忍有限
+      // 次——连续失败达上限（≈30s）即放弃并复位，服务器永久下线时不得把
+      // _busy 永真、「加载示例/渲染」永久禁点（工作台死端）。
+      _pollFails++;
+      if (_pollFails < _pollMaxFails) return;
+      _pollFails = 0;
+      _poll?.cancel();
+      if (!mounted) return; // dispose 已取消定时器；回来时 initState 重新接回
+      setState(() {
+        _job = null;
+        _jobState = null;
+        _busy = false;
+        _previewCount = 0;
+      });
+      store.setVideoState(job: ''); // 失联任务不再持久化为在飞 job
+      _toast('渲染任务失联', '连续约 30s 连不上服务器，已停止轮询；恢复连接后请重新渲染。');
     }
   }
 
@@ -342,10 +394,34 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
-            onPressed: _busy || _tl == null ? null : _render,
+            // 环② FAIL 时禁渲染：失败原因当场就近可见，不滞后到 render.py
+            // 独立硬门的「渲染失败」toast。
+            onPressed: _busy || _tl == null || _reviewOk == false ? null : _render,
             icon: const Icon(Icons.play_circle_outlined, size: 15),
             label: const Text('渲染（后台）'),
           ),
+          if (_reviewOk == false) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: p.danger.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: p.danger.withValues(alpha: 0.6)),
+              ),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Icon(Icons.block_outlined, size: 14, color: p.danger),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(_reviewFailReason,
+                      style: TextStyle(fontSize: 11, color: p.danger, height: 1.4),
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis),
+                ),
+              ]),
+            ),
+          ],
           const SizedBox(height: 14),
           if (_reviewOutput.isNotEmpty) ...[
             Row(children: [

@@ -63,6 +63,7 @@ def main() -> int:
         "/video/render/status",
         "/video/frame",
         "/three/scene/{name}.js",
+        "/three/delete",
         "/hotapp/generate",
         "/hotapp/refine",
         "/hotapp/page/{name}",

@@ -1,0 +1,22 @@
+{
+  "_source": "server/agent.py:543-547 reasoning handling (whitelist set + '' / 'auto' skip). Regenerate by replicating those lines verbatim in python: level not in {'','auto'} and level in whitelist -> level else null.",
+  "_regenerated": "2026-11-17",
+  "cases": {
+    "": null,
+    "auto": null,
+    "none": "none",
+    "minimal": "minimal",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "max",
+    "off": null,
+    "on": null,
+    "HIGH": null,
+    "medium ": null,
+    " medium": null,
+    "bogus": null,
+    "None": null
+  }
+}

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:nondesign/core/api.dart';
 
 void main() {
@@ -121,5 +123,38 @@ void main() {
     expect(events.map((e) => e['type']), ['failed']);
     expect(events.last['error'], 'sse_idle_timeout');
     await server.close(force: true);
+  });
+
+  // ---- 2026-11-17 3D 客户端超时批次回归锚（three-2）----
+
+  test('threeNewProject/threeRunPass carry the 10-minute LLM generation timeout', () async {
+    // 值锚：默认与 hotAppGenerate/hotAppRefine 的 10 分钟对齐，不得回退
+    // postJson 默认 30s——真实 LLM 生成整份 spec JSON / scene.js 经常超过
+    // 30s，客户端先抛 TimeoutException 报「生成失败」而服务端继续落盘
+    //（重试撞 project_exists / pass_awaiting_feedback，状态分叉）。
+    expect(NoNDesignApi.llmGenTimeout, const Duration(minutes: 10));
+    // 接线锚：缩短超时、响应慢于它——两方法都必须抛 TimeoutException。
+    //（若有人把 timeout: llmGenTimeout 撤掉回到默认 30s，400ms 响应不会
+    // 抛，本测试变红。）
+    NoNDesignApi.llmGenTimeout = const Duration(milliseconds: 120);
+    addTearDown(() => NoNDesignApi.llmGenTimeout = const Duration(minutes: 10));
+    final api = NoNDesignApi('http://mock.local', MockClient((request) async {
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      return http.Response('{"ok":true}', 200);
+    }));
+    await expectLater(
+      api.threeNewProject(
+        name: 'saturn-demo', brief: '带环行星',
+        model: 'm', baseUrl: 'u', apiKey: 'k', thinkingLevel: 'off',
+      ),
+      throwsA(isA<TimeoutException>()),
+    );
+    await expectLater(
+      api.threeRunPass(
+        name: 'saturn-demo',
+        model: 'm', baseUrl: 'u', apiKey: 'k', thinkingLevel: 'off',
+      ),
+      throwsA(isA<TimeoutException>()),
+    );
   });
 }
