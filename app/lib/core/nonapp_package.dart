@@ -838,3 +838,29 @@ void assertHtmlOfflineSafe(String html) {
         'nonapp_html_external_refs', 'HTML 含外链引用（${found.take(3).join(', ')}）');
   }
 }
+
+/// 服务端 `/hotapp/page` 的 CSP（server/main.py `_HOTAPP_PAGE_CSP`）。
+///
+/// file:// 离线页没有 HTTP 响应头，只能把同一条策略经 `<meta http-equiv>`
+/// 注入——它是「零外链」静态扫描之外的第二道防线：JS 字符串拼接/编码的
+/// 地址绕过扫描，但过不了 CSP（review nonapp-5）。**改服务端策略必须同步
+/// 这里**，`scripts/wf/test_nonapp.py` 对两处字符串做对账。
+const String nonAppOfflineCsp =
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+    "img-src data: blob:; font-src data:; media-src data: blob:; "
+    "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+/// 把 [nonAppOfflineCsp] 以 meta 注入 `<head>` 的第一个标签之后（无 `<head>`
+/// 则置于文档最前）：策略必须早于页面脚本生效。幂等性不保证——缓存写入是
+/// 一次性动作，对同一载荷重复注入只会叠一条等价策略。
+String injectNonAppCsp(String html) {
+  final meta =
+      '<meta http-equiv="Content-Security-Policy" content="$nonAppOfflineCsp">';
+  final lower = html.toLowerCase();
+  final headIdx = lower.indexOf('<head');
+  if (headIdx >= 0) {
+    final headEnd = html.indexOf('>', headIdx);
+    if (headEnd >= 0) return html.replaceRange(headEnd + 1, headEnd + 1, meta);
+  }
+  return '$meta$html';
+}

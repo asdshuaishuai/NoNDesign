@@ -22,6 +22,7 @@ import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 import 'package:nondesign/core/api.dart';
 import 'package:nondesign/core/api_nonapp.dart';
 import 'package:nondesign/core/nonapp_cache.dart';
+import 'package:nondesign/core/nonapp_package.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/widgets/hotapp_workspace.dart';
@@ -53,6 +54,7 @@ class _FakePlatformWebViewController extends PlatformWebViewController {
 
   final loadedUrls = <Uri>[];
   final loadedFiles = <String>[];
+  _FakePlatformNavigationDelegate? navDelegate;
 
   @override
   Future<void> setJavaScriptMode(JavaScriptMode mode) async {}
@@ -61,7 +63,9 @@ class _FakePlatformWebViewController extends PlatformWebViewController {
   Future<void> addJavaScriptChannel(dynamic params) async {}
 
   @override
-  Future<void> setPlatformNavigationDelegate(dynamic delegate) async {}
+  Future<void> setPlatformNavigationDelegate(dynamic delegate) async {
+    navDelegate = delegate as _FakePlatformNavigationDelegate;
+  }
 
   @override
   Future<void> loadRequest(dynamic params) async {
@@ -77,6 +81,8 @@ class _FakePlatformWebViewController extends PlatformWebViewController {
 class _FakePlatformNavigationDelegate extends PlatformNavigationDelegate {
   _FakePlatformNavigationDelegate(super.params) : super.implementation();
 
+  NavigationRequestCallback? onNavigationRequest;
+
   @override
   Future<void> setOnPageStarted(PageEventCallback cb) async {}
 
@@ -85,6 +91,10 @@ class _FakePlatformNavigationDelegate extends PlatformNavigationDelegate {
 
   @override
   Future<void> setOnWebResourceError(WebResourceErrorCallback cb) async {}
+
+  @override
+  Future<void> setOnNavigationRequest(NavigationRequestCallback cb) async =>
+      onNavigationRequest = cb;
 }
 
 class _FakePlatformWebViewWidget extends PlatformWebViewWidget {
@@ -230,6 +240,27 @@ void main() {
     expect(controller, isNotNull);
     expect(controller!.loadedFiles, [cached.path], reason: 'file:// 打开必须恰好一次');
     expect(controller.loadedUrls, isEmpty, reason: '离线路径不得走 HTTP');
+
+    // nonapp-5：file:// 没有服务端响应头，缓存文件必须自带服务端同款 CSP
+    // meta（且排在页面内容/脚本之前生效）。
+    final cachedHtml = cached.readAsStringSync();
+    expect(cachedHtml, contains('http-equiv="Content-Security-Policy"'));
+    expect(cachedHtml, contains(nonAppOfflineCsp));
+    expect(cachedHtml.indexOf('Content-Security-Policy'),
+        lessThan(cachedHtml.indexOf('offline-marker')),
+        reason: '策略必须早于页面内容');
+
+    // nonapp-5：运行期导航白名单——远端整页导航 prevent，file:// 放行。
+    final nav = controller.navDelegate;
+    expect(nav?.onNavigationRequest, isNotNull);
+    expect(
+        await nav!.onNavigationRequest!(
+            const NavigationRequest(url: 'https://evil.example/x', isMainFrame: true)),
+        NavigationDecision.prevent);
+    expect(
+        await nav.onNavigationRequest!(NavigationRequest(
+            url: Uri.file(cached.path).toString(), isMainFrame: true)),
+        NavigationDecision.navigate);
 
     // 常驻横幅：SQLite 桥降级必须明示
     expect(find.textContaining('离线运行：SQLite 桥不可用'), findsOneWidget);
@@ -434,5 +465,28 @@ void main() {
     expect(cacheDir.listSync(), isEmpty, reason: '在线分支不写离线缓存');
     expect(fake.lastController?.loadedUrls, isNotEmpty,
         reason: '在线 html 走 /hotapp/page 的 HTTP 路径，不是 file://');
+  });
+
+  // nonapp-5：导航白名单的纯函数面（Widget 用例只覆盖离线 file:// 一档）。
+  group('hotAppNavigationAllowed', () {
+    test('file/about 放行；远端主机、非常规 scheme、无 baseUrl 一律拦', () {
+      expect(hotAppNavigationAllowed('file:///tmp/cache/app.html'), isTrue);
+      expect(hotAppNavigationAllowed('about:blank'), isTrue);
+      expect(
+          hotAppNavigationAllowed('http://127.0.0.1:8799/hotapp/page/x',
+              baseUrl: 'http://127.0.0.1:8799'),
+          isTrue);
+      expect(
+          hotAppNavigationAllowed('http://127.0.0.1:8800/hotapp/page/x',
+              baseUrl: 'http://127.0.0.1:8799'),
+          isFalse,
+          reason: '端口不同即不同源');
+      expect(hotAppNavigationAllowed('https://evil.example/x', baseUrl: 'http://127.0.0.1:8799'),
+          isFalse);
+      expect(hotAppNavigationAllowed('http://127.0.0.1:8799/x', baseUrl: ''), isFalse);
+      expect(hotAppNavigationAllowed('javascript:alert(1)'), isFalse);
+      expect(hotAppNavigationAllowed('data:text/html,<script>1</script>'), isFalse);
+      expect(hotAppNavigationAllowed('not a url'), isFalse);
+    });
   });
 }

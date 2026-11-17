@@ -3,10 +3,14 @@ import UIKit
 
 /// `.nonapp` 文件的系统打开收件箱（iOS）。
 ///
-/// iOS 的打开路径有三条，全部汇到同一队列：
-///   ① 冷启动 `launchOptions[.url]`（「文件」App 点击 → 应用未运行）
-///   ② 运行中 `application(_:open:options:)`（文件 App 分享/打开到本应用）
-///   ③ 其它应用经 `UIActivityViewController` 交付的 file URL
+/// 打开路径全部汇到同一队列：
+///   ① 冷启动 `launchOptions[.url]`（无 UIScene 的旧路径；AppDelegate 侧保留）
+///   ② 运行中 `application(_:open:options:)`（同上，旧路径）
+///   ③ UIScene 生命周期：`SceneDelegate.scene(_:willConnectTo:options:)` 的
+///      `connectionOptions.urlContexts`（冷启动）与
+///      `scene(_:openURLContexts:)`（运行中）——Info.plist 声明了
+///      UISceneDelegate 后 UIKit **只走这两条**，AppDelegate 的 ①② 不再被
+///      调用（review nonapp-1）。SceneDelegate 复用 [materialize] 后入队。
 ///
 /// 冷启动时 Dart 侧还没有通道 handler，所以**只入队**；Dart 就绪后调
 /// `nc/open` 的 `takePending` 拉取并清空（**冷启动 URL 不丢**——这是
@@ -109,7 +113,11 @@ final class NonAppOpenInbox {
     NonAppOpenInbox.shared.push(path)
   }
 
-  private static func materialize(_ url: URL) -> String? {
+  /// file:// 直接用路径；其它 scheme（content/provider）先拷到临时目录。
+  ///
+  /// 非 private：SceneDelegate（UIScene 生命周期）复用同一落盘/拷贝逻辑，
+  /// 两个入口的 URL 处理不得分叉（review nonapp-1）。
+  static func materialize(_ url: URL) -> String? {
     if url.isFileURL {
       return url.path
     }

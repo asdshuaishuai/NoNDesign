@@ -290,7 +290,14 @@ class IconAction extends StatefulWidget {
   final String tooltip;
   final VoidCallback? onTap;
   final bool active;
+
+  /// 视觉尺寸（图标按 0.52 缩放）。
   final double size;
+
+  /// 触控命中区（InkWell 盒子边长）：缺省等于 [size]（桌面紧凑密度不变）。
+  /// 触屏（iOS/Android）调用点应传 ≥44 —— HIG / Material 最小触控目标；
+  /// 命中区放大不改变图标视觉尺寸。
+  final double? hitSize;
   final Color? color;
 
   const IconAction({
@@ -300,6 +307,7 @@ class IconAction extends StatefulWidget {
     this.onTap,
     this.active = false,
     this.size = 26,
+    this.hitSize,
     this.color,
   });
 
@@ -313,6 +321,7 @@ class _IconActionState extends State<IconAction> {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    final hit = widget.hitSize ?? widget.size;
     return Tooltip(
       message: widget.tooltip,
       child: MouseRegion(
@@ -333,10 +342,12 @@ class _IconActionState extends State<IconAction> {
             borderRadius: BorderRadius.circular(8),
             onTap: widget.onTap,
             child: SizedBox(
-              width: widget.size,
-              height: widget.size,
-              child: Icon(widget.icon, size: (widget.size * 0.52).roundToDouble(),
-                  color: widget.active ? p.accent : (widget.color ?? p.ink3)),
+              width: hit,
+              height: hit,
+              child: Center(
+                child: Icon(widget.icon, size: (widget.size * 0.52).roundToDouble(),
+                    color: widget.active ? p.accent : (widget.color ?? p.ink3)),
+              ),
             ),
           ),
         ),

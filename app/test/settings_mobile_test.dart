@@ -49,6 +49,9 @@ Future<void> _open(WidgetTester tester, AppStore store, Size size) async {
   ));
   await tester.tap(find.text('open'));
   await tester.pump(const Duration(milliseconds: 320));
+  // 入场是 fade+scale（0.965→1.0，240ms）：单次 pump 落在首个动画帧，
+  // 量到的尺寸会整体缩水 3.5%（44→42.46）。再泵一帧等动画收束。
+  await tester.pump(const Duration(milliseconds: 300));
 }
 
 void main() {
@@ -67,6 +70,10 @@ void main() {
     // 移动端触控目标：分组行 ≥64。
     final tile = tester.getRect(find.byKey(const ValueKey('settings-m-models')));
     expect(tile.height, greaterThanOrEqualTo(64));
+    // 关闭按钮 44×44（settings-1 的同一触控标准）。
+    final close = tester.getRect(find.byKey(const ValueKey('settings-mobile-close')));
+    expect(close.width, greaterThanOrEqualTo(44));
+    expect(close.height, greaterThanOrEqualTo(44));
   });
 
   testWidgets('phone settings: 下钻单列 + 输入/触控尺寸 + 返回', (tester) async {
@@ -108,6 +115,68 @@ void main() {
     await tester.tap(find.text('浅色'));
     await tester.pump(const Duration(milliseconds: 200));
     expect(store.settings.theme, 'light');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('phone settings: 系统返回先回分组根页，再按才关设置（settings-2）', (tester) async {
+    final store = _store();
+    await _open(tester, store, const Size(390, 844));
+    await tester.tap(find.byKey(const ValueKey('settings-m-appearance')));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const ValueKey('settings-m-detail-appearance')), findsOneWidget);
+
+    // Android 系统返回键（PopScope）：详情页 → 分组根页，弹窗仍在。
+    await tester.binding.handlePopRoute();
+    await tester.pump(const Duration(milliseconds: 220));
+    expect(find.byKey(const ValueKey('settings-mobile-root')), findsOneWidget);
+    expect(find.byKey(const ValueKey('settings-m-detail-appearance')), findsNothing);
+
+    // 根页再按一次才关闭整个设置。
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('settings-mobile-root')), findsNothing);
+    expect(find.byKey(const ValueKey('settings-mobile-close')), findsNothing,
+        reason: '设置弹窗已被第二次 back 关掉');
+    expect(find.text('open'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('phone settings: 思考等级 chip ≥44 触控目标（settings-3）', (tester) async {
+    final store = _store();
+    // 思考等级卡只在有当前模型时出现：给注册表播种一个同 id 的模型。
+    store.registry = ModelRegistry.fromJson({
+      'providers': {
+        'deepseek': {
+          'api': 'https://api.deepseek.com',
+          'protocol': 'openai',
+          'models': {
+            'deepseek-v4.1-flash': {
+              'name': 'DeepSeek V4.1 Flash',
+              'tool_call': true,
+              'limit': {'context': 128000},
+            },
+          },
+        },
+      },
+    });
+    await _open(tester, store, const Size(390, 844));
+    await tester.tap(find.byKey(const ValueKey('settings-m-models')));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // 详情页底部的思考等级 chips：滚到可见再量高度（此前 34）。
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-m-thinking-auto')),
+      260,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('settings-m-detail-models')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+    final chip = tester.getRect(find.byKey(const ValueKey('settings-m-thinking-auto')));
+    expect(chip.height, greaterThanOrEqualTo(44), reason: '移动端最小触控目标 44');
     expect(tester.takeException(), isNull);
   });
 

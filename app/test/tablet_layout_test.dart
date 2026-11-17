@@ -155,6 +155,9 @@ void main() {
     ));
     await tester.tap(find.text('open'));
     await tester.pump(const Duration(milliseconds: 300));
+    // 入场 fade+scale（0.965→1.0）：首帧量尺寸会整体缩水 3.5%（44→42.46），
+    // 再泵一帧等动画收束（本文件从 settings-1 起有尺寸断言）。
+    await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('模型与端点'), findsOneWidget);
@@ -183,9 +186,18 @@ void main() {
     ));
     await tester.tap(find.text('open'));
     await tester.pump(const Duration(milliseconds: 300));
+    // 入场 fade+scale（0.965→1.0）：首帧量尺寸会整体缩水 3.5%（44→42.46），
+    // 再泵一帧等动画收束（本文件从 settings-1 起有尺寸断言）。
+    await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('settings-topnav')), findsOneWidget);
     expect(find.byKey(const ValueKey('settings-rail')), findsNothing);
+    // settings-1：触屏（iPad 竖屏）顶部 tab 与关闭按钮命中区都 ≥44。
+    final tab = tester.getRect(find.byKey(const ValueKey('settings-nav-models')));
+    expect(tab.height, greaterThanOrEqualTo(44), reason: 'iPad 顶部 tab 触控目标 ≥44');
+    final close = tester.getRect(find.byTooltip('关闭'));
+    expect(close.width, greaterThanOrEqualTo(44), reason: '关闭按钮命中区 ≥44');
+    expect(close.height, greaterThanOrEqualTo(44));
   });
 
   testWidgets('settings uses the side rail on iPad landscape', (tester) async {
@@ -209,9 +221,15 @@ void main() {
     ));
     await tester.tap(find.text('open'));
     await tester.pump(const Duration(milliseconds: 300));
+    // 入场 fade+scale（0.965→1.0）：首帧量尺寸会整体缩水 3.5%（44→42.46），
+    // 再泵一帧等动画收束（本文件从 settings-1 起有尺寸断言）。
+    await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('settings-rail')), findsOneWidget);
     expect(find.byKey(const ValueKey('settings-topnav')), findsNothing);
+    // settings-1：iPad 横屏侧栏项同样按触屏目标 44。
+    final item = tester.getRect(find.byKey(const ValueKey('settings-nav-models')));
+    expect(item.height, greaterThanOrEqualTo(44), reason: 'iPad 侧栏项触控目标 ≥44');
   });
 
   testWidgets('settings stays full-screen on phone landscape', (tester) async {
@@ -234,6 +252,9 @@ void main() {
       }),
     ));
     await tester.tap(find.text('open'));
+    await tester.pump(const Duration(milliseconds: 300));
+    // 入场 fade+scale（0.965→1.0）：首帧量尺寸会整体缩水 3.5%（44→42.46），
+    // 再泵一帧等动画收束（本文件从 settings-1 起有尺寸断言）。
     await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
     // 手机横屏（844×390）同样走移动端独立布局（分组根页），不再挤顶部 tab。
@@ -263,7 +284,14 @@ void main() {
     ));
     await tester.tap(find.text('open'));
     await tester.pump(const Duration(milliseconds: 300));
+    // 入场 fade+scale（0.965→1.0）：首帧量尺寸会整体缩水 3.5%（44→42.46），
+    // 再泵一帧等动画收束（本文件从 settings-1 起有尺寸断言）。
+    await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
     expect(find.text('外部智能体'), findsOneWidget);
+    // 非触屏（macOS）维持紧凑密度：关闭命中区仍是 26——触屏 ≥44 的规则
+    // 不得外溢到桌面（settings-1 的反向锚点）。
+    final close = tester.getRect(find.byTooltip('关闭'));
+    expect(close.width, lessThan(44));
   });
 }

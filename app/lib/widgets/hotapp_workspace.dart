@@ -38,6 +38,26 @@ String? hotAppLoadOnOpen;
 /// ——后者只承载应用名（服务端托管），这里只承载本机缓存文件。
 String? hotAppOfflinePath;
 
+/// WebView 导航白名单（review nonapp-5）：只放行
+///   ① 离线缓存 `file://`
+///   ② `about:`（WebView 内部空页）
+///   ③ 桌面服务同源页（`<baseUrl>/hotapp/page/*`，host+port 比对）
+///
+/// 其余 scheme/主机一律 prevent。离线页的静态「零外链」扫描覆盖不到 JS
+/// 字符串拼接/编码的地址，CSP meta 挡请求与资源，这里挡的是整页导航
+/// （页面脚本把 WebView 带到远端页面 = 跳出本应用的执行面）。
+bool hotAppNavigationAllowed(String url, {String? baseUrl}) {
+  final uri = Uri.tryParse(url);
+  if (uri == null) return false;
+  if (uri.scheme == 'file' || uri.scheme == 'about') return true;
+  if (uri.scheme != 'http' && uri.scheme != 'https') return false;
+  final base = (baseUrl ?? '').trim();
+  if (base.isEmpty) return false;
+  final origin = Uri.tryParse(base);
+  if (origin == null || origin.host.isEmpty) return false;
+  return uri.host == origin.host && uri.port == origin.port;
+}
+
 class HotAppWorkspace extends StatefulWidget {
   const HotAppWorkspace({super.key});
 
@@ -172,6 +192,13 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     ..setJavaScriptMode(JavaScriptMode.unrestricted)
     ..addJavaScriptChannel('NONHOTAPP', onMessageReceived: _onBridgeMessage)
     ..setNavigationDelegate(NavigationDelegate(
+      // 导航白名单：离线 file:// 与服务端同源页之外一律拦下（loadRequest /
+      // loadFile 自身也过这里）。页面脚本仍可跑，但带不走 WebView
+      // （review nonapp-5）。
+      onNavigationRequest: (request) => hotAppNavigationAllowed(
+              request.url, baseUrl: store.api?.baseUrl)
+          ? NavigationDecision.navigate
+          : NavigationDecision.prevent,
       onWebResourceError: (error) {
         if (!mounted) return;
         setState(() => _lastError =

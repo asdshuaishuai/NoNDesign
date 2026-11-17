@@ -331,6 +331,36 @@ void main() {
     expect(fake.lastController!.loadedUrls.length, 2);
   });
 
+  testWidgets('无 WebView 平台：不构造控制器，预览区给地址/路径提示（shelf-1）', (tester) async {
+    // 测试机是 macOS（Platform.isMacOS=true）：用注入开关走 Linux/Windows
+    // 的同一代码路（与 video_player_surface 的平台矩阵一致）。
+    debugThreeWebViewSupported = false;
+    addTearDown(() => debugThreeWebViewSupported = null);
+    threeLoadOnOpen = 'saturn-demo';
+    addTearDown(() => threeLoadOnOpen = null);
+    // fake 平台同样装上：守卫失效时控制器会在这里被构造出来（断言抓）。
+    final fake = _FakeWebViewPlatform();
+    WebViewPlatform.instance = fake;
+    addTearDown(() => WebViewPlatform.instance = WebKitWebViewPlatform());
+
+    await _pumpAt(tester, _host(_store(_projectApi())), const Size(1440, 900));
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(fake.lastController, isNull, reason: '不支持平台绝不构造 WebViewController');
+    expect(find.byType(WebViewWidget), findsNothing);
+    expect(find.text('加载预览…'), findsNothing, reason: '不能把加载态当终态');
+    expect(find.byKey(const ValueKey('three-preview-unsupported')), findsOneWidget);
+    expect(find.text('当前平台不支持应用内 3D 预览'), findsOneWidget);
+    // 路径提示（可复制/定位）：预览地址 + 项目目录。
+    expect(find.textContaining('/three/preview/saturn-demo'), findsOneWidget);
+    expect(find.textContaining('3d/saturn-demo'), findsOneWidget);
+    expect(find.text('复制预览地址'), findsOneWidget);
+    expect(find.text('复制项目路径'), findsOneWidget);
+    expect(find.text('在文件夹中显示'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('子资源错误不清占位，主帧资源错误才置占位', (tester) async {
     final fake = await _pumpProject(tester, _store(_projectApi()));
     final nav = fake.lastController!.navDelegate!;

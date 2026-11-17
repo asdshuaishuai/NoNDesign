@@ -31,11 +31,25 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
             <!-- `.nonapp` 单文件包（文件即应用 v2）：VIEW（文件管理器点击 /
-                 “打开方式”）与 SEND（分享面板）。mimeType 由文件管理器按扩展名
-                 上报（application/zip 最常见），pathPattern 只在 content/file
-                 scheme 生效；两者都声明，拿不到 mime 时靠 .nonapp 后缀匹配。
+                 “打开方式”）与 SEND（分享面板）。
+                 声明面拆两条 filter——intent-filter 内 scheme/类型/路径各自
+                 集合内部 OR，集合之间是 AND：把 mimeType 与 pathPattern 放进
+                 同一条，MIME 缺失或 application/octet-stream 时整条不匹配，
+                 `.nonapp` 后缀兜不住（review nonapp-2）。
                  category.DEFAULT 是隐式 intent 的必要条件；BROWSABLE 让浏览器
                  下载后的点击也能进来。 -->
+            <!-- ① 后缀/路径面：只看 scheme + pathPattern，不声明 mimeType
+                 （文件管理器对未知扩展名常报 null/octet-stream）。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="content" android:host="*"/>
+                <data android:scheme="file"/>
+                <data android:pathPattern=".*\\.nonapp"/>
+            </intent-filter>
+            <!-- ② MIME 面：文件管理器/浏览器按类型上报 zip 时命中（不看路径
+                 ——有些 provider 不暴露文件名）。 -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
@@ -44,7 +58,6 @@
                 <data android:scheme="file"/>
                 <data android:mimeType="application/zip"/>
                 <data android:mimeType="application/x-nondesign-package"/>
-                <data android:pathPattern=".*\\.nonapp"/>
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND"/>

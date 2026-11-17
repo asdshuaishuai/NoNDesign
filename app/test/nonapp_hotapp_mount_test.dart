@@ -73,6 +73,9 @@ class _FakePlatformNavigationDelegate extends PlatformNavigationDelegate {
 
   @override
   Future<void> setOnWebResourceError(WebResourceErrorCallback cb) async {}
+
+  @override
+  Future<void> setOnNavigationRequest(NavigationRequestCallback cb) async {}
 }
 
 class _FakePlatformWebViewWidget extends PlatformWebViewWidget {

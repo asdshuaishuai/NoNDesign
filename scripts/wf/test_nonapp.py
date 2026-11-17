@@ -12,11 +12,18 @@
   3) 安全门逐项：../ 条目、绝对路径、反斜杠、未列名条目、条目数超限、
      单条/总解压体积超限、坏 zip、坏 manifest 版本/name/id、未知 renderer、
      缺载荷、html 外链、超长 body —— 各自稳定 code，且失败不留半成品目录。
-  4) 同名策略：同 id = 覆盖升级（内容替换）；不同 id = app_exists。
+  4) 同名策略：同 id = 覆盖升级（内容替换）；不同 id = app_exists；
+     **generate 目录（meta 无 nonappId）导出 → 重导按 _derive_id 兜底**。
   5) TestClient 路由级 e2e：POST /hotapp/import（真实 zip 字节）→ GET
      /portfolio 命中 → GET /hotapp/page/{name} 200 且含原 HTML 特征串 →
      POST /hotapp/export 取回字节 → 再次 import 同名同 id 覆盖成功 →
-     GET /hotapp/info / /hotapp/a2ui 语义。
+     GET /hotapp/info / /hotapp/a2ui 语义；不支持的压缩方法 400 而非 500。
+  6) 客户端打开入口：AndroidManifest 的 VIEW filter 必须拆成「后缀/路径」
+     与「MIME」两条（mime 与 pathPattern 混放 = 拿不到 mime 时不匹配）；
+     iOS SceneDelegate 覆盖 scene willConnectTo/openURLContexts 并 swiftc
+     -typecheck 真编译（缺 iOS 工具链时 skip，不判红）。
+  7) 离线 CSP：客户端注入的 meta 与服务端 `_HOTAPP_PAGE_CSP` 同款，且缓存
+     写入与 WebView 导航白名单确实接线。
 """
 
 from __future__ import annotations
@@ -24,12 +31,18 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import tracemalloc
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 from unittest import mock
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "server"))
 
@@ -141,6 +154,176 @@ def _bomb_zip(payload_bytes: int = 64 * 1024 * 1024,
                 data[off:off + 4] = declared.to_bytes(4, "little")
             pos += 4
     return bytes(data)
+
+
+def _patch_compression(data: bytes, method: int = 99) -> bytes:
+    """把 zip 内所有条目的压缩方法改成 [method]（本地头 +8 / 中央目录 +10）。
+
+    99 是 zipfile 不支持的压缩方法：`zf.open()` 随即抛 NotImplementedError
+    （评论 nonapp-4 的 500 实证形态）。
+    """
+    buf = bytearray(data)
+    for sig, offset in ((b"PK\x03\x04", 8), (b"PK\x01\x02", 10)):
+        pos = 0
+        while True:
+            pos = buf.find(sig, pos)
+            if pos < 0:
+                break
+            off = pos + offset
+            buf[off:off + 2] = method.to_bytes(2, "little")
+            pos += 4
+    return bytes(buf)
+
+
+def _check_android_manifest(check) -> None:
+    """nonapp-2：VIEW 的 mime 面与路径面必须是两条 filter。
+
+    intent-filter 内 scheme/类型/路径各自集合内部 OR、集合之间 AND：混在同
+    一条时，MIME 缺失（文件管理器对未知扩展名常报 null/octet-stream）就整条
+    不匹配，`.nonapp` 后缀兜不住。
+    """
+    path = REPO_ROOT / "app/android/app/src/main/AndroidManifest.xml"
+    try:
+        root = ET.parse(path).getroot()
+    except (ET.ParseError, OSError) as e:  # pragma: no cover - 结构性损坏
+        check("android manifest parses", False, f"{type(e).__name__}: {e}")
+        return
+    ns = "{http://schemas.android.com/apk/res/android}"
+    view_filters = []
+    for f in root.iter("intent-filter"):
+        actions = {a.get(ns + "name") for a in f.findall("action")}
+        if "android.intent.action.VIEW" in actions:
+            view_filters.append(f)
+    check("android VIEW filters present", len(view_filters) >= 2, str(len(view_filters)))
+
+    def datas(f):
+        return [{k.replace(ns, ""): v for k, v in d.attrib.items()} for d in f.findall("data")]
+
+    def schemes(f):
+        return {d.get("scheme") for d in datas(f) if d.get("scheme")}
+
+    def mimes(f):
+        return {d.get("mimeType") for d in datas(f) if d.get("mimeType")}
+
+    def paths(f):
+        return {d.get("pathPattern") for d in datas(f) if d.get("pathPattern")}
+
+    check("no VIEW filter mixes mimeType with pathPattern",
+          all(not (mimes(f) and paths(f)) for f in view_filters),
+          str([(sorted(mimes(f)), sorted(paths(f))) for f in view_filters]))
+    suffix = [f for f in view_filters if any(".nonapp" in p for p in paths(f))]
+    mime = [f for f in view_filters if mimes(f)]
+    check("VIEW suffix filter kept", len(suffix) == 1, str(len(suffix)))
+    check("VIEW suffix filter declares content+file schemes",
+          len(suffix) == 1 and {"content", "file"} <= schemes(suffix[0]),
+          str(suffix[0].attrib) if suffix else "missing")
+    check("VIEW suffix filter has no mimeType",
+          len(suffix) == 1 and not mimes(suffix[0]))
+    check("VIEW mime filter present", len(mime) == 1, str(len(mime)))
+    check("VIEW mime filter carries both types",
+          len(mime) == 1
+          and {"application/zip", "application/x-nondesign-package"} <= mimes(mime[0]),
+          str(mime[0].attrib) if mime else "missing")
+    check("VIEW mime filter has no pathPattern", len(mime) == 1 and not paths(mime[0]))
+    default_cat = "android.intent.category.DEFAULT"
+    check("every VIEW filter has DEFAULT category",
+          all(default_cat in {c.get(ns + "name") for c in f.findall("category")}
+              for f in view_filters))
+    # SEND 面不参与 VIEW 拆分（分享面板只按 MIME）。
+    send_mimes = set()
+    for f in root.iter("intent-filter"):
+        if "android.intent.action.SEND" in {a.get(ns + "name") for a in f.findall("action")}:
+            send_mimes |= mimes(f)
+    check("SEND filter keeps zip types", {"application/zip",
+                                          "application/x-nondesign-package"} <= send_mimes,
+          str(send_mimes))
+
+
+def _flutter_ios_framework() -> Path | None:
+    """定位 Flutter iOS 引擎产物（Flutter.framework 所在目录）。"""
+    roots: list[Path] = []
+    env = Path.home() / ".flutter_sdk"
+    if env.exists():
+        roots.append(env)
+    which = shutil.which("flutter")
+    if which:
+        roots.append(Path(which).resolve().parent.parent)
+    for root in roots:
+        fw = root / "bin/cache/artifacts/engine/ios/Flutter.xcframework/ios-arm64"
+        if (fw / "Flutter.framework").exists():
+            return fw
+    return None
+
+
+def _check_ios_scene(check) -> None:
+    """nonapp-1：SceneDelegate 接住 UIScene 的两条 URL 入口，并能真编译。"""
+    scene = (REPO_ROOT / "app/ios/Runner/SceneDelegate.swift").read_text(encoding="utf-8")
+    appdelegate = (REPO_ROOT / "app/ios/Runner/AppDelegate.swift").read_text(encoding="utf-8")
+    check("SceneDelegate handles scene willConnectTo",
+          "willConnectTo" in scene and "connectionOptions.urlContexts" in scene, scene[:200])
+    check("SceneDelegate handles scene openURLContexts", "openURLContexts" in scene)
+    check("SceneDelegate funnels into NonAppOpenInbox",
+          "NonAppOpenInbox.shared.push" in scene)
+    check("AppDelegate.materialize is reusable (not private)",
+          "static func materialize" in appdelegate
+          and "private static func materialize" not in appdelegate)
+
+    if sys.platform != "darwin" or shutil.which("swiftc") is None:
+        print("[skip] swiftc/iOS toolchain unavailable (not macOS)")
+        return
+    try:
+        sdk = subprocess.check_output(
+            ["xcrun", "--sdk", "iphoneos", "--show-sdk-path"],
+            text=True, stderr=subprocess.DEVNULL).strip()
+    except (OSError, subprocess.CalledProcessError):
+        print("[skip] iphoneos SDK unavailable")
+        return
+    if not sdk or not Path(sdk).exists():
+        print("[skip] iphoneos SDK unavailable")
+        return
+    framework = _flutter_ios_framework()
+    if framework is None:
+        print("[skip] Flutter iOS framework unavailable (run sync_engine / flutter precache)")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        # 真实 GeneratedPluginRegistrant 由 flutter build 生成（podspec 报备），
+        # 仓库里没有——类型检查时用同签名桩顶替。
+        stub = Path(td) / "GeneratedPluginRegistrant.swift"
+        stub.write_text(
+            "import Flutter\n"
+            "enum GeneratedPluginRegistrant {\n"
+            "  static func register(with registry: FlutterPluginRegistry) {}\n"
+            "}\n",
+            encoding="utf-8")
+        proc = subprocess.run(
+            ["xcrun", "--sdk", "iphoneos", "swiftc", "-typecheck", "-parse-as-library",
+             "-target", "arm64-apple-ios15.0", "-sdk", sdk, "-F", str(framework),
+             str(REPO_ROOT / "app/ios/Runner/SceneDelegate.swift"),
+             str(REPO_ROOT / "app/ios/Runner/AppDelegate.swift"),
+             str(stub)],
+            capture_output=True, text=True)
+        detail = (proc.stderr or proc.stdout).strip()[-900:]
+        check("swiftc -typecheck SceneDelegate + AppDelegate", proc.returncode == 0, detail)
+
+
+def _check_offline_csp(check, server_csp: str) -> None:
+    """nonapp-5：离线缓存注入的 CSP meta 必须与服务端同款。"""
+    dart_src = (REPO_ROOT / "app/lib/core/nonapp_package.dart").read_text(encoding="utf-8")
+    match = re.search(r'const String nonAppOfflineCsp =\s*((?:"[^"]*"\s*)+);', dart_src, re.S)
+    check("dart offline CSP constant present", match is not None)
+    if match is None:
+        return
+    dart_csp = "".join(re.findall(r'"([^"]*)"', match.group(1)))
+    normalize = lambda s: "".join(s.split())  # noqa: E731 - 仅规整空白
+    check("offline CSP mirrors server _HOTAPP_PAGE_CSP",
+          normalize(dart_csp) == normalize(server_csp),
+          f"dart={dart_csp!r} server={server_csp!r}")
+    cache_src = (REPO_ROOT / "app/lib/core/nonapp_cache.dart").read_text(encoding="utf-8")
+    check("offline cache injects CSP before writing",
+          "injectNonAppCsp(" in cache_src and "writeAsBytes(safeBytes" in cache_src)
+    hotapp_src = (REPO_ROOT / "app/lib/widgets/hotapp_workspace.dart").read_text(encoding="utf-8")
+    check("webview navigation whitelist wired",
+          "onNavigationRequest" in hotapp_src and "hotAppNavigationAllowed(" in hotapp_src)
 
 
 def main() -> int:
@@ -304,6 +487,15 @@ def main() -> int:
                         _zip({"manifest.json": json.dumps(_manifest()),
                               "payload/evil.js": "x"}), "nonapp_unexpected_entry:payload/evil.js")
             install_err("bad zip rejected", b"not a zip at all", "nonapp_invalid_zip")
+            # nonapp-4：zipfile 不支持的压缩方法（compress_type=99）在 zf.open
+            # 抛 NotImplementedError——必须映射 nonapp_invalid_zip（400），
+            # 不能漏成裸 500。
+            bad_method = _patch_compression(_zip({
+                "manifest.json": json.dumps(_manifest(id="bad-method", name="bad-method")),
+                "payload/index.html": _html("bad-method-marker"),
+            }))
+            install_err("unsupported compression method rejected as bad zip",
+                        bad_method, "nonapp_invalid_zip")
             install_err("oversized body rejected",
                         b"\0" * (nonapp.MAX_PACKAGE_BYTES + 1), "nonapp_too_large")
 
@@ -461,6 +653,37 @@ def main() -> int:
             check("conflict left original intact",
                   "marker-β" in (dst_root / "demo-app" / "index.html").read_text("utf-8"))
 
+            # ---- 4b) 生成目录（meta 无 nonappId）导出 → 重导 ----
+            # hotapp_agent.generate 从不写 nonappId；_conflict/_promote 必须按
+            # 导出时同一规则 _derive_id(name) 兜底，否则「导出自家生成的应用
+            # 再导回」必得 app_exists（重导只能删应用，连 app.db 一起丢——
+            # review nonapp-3）。
+            gen = dst_root / "probe-gen"
+            gen.mkdir()
+            (gen / "index.html").write_text(_html("gen-marker"), "utf-8")
+            (gen / "meta.json").write_text(json.dumps({
+                "name": "probe-gen", "title": "生成的应用", "brief": "生成",
+                "createdAt": 1_700_000_000, "updatedAt": 1_700_000_001, "kind": "hotapp",
+            }), "utf-8")
+            gen_pkg = nonapp.build_package("probe-gen")
+            with zipfile.ZipFile(io.BytesIO(gen_pkg)) as zf:
+                gen_manifest = json.loads(zf.read("manifest.json"))
+            check("generated app manifest id derives from name",
+                  gen_manifest["id"] == nonapp._derive_id("probe-gen"), str(gen_manifest))
+            try:
+                res_gen = install(gen_pkg)
+            except hotapp.HotAppError as e:
+                res_gen = {}
+                check("re-import own generated export succeeds", False, f"raised {e!r}")
+            else:
+                check("re-import own generated export succeeds",
+                      res_gen.get("ok") is True, str(res_gen))
+            check("re-import keeps generated content",
+                  "gen-marker" in (gen / "index.html").read_text("utf-8"))
+            check("re-import stamps nonappId",
+                  json.loads((gen / "meta.json").read_text("utf-8")).get("nonappId")
+                  == nonapp._derive_id("probe-gen"))
+
             # ---- 5) 路由级 e2e（TestClient） ----
             import main as server_main  # noqa: E402  (import 注册全部路由)
             from fastapi.testclient import TestClient
@@ -502,6 +725,19 @@ def main() -> int:
             r = client.post("/hotapp/import", content=exported)
             check("route re-import same id overwrite", r.status_code == 200
                   and r.json().get("ok") is True, f"{r.status_code} {r.text[:200]}")
+
+            # nonapp-4 路由面：不支持的压缩方法 → 稳定 400 信封（此前裸 500）。
+            # TestClient 默认把服务端未处理异常重新抛出——回归时这里会炸出
+            # traceback，因此显式捕获成 FAIL（异常本身就是缺陷形态）。
+            try:
+                r = client.post("/hotapp/import", content=bad_method)
+            except Exception as e:  # noqa: BLE001 - 未处理异常 = 裸 500 缺陷
+                check("route unsupported compression 400", False,
+                      f"unhandled {type(e).__name__}: {e}")
+            else:
+                check("route unsupported compression 400", r.status_code == 400
+                      and "nonapp_invalid_zip" in r.json().get("detail", ""),
+                      f"{r.status_code} {r.text[:200]}")
 
             r = client.get("/hotapp/info/e2e-app")
             check("route info exists", r.status_code == 200 and r.json().get("exists") is True,
@@ -556,6 +792,12 @@ def main() -> int:
             r = client.post("/hotapp/import", content=b"")
             check("route import empty 400", r.status_code == 400
                   and "nonapp_empty_body" in r.json().get("detail", ""), r.text[:200])
+
+    # ---- 6) 客户端打开入口（nonapp-1 / nonapp-2）----
+    _check_android_manifest(check)
+    _check_ios_scene(check)
+    # ---- 7) 离线 CSP 与服务端同款 + 注入/导航白名单接线（nonapp-5）----
+    _check_offline_csp(check, server_main._HOTAPP_PAGE_CSP)
 
     if failures:
         print("FAIL")

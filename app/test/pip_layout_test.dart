@@ -154,6 +154,46 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('最大化下关闭 → 重开回到原浮窗尺寸（pip-4：_pipMax 复位）', (tester) async {
+    await _pumpAt(tester, _store(), const Size(900, 800));
+    await tester.tap(find.byKey(const ValueKey('pip-edge-capsule')));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final original = _pipRect(tester);
+    expect(original.width, lessThan(900), reason: '起点是普通浮窗，不是最大化');
+
+    // ✕ 关闭路径：最大化态不得记忆到下一次打开。
+    await tester.tap(find.byKey(const ValueKey('pip-max')));
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(_pipRect(tester), const Rect.fromLTWH(0, 0, 900, 800));
+
+    await tester.tap(find.byKey(const ValueKey('pip-close')));
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(find.byType(PipWindow), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('pip-edge-capsule')));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byType(PipWindow), findsOneWidget);
+    expect(_pipRect(tester), original, reason: '重开回到原浮窗 rect（尺寸与位置）');
+    expect(tester.widget<PipWindow>(find.byType(PipWindow)).maximized, isFalse,
+        reason: '最大化态随关闭复位');
+
+    // 面板内「收回浮窗」路径（slim header）同样复位。
+    await tester.tap(find.byKey(const ValueKey('pip-max')));
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(_pipRect(tester), const Rect.fromLTWH(0, 0, 900, 800));
+
+    await tester.tap(find.byKey(const ValueKey('chat-shell-collapse')));
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(find.byType(PipWindow), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('pip-edge-capsule')));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(_pipRect(tester), original, reason: '收回路径同样回到原 rect');
+    expect(tester.widget<PipWindow>(find.byType(PipWindow)).maximized, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('分栏『全屏工作区』在宿主内铺满，再点还原（view 不变）', (tester) async {
     await _pumpAt(tester, _store(), const Size(1280, 860));
     expect(find.byKey(const ValueKey('chat-input')), findsOneWidget);

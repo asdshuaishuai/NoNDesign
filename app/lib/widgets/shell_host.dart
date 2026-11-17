@@ -83,7 +83,19 @@ class _ChatWorkspaceHostState extends State<ChatWorkspaceHost> {
     if (store.view != 'chat') store.setView('chat');
   }
 
-  void _openPip() => setState(() => _pipOpen = true);
+  /// 开浮窗：复位最大化态——关闭后重开回到上次浮窗尺寸（review pip-4：
+  /// `_pipMax` 残留会让重开的浮窗继续铺满整屏）。
+  void _openPip() => setState(() {
+        _pipOpen = true;
+        _pipMax = false;
+      });
+
+  /// 关浮窗的唯一收口（✕/「收回浮窗」/面板内关闭三条路径都走这里）：
+  /// 复位最大化态，`_pipRect` 保留，重开即回原尺寸与位置。
+  void _closePip() => setState(() {
+        _pipOpen = false;
+        _pipMax = false;
+      });
 
   @override
   Widget build(BuildContext context) {
@@ -168,7 +180,7 @@ class _ChatWorkspaceHostState extends State<ChatWorkspaceHost> {
                 _pipRect = _clampPipRect(r, area);
                 if (_pipMax) _pipMax = false;
               }),
-              onClose: () => setState(() => _pipOpen = false),
+              onClose: _closePip,
               onToggleMax: () => setState(() => _pipMax = !_pipMax),
               child: _workspacePane(store, inPip: true),
             ),
@@ -216,7 +228,7 @@ class _ChatWorkspaceHostState extends State<ChatWorkspaceHost> {
               icon: Icons.keyboard_double_arrow_right,
               tooltip: inPip ? '收回浮窗' : '折叠工作区',
               onTap: inPip
-                  ? () => setState(() => _pipOpen = false)
+                  ? _closePip
                   : () => setState(() {
                         _collapsed = true;
                         _workspaceFull = false;
@@ -237,7 +249,7 @@ class _ChatWorkspaceHostState extends State<ChatWorkspaceHost> {
               icon: Icons.close,
               tooltip: inPip ? '关闭浮窗' : '关闭工作区',
               onTap: inPip
-                  ? () => setState(() => _pipOpen = false)
+                  ? _closePip
                   : () => setState(() {
                         _collapsed = true;
                         _workspaceFull = false;

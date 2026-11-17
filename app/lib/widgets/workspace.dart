@@ -50,8 +50,34 @@ class Workspace extends StatefulWidget {
 class _WorkspaceState extends State<Workspace> {
   final _focus = FocusNode(debugLabel: 'workspace');
 
+  /// 嵌入宿主登记用的 store 引用：initState 取一次——dispose 时 context
+  /// 已不能再做祖先查找，登记/注销必须持有引用做。
+  AppStore? _store;
+
+  @override
+  void initState() {
+    super.initState();
+    _store = context.read<AppStore>();
+    // 嵌入宿主登记（review pip-1/pip-4）：在场期间 store 的 run/打开项目/
+    // 新建项目/建板一律不切 view，聊天宿主不会被整块替换。
+    if (widget.embedded) _store!.enterEmbeddedHost();
+  }
+
+  @override
+  void didUpdateWidget(Workspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.embedded != widget.embedded) {
+      if (widget.embedded) {
+        _store!.enterEmbeddedHost();
+      } else {
+        _store!.exitEmbeddedHost();
+      }
+    }
+  }
+
   @override
   void dispose() {
+    if (widget.embedded) _store?.exitEmbeddedHost();
     _focus.dispose();
     super.dispose();
   }

@@ -121,7 +121,17 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     // 两列输入在 390 宽挤成一条、字号 11 不可读、下半屏空白。
     final phoneLayout = phone || (size.height < 460 && size.width < 960);
     if (phoneLayout) {
-      return _mobileFrame(context, store);
+      // 系统返回（Android back / 预测性返回）先回分组根页，再按一次才关
+      // 设置：此前普通路由被直接 pop，下钻详情页没有栈内退路（review
+      // settings-2）。
+      return PopScope<Object?>(
+        canPop: _mobileSection == null,
+        onPopInvokedWithResult: (didPop, result) {
+          if (didPop) return;
+          if (_mobileSection != null) setState(() => _mobileSection = null);
+        },
+        child: _mobileFrame(context, store),
+      );
     }
     final dialogWidth = (size.width - 48).clamp(320.0, size.width < 1100 ? 920.0 : 860.0).toDouble();
     final dialogHeight = (size.height - 48).clamp(420.0, 640.0).toDouble();
@@ -188,7 +198,16 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       Text('模型、外观与 Agent 上下文策略', style: TextStyle(fontSize: 11, color: p.ink3)),
                     ],
                     const Spacer(),
-                    IconAction(icon: Icons.close, tooltip: '关闭', size: 26, onTap: () => Navigator.pop(context)),
+                    // 触屏（iPad/手机）关闭按钮命中区 44：视觉尺寸不变，
+                    // IconAction 的 InkWell 盒子按 hitSize 放大（review
+                    // settings-1；桌面临界值是 26）。
+                    IconAction(
+                      icon: Icons.close,
+                      tooltip: '关闭',
+                      size: 26,
+                      hitSize: mobile ? 44 : null,
+                      onTap: () => Navigator.pop(context),
+                    ),
                   ],
                 ),
               ),
@@ -232,11 +251,16 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   Widget _nav(BuildContext context, String id, IconData icon, String label, {bool compact = false}) {
     final p = context.palette;
     final active = _tab == id;
+    // 触屏（iOS/Android，含 iPad 两朝向）最小触控目标 44：顶部 tab 与
+    // 侧栏项同规；桌面维持 32/34 的紧凑密度（review settings-1）。
+    final touch = Theme.of(context).platform == TargetPlatform.iOS ||
+        Theme.of(context).platform == TargetPlatform.android;
     return InkWell(
+      key: ValueKey('settings-nav-$id'),
       borderRadius: BorderRadius.circular(8),
       onTap: () => setState(() => _tab = id),
       child: Container(
-        height: compact ? 32 : 34,
+        height: touch ? 44 : (compact ? 32 : 34),
         margin: compact ? const EdgeInsets.only(right: 4) : const EdgeInsets.only(bottom: 2),
         padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 9),
         decoration: BoxDecoration(
@@ -1433,6 +1457,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   children: [
                     for (final level in _levels(store.model!))
                       InkWell(
+                        key: ValueKey('settings-m-thinking-$level'),
                         borderRadius: BorderRadius.circular(8),
                         onTap: () async {
                           store.settings.thinkingLevel = level;
@@ -1440,7 +1465,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                           if (mounted) setState(() {});
                         },
                         child: Container(
-                          height: 34,
+                          // 移动端最小触控目标 44（review settings-3：此前 34）。
+                          height: 44,
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           alignment: Alignment.center,
                           decoration: BoxDecoration(

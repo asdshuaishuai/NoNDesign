@@ -399,9 +399,11 @@ def _read_entry_limited(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
                     raise hotapp.HotAppError(
                         f"nonapp_too_large: 条目 {info.filename} 解压后超过 8MiB")
                 chunks.append(chunk)
-    except (zipfile.BadZipFile, EOFError, zlib.error) as e:
-        # 声明大小与真实数据不一致（伪造头）、损坏 deflate 流、截断数据：
-        # 一律按坏 zip 拒绝，不把 zipfile 内部异常漏成 500。
+    except (zipfile.BadZipFile, EOFError, zlib.error, NotImplementedError) as e:
+        # 声明大小与真实数据不一致（伪造头）、损坏 deflate 流、截断数据、
+        # 白名单条目声明了 zipfile 不支持的压缩方法（compress_type 未知，
+        # 如 99 → zf.open 抛 NotImplementedError）：一律按坏 zip 拒绝，不把
+        # zipfile 内部异常漏成裸 500（review nonapp-4）。
         raise hotapp.HotAppError(f"nonapp_invalid_zip: 条目 {info.filename} 解压失败（{e}）") from e
     return b"".join(chunks)
 
@@ -448,12 +450,24 @@ def _read_zip(data: bytes) -> tuple[dict[str, Any], dict[str, bytes]]:
     return manifest, files
 
 
+def _current_id(d: Path, name: str) -> str:
+    """磁盘目录的当前身份 id：meta.nonappId 优先，缺失时按导出时的
+    `_derive_id(name)` 兜底。
+
+    generate 路径（hotapp_agent.generate）从不写 nonappId——只比 meta 会让
+    「导出自家生成的应用再导回」必得 app_exists:name（要重导只能删应用，
+    连 app.db 一起丢，review nonapp-3）。已导入目录一定带 nonappId，兜底
+    只在 generate/手工目录上生效，不掩盖真实的 id 冲突。
+    """
+    return str(_meta_of(d).get("nonappId") or "") or _derive_id(name)
+
+
 def _conflict(name: str, ident: str) -> None:
     """同名目录策略：同 id = 覆盖升级；否则 app_exists（生成路径同语义）。"""
     d = hotapp.HOTAPP_ROOT / name
     if not d.exists():
         return
-    if str(_meta_of(d).get("nonappId") or "") != ident:
+    if _current_id(d, name) != ident:
         raise hotapp.HotAppError(f"app_exists:{name}")
 
 
@@ -509,7 +523,9 @@ def _promote(stage: Path, name: str, ident: str) -> Path:
     d = hotapp._app_dir(name)
     trash: Path | None = None
     if d.exists():
-        if str(_meta_of(d).get("nonappId") or "") != ident:
+        # 锁内重验同 _conflict：generate 目录（meta 无 nonappId）按
+        # _derive_id 兜底，否则重导自家生成的应用在锁内又被拦下。
+        if _current_id(d, name) != ident:
             raise hotapp.HotAppError(f"app_exists:{name}")
         trash = hotapp.HOTAPP_ROOT / f".trash-{uuid.uuid4().hex}"
         os.replace(d, trash)

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
@@ -17,6 +18,11 @@ import 'common.dart';
 /// （执行错误 / 场景测量 / 截图），驱动 img2threejs 式分 pass 修复轮。
 /// webview_flutter 无 endorsed macOS 实现——首次使用前幂等注册 WebKit。
 bool _wkRegistered = false;
+
+/// 测试注入：平台矩阵的确定性覆盖（测试机恒为 macOS，造不出 Linux/Windows
+/// 环境——置 false 即走「无 WebView 平台」的降级分支，与真机同一条代码路）。
+@visibleForTesting
+bool? debugThreeWebViewSupported;
 
 /// 作品集「打开」直载：切视图前设置，ThreeWorkspace.initState 消费后清空
 /// （与 hotAppLoadOnOpen 同构的跨实例传名通道）。
@@ -72,6 +78,13 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   bool _previewReady = false;
   // 缓存 store：dispose 里保存规范草稿时不能再 context.read（元素已停用）。
   late final AppStore _store = context.read<AppStore>();
+
+  /// webview_flutter 只覆盖 android/ios/macos；Linux/Windows 没有 WebView
+  /// 插件——那两平台降级为预览地址/项目路径提示（可复制/定位），与视频
+  /// 播放面的平台判据同一矩阵（video_player_surface.dart:44-46）。
+  static bool get _webViewSupported =>
+      debugThreeWebViewSupported ??
+      (Platform.isMacOS || Platform.isIOS || Platform.isAndroid);
 
   @override
   void dispose() {
@@ -254,6 +267,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   }
 
   void _mountPreview() {
+    // webview_flutter 只覆盖 android/ios/macos（video_player_surface.dart:
+    // 44-46 同一平台矩阵）；Linux/Windows 没有 WebView 插件——绝不构造
+    // 控制器，否则平台接口在 postFrame 回调里抛未实现错误，工作台停在
+    // 「加载预览…」。预览区改走 _PreviewUnsupportedPane（地址/路径提示）。
+    if (!_webViewSupported) return;
     final api = store.api;
     if (api == null || _project == null) return;
     // 新控制器 = 新页面：就绪态归零，等预览页的 metrics 桥重新点亮。
@@ -853,11 +871,18 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     }
     // 加载失败占位优先（three-5）：主帧 HTTP ≥400 / 网络错误不再把服务器的
     // 裸 JSON 渲染给用户，整块替换为可重试的错误占位。
-    final preview = _loadError.isNotEmpty
-        ? _PreviewErrorPane(message: _loadError, onRetry: _retryPreview)
-        : (_controller == null
-            ? const Center(child: Text('加载预览…'))
-            : WebViewWidget(controller: _controller!));
+    // 无 WebView 的平台（Linux/Windows）最先分流：不构造控制器，给预览
+    // 地址与项目目录提示（可复制/定位），不把「加载预览…」当作终态。
+    final preview = !_webViewSupported
+        ? _PreviewUnsupportedPane(
+            previewUrl: store.api?.threePreviewUrl(_project!) ?? '',
+            projectDir: threeProjectDir(_project!),
+          )
+        : _loadError.isNotEmpty
+            ? _PreviewErrorPane(message: _loadError, onRetry: _retryPreview)
+            : (_controller == null
+                ? const Center(child: Text('加载预览…'))
+                : WebViewWidget(controller: _controller!));
     final side = switch (_face) {
       'source' => SingleChildScrollView(
           padding: const EdgeInsets.all(14),
@@ -920,6 +945,108 @@ class _EmptyNew extends StatelessWidget {
           label: const Text('新建 3D 项目'),
         ),
       ]),
+    );
+  }
+}
+
+/// 3D 项目在服务器主机上的落盘目录（server/three_agent.py:37 的
+/// `THREE_ROOT = ~/Documents/NoNDesign/3d`）。客户端与服务器不同机（手机/
+/// 远程桌面）时该目录不存在——「在文件夹中显示」按存在性诚实降级，不做假成功。
+String threeProjectDir(String project) {
+  final home = Platform.environment['HOME'] ?? '';
+  if (home.isEmpty || project.isEmpty) return '';
+  return '$home/Documents/NoNDesign/3d/$project';
+}
+
+/// 无 WebView 平台（Linux/Windows）的预览降级面：webview 插件缺失，不渲染
+/// 3D，但把预览地址与项目目录交给用户（复制/定位）——与视频播放面的
+/// 「当前平台不支持应用内视频播放 + 路径提示」同构（review shelf-1）。
+class _PreviewUnsupportedPane extends StatelessWidget {
+  const _PreviewUnsupportedPane({required this.previewUrl, required this.projectDir});
+  final String previewUrl;
+  final String projectDir;
+
+  Future<void> _copy(BuildContext context, String text, String done) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
+  }
+
+  Future<void> _reveal(BuildContext context) async {
+    if (projectDir.isEmpty || !Directory(projectDir).existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('本机没有该项目目录（3D 项目在服务器主机上）')));
+      return;
+    }
+    final ok = await revealInFolder(projectDir);
+    if (!context.mounted || ok) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法在文件夹中显示')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Container(
+      key: const ValueKey('three-preview-unsupported'),
+      color: p.panel2,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(24),
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.view_in_ar_outlined, size: 36, color: p.ink4),
+          const SizedBox(height: 10),
+          Text('当前平台不支持应用内 3D 预览',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink2)),
+          const SizedBox(height: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Text(
+              'Linux / Windows 没有 WebView 插件。可复制预览地址到系统浏览器打开'
+              '（需桌面服务在线），或在项目目录里查看产物：',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, color: p.ink4, height: 1.5),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SelectableText(
+            previewUrl.isEmpty ? '预览地址：未连接桌面服务' : '预览地址：$previewUrl',
+            key: const ValueKey('three-preview-url'),
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5),
+          ),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
+            OutlinedButton.icon(
+              key: const ValueKey('three-preview-copy-url'),
+              onPressed: previewUrl.isEmpty ? null : () => _copy(context, previewUrl, '已复制预览地址'),
+              icon: const Icon(Icons.link, size: 14),
+              label: const Text('复制预览地址'),
+            ),
+            if (projectDir.isNotEmpty) ...[
+              OutlinedButton.icon(
+                key: const ValueKey('three-preview-copy-path'),
+                onPressed: () => _copy(context, projectDir, '已复制项目路径'),
+                icon: const Icon(Icons.copy, size: 14),
+                label: const Text('复制项目路径'),
+              ),
+              if (revealSupported)
+                OutlinedButton.icon(
+                  key: const ValueKey('three-preview-reveal'),
+                  onPressed: () => _reveal(context),
+                  icon: const Icon(Icons.folder_open_outlined, size: 14),
+                  label: const Text('在文件夹中显示'),
+                ),
+            ],
+          ]),
+          if (projectDir.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            SelectableText('项目目录：$projectDir',
+                key: const ValueKey('three-preview-path'),
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5)),
+          ],
+        ]),
+      ),
     );
   }
 }

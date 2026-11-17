@@ -156,6 +156,22 @@ void main() {
     expect(find.byKey(const ValueKey('shelf-offline')), findsOneWidget);
     expect(find.textContaining('未连接服务器'), findsWidgets);
     expect(find.text('还没有作品'), findsNothing);
+
+    // shelf-2：提示条文案与 _open / store.openProjectPath 的门一致——原型
+    // 同样需要桌面服务（api==null 时 openProjectPath 直接 failed），不再
+    // 承诺「原型项目仍可打开」。
+    expect(find.text('未连接服务器：热应用 / 视频 / 3D / 原型都需要桌面服务，连接后可打开。'), findsOneWidget);
+    expect(find.textContaining('原型项目仍可打开'), findsNothing);
+
+    // 行为锚：离线点原型 → 明确提示需要桌面服务，不切视图（文案=行为）。
+    final viewBefore = store.view;
+    final card = find.ancestor(of: find.text('proto-a'), matching: find.byType(ArtShelfCard));
+    await tester.tap(find.descendant(of: card, matching: find.text('打开')));
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(find.text('打开 DDP 项目需要桌面服务。'), findsOneWidget);
+    expect(store.view, viewBefore, reason: '离线打开失败不得切视图');
+    expect(store.hasProject, isFalse);
+    await tester.pumpAndSettle(); // 收掉 toast 的展示定时器
   });
 
   testWidgets('未连接且无产物：空态文案是「未连接服务器」而不是「还没有作品」', (tester) async {

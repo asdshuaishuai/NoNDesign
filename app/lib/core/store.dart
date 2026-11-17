@@ -108,6 +108,22 @@ class AppStore extends ChangeNotifier {
   /// 本轮 run 由聊天流驱动：run 内不跳 view/rightTab（聊天流是主面，
   /// PLAN 不把用户拽去 docs 视图、BUILD 不拽去 design 视图）。
   bool chatActive = false;
+  /// 嵌入式工作区宿主登记计数（`Workspace(embedded: true)` 的
+  /// initState/dispose 各记一次；聊天分栏与画中画浮窗会各挂一份）。
+  ///
+  /// 嵌入期间 view 必须保持 'chat'：面板里发送（runPlan/runBuild/runRefine）、
+  /// 最近项目（openProjectFlow → openProjectPath）、新建项目/画板若把 view
+  /// 切走，聊天宿主被整块替换，而全屏壳没有回聊天流的入口（review pip-1
+  /// 的面板内路径）。计数而非布尔：宽窄切换/折叠重开时新旧实例可能短暂并存。
+  int _embeddedHosts = 0;
+  bool get embeddedHostActive => _embeddedHosts > 0;
+  void enterEmbeddedHost() => _embeddedHosts++;
+  void exitEmbeddedHost() {
+    if (_embeddedHosts > 0) _embeddedHosts--;
+  }
+
+  /// 视图锁：聊天流驱动（本轮 run）或嵌入宿主在场时，view 不离开 'chat'。
+  bool get _keepChatView => chatActive || embeddedHostActive;
   /// chat.json 串行写链（与 recovery.json 同一撕裂治理）。
   Future<void> _chatWriteQueue = Future.value();
 
@@ -704,8 +720,9 @@ class AppStore extends ChangeNotifier {
         docs = Docs();
         history = [''];
         historyIndex = 0;
-        // 聊天流驱动的建项目（sendChat 新 brief）不跳视图——聊天流是主面。
-        if (!chatActive) view = 'design';
+        // 聊天流驱动的建项目（sendChat 新 brief）与嵌入宿主内建项目不跳
+        // 视图——聊天流是主面，切走就拆宿主（review pip-1）。
+        if (!_keepChatView) view = 'design';
         panel = 'project';
         rightTab = 'agent';
         timeline = [];
@@ -740,7 +757,7 @@ class AppStore extends ChangeNotifier {
       docs = Docs();
       activeBoard = (res['entry'] ?? 'home').toString();
       selectedNode = null;
-      if (!chatActive) view = 'design'; // 同空分支：聊天流驱动不跳视图
+      if (!_keepChatView) view = 'design'; // 同空分支：聊天流/嵌入宿主不跳视图
       panel = 'project';
       rightTab = 'agent';
       timeline = [];
@@ -801,7 +818,9 @@ class AppStore extends ChangeNotifier {
       lastSavedAt = DateTime.now().millisecondsSinceEpoch;
       docs = Docs.fromJson(res['docs']);
       selectedNode = null;
-      view = 'design';
+      // 嵌入宿主/聊天流里打开项目只换内容，不换路由（review pip-1：
+      // 「最近项目」点一下就把聊天宿主拆成全屏设计视图，触屏回不来）。
+      if (!_keepChatView) view = 'design';
       panel = 'project';
       rightTab = 'agent';
       // 上一项目 run 的流式/思考残留不进新项目面板（timeline 是否同清属
@@ -1047,7 +1066,8 @@ class AppStore extends ChangeNotifier {
     final ok = await applyOp(op);
     if (ok) {
       activeBoard = templateId ?? id;
-      view = 'design';
+      // 嵌入宿主内建板留在聊天宿主（画板条「＋ 新建」在浮窗里同样可达）。
+      if (!_keepChatView) view = 'design';
       notifyListeners();
     }
     return ok;
@@ -1916,10 +1936,13 @@ class AppStore extends ChangeNotifier {
                 : '规划页面并落画布（内置 Dart · 引擎门）',
       ),
     ];
-    // 聊天流驱动的 run 不跳视图/rightTab（聊天流是主面；进工作区是
-    // 显式动作——openWorkspace）。
+    // 聊天流驱动的 run 与嵌入宿主内发起的 run 不跳视图（聊天流是主面；
+    // 进工作区是显式动作——openWorkspace）。rightTab 只按 chatActive 收，
+    // 嵌入面板里 run 起来时右栏切到 Agent 是可观察的目标态。
     if (!chatActive) {
       rightTab = 'agent';
+    }
+    if (!_keepChatView) {
       if (mode == 'plan') view = 'docs';
       if (mode != 'plan') view = 'design';
     }
@@ -2069,9 +2092,11 @@ class AppStore extends ChangeNotifier {
       TimelineEntry.user(instruction),
       TimelineEntry(kind: 'phase', text: mode == 'plan' ? '理解 brief，撰写产品文档' : mode == 'refine' ? '定位改动，保持设计系统' : '规划页面并生成原型'),
     ];
-    // 同 _runDartLoop：聊天流驱动的 run 不跳视图/rightTab。
+    // 同 _runDartLoop：聊天流驱动/嵌入宿主内的 run 不跳视图。
     if (!chatActive) {
       rightTab = 'agent';
+    }
+    if (!_keepChatView) {
       if (mode == 'plan') view = 'docs';
       if (mode != 'plan') view = 'design';
     }

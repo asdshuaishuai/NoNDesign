@@ -56,13 +56,17 @@ class NonAppCache {
       throw NonAppException('nonapp_invalid_name:$name', '应用名非法，拒绝写缓存');
     }
     // 保守预筛必须跑在落盘之前：缓存文件会被 file:// 直接执行。
-    assertHtmlOfflineSafe(utf8.decode(htmlBytes));
+    final html = utf8.decode(htmlBytes);
+    assertHtmlOfflineSafe(html);
+    // 注入服务端同款 CSP meta：file:// 没有响应头，meta 是唯一可用的第二道
+    // 防线——JS 拼接/编码的地址过不了静态扫描，但过不了 CSP（review nonapp-5）。
+    final safeBytes = utf8.encode(injectNonAppCsp(html));
 
     final dir = root();
     final target = File('${dir.path}/$name.html');
     final tmp = File('${dir.path}/.$name.${DateTime.now().microsecondsSinceEpoch}.tmp');
     try {
-      await tmp.writeAsBytes(htmlBytes, flush: true);
+      await tmp.writeAsBytes(safeBytes, flush: true);
       await tmp.rename(target.path);
     } catch (e) {
       try {

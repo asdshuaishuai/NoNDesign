@@ -726,7 +726,10 @@ class _PortfolioViewState extends State<PortfolioView> {
           Icon(Icons.cloud_off_outlined, size: 14, color: p.warn),
           const SizedBox(width: 6),
           Expanded(
-            child: Text('未连接服务器：热应用 / 视频 / 3D 需要桌面服务，原型项目仍可打开。',
+            // 与 _open 的门一致：原型同样需要桌面服务（openProjectPath
+            // 在 api==null 时直接 failed）——不承诺「原型项目仍可打开」，
+            // 那是一点就失败的空话（review shelf-2）。
+            child: Text('未连接服务器：热应用 / 视频 / 3D / 原型都需要桌面服务，连接后可打开。',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 11, color: p.warn)),

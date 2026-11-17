@@ -555,6 +555,16 @@ void main() {
     expect(pkg.renderer, 'html');
   });
 
+  test('CSP 注入：进 <head> 首标签之后（无 head 时置顶），策略早于页面内容', () {
+    final injected = injectNonAppCsp(_html());
+    expect(injected, contains('http-equiv="Content-Security-Policy"'));
+    expect(injected, contains(nonAppOfflineCsp));
+    expect(injected.indexOf('Content-Security-Policy'), lessThan(injected.indexOf('<style>')));
+    // 无 <head> 的载荷（结构门通常已拒）：策略仍先于一切内容出现。
+    final bare = injectNonAppCsp('<body>x</body>');
+    expect(bare.startsWith('<meta http-equiv="Content-Security-Policy"'), isTrue);
+  });
+
   test('体积上限与坏 zip', () {
     _expectCode('nonapp_too_large', List<int>.filled(nonAppMaxPackageBytes + 1, 0));
     _expectCode('nonapp_invalid_zip', utf8.encode('not a zip at all'));
