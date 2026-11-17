@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 double _num(dynamic v, [double fallback = 0]) => (v is num) ? v.toDouble() : fallback;
 
@@ -434,16 +433,17 @@ class ModelRegistry {
 }
 
 /// Agent 循环运行时（docs/plan-dart-agent-migration.md P0）：
-/// - `dart`：内置 Dart 循环（core/dart_agent.dart）——PLAN/Refine 纯本地，
-///   Build 的 design_op 仍经 HTTP 打引擎 AgentGate（绝不绕过引擎门）；
-/// - `server`：桌面服务 `/agent/run`（Python openai-agents，全功能）。
-/// 默认值按平台：移动端 dart、桌面 server（用户决策：桌面保留「桌面服务」
-/// 运行时选项，移动端默认内置 Dart）。
+/// - `dart`：内置 Dart 循环（core/dart_agent.dart）——桌面与移动共用；
+///   Build 的 design_op 仍经引擎 AgentGate（绝不绕过引擎门）。
+///
+/// `server`（Python `/agent/run`）已从设置面退役（用户裁决 2026-11-17：
+/// 桌面与移动内置能力一致、Python 服务退出运行时）；旧存档读到 `server`
+/// 时统一迁移到 `dart`，不再提供第二种运行时选择。
 const String agentRuntimeDart = 'dart';
+/// 仅用于旧存档读取与迁移；不再作为可选运行时。
 const String agentRuntimeServer = 'server';
 
-String defaultAgentRuntime() =>
-    (Platform.isIOS || Platform.isAndroid) ? agentRuntimeDart : agentRuntimeServer;
+String defaultAgentRuntime() => agentRuntimeDart;
 
 class AppSettings {
   String providerId;
@@ -498,7 +498,8 @@ class AppSettings {
     String? agentRuntime,
     this.chatStreamHome = true,
   })  : threeSpecDrafts = threeSpecDrafts ?? {},
-        agentRuntime = agentRuntime ?? defaultAgentRuntime();
+        // 单一运行时：旧构造参数（含 'server'）一律收敛到内置 Dart。
+        agentRuntime = agentRuntimeDart;
 
   Map<String, dynamic> toJson() => {
         'providerId': providerId,
@@ -540,12 +541,8 @@ class AppSettings {
                     .map((e) => MapEntry(e.key.toString(), e.value.toString())))
             : <String, String>{},
         serverUrl: (m['serverUrl'] ?? '').toString(),
-        // 未知值（旧存档损坏/手改）不静默当 server：回落平台默认。
-        agentRuntime: switch (m['agentRuntime']) {
-          agentRuntimeDart => agentRuntimeDart,
-          agentRuntimeServer => agentRuntimeServer,
-          _ => null,
-        },
+        // 旧存档的 `server` 与未知值统一迁移到内置 Dart（不再有第二种运行时）。
+        agentRuntime: agentRuntimeDart,
         // 旧存档无此键：默认开（用户决策 2026-11-17，聊天流是主面）。
         chatStreamHome: m['chatStreamHome'] is bool ? m['chatStreamHome'] as bool : true,
       );

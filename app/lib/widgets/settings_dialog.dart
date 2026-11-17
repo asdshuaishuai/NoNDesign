@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../core/api.dart';
 import '../core/models.dart';
 import '../core/keys.dart';
 import '../core/store.dart';
@@ -30,7 +29,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   String _query = '';
   late final TextEditingController _keyController;
   late final TextEditingController _baseController;
-  late final TextEditingController _serverUrlController;
   List<AcpAgentInfo> _acpAgents = const [];
   // ACP 探测失败原因（含「本地服务未连接」）；null = 正常或未探测。
   String? _acpError;
@@ -44,19 +42,19 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     super.initState();
     final store = context.read<AppStore>();
     _keyController = TextEditingController(text: store.settings.apiKey);
-    _serverUrlController = TextEditingController(text: store.settings.serverUrl);
-    _baseController = TextEditingController(text: store.settings.baseUrl);
+    // 内置服务商的端点来自 models.dev 快照：设置页打开时就填入，避免
+    // 「先切一次服务商才看到端点」的空态。端点本身只读（内置不可改）。
+    final provider = store.registry.provider(store.settings.providerId);
+    final providerApi = (provider?['api'] ?? '').toString();
+    final base = store.settings.baseUrl.isNotEmpty ? store.settings.baseUrl : providerApi;
+    if (store.settings.baseUrl.isEmpty && providerApi.isNotEmpty) {
+      store.settings.baseUrl = providerApi;
+      Future.microtask(store.saveSettings);
+    }
+    _baseController = TextEditingController(text: base);
     _stepsController = TextEditingController(text: store.settings.maxSteps.toString());
     _stepsFocus.addListener(() { if (mounted) setState(() {}); });
     _loadAcpAgents();
-  }
-
-  /// 连接桌面地址：保存后同步 manualBaseUrl（下一次 launch 立即使用）。
-  Future<void> _saveServerUrl(String value) async {
-    final store = context.read<AppStore>();
-    store.settings.serverUrl = value.trim();
-    ServerLauncher.manualBaseUrl = store.settings.serverUrl;
-    await store.saveSettings();
   }
 
   /// 显式保存按钮（用户点名）：把步数输入框的当前值提交并给出 ✓ 反馈。
@@ -98,7 +96,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   @override
   void dispose() {
     _keyController.dispose();
-    _serverUrlController.dispose();
     _baseController.dispose();
     _stepsController.dispose();
     _stepsFocus.dispose();
@@ -142,8 +139,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         Theme.of(context).platform == TargetPlatform.android;
     final navItems = <(String, IconData, String)>[
       ('models', Icons.memory, '模型与端点'),
+      ('agent', Icons.smart_toy_outlined, '智能体'),
       ('appearance', Icons.palette_outlined, '外观与交互'),
-      ('agent', Icons.speed, '上下文与缓存'),
       if (!mobile) ('acp', Icons.hub_outlined, '外部智能体'),
       ('about', Icons.info_outline, '关于'),
     ];
@@ -195,7 +192,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     Text('设置', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
                     if (!phone) ...[
                       const SizedBox(width: 8),
-                      Text('模型、外观与 Agent 上下文策略', style: TextStyle(fontSize: 11, color: p.ink3)),
+                      Text('模型与端点、智能体、外观设置', style: TextStyle(fontSize: 11, color: p.ink3)),
                     ],
                     const Spacer(),
                     // 触屏（iPad/手机）关闭按钮命中区 44：视觉尺寸不变，
@@ -329,18 +326,17 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _labeled(context, '端点', TextField(
+                // 内置服务商的端点来自 models.dev 快照，固定不可改（用户裁决
+                // 2026-11-17）。自定义服务商接入前这里不提供编辑面。
+                child: _labeled(context, '端点（内置只读）', TextField(
                   controller: _baseController,
+                  readOnly: true,
                   style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink2),
-                  decoration: InputDecoration(hintText: 'https://…/v1', contentPadding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9)),
-                  onSubmitted: (v) async {
-                    store.settings.baseUrl = v.trim();
-                    await store.saveSettings();
-                  },
-                  onTapOutside: (_) async {
-                    store.settings.baseUrl = _baseController.text.trim();
-                    await store.saveSettings();
-                  },
+                  decoration: InputDecoration(
+                    hintText: 'https://…/v1',
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
+                    suffixIcon: Icon(Icons.lock_outline, size: 13, color: p.ink4),
+                  ),
                 )),
               ),
             ],
@@ -359,23 +355,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               store.settings.apiKey = _keyController.text.trim();
               await store.saveSettings();
             },
-          )),
-          const SizedBox(height: 12),
-          // Agent 运行时（docs/plan-dart-agent-migration.md P0）：内置 Dart
-          // 循环 vs 桌面服务。移动端默认 dart（PLAN/Refine 无需服务器），
-          // 桌面默认 server（全功能，含整屏生成与 RSI 评审）。
-          _runtimePicker(context, store),
-          const SizedBox(height: 12),
-          // 手机「连接桌面」的唯一输入口：旧实现控制器建了却从未绑定，
-          // 地址无处填写 → launch 永远连不上桌面服务器。
-          _labeled(context, '桌面服务器（手机连接桌面模式）', TextField(
-            controller: _serverUrlController,
-            style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink2),
-            decoration: const InputDecoration(
-              hintText: 'http://192.168.1.5:8799（留空 = 本机自动拉起 / PLAN 直连）',
-            ),
-            onSubmitted: _saveServerUrl,
-            onTapOutside: (_) => _saveServerUrl(_serverUrlController.text),
           )),
           const SizedBox(height: 12),
           Row(
@@ -595,84 +574,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     );
   }
 
-  /// Agent 运行时切换（内置 Dart / 桌面服务）。默认值由平台解析
-  /// （models.dart defaultAgentRuntime：移动端 dart、桌面 server）；
-  /// 显式选择不静默降级——server 未连接、dart 缺引擎桥都会显性报错。
-  Widget _runtimePicker(BuildContext context, AppStore store) {
-    final p = context.palette;
-    final mobile = Theme.of(context).platform == TargetPlatform.iOS ||
-        Theme.of(context).platform == TargetPlatform.android;
-    final items = <(String, String, IconData, String)>[
-      ('dart', '内置 Dart', Icons.bolt_outlined, '循环在客户端执行；画布变更仍经引擎门'),
-      ('server', '桌面服务', Icons.dns_outlined, '/agent/run 全功能（整屏生成 + 质量环）'),
-    ];
-    final runtime = store.settings.agentRuntime;
-    final warn = runtime == agentRuntimeServer && mobile && store.settings.serverUrl.trim().isEmpty;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            for (final item in items)
-              Expanded(
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(10),
-                  onTap: () async {
-                    if (store.settings.agentRuntime == item.$1) return;
-                    store.settings.agentRuntime = item.$1;
-                    await store.saveSettings();
-                  },
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                    decoration: BoxDecoration(
-                      color: runtime == item.$1 ? p.accentSoft : p.panel2.withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: runtime == item.$1 ? p.accent : p.line),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(item.$3,
-                            size: 15,
-                            color: runtime == item.$1 ? p.accent : p.ink3),
-                        const SizedBox(width: 7),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('${item.$2}${mobile && item.$1 == 'dart' || !mobile && item.$1 == 'server' ? '（默认）' : ''}',
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                      color: p.ink)),
-                              Text(item.$4,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(fontSize: 10, color: p.ink4)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 5),
-        Text(
-          warn
-              ? '「桌面服务」运行时未配置桌面服务器地址——下方填入桌面端地址后方可运行。'
-              : mobile
-                  ? '内置 Dart：PLAN / Refine 无需服务器即可运行；Build 需连接桌面（引擎门）。'
-                  : '内置 Dart 后循环在客户端执行，画布变更仍经引擎 AgentGate 校验。',
-          style: TextStyle(fontSize: 10, height: 1.4, color: warn ? p.warn : p.ink4),
-        ),
-      ],
-    );
-  }
-
   List<String> _levels(ModelInfo model) {    final out = <String>{'auto'};
     for (final opt in model.reasoningOptions) {
       if (opt is Map) {
@@ -809,6 +710,36 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const SectionLabel('运行时'),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: p.panel2.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: p.line),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.smart_toy_outlined, size: 16, color: p.accent),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('内置 Dart 循环',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
+                      const SizedBox(height: 2),
+                      Text('桌面与移动共用；循环在客户端执行，画布变更仍经引擎 AgentGate 校验。',
+                          style: TextStyle(fontSize: 10, height: 1.45, color: p.ink3)),
+                    ],
+                  ),
+                ),
+                Pill(label: '内置', color: p.accent),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(12)),
@@ -964,9 +895,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         for (final row in [
           ('运行时', 'Flutter 3.50'),
           ('引擎', 'MoonViz classic wasm · 0.2 dev 构建'),
-          // 不暴露裸 URL：本地引擎服务是应用自动拉起的实现细节，
-          // 端口排障需要时看 ~/.nondesign/server.json 即可。
-          ('本地引擎服务', store.api == null ? '未连接' : '随应用自动启动 · 就绪'),
+          ('引擎宿主', store.api == null ? '未就绪' : '就绪'),
           ('数据', '~/.nondesign · DDP 单文件'),
         ])
           Padding(
@@ -990,7 +919,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   Widget _acp(BuildContext context, AppStore store) {
     final p = context.palette;
-    final selected = store.settings.acpAgentId;
     return ListView(
       children: [
         Text('外部智能体（ACP 协议）', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
@@ -1127,8 +1055,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final p = context.palette;
     const titles = <String, String>{
       'models': '模型与端点',
+      'agent': '智能体',
       'appearance': '外观与交互',
-      'agent': '上下文与缓存',
       'about': '关于',
     };
     final section = _mobileSection;
@@ -1209,18 +1137,18 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             subtitle: '$providerName · $modelName',
             onTap: () => setState(() => _mobileSection = 'models')),
         _mSectionTile(context,
+            id: 'agent',
+            icon: Icons.smart_toy_outlined,
+            title: '智能体',
+            subtitle: '内置 Dart · 最大步数 ${store.settings.maxSteps} · 本地上下文治理',
+            onTap: () => setState(() => _mobileSection = 'agent')),
+        _mSectionTile(context,
             id: 'appearance',
             icon: Icons.palette_outlined,
             title: '外观与交互',
             subtitle:
                 '${store.settings.theme == 'light' ? '浅色' : '深色'} · ${store.settings.chatStreamHome ? '聊天流' : '经典 Welcome'}',
             onTap: () => setState(() => _mobileSection = 'appearance')),
-        _mSectionTile(context,
-            id: 'agent',
-            icon: Icons.speed,
-            title: '上下文与缓存',
-            subtitle: '最大步数 ${store.settings.maxSteps} · 本地确定性治理',
-            onTap: () => setState(() => _mobileSection = 'agent')),
         _mSectionTile(context,
             id: 'about',
             icon: Icons.info_outline,
@@ -1341,23 +1269,16 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             ),
           ),
         ]),
-        _mCard(context, title: '端点', helper: 'OpenAI 兼容端点；非兼容协议的服务商不可用。', children: [
+        _mCard(context, title: '端点（内置只读）',
+            helper: '内置服务商端点来自 models.dev 快照，固定不可改动。', children: [
           TextField(
             key: const ValueKey('settings-m-endpoint'),
             controller: _baseController,
+            readOnly: true,
             style: TextStyle(fontSize: 13, fontFamily: 'Menlo', color: p.ink),
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-            enableSuggestions: false,
-            decoration: _mDecoration(context, hint: 'https://…/v1'),
-            onSubmitted: (v) async {
-              store.settings.baseUrl = v.trim();
-              await store.saveSettings();
-            },
-            onTapOutside: (_) async {
-              store.settings.baseUrl = _baseController.text.trim();
-              await store.saveSettings();
-            },
+            decoration: _mDecoration(context,
+                hint: 'https://…/v1',
+                suffix: Icon(Icons.lock_outline, size: 18, color: p.ink4)),
           ),
         ]),
         _mCard(context, title: 'API Key（只存本机）', helper: '仅保存在本机设置中，不上传。', children: [
@@ -1387,40 +1308,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               await store.saveSettings();
             },
           ),
-        ]),
-        _mCard(context, title: '桌面服务器（连接桌面模式）',
-            helper: '留空 = 本机自动拉起 / PLAN 直连；手机需填桌面局域网地址。', children: [
-          TextField(
-            key: const ValueKey('settings-m-server'),
-            controller: _serverUrlController,
-            style: TextStyle(fontSize: 13, fontFamily: 'Menlo', color: p.ink),
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-            enableSuggestions: false,
-            decoration: _mDecoration(context, hint: 'http://192.168.1.5:8799'),
-            onSubmitted: _saveServerUrl,
-            onTapOutside: (_) => _saveServerUrl(_serverUrlController.text),
-          ),
-        ]),
-        _mCard(context, title: 'Agent 运行时', helper: _mRuntimeNote(context, store), children: [
-          _mRadioRow(context,
-              label: '内置 Dart（移动端默认）',
-              note: '循环在客户端执行；画布变更仍经引擎门',
-              selected: store.settings.agentRuntime == agentRuntimeDart,
-              onTap: () async {
-                store.settings.agentRuntime = agentRuntimeDart;
-                await store.saveSettings();
-                if (mounted) setState(() {});
-              }),
-          _mRadioRow(context,
-              label: '桌面服务',
-              note: '/agent/run 全功能（整屏生成 + 质量环）',
-              selected: store.settings.agentRuntime == agentRuntimeServer,
-              onTap: () async {
-                store.settings.agentRuntime = agentRuntimeServer;
-                await store.saveSettings();
-                if (mounted) setState(() {});
-              }),
         ]),
         _mCard(context, title: '模型清单', children: [
           Row(
@@ -1686,6 +1573,23 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       children: [
+        _mCard(context, title: '运行时',
+            helper: '桌面与移动共用内置 Dart；循环在客户端执行，画布变更仍经引擎门校验。', children: [
+          Row(children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(color: p.accentSoft, borderRadius: BorderRadius.circular(10)),
+              child: Icon(Icons.smart_toy_outlined, size: 19, color: p.accent),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text('内置 Dart 循环',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
+            ),
+            Pill(label: '内置', color: p.accent),
+          ]),
+        ]),
         Row(children: [
           _mStat(context, '上下文窗口', formatTokens(store.model?.context)),
           _mStat(context, '本轮输入', formatTokens(store.usage['inputTokens'] as num?)),
@@ -1830,7 +1734,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           for (final row in [
             ('运行时', 'Flutter 3.50'),
             ('引擎', 'MoonViz classic wasm · 0.2 dev 构建'),
-            ('本地引擎服务', store.api == null ? '未连接' : '随应用自动启动 · 就绪'),
+            ('引擎宿主', store.api == null ? '未就绪' : '就绪'),
             ('数据', '~/.nondesign · DDP 单文件'),
           ])
             Padding(
@@ -1943,18 +1847,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ),
       ),
     );
-  }
-
-  String _mRuntimeNote(BuildContext context, AppStore store) {
-    final mobile = Theme.of(context).platform == TargetPlatform.iOS ||
-        Theme.of(context).platform == TargetPlatform.android;
-    final warn = store.settings.agentRuntime == agentRuntimeServer &&
-        mobile &&
-        store.settings.serverUrl.trim().isEmpty;
-    if (warn) return '「桌面服务」运行时未配置桌面服务器地址——上方填入桌面端地址后方可运行。';
-    return mobile
-        ? '内置 Dart：PLAN / Refine 无需服务器即可运行；Build 需连接桌面（引擎门）。'
-        : '内置 Dart 后循环在客户端执行，画布变更仍经引擎 AgentGate 校验。';
   }
 
   Widget _labeled(BuildContext context, String label, Widget child) {
