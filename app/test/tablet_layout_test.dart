@@ -236,7 +236,9 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
-    expect(find.byKey(const ValueKey('settings-topnav')), findsOneWidget);
+    // 手机横屏（844×390）同样走移动端独立布局（分组根页），不再挤顶部 tab。
+    expect(find.byKey(const ValueKey('settings-mobile-root')), findsOneWidget);
+    expect(find.byKey(const ValueKey('settings-topnav')), findsNothing);
   });
 
   testWidgets('desktop settings keeps the external agent tab', (tester) async {

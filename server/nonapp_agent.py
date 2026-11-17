@@ -13,8 +13,10 @@
 全新实例（app.db 由首次 db_exec 懒建，见 hotapp_agent.py:298）。
 
 导入安全面是本模块存在的理由：zip 解包是最大攻击面，因此
-① 白名单 + 条目数/单条解压/总解压三重上限（都用 ZipInfo.file_size 预检，
-不解压超限包）；② 条目名拒 ../、绝对路径、反斜杠、控制字符；③ 先写
+① 白名单 + 条目数/单条解压/总解压三重上限（ZipInfo.file_size 只作快速
+预检——声明值可伪造；真实解压走 ``zf.open(info)`` 分块读取并逐块累计，
+超过 MAX_ENTRY_BYTES 立即失败，峰值内存不随真实载荷增长）；② 条目名拒
+../、绝对路径、反斜杠、控制字符；③ 先写
 ``HOTAPP_ROOT/.import-<uuid>`` 临时目录，再在**每应用 asyncio 锁**内
 旧目录改名 .trash-<uuid> → ``os.replace`` 落位 → rmtree 旧目录；④ 失败
 路径清干净临时目录（不产生半成品）。锁必须是 ``hotapp._lock_for`` 的
@@ -32,6 +34,7 @@ import shutil
 import time
 import uuid
 import zipfile
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +48,9 @@ MAX_ENTRIES = 32
 MAX_PROMPT_BYTES = 8 * 1024
 MAX_TITLE_CHARS = 120
 MAX_BRIEF_CHARS = 2000
+# 解压读取块：上限检查在每块后执行，单块是峰值内存的固定上界（声明大小
+# 伪造时真正兜底的是这个循环，而非 ZipInfo.file_size 预检）。
+_READ_CHUNK_BYTES = 64 * 1024
 ALLOWED_ENTRIES = {
     "manifest.json",
     "payload/index.html",
@@ -370,6 +376,36 @@ def _validate_payload(manifest: dict[str, Any], files: dict[str, bytes]) -> dict
     return out
 
 
+def _read_entry_limited(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
+    """分块解压单条目，累计真实输出字节；超限立即失败。
+
+    `zf.read(info)` 会按声明大小以外的口径把整段 deflate 流一次解压（
+    `ZipExtFile.read(-1)` 用 MAX_N 作为输出上限），高压缩比 + 伪造声明大小
+    的包会在长度校验之前吃掉几十/几百 MB。这里按 `_READ_CHUNK_BYTES` 流式
+    读取：任何时刻内存里只有已读块（上限 MAX_ENTRY_BYTES）+ 一块输出，
+    末尾拼接再复制一次，峰值仍是 ≤2×MAX_ENTRY_BYTES 的固定上界。
+    声明大小预检仍保留（见调用方）作为快速失败。
+    """
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        with zf.open(info) as fp:
+            while True:
+                chunk = fp.read(_READ_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_ENTRY_BYTES:
+                    raise hotapp.HotAppError(
+                        f"nonapp_too_large: 条目 {info.filename} 解压后超过 8MiB")
+                chunks.append(chunk)
+    except (zipfile.BadZipFile, EOFError, zlib.error) as e:
+        # 声明大小与真实数据不一致（伪造头）、损坏 deflate 流、截断数据：
+        # 一律按坏 zip 拒绝，不把 zipfile 内部异常漏成 500。
+        raise hotapp.HotAppError(f"nonapp_invalid_zip: 条目 {info.filename} 解压失败（{e}）") from e
+    return b"".join(chunks)
+
+
 def _read_zip(data: bytes) -> tuple[dict[str, Any], dict[str, bytes]]:
     """解包 + 全部纯校验（不落盘）：返回 (manifest, 白名单条目字节)。"""
     if len(data) > MAX_PACKAGE_BYTES:
@@ -400,12 +436,9 @@ def _read_zip(data: bytes) -> tuple[dict[str, Any], dict[str, bytes]]:
             _reject_entry_name(info.filename)
             if info.filename in files:
                 raise hotapp.HotAppError(f"nonapp_unexpected_entry:{info.filename}（重复条目）")
-            payload = zf.read(info)
-            # 头部声明与实际解压字节都要受限（ZipInfo.file_size 可被伪造）
-            if len(payload) > MAX_ENTRY_BYTES:
-                raise hotapp.HotAppError(
-                    f"nonapp_too_large: 条目 {info.filename} 解压后超过 8MiB")
-            files[info.filename] = payload
+            # 声明大小预检在上面已做（快速失败）；真实解压字节在这里分块
+            # 计数，伪造声明大小的高压缩比包走不到「先全量解压再校验」。
+            files[info.filename] = _read_entry_limited(zf, info)
 
     manifest_raw = files.get("manifest.json")
     if manifest_raw is None:

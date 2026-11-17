@@ -12,3 +12,13 @@ PRODUCT_BUNDLE_IDENTIFIER = com.nondesign.nondesign
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.nondesign. All rights reserved.
+
+// Apple Silicon only（2026-11-17，MediaPipe 集成硬约束）：
+// MediaPipe 只提供 macOS arm64 运行时（macos/x64 无切片），而 Flutter 的
+// macOS release/profile 默认同时构建 Intel；不排除 x86_64 时 native assets
+// 钩子会直接失败（mediapipe_retrieval hook: "no MediaPipe library for
+// Intel Macs"）。Flutter 3.50 起 Xcode 27 已允许 ARM-only、Intel Mac 宿主
+// 进入退役通道，因此这里显式收窄。iOS 模拟器同理见 Runner.xcodeproj 的
+// EXCLUDED_ARCHS[sdk=iphonesimulator*]=x86_64。
+ARCHS = arm64
+EXCLUDED_ARCHS = x86_64

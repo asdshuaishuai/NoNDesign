@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../core/api_shelf.dart';
+import '../core/embedding_index.dart';
+import '../core/mediapipe_service.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'art_shelf_card.dart';
@@ -27,11 +31,24 @@ import 'video_workspace.dart';
 /// - video    → videoLoadOnOpen（mp4 绝对路径）+ plugin:video（真播放）
 /// - three    → threeLoadOnOpen（项目名）+ plugin:three
 class PortfolioView extends StatefulWidget {
-  const PortfolioView({super.key});
+  const PortfolioView({super.key, this.searchIndex});
+
+  /// 检索入口（生产 = 进程内共享 [EmbeddingIndex]；测试注入 fake/临时目录）。
+  ///
+  /// 注入 [EmbeddingIndex] 时视图会先 `sync` 已加载条目再检索；注入纯
+  /// [SearchIndex] fake 时只用它检索（不建索引）——两条路径都不碰网络。
+  final SearchIndex? searchIndex;
 
   @override
   State<PortfolioView> createState() => _PortfolioViewState();
 }
+
+/// 进程内共享的艺术架索引（生产路径；模型未就绪时自动退化子串匹配）。
+EmbeddingIndex? _sharedShelfIndex;
+
+EmbeddingIndex defaultShelfIndex() => _sharedShelfIndex ??= EmbeddingIndex(
+      embedder: MediaPipeServiceEmbedder(MediaPipeService.shared),
+    );
 
 /// 固定分类签（顺序即展示顺序）。'prototype' 不是服务端 portfolio kind——
 /// 它是客户端聚合的 DDP 项目类目。
@@ -56,12 +73,30 @@ class _PortfolioViewState extends State<PortfolioView> {
   bool _busy = false;
   String _filter = 'all';
 
+  /// 搜索框状态：输入防抖 180ms（每键一次向量化会把 embedder 拍死）。
+  final TextEditingController _searchCtl = TextEditingController();
+  Timer? _searchDebounce;
+  String _query = '';
+
+  /// 语义检索命中的条目 id（`kind:ref`）；null = 走本地子串匹配。
+  Set<String>? _hitIds;
+
+  /// 降级提示（「语义检索不可用，已按关键词匹配」）；null = 无语义/无降级。
+  String? _searchNote;
+
   AppStore get store => context.read<AppStore>();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchCtl.dispose();
+    super.dispose();
   }
 
   /// 全量刷新：先对账项目发现（store.serverProjects 是原型段的数据源；store 的
@@ -104,7 +139,11 @@ class _PortfolioViewState extends State<PortfolioView> {
       _prototypes = _collectPrototypes(store);
       _error = error;
       _busy = false;
+      _hitIds = null; // 条目重载：旧命中集可能指向已消失的条目
     });
+    if (_query.trim().isNotEmpty) {
+      unawaited(_runSearch(_query.trim()));
+    }
   }
 
   /// 原型项目聚合：当前项目 → 服务端发现（workspace/桌面）→ 最近项目，
@@ -143,6 +182,110 @@ class _PortfolioViewState extends State<PortfolioView> {
   List<Map<String, dynamic>> _itemsOf(String kind) {
     if (kind == 'prototype') return _prototypes;
     return _apiItems.where((i) => i['kind'] == kind).toList();
+  }
+
+  // ---- 搜索（M2 离线语义检索切片）----
+
+  /// 条目稳定 id：与 [EmbeddingDoc.id] 同源（`<kind>:<ref>`）。
+  static String _itemKey(Map<String, dynamic> item) =>
+      '${item['kind']}:${item['ref'] ?? ''}';
+
+  /// 全架条目（不受分类签影响——搜索是全库，分类签只是展示过滤）。
+  List<EmbeddingDoc> _searchDocs() {
+    final docs = <EmbeddingDoc>[];
+    for (final kind in _shelfKinds) {
+      for (final item in _itemsOf(kind)) {
+        final ref = item['ref']?.toString() ?? '';
+        if (ref.isEmpty) continue;
+        final title = '${item['title'] ?? ref}';
+        final detail = '${item['detail'] ?? item['path'] ?? ''}';
+        docs.add(EmbeddingDoc(
+          id: _itemKey(item),
+          kind: kind,
+          title: title,
+          text: detail,
+          ref: ref,
+        ));
+      }
+    }
+    return docs;
+  }
+
+  SearchIndex _searchIndex() => widget.searchIndex ?? defaultShelfIndex();
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    final query = value.trim();
+    setState(() {
+      _query = value;
+      if (query.isEmpty) {
+        _hitIds = null;
+        _searchNote = null;
+      }
+    });
+    if (query.isEmpty) return;
+    _searchDebounce = Timer(const Duration(milliseconds: 180), () => _runSearch(query));
+  }
+
+  /// 检索：索引可用 → 向量 topK（命中只留这些卡片）；否则 → 本地子串。
+  ///
+  /// 语义检索「零命中」也退回子串——topK 的余弦下限以上没有结果时，关键词
+  /// 匹配比空货架更有用（用户输入的是字面词时尤其明显）。
+  Future<void> _runSearch(String query) async {
+    final index = _searchIndex();
+    try {
+      if (index is EmbeddingIndex) {
+        await index.sync(_searchDocs());
+      }
+      final outcome = await index.search(query, topK: 50);
+      if (!mounted || _query.trim() != query) return; // 过期结果（输入已变）
+      setState(() {
+        if (outcome.semantic && outcome.hits.isNotEmpty) {
+          _hitIds = outcome.hits.map((h) => h.entry.id).toSet();
+          _searchNote = null;
+        } else {
+          _hitIds = null;
+          _searchNote = outcome.semantic ? null : (outcome.reason ?? '已按关键词匹配');
+        }
+      });
+    } catch (e) {
+      if (!mounted || _query.trim() != query) return;
+      // 检索任何异常都不该让货架不可用：直接退回本地子串。
+      setState(() {
+        _hitIds = null;
+        _searchNote = '语义检索不可用，已按关键词匹配';
+      });
+    }
+  }
+
+  bool _localMatch(Map<String, dynamic> item, String query) => substringMatch(query, [
+        '${item['title'] ?? ''}',
+        '${item['detail'] ?? ''}',
+        '${item['path'] ?? ''}',
+        '${item['ref'] ?? ''}',
+        '${item['kind'] ?? ''}',
+      ]);
+
+  /// 分类签 + 搜索后的可见条目。
+  List<Map<String, dynamic>> _visibleItems(String kind) {
+    final items = _itemsOf(kind);
+    final query = _query.trim();
+    if (query.isEmpty) return items;
+    final ids = _hitIds;
+    if (ids != null) {
+      return items.where((item) => ids.contains(_itemKey(item))).toList();
+    }
+    return items.where((item) => _localMatch(item, query)).toList();
+  }
+
+  void _clearSearch() {
+    _searchDebounce?.cancel();
+    _searchCtl.clear();
+    setState(() {
+      _query = '';
+      _hitIds = null;
+      _searchNote = null;
+    });
   }
 
   // ---- 打开 ----
@@ -337,22 +480,28 @@ class _PortfolioViewState extends State<PortfolioView> {
     final rows = <Widget>[];
     for (final kind in _shelfKinds) {
       if (_filter != 'all' && _filter != kind) continue;
-      final items = _itemsOf(kind);
+      final items = _visibleItems(kind);
       if (items.isEmpty) continue;
       rows.add(_shelfRow(p, kind, items));
     }
+    final searching = _query.trim().isNotEmpty;
     return Column(
       children: [
         _header(p),
         if (_error != null) _errorBar(p),
         if (store.api == null && rows.isNotEmpty) _offlineBar(p),
-        Expanded(child: rows.isEmpty ? _emptyState(p) : ListView(children: [...rows, const SizedBox(height: 18)])),
+        Expanded(
+          child: rows.isEmpty
+              ? (searching ? _noSearchResults(p) : _emptyState(p))
+              : ListView(children: [...rows, const SizedBox(height: 18)]),
+        ),
       ],
     );
   }
 
-  /// 头部分两行（手机宽度 390/402 下五个分类签与标题同排必溢出 404px）：
-  /// 第一行 44 = 返回/标题/刷新/⋯；第二行 36 = 横向滚动的固定分类签。
+  /// 头部三行（手机宽度 390/402 下五个分类签与标题同排必溢出 404px）：
+  /// 第一行 44 = 返回/标题/刷新/⋯；第二行 36 = 横向滚动的固定分类签；
+  /// 第三行 40 = 检索框（M2：语义优先、关键词兜底），降级时附一行提示。
   Widget _header(NonPalette p) {
     return Container(
       decoration: BoxDecoration(
@@ -447,9 +596,98 @@ class _PortfolioViewState extends State<PortfolioView> {
             ]),
           ),
         ),
+        _searchRow(p),
+        if (_searchNote != null) _searchNoteRow(p),
       ]),
     );
   }
+
+  /// 检索输入行：语义优先、关键词兜底（无服务器/无模型时同样可用）。
+  Widget _searchRow(NonPalette p) {
+    return SizedBox(
+      height: 40,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+        child: TextField(
+          key: const ValueKey('shelf-search'),
+          controller: _searchCtl,
+          onChanged: _onSearchChanged,
+          textInputAction: TextInputAction.search,
+          style: TextStyle(fontSize: 12, color: p.ink),
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: '搜索作品（语义 / 关键词）',
+            hintStyle: TextStyle(fontSize: 12, color: p.ink4),
+            prefixIcon: Icon(Icons.search, size: 15, color: p.ink3),
+            prefixIconConstraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            suffixIcon: _query.isEmpty
+                ? null
+                : IconButton(
+                    key: const ValueKey('shelf-search-clear'),
+                    tooltip: '清除搜索',
+                    icon: Icon(Icons.close, size: 14, color: p.ink3),
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                    padding: EdgeInsets.zero,
+                    onPressed: _clearSearch,
+                  ),
+            suffixIconConstraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            filled: true,
+            fillColor: p.panel,
+            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: p.line),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: p.line),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: p.accent),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 降级提示条（只在语义检索不可用时出现，避免噪音）。
+  Widget _searchNoteRow(NonPalette p) => Container(
+        key: const ValueKey('shelf-search-note'),
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(14, 0, 12, 4),
+        child: Row(children: [
+          Icon(Icons.info_outline, size: 12, color: p.ink4),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              _searchNote!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10, color: p.ink4),
+            ),
+          ),
+        ]),
+      );
+
+  /// 搜索无结果（与「还没有作品」区分开——用户刚输入了关键词）。
+  Widget _noSearchResults(NonPalette p) => Center(
+        key: const ValueKey('shelf-search-empty'),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.search_off, size: 38, color: p.ink4),
+            const SizedBox(height: 10),
+            Text('没有匹配的作品',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: p.ink2)),
+            const SizedBox(height: 6),
+            Text('换个关键词试试；模型未就绪时按标题/路径做关键词匹配。',
+                textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: p.ink4)),
+          ]),
+        ),
+      );
 
   Widget _errorBar(NonPalette p) => Container(
         key: const ValueKey('shelf-error'),

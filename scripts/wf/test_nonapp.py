@@ -26,6 +26,7 @@ import io
 import json
 import sys
 import tempfile
+import tracemalloc
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -64,7 +65,10 @@ SURFACE_MESSAGES = [
     },
     {
         "version": "1.0",
-        "surfaceUpdate": {"surfaceId": "demo", "components": []},
+        "updateComponents": {"surfaceId": "demo", "components": [
+            {"id": "root", "component": "Column", "children": ["title"]},
+            {"id": "title", "component": "Text", "text": "清单"},
+        ]},
     },
 ]
 
@@ -99,6 +103,44 @@ def _a2ui_zip(**manifest_over) -> bytes:
         "payload/surface.json": json.dumps(SURFACE_MESSAGES),
         "payload/data.json": json.dumps({"items": []}),
     })
+
+
+def _bomb_zip(payload_bytes: int = 64 * 1024 * 1024,
+              declared: int = 1000) -> bytes:
+    """高压缩比解压炸弹：真实载荷 payload_bytes 个零字节，头部声明 declared。
+
+    压缩流式写入（不物化 64MiB 明文：1MiB 块循环），随后把 payload/index.html
+    的「解压后大小」在中央目录与本地头里都改成 declared（< 上限 → 声明预检
+    放行）。CRC 仍是全量载荷的（伪造头场景的典型形态），真实解压超过声明
+    大小时由分块读取的 CRC/长度门拒绝。
+    """
+    name = b"payload/index.html"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manifest.json", json.dumps(_manifest()))
+        with zf.open("payload/index.html", "w") as fp:
+            zeros = b"\0" * (1024 * 1024)
+            for _ in range(payload_bytes // len(zeros)):
+                fp.write(zeros)
+    data = bytearray(buf.getvalue())
+    # 本地文件头 PK\x03\x04：解压大小 +22、文件名长度 +26、文件名 +30；
+    # 中央目录 PK\x01\x02：解压大小 +24、文件名长度 +28、文件名 +46。
+    for sig, size_offset, fnlen_offset, name_offset in (
+            (b"PK\x03\x04", 22, 26, 30),
+            (b"PK\x01\x02", 24, 28, 46)):
+        pos = 0
+        while True:
+            pos = data.find(sig, pos)
+            if pos < 0:
+                break
+            fn_len = int.from_bytes(data[pos + fnlen_offset:
+                                         pos + fnlen_offset + 2], "little")
+            start = pos + name_offset
+            if bytes(data[start:start + fn_len]) == name:
+                off = pos + size_offset
+                data[off:off + 4] = declared.to_bytes(4, "little")
+            pos += 4
+    return bytes(data)
 
 
 def main() -> int:
@@ -354,12 +396,32 @@ def main() -> int:
                         _zip({"manifest.json": json.dumps(_manifest(renderer="a2ui")),
                               "payload/surface.json": json.dumps([
                                   {"version": "1.0", "createSurface": {
-                                      "surfaceId": "demo", "components": []}},
-                                  {"version": "1.0", "dataModelUpdate": {
+                                      "surfaceId": "demo", "components": [
+                                          {"id": "root", "component": "Text", "text": "x"}]}},
+                                  {"version": "1.0", "updateDataModel": {
                                       "surfaceId": "demo", "path": "/",
-                                      "contents": [{"key": "img",
-                                                    "valueString": "//cdn.example/a.png"}]}}])}),
+                                      "value": {"img": "//cdn.example/a.png"}}}])}),
                         "nonapp_a2ui_external_refs")
+
+            # 解压炸弹（res-1）：真实 64MiB 零字节，头部声明 1000 字节。
+            # 修复前 zf.read 会把整段 deflate 流一次解压（峰值 RSS ~375MB）；
+            # 分块读取后内存上界是 MAX_ENTRY_BYTES，且声明与真实不符的条目
+            # 在首个 CRC/长度检查处即被拒（nonapp_invalid_zip）。
+            bomb = _bomb_zip()
+            check("bomb package small on disk", len(bomb) < 512 * 1024, f"{len(bomb)} bytes")
+            with zipfile.ZipFile(io.BytesIO(bomb)) as zf:
+                declared = {i.filename: i.file_size for i in zf.infolist()}
+            check("bomb declared size forged", declared.get("payload/index.html") == 1000,
+                  str(declared))
+            tracemalloc.start()
+            try:
+                install_err("decompression bomb rejected", bomb, "nonapp_invalid_zip")
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            # 修复前一次解压 64MiB 明文 → peak ≥ 64MiB；分块读取应远低于此。
+            check("bomb peak memory bounded", peak < 16 * 1024 * 1024,
+                  f"peak={peak / (1024 * 1024):.1f}MiB")
 
             # 服务端等价 HTML 门：<a href="https://…"> 服务端 _html_ok 接受
             # （正则只覆盖 script/link/img），导入必须成功且可 round-trip——

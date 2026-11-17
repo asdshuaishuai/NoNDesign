@@ -20,7 +20,7 @@ class NonAppA2uiViewer extends StatelessWidget {
 
   final String title;
 
-  /// A2UI v1.0 消息序列（已归一为数组：createSurface / surfaceUpdate …）。
+  /// A2UI v1.0 消息序列（已归一为数组：createSurface / updateComponents …）。
   final List<Object?> messages;
 
   @override

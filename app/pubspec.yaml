@@ -44,9 +44,10 @@ dependencies:
   webview_flutter: ^4.14.1
   webview_flutter_wkwebview: ^3.27.2
   # `.nonapp` 单文件包（zip 容器）的读取：只用 ZipDecoder，pure Dart、无平台
-  # 通道。3.6.1 的两个传递依赖 crypto ^3.0.3 / path ^1.8.0 已在 lock 里，
-  # 离线可解析（本机 pub cache 已存在 archive-3.6.1）。
-  archive: ^3.6.1
+  # 通道。**4.x 是 mediapipe_core 的硬约束**（0.2/0.3 都要求 archive ^4.2.0），
+  # 3.6.1 与它无解；ZipDecoder.decodeBytes 在 4.x 仍可用（N6 mediapipe 集成的硬前置，
+  # 2026-11-17 经协调者批准；nonapp 侧已按 archive 4 API 迁移）。
+  archive: ^4.2.0
   ai_sdk_dart: ^3.1.0
   ai_sdk_openai: ^3.1.0
 
@@ -58,6 +59,16 @@ dependencies:
   a2ui_flutter: ^0.3.0
   a2ui_agent: ^0.3.0
   a2ui_core: ^0.7.0
+  # MediaPipe for Flutter（N6，2026-11-17 用户裁决）：只引入基础 task 能力。
+  # **不引入 mediapipe_audio / mediapipe_decision**，也**不引入 LiteRT-LM /
+  # Gemma 端侧 LLM**（明确不做）。版本按 `flutter pub add` 实际解析（0.3.0，
+  # 2026-11-12 时点为 0.2.1）；0.x API 会动，原生导入只允许出现在
+  # lib/core/mediapipe_embedder_adapter.dart，其余代码只认 MediaPipeEmbedder
+  # 接口（core/mediapipe_embedder.dart）。
+  mediapipe_core: ^0.3.0
+  mediapipe_retrieval: ^0.3.0
+  mediapipe_vision: ^0.3.0
+  mediapipe_text: ^0.3.0
 
 dev_dependencies:
   flutter_test:

@@ -61,6 +61,40 @@ void main() {
     expect(find.textContaining('Tokyo'), findsOneWidget);
   });
 
+  testWidgets('坏 surface（缺 version / 旧 surfaceUpdate 信封）渲染错误页而不是抛异常', (tester) async {
+    // res-3：结构门只认 v1.0 信封；这两类包能过 parse 的旧门但会炸
+    // MessageProcessor。查看器必须走错误页（红条 + 空态说明），不得抛。
+    final cases = <List<Object?>>[
+      [
+        {
+          'createSurface': {
+            'surfaceId': 'no-version',
+            'catalogId':
+                'https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json',
+            'components': [
+              {'id': 'root', 'component': 'Text', 'text': 'x'},
+            ],
+          },
+        },
+      ],
+      [
+        {
+          'version': '1.0',
+          'surfaceUpdate': {'surfaceId': 'legacy', 'components': <Object>[]},
+        },
+      ],
+    ];
+    for (final messages in cases) {
+      await tester.pumpWidget(_host(NonAppA2uiViewer(title: '坏包', messages: messages)));
+      await tester.pump(const Duration(milliseconds: 60));
+
+      expect(find.byIcon(Icons.error_outline), findsOneWidget, reason: '错误必须可见');
+      expect(find.textContaining('组件错误'), findsOneWidget);
+      expect(find.textContaining('无法在本地渲染'), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: '不得把结构错抛成渲染异常');
+    }
+  });
+
   testWidgets('组件错误经 onError 呈现在顶部红条（不崩页）', (tester) async {
     // 非内置组件目录：a2ui 0.3.0 会在渲染期抛 A2uiValidationError（整页崩），
     // 查看器先过浅层结构门 → 顶部红条 + 空态说明，卡片不构建。

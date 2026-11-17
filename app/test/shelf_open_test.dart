@@ -177,7 +177,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('项目已加密'), findsOneWidget);
-    await tester.enterText(find.byType(TextField), 'sesame');
+    // 艺术架头部有搜索框（M2），口令框必须按弹窗作用域定位。
+    await tester.enterText(
+      find.descendant(of: find.byType(AlertDialog), matching: find.byType(TextField)),
+      'sesame',
+    );
     await tester.tap(find.widgetWithText(FilledButton, '打开'));
     await tester.pumpAndSettle();
 

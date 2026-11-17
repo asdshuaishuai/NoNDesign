@@ -17,7 +17,7 @@ List<int> _zip(Map<String, Object?> entries) {
     final bytes = e.value is String ? utf8.encode(e.value as String) : e.value as List<int>;
     archive.addFile(ArchiveFile(e.key, bytes.length, bytes));
   }
-  return ZipEncoder().encode(archive)!;
+  return ZipEncoder().encode(archive);
 }
 
 String _html({String marker = 'marker-α'}) =>
@@ -51,7 +51,7 @@ List<int> _pkg(Map<String, Object?> extra, {Map<String, Object?>? manifest}) => 
       ...extra,
     });
 
-// createSurface + surfaceUpdate：自足的最小 A2UI v1.0 序列。
+// createSurface + updateComponents：自足的最小 A2UI v1.0 序列。
 final List<Object?> _messages = [
   {
     'version': '1.0',
@@ -66,7 +66,13 @@ final List<Object?> _messages = [
   },
   {
     'version': '1.0',
-    'surfaceUpdate': {'surfaceId': 'demo', 'components': []},
+    'updateComponents': {
+      'surfaceId': 'demo',
+      'components': [
+        {'id': 'root', 'component': 'Column', 'children': ['title']},
+        {'id': 'title', 'component': 'Text', 'text': '清单'},
+      ],
+    },
   },
 ];
 
@@ -134,7 +140,7 @@ void main() {
     archive.addFile(ArchiveFile('manifest.json', 1, utf8.encode(jsonEncode(_manifest()))));
     archive.addFile(ArchiveFile('payload/', 0, const <int>[]));
     archive.addFile(ArchiveFile('payload/index.html', 1, utf8.encode(_html())));
-    final ok = NonAppPackage.parse(ZipEncoder().encode(archive)!);
+    final ok = NonAppPackage.parse(ZipEncoder().encode(archive));
     expect(ok.renderer, 'html');
 
     _expectCode(
@@ -264,7 +270,182 @@ void main() {
     );
   });
 
-  test('客户端 parse 走服务端等价 HTML 门：<a href>/<iframe src> 不误拒', () {
+  test('a2ui v1.0 信封门：version 必填、createSurface.components 非空、旧信封拒绝', () {
+    // 合法 v1.0（createSurface + updateComponents）通过。
+    final ok = NonAppPackage.parse(_pkg({
+      'payload/surface.json': jsonEncode(_messages),
+    }, manifest: _manifest(renderer: 'a2ui')));
+    expect(ok.messages, hasLength(2));
+
+    List<int> a2ui(List<Object?> messages) => _pkg({
+          'payload/surface.json': jsonEncode(messages),
+        }, manifest: _manifest(renderer: 'a2ui'));
+
+    // 缺 version：a2ui_core 的 processMessages 直接抛 A2uiValidationError
+    // （静态路径在 initState 里 = 炸整页），门口必须拒。
+    _expectCode(
+      'nonapp_invalid_surface',
+      a2ui([
+        {
+          'createSurface': {
+            'surfaceId': 'demo',
+            'catalogId': nonAppBasicCatalogId,
+            'components': [
+              {'id': 'root', 'component': 'Text', 'text': 'x'},
+            ],
+          },
+        },
+      ]),
+    );
+    // 无效 wire 值（'v1.0' / '1.0.0' 都不是 A2uiProtocolVersion 的字面量）。
+    _expectCode(
+      'nonapp_invalid_surface',
+      a2ui([
+        {
+          'version': 'v1.0',
+          'createSurface': {
+            'surfaceId': 'demo',
+            'components': [
+              {'id': 'root', 'component': 'Text', 'text': 'x'},
+            ],
+          },
+        },
+      ]),
+    );
+    // createSurface.components 空数组：v1.0 协议要求非空（`_components`）。
+    _expectCode(
+      'nonapp_invalid_surface',
+      a2ui([
+        {
+          'version': '1.0',
+          'createSurface': {
+            'surfaceId': 'demo',
+            'catalogId': nonAppBasicCatalogId,
+            'components': <Object>[],
+          },
+        },
+      ]),
+    );
+    // createSurface 缺 components 且没有任何后续 updateComponents：协议合法
+    // 形状，但打包应用会打开成空白页——序列整体必须至少定义一批组件。
+    _expectCode(
+      'nonapp_invalid_surface',
+      a2ui([
+        {
+          'version': '1.0',
+          'createSurface': {'surfaceId': 'demo', 'catalogId': nonAppBasicCatalogId},
+        },
+      ]),
+    );
+    // createSurface 先声明 surface、组件由 updateComponents 补齐是协议
+    // 允许的两段式（a2ui_core v1.0 schema：组件可内联或稍后发送）——放行。
+    final split = NonAppPackage.parse(a2ui([
+      {
+        'version': '1.0',
+        'createSurface': {'surfaceId': 'demo', 'catalogId': nonAppBasicCatalogId},
+      },
+      {
+        'version': '1.0',
+        'updateComponents': {
+          'surfaceId': 'demo',
+          'components': [
+            {'id': 'root', 'component': 'Text', 'text': 'x'},
+          ],
+        },
+      },
+    ]));
+    expect(split.messages, hasLength(2));
+    // 旧信封 surfaceUpdate 不是 A2UI v1.0 协议的一部分（真名 updateComponents），
+    // a2ui_core 对未知信封抛错。
+    _expectCode(
+      'nonapp_invalid_surface',
+      a2ui([
+        {
+          'version': '1.0',
+          'surfaceUpdate': {'surfaceId': 'demo', 'components': <Object>[]},
+        },
+      ]),
+    );
+    // updateComponents 的 components 也必须非空。
+    _expectCode(
+      'nonapp_invalid_surface',
+      a2ui([
+        {
+          'version': '1.0',
+          'updateComponents': {'surfaceId': 'demo', 'components': <Object>[]},
+        },
+      ]),
+    );
+    // 一条消息里两个信封 = 渲染期 VALIDATION_FAILED。
+    _expectCode(
+      'nonapp_invalid_surface',
+      a2ui([
+        {
+          'version': '1.0',
+          'createSurface': {
+            'surfaceId': 'demo',
+            'components': [
+              {'id': 'root', 'component': 'Text', 'text': 'x'},
+            ],
+          },
+          'deleteSurface': {'surfaceId': 'demo'},
+        },
+      ]),
+    );
+    // 其它 v1.0 信封（updateDataModel / deleteSurface）通过结构门。
+    final okData = NonAppPackage.parse(a2ui([
+      {
+        'version': '1.0',
+        'createSurface': {
+          'surfaceId': 'demo',
+          'catalogId': nonAppBasicCatalogId,
+          'components': [
+            {'id': 'root', 'component': 'Text', 'text': 'x'},
+          ],
+        },
+      },
+      {
+        'version': '1.0',
+        'updateDataModel': {'surfaceId': 'demo', 'path': '/x', 'value': 'y'},
+      },
+      {
+        'version': '1.0',
+        'deleteSurface': {'surfaceId': 'demo'},
+      },
+    ]));
+    expect(okData.messages, hasLength(3));
+
+    // deleteSurface 之后重建同一 surfaceId 是合法序列（reset 式应用）。
+    final reset = NonAppPackage.parse(a2ui([
+      {
+        'version': '1.0',
+        'createSurface': {
+          'surfaceId': 'demo',
+          'catalogId': nonAppBasicCatalogId,
+          'components': [
+            {'id': 'root', 'component': 'Text', 'text': 'x'},
+          ],
+        },
+      },
+      {
+        'version': '1.0',
+        'deleteSurface': {'surfaceId': 'demo'},
+      },
+      {
+        'version': '1.0',
+        'createSurface': {
+          'surfaceId': 'demo',
+          'catalogId': nonAppBasicCatalogId,
+          'components': [
+            {'id': 'root', 'component': 'Text', 'text': 'y'},
+          ],
+        },
+      },
+    ]));
+    expect(reset.messages, hasLength(3));
+  });
+
+  test('client parse 走服务端等价 HTML 门：<a href>/<iframe src> 不误拒', () {
     // 服务端 _html_ok 的正则只覆盖 script/link/img；客户端若在 parse 里用
     // 更严的离线门，服务端接受的包（导出→打开自家应用）会解不开。
     for (final tag in const [
@@ -317,16 +498,20 @@ void main() {
         'payload/surface.json': jsonEncode([
           {
             'version': '1.0',
-            'createSurface': {'surfaceId': 'demo', 'catalogId': nonAppBasicCatalogId, 'components': []},
+            'createSurface': {
+              'surfaceId': 'demo',
+              'catalogId': nonAppBasicCatalogId,
+              'components': [
+                {'id': 'root', 'component': 'Text', 'text': '清单'},
+              ],
+            },
           },
           {
             'version': '1.0',
-            'dataModelUpdate': {
+            'updateDataModel': {
               'surfaceId': 'demo',
               'path': '/',
-              'contents': [
-                {'key': 'img', 'valueString': '//cdn.example/a.png'},
-              ],
+              'value': {'img': '//cdn.example/a.png'},
             },
           },
         ]),

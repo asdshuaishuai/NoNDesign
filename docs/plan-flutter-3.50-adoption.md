@@ -101,6 +101,17 @@ content-sized window。用途：把工作区从聊天流拆成独立 OS 窗口�
 风险：包仍 0.x（API 可能动，封装层隔离）；原生库对 Android 16KB page size / Impeller 的
 兼容性要实测；桌面 FFI 与浏览器 Wasm 性能分层明显。任务矩阵与候选场景见 §3。
 
+**实施记录（2026-11-17）**：M1 + M2 已落地——`mediapipe_core/retrieval/vision/text 0.3.0`
+（archive 由 ^3.6.1 升到 ^4.2.0，nonapp 侧同步迁移）；`MediaPipeService`（下载/sha256/原子
+落位/isolate 推理/降级）+ `EmbeddingIndex`（增量索引/余弦/子串兜底）+ 艺术架搜索框；
+57 项定向测试。**构建面**：MediaPipe 无 Intel iOS 模拟器切片，Runner 三个配置已落
+`"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;`（否则 `flutter build ios --simulator`
+在 native assets 阶段失败）；macOS 同理在 `macos/Runner/Configs/AppInfo.xcconfig` 显式
+`ARCHS = arm64` / `EXCLUDED_ARCHS = x86_64`（Flutter release/profile 默认带 Intel，
+Intel Mac 宿主随 Flutter 3.50 退役）。
+模型注册表只登记官方来源可核实的 Universal Embedder 模型；vision/text 模型 URL/sha256
+留 TODO（未编造）。
+
 ### N7（P3）工程卫生（记录即可）
 
 - `dart migrate` 纳入 SDK 升级流程（`--dry-run` → `--apply`，支持 prepare/bump/cleanup 分步）；

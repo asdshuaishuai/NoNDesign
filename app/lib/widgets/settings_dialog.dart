@@ -23,6 +23,10 @@ class _SettingsDialog extends StatefulWidget {
 
 class _SettingsDialogState extends State<_SettingsDialog> {
   String _tab = 'models';
+  // 手机端独立布局：null = 分组根页；否则为下钻的分组 id。
+  // 与 _tab 分开：桌面/平板保持既有三档导航，手机走「列表 → 详情」。
+  String? _mobileSection;
+  bool _keyVisible = false;
   String _query = '';
   late final TextEditingController _keyController;
   late final TextEditingController _baseController;
@@ -112,6 +116,13 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final short = size.height < 560;
     final padPortrait = !phone && !short && size.width < 1100 && size.height >= size.width;
     final fullScreen = phone || short || padPortrait;
+    // 手机（含横屏矮窗）走独立移动端布局：分组列表 → 下钻详情。
+    // 不再沿用「顶部横向 tab + 桌面向量表单」——2026-11-17 用户实测反馈
+    // 两列输入在 390 宽挤成一条、字号 11 不可读、下半屏空白。
+    final phoneLayout = phone || (size.height < 460 && size.width < 960);
+    if (phoneLayout) {
+      return _mobileFrame(context, store);
+    }
     final dialogWidth = (size.width - 48).clamp(320.0, size.width < 1100 ? 920.0 : 860.0).toDouble();
     final dialogHeight = (size.height - 48).clamp(420.0, 640.0).toDouble();
     final railWidth = size.width < 1100 ? 200.0 : 176.0;
@@ -1078,6 +1089,846 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ),
       ),
     );
+  }
+
+  // ---------------- 手机端独立布局（2026-11-17 重做） ----------------
+  //
+  // 入口：phoneLayout（手机竖屏 + 手机横屏矮窗）。结构为 iOS 式
+  // 「分组根页 → 下钻详情」：根页 4 个分组行（≥64 高、大标题 22、
+  // 关闭/返回 44×44）；详情页单列卡片（输入 48 高、正文字号 13–15、
+  // 页面滚动 + 键盘安全区）。桌面/平板的三档布局（顶部 tab / 侧栏）
+  // 完全不变，两条路径共用同一套 settings 字段与保存逻辑。
+
+  Widget _mobileFrame(BuildContext context, AppStore store) {
+    final p = context.palette;
+    const titles = <String, String>{
+      'models': '模型与端点',
+      'appearance': '外观与交互',
+      'agent': '上下文与缓存',
+      'about': '关于',
+    };
+    final section = _mobileSection;
+    return Dialog(
+      insetPadding: EdgeInsets.zero,
+      backgroundColor: p.panel,
+      shape: const RoundedRectangleBorder(),
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              height: 60,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+              child: Row(
+                children: [
+                  if (section != null)
+                    SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: IconButton(
+                        key: const ValueKey('settings-mobile-back'),
+                        tooltip: '返回',
+                        onPressed: () => setState(() => _mobileSection = null),
+                        icon: Icon(Icons.arrow_back, size: 22, color: p.ink2),
+                      ),
+                    )
+                  else
+                    const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      section == null ? '设置' : (titles[section] ?? '设置'),
+                      style: TextStyle(
+                        fontSize: section == null ? 22 : 18,
+                        fontWeight: FontWeight.w700,
+                        color: p.ink,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: IconButton(
+                      key: const ValueKey('settings-mobile-close'),
+                      tooltip: '关闭',
+                      onPressed: () => Navigator.pop(context),
+                      icon: Icon(Icons.close, size: 22, color: p.ink3),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: section == null
+                  ? _mobileRoot(context, store)
+                  : _mobileDetail(context, store, section),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _mobileRoot(BuildContext context, AppStore store) {
+    final p = context.palette;
+    final provider = store.registry.provider(store.settings.providerId);
+    final providerName = (provider?['name'] ?? store.settings.providerId).toString();
+    final modelName = store.model?.name ?? store.settings.modelId;
+    return ListView(
+      key: const ValueKey('settings-mobile-root'),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      children: [
+        _mSectionTile(context,
+            id: 'models',
+            icon: Icons.memory,
+            title: '模型与端点',
+            subtitle: '$providerName · $modelName',
+            onTap: () => setState(() => _mobileSection = 'models')),
+        _mSectionTile(context,
+            id: 'appearance',
+            icon: Icons.palette_outlined,
+            title: '外观与交互',
+            subtitle:
+                '${store.settings.theme == 'light' ? '浅色' : '深色'} · ${store.settings.chatStreamHome ? '聊天流' : '经典 Welcome'}',
+            onTap: () => setState(() => _mobileSection = 'appearance')),
+        _mSectionTile(context,
+            id: 'agent',
+            icon: Icons.speed,
+            title: '上下文与缓存',
+            subtitle: '最大步数 ${store.settings.maxSteps} · 本地确定性治理',
+            onTap: () => setState(() => _mobileSection = 'agent')),
+        _mSectionTile(context,
+            id: 'about',
+            icon: Icons.info_outline,
+            title: '关于',
+            subtitle: 'NoNDesign v0.1 · Flutter 3.50',
+            onTap: () => setState(() => _mobileSection = 'about')),
+        const SizedBox(height: 10),
+        Text('设置即时生效并保存在本机；模型与端点来自 models.dev 快照。',
+            style: TextStyle(fontSize: 12, height: 1.5, color: p.ink4)),
+      ],
+    );
+  }
+
+  Widget _mSectionTile(BuildContext context,
+      {required String id,
+      required IconData icon,
+      required String title,
+      required String subtitle,
+      required VoidCallback onTap}) {
+    final p = context.palette;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        key: ValueKey('settings-m-$id'),
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 64),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: p.panel2.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: p.line),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(color: p.accentSoft, borderRadius: BorderRadius.circular(10)),
+                child: Icon(icon, size: 19, color: p.accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
+                    const SizedBox(height: 2),
+                    Text(subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: p.ink4)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 20, color: p.ink4),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _mobileDetail(BuildContext context, AppStore store, String section) {
+    return switch (section) {
+      'appearance' => _mAppearance(context, store),
+      'agent' => _mAgent(context, store),
+      'about' => _mAbout(context, store),
+      _ => _mModels(context, store),
+    };
+  }
+
+  Widget _mModels(BuildContext context, AppStore store) {
+    final p = context.palette;
+    final provider = store.registry.provider(store.settings.providerId);
+    final providerName = (provider?['name'] ?? store.settings.providerId).toString();
+    final models = store.registry.flatten().where((m) {
+      if (m.providerId != store.settings.providerId) return false;
+      if (_query.isEmpty) return true;
+      final q = _query.toLowerCase();
+      return m.id.toLowerCase().contains(q) || m.name.toLowerCase().contains(q);
+    }).take(40).toList();
+    return ListView(
+      key: const ValueKey('settings-m-detail-models'),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      children: [
+        _mCard(context, title: '服务商', children: [
+          InkWell(
+            key: const ValueKey('settings-m-provider'),
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => _mPickProvider(context, store),
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 48),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: p.panel3.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: p.line),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(providerName, style: TextStyle(fontSize: 15, color: p.ink)),
+                        if (store.registry.providerIds.isEmpty)
+                          Text('模型清单未加载，点此重试',
+                              style: TextStyle(fontSize: 12, color: p.warn)),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.expand_more, size: 20, color: p.ink4),
+                ],
+              ),
+            ),
+          ),
+        ]),
+        _mCard(context, title: '端点', helper: 'OpenAI 兼容端点；非兼容协议的服务商不可用。', children: [
+          TextField(
+            key: const ValueKey('settings-m-endpoint'),
+            controller: _baseController,
+            style: TextStyle(fontSize: 13, fontFamily: 'Menlo', color: p.ink),
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: _mDecoration(context, hint: 'https://…/v1'),
+            onSubmitted: (v) async {
+              store.settings.baseUrl = v.trim();
+              await store.saveSettings();
+            },
+            onTapOutside: (_) async {
+              store.settings.baseUrl = _baseController.text.trim();
+              await store.saveSettings();
+            },
+          ),
+        ]),
+        _mCard(context, title: 'API Key（只存本机）', helper: '仅保存在本机设置中，不上传。', children: [
+          TextField(
+            key: const ValueKey('settings-m-apikey'),
+            controller: _keyController,
+            obscureText: !_keyVisible,
+            style: TextStyle(fontSize: 13, fontFamily: 'Menlo', color: p.ink),
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: _mDecoration(context,
+                hint: 'sk-…',
+                suffix: IconButton(
+                  tooltip: _keyVisible ? '隐藏' : '显示',
+                  onPressed: () => setState(() => _keyVisible = !_keyVisible),
+                  icon: Icon(
+                      _keyVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                      size: 20,
+                      color: p.ink4),
+                )),
+            onSubmitted: (v) async {
+              store.settings.apiKey = v.trim();
+              await store.saveSettings();
+            },
+            onTapOutside: (_) async {
+              store.settings.apiKey = _keyController.text.trim();
+              await store.saveSettings();
+            },
+          ),
+        ]),
+        _mCard(context, title: '桌面服务器（连接桌面模式）',
+            helper: '留空 = 本机自动拉起 / PLAN 直连；手机需填桌面局域网地址。', children: [
+          TextField(
+            key: const ValueKey('settings-m-server'),
+            controller: _serverUrlController,
+            style: TextStyle(fontSize: 13, fontFamily: 'Menlo', color: p.ink),
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: _mDecoration(context, hint: 'http://192.168.1.5:8799'),
+            onSubmitted: _saveServerUrl,
+            onTapOutside: (_) => _saveServerUrl(_serverUrlController.text),
+          ),
+        ]),
+        _mCard(context, title: 'Agent 运行时', helper: _mRuntimeNote(context, store), children: [
+          _mRadioRow(context,
+              label: '内置 Dart（移动端默认）',
+              note: '循环在客户端执行；画布变更仍经引擎门',
+              selected: store.settings.agentRuntime == agentRuntimeDart,
+              onTap: () async {
+                store.settings.agentRuntime = agentRuntimeDart;
+                await store.saveSettings();
+                if (mounted) setState(() {});
+              }),
+          _mRadioRow(context,
+              label: '桌面服务',
+              note: '/agent/run 全功能（整屏生成 + 质量环）',
+              selected: store.settings.agentRuntime == agentRuntimeServer,
+              onTap: () async {
+                store.settings.agentRuntime = agentRuntimeServer;
+                await store.saveSettings();
+                if (mounted) setState(() {});
+              }),
+        ]),
+        _mCard(context, title: '模型清单', children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const ValueKey('settings-m-model-search'),
+                  onChanged: (v) => setState(() => _query = v),
+                  style: TextStyle(fontSize: 14, color: p.ink),
+                  decoration: _mDecoration(context, hint: '搜索模型…'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 48,
+                child: OutlinedButton.icon(
+                  onPressed: () => store.refreshModels(),
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('更新', style: TextStyle(fontSize: 13)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          for (final m in models) _mModelRow(context, store, m),
+        ]),
+        if (store.model != null)
+          _mCard(context, title: '思考等级',
+              helper: '当前模型：${store.model!.name} · ${formatTokens(store.model!.context)} context',
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final level in _levels(store.model!))
+                      InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () async {
+                          store.settings.thinkingLevel = level;
+                          await store.saveSettings();
+                          if (mounted) setState(() {});
+                        },
+                        child: Container(
+                          height: 34,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: store.settings.thinkingLevel == level ? p.accent : p.panel3,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(level,
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  color: store.settings.thinkingLevel == level
+                                      ? Colors.white
+                                      : p.ink3)),
+                        ),
+                      ),
+                  ],
+                ),
+              ]),
+      ],
+    );
+  }
+
+  Widget _mModelRow(BuildContext context, AppStore store, ModelInfo m) {
+    final p = context.palette;
+    final active = store.settings.modelId == m.id;
+    return InkWell(
+      key: ValueKey('settings-m-model-${m.id}'),
+      borderRadius: BorderRadius.circular(10),
+      onTap: () async {
+        store.settings.modelId = m.id;
+        if (store.settings.baseUrl.isEmpty) store.settings.baseUrl = m.baseUrl;
+        _baseController.text = store.settings.baseUrl;
+        await store.saveSettings();
+        if (mounted) setState(() {});
+      },
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 56),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        margin: const EdgeInsets.only(bottom: 6),
+        decoration: BoxDecoration(
+          color: active ? p.accentSoft : p.panel3.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: active ? p.accent : p.line),
+        ),
+        child: Row(
+          children: [
+            Icon(active ? Icons.check_circle : Icons.circle_outlined,
+                size: 20, color: active ? p.accent : p.ink4),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(m.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: p.ink)),
+                  const SizedBox(height: 2),
+                  Row(children: [
+                    Flexible(
+                      child: Text('${m.id} · ${formatTokens(m.context)} ctx',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink4)),
+                    ),
+                    if (m.toolCall) ...[
+                      const SizedBox(width: 6),
+                      Pill(label: 'tools', color: p.success),
+                    ],
+                    if (m.reasoning) ...[
+                      const SizedBox(width: 4),
+                      Pill(label: 'thinking', color: p.accent),
+                    ],
+                  ]),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _mPickProvider(BuildContext context, AppStore store) async {
+    final p = context.palette;
+    final ids = store.registry.providerIds.toList();
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: p.panel,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => FractionallySizedBox(
+        heightFactor: 0.7,
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: 16),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                child: Text('选择服务商',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.ink)),
+              ),
+              if (ids.isEmpty)
+                ListTile(
+                  minVerticalPadding: 14,
+                  title: Text('模型清单未加载', style: TextStyle(fontSize: 15, color: p.ink3)),
+                  subtitle: Text('点按重试拉取 models.dev 快照',
+                      style: TextStyle(fontSize: 12, color: p.ink4)),
+                  onTap: () async {
+                    await store.refreshModels();
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (mounted) setState(() {});
+                  },
+                ),
+              for (final id in ids)
+                ListTile(
+                  key: ValueKey('settings-m-provider-$id'),
+                  minVerticalPadding: 14,
+                  title: Text(store.registry.provider(id)?['name']?.toString() ?? id,
+                      style: TextStyle(fontSize: 15, color: p.ink)),
+                  subtitle: Text(id,
+                      style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink4)),
+                  trailing: id == store.settings.providerId
+                      ? Icon(Icons.check, size: 20, color: p.accent)
+                      : null,
+                  onTap: () => Navigator.pop(ctx, id),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null || picked == store.settings.providerId) return;
+    final pv = store.registry.provider(picked);
+    final models = (pv?['models'] as Map?) ?? const {};
+    var first = '';
+    for (final k in models.keys) {
+      if ((models[k] as Map?)?['tool_call'] == true) {
+        first = k.toString();
+        break;
+      }
+    }
+    if (first.isEmpty && models.isNotEmpty) first = models.keys.first.toString();
+    store.settings
+      ..providerId = picked
+      ..modelId = first
+      ..baseUrl = (pv?['api'] ?? '').toString()
+      ..thinkingLevel = 'auto';
+    _baseController.text = store.settings.baseUrl;
+    await store.saveSettings();
+    if (mounted) setState(() {});
+  }
+
+  Widget _mAppearance(BuildContext context, AppStore store) {
+    final p = context.palette;
+    return ListView(
+      key: const ValueKey('settings-m-detail-appearance'),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      children: [
+        _mCard(context, title: '主题', children: [
+          _mRadioRow(context,
+              label: '深色',
+              selected: store.settings.theme != 'light',
+              onTap: () async {
+                store.settings.theme = 'dark';
+                await store.saveSettings();
+                if (mounted) setState(() {});
+              }),
+          _mRadioRow(context,
+              label: '浅色',
+              selected: store.settings.theme == 'light',
+              onTap: () async {
+                store.settings.theme = 'light';
+                await store.saveSettings();
+                if (mounted) setState(() {});
+              }),
+        ]),
+        _mCard(context, title: '启动主面', children: [
+          _mRadioRow(context,
+              label: '聊天流',
+              note: '默认；顶栏「工作区」进设计视图',
+              selected: store.settings.chatStreamHome,
+              onTap: () async {
+                store.settings.chatStreamHome = true;
+                await store.saveSettings();
+                if (mounted) setState(() {});
+              }),
+          _mRadioRow(context,
+              label: '经典 Welcome',
+              note: '启动停留在主页卡片',
+              selected: !store.settings.chatStreamHome,
+              onTap: () async {
+                store.settings.chatStreamHome = false;
+                await store.saveSettings();
+                if (mounted) setState(() {});
+              }),
+        ]),
+        _mCard(context, title: '界面语言',
+            helper: '当前：简体中文。移动端输入由系统键盘接管，多语言界面后续接入。', children: [
+          Row(children: [
+            Icon(Icons.translate, size: 18, color: p.ink3),
+            const SizedBox(width: 8),
+            Text('简体中文', style: TextStyle(fontSize: 15, color: p.ink)),
+          ]),
+        ]),
+      ],
+    );
+  }
+
+  Widget _mAgent(BuildContext context, AppStore store) {
+    final p = context.palette;
+    final cacheRate = (store.usage['inputTokens'] as num? ?? 0) > 0
+        ? ((store.usage['cachedTokens'] as num? ?? 0) / (store.usage['inputTokens'] as num)) * 100
+        : 0;
+    return ListView(
+      key: const ValueKey('settings-m-detail-agent'),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      children: [
+        Row(children: [
+          _mStat(context, '上下文窗口', formatTokens(store.model?.context)),
+          _mStat(context, '本轮输入', formatTokens(store.usage['inputTokens'] as num?)),
+          _mStat(context, '缓存命中', cacheRate > 0 ? '${cacheRate.round()}%' : '—', last: true),
+        ]),
+        const SizedBox(height: 14),
+        _mCard(context, title: '步数与会话', children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const ValueKey('settings-m-steps'),
+                  controller: _stepsController,
+                  keyboardType: TextInputType.number,
+                  style: TextStyle(fontSize: 15, fontFamily: 'Menlo', color: p.ink),
+                  decoration: _mDecoration(context, hint: '300'),
+                  onChanged: (v) async {
+                    final n = int.tryParse(v);
+                    if (n == null) return;
+                    store.settings.maxSteps = n.clamp(4, 600);
+                    await store.saveSettings();
+                  },
+                  onSubmitted: (_) => _saveSteps(),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                height: 48,
+                child: OutlinedButton.icon(
+                  onPressed: _saveSteps,
+                  icon: Icon(_stepsSavedFlash ? Icons.check : Icons.save_outlined,
+                      size: 16, color: _stepsSavedFlash ? p.success : p.ink3),
+                  label: Text(_stepsSavedFlash ? '已保存' : '保存',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: _stepsSavedFlash ? p.success : p.ink2)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(children: [
+            Text('会话键', style: TextStyle(fontSize: 13, color: p.ink3)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(store.projectPath ?? store.projectName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, fontFamily: 'Menlo', color: p.ink4)),
+            ),
+          ]),
+        ]),
+        _mCard(context, title: '会话记忆', helper: '删除本项目的对话记忆；画布与文档不受影响。', children: [
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: OutlinedButton.icon(
+              onPressed: () => store.clearAgentSession(),
+              icon: const Icon(Icons.delete_outline, size: 18),
+              label: const Text('清空会话', style: TextStyle(fontSize: 14)),
+            ),
+          ),
+        ]),
+        _mCard(context, title: '确定性上下文治理', children: [
+          for (final line in [
+            '工具结果剥离 canonical 与 SVG，只保留摘要 + 最新 state',
+            '旧 read/inspect 结果被占位替换（去 supersede）',
+            '上下文窗口来自 models.dev 的 limit.context',
+            '会话超过 80 条自动压缩为确定性摘要，不额外调用 LLM',
+          ])
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text('· $line', style: TextStyle(fontSize: 12, height: 1.5, color: p.ink3)),
+            ),
+        ]),
+      ],
+    );
+  }
+
+  Widget _mStat(BuildContext context, String label, String value, {bool last = false}) {
+    final p = context.palette;
+    return Expanded(
+      child: Container(
+        margin: EdgeInsets.only(right: last ? 0 : 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration: BoxDecoration(
+          color: p.bgElevated.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: p.line),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 15, fontFamily: 'Menlo', fontWeight: FontWeight.w600, color: p.ink)),
+            const SizedBox(height: 2),
+            Text(label, style: TextStyle(fontSize: 11, color: p.ink4)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _mAbout(BuildContext context, AppStore store) {
+    final p = context.palette;
+    return ListView(
+      key: const ValueKey('settings-m-detail-about'),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: p.panel2.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: p.line),
+          ),
+          child: Row(
+            children: [
+              const NonLogo(size: 44),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('NoNDesign',
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.ink)),
+                    Text('AI-native product design studio',
+                        style: TextStyle(fontSize: 12, color: p.ink3)),
+                  ],
+                ),
+              ),
+              Pill(label: 'v0.1', color: p.accent),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _mCard(context, title: '运行信息', children: [
+          for (final row in [
+            ('运行时', 'Flutter 3.50'),
+            ('引擎', 'MoonViz classic wasm · 0.2 dev 构建'),
+            ('本地引擎服务', store.api == null ? '未连接' : '随应用自动启动 · 就绪'),
+            ('数据', '~/.nondesign · DDP 单文件'),
+          ])
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                      width: 92,
+                      child: Text(row.$1, style: TextStyle(fontSize: 13, color: p.ink4))),
+                  Expanded(
+                    child: Text(row.$2,
+                        style: TextStyle(fontSize: 13, fontFamily: 'Menlo', color: p.ink2)),
+                  ),
+                ],
+              ),
+            ),
+        ]),
+        _mCard(context, title: '唯一事实源', children: [
+          Text('一份 canonical .mbt.md；人类与 Agent 的每次修改都经引擎门校验后回写同一份文档。DDP 只是它的认证加密容器。',
+              style: TextStyle(fontSize: 13, height: 1.6, color: p.ink3)),
+        ]),
+      ],
+    );
+  }
+
+  Widget _mCard(BuildContext context,
+      {required String title, String? helper, required List<Widget> children}) {
+    final p = context.palette;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      decoration: BoxDecoration(
+        color: p.panel2.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: p.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink2)),
+          const SizedBox(height: 10),
+          ...children,
+          if (helper != null) ...[
+            const SizedBox(height: 8),
+            Text(helper, style: TextStyle(fontSize: 12, height: 1.5, color: p.ink4)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _mDecoration(BuildContext context, {String? hint, Widget? suffix}) {
+    final p = context.palette;
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: p.line),
+    );
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(fontSize: 13, color: p.ink4),
+      isDense: true,
+      filled: true,
+      fillColor: p.panel3.withValues(alpha: 0.55),
+      suffixIcon: suffix,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+      border: border,
+      enabledBorder: border,
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: p.accent, width: 1.4),
+      ),
+    );
+  }
+
+  Widget _mRadioRow(BuildContext context,
+      {required String label,
+      String? note,
+      required bool selected,
+      required VoidCallback onTap}) {
+    final p = context.palette;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 52),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        margin: const EdgeInsets.only(bottom: 6),
+        decoration: BoxDecoration(
+          color: selected ? p.accentSoft : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? p.accent : p.line),
+        ),
+        child: Row(
+          children: [
+            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_off,
+                size: 20, color: selected ? p.accent : p.ink4),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: TextStyle(fontSize: 15, color: p.ink)),
+                  if (note != null)
+                    Text(note, style: TextStyle(fontSize: 12, color: p.ink4)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _mRuntimeNote(BuildContext context, AppStore store) {
+    final mobile = Theme.of(context).platform == TargetPlatform.iOS ||
+        Theme.of(context).platform == TargetPlatform.android;
+    final warn = store.settings.agentRuntime == agentRuntimeServer &&
+        mobile &&
+        store.settings.serverUrl.trim().isEmpty;
+    if (warn) return '「桌面服务」运行时未配置桌面服务器地址——上方填入桌面端地址后方可运行。';
+    return mobile
+        ? '内置 Dart：PLAN / Refine 无需服务器即可运行；Build 需连接桌面（引擎门）。'
+        : '内置 Dart 后循环在客户端执行，画布变更仍经引擎 AgentGate 校验。';
   }
 
   Widget _labeled(BuildContext context, String label, Widget child) {

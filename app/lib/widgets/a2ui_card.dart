@@ -225,7 +225,16 @@ class _A2uiCardState extends State<A2uiCard> {
     if (widget.messages != null) {
       // 静态路径：initState 里同步入列（订阅已就位，onSurfaceCreated 会在
       // 首次 build 前把 surface 收进 _surfaces——官方 README 同模式）。
-      processor.processMessages(widget.messages);
+      // **不可信输入**：.nonapp 的 surface.json 来自外部文件，结构门只能
+      // 挡住 known-bad 形状；processMessages 对 schema 错会抛
+      // A2uiValidationError（同步抛在 initState 里 = 打开坏包炸整页）。
+      // 这里降级为卡内错误行 + onError 回流，异常绝不冒泡。
+      try {
+        processor.processMessages(widget.messages);
+      } on Object catch (error) {
+        _error = 'surface 消息无效：$error';
+        widget.onError?.call(error);
+      }
     } else if (widget.instruction != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _run());
     }

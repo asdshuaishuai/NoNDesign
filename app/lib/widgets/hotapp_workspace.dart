@@ -186,7 +186,9 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     _lastError = '';
     try {
       final info = await api.hotAppInfo(name);
-      if (!mounted) return;
+      // 回包晚于下一次 build：期间用户可能已切到别的应用/离线。只认当前
+      // 目标，避免迟到回包把旧应用塞回控制器。
+      if (!mounted || _app != name) return;
       if (info['exists'] == false) {
         setState(() => _lastError = '服务器上没有这个应用：$name');
         return;
@@ -198,9 +200,12 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     } catch (_) {
       // 老服务端没有 /hotapp/info：按 html 继续（向后兼容）
     }
-    if (!mounted) return;
+    if (!mounted || _app != name) return;
     _offlinePath = null;
     _controller = _newController()..loadRequest(Uri.parse(api.hotAppPageUrl(name)));
+    // 本方法自 async 化后赋值发生在 await 之后：没有这次 setState，回包
+    // 晚于 build 时 UI 会停在「加载中…」或继续显示上一个应用的控制器。
+    setState(() {});
   }
 
   /// 离线路径：本地缓存文件经 file:// 打开（无注入桥，SQLite 不可用）。

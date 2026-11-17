@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'core/keys.dart';
+import 'core/mediapipe_embedder_adapter.dart';
+import 'core/mediapipe_service.dart';
 import 'core/nonapp_intake.dart';
 import 'core/store.dart';
 import 'core/theme.dart';
@@ -22,6 +24,10 @@ final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // MediaPipe 生产接线（N6/M1）：唯一 import mediapipe 包的 adapter 在独立
+  // isolate 里加载模型/推理；服务层与测试只认 MediaPipeEmbedder 接口。
+  // 模型缺失/平台不支持时服务层返回 unavailable，艺术架检索自动退化关键词。
+  MediaPipeService.defaultEmbedderFactory = createMediaPipeEmbedder;
   runApp(
     ChangeNotifierProvider(
       create: (_) => AppStore()..boot(),

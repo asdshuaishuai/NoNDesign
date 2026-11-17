@@ -123,7 +123,7 @@ List<int> _zip(Map<String, Object> entries) {
     final bytes = e.value is String ? utf8.encode(e.value as String) : e.value as List<int>;
     archive.addFile(ArchiveFile(e.key, bytes.length, bytes));
   }
-  return ZipEncoder().encode(archive)!;
+  return ZipEncoder().encode(archive);
 }
 
 Map<String, Object> _manifest(String renderer) => {
@@ -204,11 +204,18 @@ void main() {
     await tester.pump(const Duration(milliseconds: 30));
 
     // 真文件 IO 在 widget test 的假时钟里不会推进——必须 runAsync。
+    // 轮询条件包含 store.view：writeHtml 的 await prune 与随后的 setView 都在
+    // 真实异步链上（假时钟 pump 不驱动）；只看文件存在会在 setView 之前放行，
+    // 全量并发跑时偶发「view 仍是 design」，并让 tearDown 抢删 prune 正在
+    // 列目录的缓存目录（2026-11-17 全量门禁实测）。
     await tester.runAsync(() async {
       await tester.tap(find.text('打开包'));
-      for (var i = 0; i < 40; i++) {
+      for (var i = 0; i < 80; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 20));
-        if (File('${cacheDir.path}/offline-app.html').existsSync()) break;
+        if (File('${cacheDir.path}/offline-app.html').existsSync() &&
+            store.view == 'plugin:hotapp') {
+          break;
+        }
       }
     });
     await tester.pump();

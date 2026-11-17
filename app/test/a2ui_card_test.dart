@@ -142,6 +142,34 @@ void main() {
     expect(find.text('生成中…'), findsNothing);
   });
 
+  testWidgets('静态路径：坏 surface 在 initState 抛错也不崩页（错误内联）', (tester) async {
+    // 缺 version 的信封会让 a2ui_core 的 processMessages 同步抛
+    // A2uiValidationError——修复前异常从 initState 冒泡，打开不受信 .nonapp
+    // 直接错误页。卡片必须把它降级为卡内错误行 + onError 回流。
+    final errors = <Object>[];
+    await tester.pumpWidget(_host(A2uiCard.messages(
+      messages: [
+        {
+          'createSurface': {
+            'surfaceId': 'broken',
+            'catalogId':
+                'https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json',
+            'components': [
+              {'id': 'root', 'component': 'Text', 'text': 'x'},
+            ],
+          },
+        },
+      ],
+      onError: errors.add,
+    )));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(tester.takeException(), isNull, reason: '异常不得冒泡出卡片');
+    expect(find.byType(A2uiCard), findsOneWidget);
+    expect(find.textContaining('surface 消息无效'), findsOneWidget);
+    expect(errors, isNotEmpty);
+  });
+
   testWidgets('流式全链：动作同样回流 + 传输失败不炸卡（错误内联）', (tester) async {
     final fixture = _fixtureProcessor();
     final payload = fixture.parser.decompile([

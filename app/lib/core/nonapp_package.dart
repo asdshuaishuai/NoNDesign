@@ -155,13 +155,17 @@ class NonAppPackage {
 
     final Archive archive;
     try {
-      archive = ZipDecoder().decodeBytes(bytes, verify: false);
+      // archive 4 默认吞掉解码错误返回空归档（guardDecode 严格模式关闭），
+      // 坏 zip 会以「缺 manifest」而不是「不是有效 zip」呈现；throwOnError
+      // 让结构错误显性抛出，映射回既有稳定码。
+      archive = ZipDecoder().decodeBytes(bytes, verify: false, throwOnError: true);
     } catch (e) {
       throw NonAppException('nonapp_invalid_zip', '不是有效的 zip 包：$e');
     }
 
     // 条目数/解压上限先用中央目录声明的 size 预检（不解压超限包）；
-    // 声明的 size 可被伪造，真实内容长度在读取后再核一遍。
+    // 声明的 size 可被伪造，真实解压字节在读取时按块累计并硬限（下方
+    // _readEntryContent：content 的读取面按声明大小截断，不能当安全门）。
     final files = archive.files;
     if (files.length > nonAppMaxEntries) {
       throw const NonAppException('nonapp_too_large', '条目数超过 32');
@@ -192,10 +196,7 @@ class NonAppPackage {
       if (entries.containsKey(f.name)) {
         throw NonAppException('nonapp_unexpected_entry:${f.name}', '重复条目');
       }
-      final data = _contentOf(f);
-      if (data.length > nonAppMaxEntryBytes) {
-        throw NonAppException('nonapp_too_large', '条目 ${f.name} 解压后超过 8MiB');
-      }
+      final data = _readEntryContent(f);
       actualTotal += data.length;
       if (actualTotal > nonAppMaxTotalUncompressed) {
         throw const NonAppException('nonapp_too_large', '总解压体积超过 16MiB');
@@ -284,11 +285,54 @@ void _checkEntryName(String name) {
   }
 }
 
-Uint8List _contentOf(ArchiveFile f) {
-  final content = f.content;
-  if (content is Uint8List) return content;
-  if (content is List<int>) return Uint8List.fromList(content);
-  throw NonAppException('nonapp_invalid_payload:${f.name}', '条目内容不可读');
+/// 有界读取单条目：流式 inflate + 累计**真实输出**字节，超限立即失败。
+///
+/// `ArchiveFile.content` 走 `ZipFile._outputLimit`，即按条目**声明的**解压
+/// 大小截断——声明值可伪造，高压缩比炸弹（如 64MiB 零字节压成几十 KB、头部
+/// 声明 1000）看着只有 1KB，实际 deflate 流能展开几十 MB。这里取条目的
+/// 原始压缩流（[ArchiveFile.rawContent]），交给 archive 4 的
+/// `ZLibDecoder.decodeStream(..., maxOutputSize:)`：原生分块解码 + 输出上限
+/// 由 `LimitedOutputStream` 逐块计数，峰值内存 = 上限 + 一块解码缓冲，
+/// 不随真实载荷线性增长。
+Uint8List _readEntryContent(ArchiveFile f) {
+  final raw = f.rawContent;
+  if (raw == null) {
+    throw NonAppException('nonapp_invalid_payload:${f.name}', '条目内容不可读');
+  }
+
+  final compression = f.compression;
+  if (compression == null || compression == CompressionType.none) {
+    // 存储条目：原始内容就是载荷本身（包体 8MiB 上限已保证其大小）。
+    final data = raw.readBytes();
+    if (data.length > nonAppMaxEntryBytes) {
+      throw NonAppException('nonapp_too_large', '条目 ${f.name} 解压后超过 8MiB');
+    }
+    return data;
+  }
+  if (compression != CompressionType.deflate) {
+    throw NonAppException(
+        'nonapp_invalid_payload:${f.name}', '不支持的压缩方法：$compression');
+  }
+
+  final output = OutputMemoryStream();
+  try {
+    // getStream(decompress: false) 取压缩原始流（默认的 true 会先按声明
+    // 大小解压一遍）；maxOutputSize 是硬上限，超过即抛 ArchiveLimitException。
+    ZLibDecoder().decodeStream(
+      raw.getStream(decompress: false),
+      output,
+      raw: true,
+      throwOnError: true,
+      maxOutputSize: nonAppMaxEntryBytes,
+    );
+  } on ArchiveLimitException {
+    output.clear();
+    throw NonAppException('nonapp_too_large', '条目 ${f.name} 解压后超过 8MiB');
+  } on Object catch (e) {
+    output.clear();
+    throw NonAppException('nonapp_invalid_payload:${f.name}', '条目解压失败（$e）');
+  }
+  return output.getBytes();
 }
 
 String _decodeUtf8(List<int> raw, String what) {
@@ -427,13 +471,39 @@ const Set<String> nonAppBasicComponents = {
   'DateTimeInput',
 };
 
+/// A2UI v1.0 的**信封名**（a2ui_core 0.7.0 `_agentToRendererBodyKeys` +
+/// v1.0 增量 `_agentToRendererV1BodyKeys`）。
+///
+/// 注意：旧文档里的 `surfaceUpdate` / `dataModelUpdate` **不是** v1.0 协议
+/// 信封（后者叫 `updateComponents` / `updateDataModel`）；a2ui_core 对未知
+/// 信封在 `processMessages` 里抛 `A2uiValidationError`（静态路径在 initState，
+/// 打开坏包会炸整页），所以门口直接拒。
+const Set<String> nonAppA2uiEnvelopes = {
+  'createSurface',
+  'updateComponents',
+  'updateDataModel',
+  'deleteSurface',
+  'callRendererFunction',
+  'agentFunctionResponse',
+};
+
+/// `.nonapp` a2ui 载荷声明的协议版本：包契约固定 v1.0。
+///
+/// a2ui_core 0.7.0 的 wire 字面量是 `'1.0'`（`A2uiProtocolVersion.v1_0`）；
+/// `'v1.0'` / `'1.0.0'` 这类拼写会在解析期抛错。v0.9 序列不在包契约内
+/// （createSurface 的 components 语义是 v1.0 才有的），一律拒。
+const Set<String> nonAppA2uiVersions = {'1.0'};
+
 /// 渲染前的浅层结构门（比服务端更严）：只放行「能确定不会炸渲染」的信封。
 ///
 /// 为什么需要：a2ui 0.3.0 对 schema 不合法的信封在 `processMessages` 里抛
 /// `A2uiValidationError`，而静态路径就在 `initState` 里调它——打开一个坏包
 /// 会炸整页（不是让卡片内联报错）。客户端没有 JSON Schema 校验器，所以用
-/// 白名单把攻击面收窄到「内置组件 + 受支持的 action 形状」：
-///   · 组件名必须在 [nonAppBasicComponents]；
+/// 白名单把攻击面收窄到「v1.0 信封 + 内置组件 + 受支持的 action 形状」：
+///   · 每条消息必须有非空 `version`（且是 SDK 支持的 wire 值），并恰好包含
+///     一个 v1.0 信封（见 [nonAppA2uiEnvelopes]）；
+///   · `createSurface` / `updateComponents` 的 `surfaceId` 非空、
+///     `components` 非空，组件名必须在 [nonAppBasicComponents]；
 ///   · action 只能是 `{"event": {"name": <非空字符串>}}` 或 `{"functionCall": {...}}`
 ///     （其它形状 = 渲染期 VALIDATION_FAILED）。
 /// 更深的 props 形状仍由渲染器裁决；这一层只保证「不会因结构错炸页」。
@@ -470,6 +540,48 @@ void assertSurfaceRenderable(List<Object?> messages) {
         'nonapp_invalid_surface', '组件 $id 的 action 形状不受支持（只允许 event/functionCall）');
   }
 
+  String surfaceIdOf(Map body, String envelope) {
+    final surfaceId = body['surfaceId'];
+    if (surfaceId is! String || surfaceId.isEmpty) {
+      throw NonAppException(
+          'nonapp_invalid_surface', 'surface.json 的 $envelope.surfaceId 必须是非空字符串');
+    }
+    return surfaceId;
+  }
+
+  /// createSurface / updateComponents：组件表（若出现）必须是非空数组且逐项过门。
+  void checkComponents(Map body, String envelope,
+      {bool required = true, bool checkCatalog = false}) {
+    if (checkCatalog) {
+      final catalogId = body['catalogId'];
+      if (catalogId != null && catalogId != nonAppBasicCatalogId) {
+        throw NonAppException(
+            'nonapp_invalid_surface', '不支持的 catalogId：$catalogId（只能使用 basic v1.0 内置目录）');
+      }
+    }
+    final components = body['components'];
+    if (components == null && !required) return;
+    if (components is! List || components.isEmpty) {
+      throw NonAppException(
+          'nonapp_invalid_surface', 'surface.json 的 $envelope.components 必须是非空数组');
+    }
+    for (final component in components) {
+      checkComponent(component);
+    }
+  }
+
+  /// 每条消息引用的 surface 必须在本序列里先 createSurface（v1.0 处理器
+  /// 对未创建 surface 的 update/delete 抛 A2uiIntegrityError）。
+  final created = <String>{};
+  final withComponents = <String>{};
+
+  void requireCreated(String surfaceId, String envelope) {
+    if (!created.contains(surfaceId)) {
+      throw NonAppException(
+          'nonapp_invalid_surface', 'surface.json 的 $envelope 引用了未创建的 surface：$surfaceId');
+    }
+  }
+
   for (final message in messages) {
     if (message is! Map) continue; // normalizeSurface 已挡；防御性
     // 外链门（a2ui 版）：basic 目录的 Image/Video/AudioPlayer 对 http(s)
@@ -479,26 +591,79 @@ void assertSurfaceRenderable(List<Object?> messages) {
     // 相悖。`openUrl: null` 只禁用 openUrl 函数，拦不住这个。
     // catalogId 是结构字段（本身就是 https URL），只在 surface 信封里豁免。
     _assertNoA2uiExternalUrls(message);
-    for (final envelope in const ['createSurface', 'surfaceUpdate']) {
-      final body = message[envelope];
-      if (body is! Map) continue;
-      final surfaceId = body['surfaceId'];
-      if (surfaceId is! String || surfaceId.isEmpty) {
-        throw const NonAppException('nonapp_invalid_surface', 'surface.json 的 surfaceId 必须是非空字符串');
-      }
-      final catalogId = body['catalogId'];
-      if (catalogId != null && catalogId != nonAppBasicCatalogId) {
-        throw NonAppException(
-            'nonapp_invalid_surface', '不支持的 catalogId：$catalogId（只能使用 basic v1.0 内置目录）');
-      }
-      final components = body['components'];
-      if (components == null) continue;
-      if (components is! List) {
-        throw const NonAppException('nonapp_invalid_surface', 'surface.json 的 components 必须是数组');
-      }
-      for (final component in components) {
-        checkComponent(component);
-      }
+
+    final version = message['version'];
+    if (version is! String || version.isEmpty) {
+      throw const NonAppException(
+          'nonapp_invalid_surface', 'surface.json 每条消息必须声明非空 version（A2UI v1.0 信封）');
+    }
+    if (!nonAppA2uiVersions.contains(version)) {
+      throw NonAppException(
+          'nonapp_invalid_surface', '不支持的 A2UI 协议版本：$version（支持 ${nonAppA2uiVersions.join(' / ')}）');
+    }
+
+    final envelopes = [
+      for (final key in nonAppA2uiEnvelopes)
+        if (message.containsKey(key)) key,
+    ];
+    if (envelopes.length != 1) {
+      throw const NonAppException(
+          'nonapp_invalid_surface', 'surface.json 每条消息必须且只能包含一个 A2UI 信封');
+    }
+    final envelope = envelopes.single;
+    final body = message[envelope];
+    if (body is! Map) {
+      throw NonAppException(
+          'nonapp_invalid_surface', 'surface.json 的 $envelope 信封必须是对象');
+    }
+
+    switch (envelope) {
+      case 'createSurface':
+        final surfaceId = surfaceIdOf(body, envelope);
+        if (!created.add(surfaceId)) {
+          throw NonAppException(
+              'nonapp_invalid_surface', 'surface.json 重复创建 surface：$surfaceId');
+        }
+        // v1.0 允许 createSurface 不带 components（由后续 updateComponents
+        // 补齐）；但出现时不得为空数组。
+        checkComponents(body, envelope, required: false, checkCatalog: true);
+        if (body['components'] != null) withComponents.add(surfaceId);
+      case 'updateComponents':
+        final surfaceId = surfaceIdOf(body, envelope);
+        requireCreated(surfaceId, envelope);
+        checkComponents(body, envelope);
+        withComponents.add(surfaceId);
+      case 'updateDataModel':
+        requireCreated(surfaceIdOf(body, envelope), envelope);
+      case 'deleteSurface':
+        final surfaceId = surfaceIdOf(body, envelope);
+        requireCreated(surfaceId, envelope);
+        // 删除后允许再 createSurface 同一 id（协议允许 reset 式序列）。
+        created.remove(surfaceId);
+        withComponents.remove(surfaceId);
+      case 'callRendererFunction':
+        final surfaceId = body['surfaceId'];
+        if (surfaceId != null) {
+          if (surfaceId is! String || surfaceId.isEmpty) {
+            throw const NonAppException(
+                'nonapp_invalid_surface', 'surface.json 的 callRendererFunction.surfaceId 必须是非空字符串');
+          }
+          requireCreated(surfaceId, envelope);
+        }
+      default:
+        // agentFunctionResponse：v1.0 才有，更深形状由渲染器裁决
+        // （A2uiCard 已把渲染期异常降级为卡内错误占位）。
+        break;
+    }
+  }
+
+  // 打包应用的每个 surface 至少要有一批组件：createSurface 自带或后续
+  // updateComponents 补齐。只创建不填充 = 打开后空白页（不是崩溃，但
+  // 「文件即应用」不接受空应用）。
+  for (final surfaceId in created) {
+    if (!withComponents.contains(surfaceId)) {
+      throw NonAppException(
+          'nonapp_invalid_surface', 'surface.json 的 surface $surfaceId 没有任何组件（components 必须非空）');
     }
   }
 }
