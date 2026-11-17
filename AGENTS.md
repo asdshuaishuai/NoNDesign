@@ -94,6 +94,13 @@ app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板�
   768 竖屏 / 1024 横屏、手机横屏 844×390、设置竖屏 tab / 横屏 rail 共
   7 项；全量 **62 项绿**；iPad Pro 11 竖屏真机截图复核 3D 双行工具栏与
   设置顶部 tab 无溢出。
+- **Dart 化路线（用户方向 2026-11-17，方案未实施，详见 docs/plan-dart-agent-migration.md）**：
+  逐步干掉 Python agent 运行时。判定：ai_sdk_dart（已在 pubspec + PLAN 直连实证）是主战武器；
+  Genkit Dart 是「Dart 重写后端」非「干掉后端」（不引入）；genUI alpha 观望；AI Toolkit 可选；
+  两个 skills 仓库（flutter/agent-plugins、dart-lang/skills）是**开发期 Agent Skills**，精选 13 个
+  已装入 `.agents/skills/`（对本仓所有智能体会话生效），只读镜像在 `reference/`（gitignored）。
+  分阶段：P0 PLAN/Refine 泛化 → P1 Build 模式 + 流式/方言移植 → P2 删 Python agent 依赖 →
+  P3 引擎宿主 FFI 化（wasmtime C API + ffigen）。护栏铁律：Dart 循环仍必须过引擎门。
 - **移动端能力面实测与第三方智能体禁用（2026-11-16 深夜）**：① **ACP 在移动端
   禁用**（用户裁决）：设置页隐藏「外部智能体」、Agent 面板强制 NoN 内置
   （残留 acpAgentId 不生效）、`store.runAcp` 在 iOS/Android 直接拒绝并提示。
