@@ -21,8 +21,9 @@
    的工具语义与提示词搬过去。**
 4. **Flutter AI Toolkit（1.0 稳定）**：聊天 UI + provider 抽象 + tool calling。我们的 Agent 面板是
    时间线不是聊天流，整体替换价值低；「自定义 provider」接口值得在引入聊天式助手时参考。可选。
-5. **genUI（alpha）**：A2UI 式 JSON→Flutter 动态组件。deepDesign 侧已明确不做 A2UI；NoNDesign 的
-   产出物是 mbt/HTML，不走 A2UI。**列入观望**，唯一潜在用点是 Agent 对话中嵌入确认表单。
+5. **genUI —— 已弃用，继任者 `a2ui_flutter`；判定翻转为「采纳为第二渲染后端」**（2026-11-17
+   用户裁决，详见 docs/plan-chat-stream-shell.md）：HTML 热应用与 A2UI surface 并存、按复杂度
+   自适应分派（视觉动画→HTML；数据交互表单→a2ui），文件格式 v2 带 `renderer` 字段。
 6. **best-practices 的核心冲突点**：官方推荐 Firebase AI Logic 管 key（key 不进客户端）；我们是
    **用户自带 key、存本机设置**（桌面单用户场景，AGENTS 已登记 keychain 增强）。保持自带 key 模型，
    把「Morgan's Law → guardrails」思想落地为：**Dart 侧 agent 循环必须继续过引擎门**，护栏不搬走。
@@ -89,11 +90,18 @@ ModelSettings`）。把「agent SDK」与「服务运行时」两层分开看：
 - 判定：**可选引入**。我们的 Agent 时间线（op 流/轨迹卡）不是聊天流，整体替换不合适；
   未来若做「NoN 助手」闲聊/答疑面板，直接用它 + 自定义 provider（指向桌面服务或直连）。
 
-### 3.4 genUI —— 观望
+### 3.4 genUI → `a2ui_flutter` —— 采纳为第二渲染后端（2026-11-17 更新）
 
-- alpha；A2UI 式 JSON → Flutter 组件，交互状态回流 agent。
-- 判定：NoNDesign 产出物是 mbt/HTML/视频，主链路不走 A2UI；deepDesign 侧亦有「明确不做 A2UI」裁决。
-  观望点：Agent 对话中嵌确认表单/参数卡（如「选 3 个方案」交互卡）。alpha 期不动。
+- **`genui` 包已弃用**（pub.dev 0.10.4 标 discontinued），官方继任者 **`a2ui_flutter` 0.3.0**
+  （+ `a2ui_core` / `a2ui_agent`，Flutter 官方实验室，全平台）。
+- 能力事实：基础目录自带表单级组件（TextField/CheckBox/ChoicePicker/Slider/DateTimeInput），
+  DataModel 路径绑定 + `props.isValid` 校验 + 动作自动回流 agent；基础目录**无图表/动画**
+  （图表需自定义 `ComponentImplementation`）；transport 无关——`outboundListener`/
+  `unifiedOutbound` 可接任意 LLM 循环（含 ai_sdk_dart），`a2ui_agent` 还提供教模型 A2UI 的
+  系统提示生成器与流解析。
+- 判定（用户裁决）：**与 HTML 热应用并存、自适应分派，不互相替代**——HTML 管可移植与视觉
+  动画，a2ui 管复杂交互组件与「agent 续写」交互；分派标准与文件格式 v2 见
+  docs/plan-chat-stream-shell.md §1。
 
 ### 3.5 best-practices —— 三条采纳、一条登记差异
 
@@ -121,6 +129,10 @@ ModelSettings`）。把「agent SDK」与「服务运行时」两层分开看：
 | 10 | resvg/ffmpeg/静态服务 | Process.run + 打包资产 | P3 |
 
 ## 5. 分阶段路线图
+
+> **2026-11-17 用户裁决更新**：chat stream 主体 + 艺术架 + 画中画工作区已立项
+> （docs/plan-chat-stream-shell.md），本路线图 **P0–P2 升格为该方案的硬前置**
+> （chat stream 的 agent 就是内置 Dart 循环）；P3 维持独立立项。
 
 - **P0（纯 Dart 双端统一入口，1 个 PR 量级）**：把 `mobile_agent.dart` 泛化成 `core/dart_agent.dart`
   ——PLAN/Refine 两模式先行（都不依赖引擎写路径）；设置页加「Agent 运行时：内置 Dart（默认移动端）/
