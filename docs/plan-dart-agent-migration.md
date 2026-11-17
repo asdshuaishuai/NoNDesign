@@ -137,8 +137,15 @@ ModelSettings`）。把「agent SDK」与「服务运行时」两层分开看：
 - **P0（纯 Dart 双端统一入口，1 个 PR 量级）**：把 `mobile_agent.dart` 泛化成 `core/dart_agent.dart`
   ——PLAN/Refine 两模式先行（都不依赖引擎写路径）；设置页加「Agent 运行时：内置 Dart（默认移动端）/
   桌面服务」；桌面选内置 Dart 时 agent 循环也走客户端，引擎门仍走 HTTP 服务。
-- **P1（Build 模式 Dart 化）**：design_op 工具接引擎门 HTTP；流式/事件对齐 SSE 同款 8 类事件；
-  thinking 方言表移植；`server/agent.py` 退化为可选后端（默认关闭）。
+- **P1（Build 模式 Dart 化）——2026-11-17 主体落地**：design_op 经 HTTP 引擎门、thinking 方言表、
+  与 SSE 同形的事件面（tool_start / tool_end / doc_written / preview / done / failed 等）均已在
+  `core/dart_agent.dart`；本轮补齐 server 收尾桥段——**generate_page**（独立 `EngineWriteBridge`
+  接口 → `/engine/generate`，成功发 `page_generated`）、**RSI 评审环**（`session_critique` 的
+  `poor` 板 → `session_auto_fix` 回灌 canonical，最多 2 轮）、**空板清扫**（`_sweepIdleArtboards`：
+  删 `__seed`/≤1 节点板，永不留零板）。PLAN 分歧（Dart plan 无引擎面 → 直接 return，server plan
+  也执行）在代码头注释与测试组名显式登记；`server/agent.py` 仍为可选后端。**仍留后续**：逐字
+  `doc_delta` 流式直播（SDK 工具参数增量是原始 JSON 分片，需自建内容提取器）与 agent 驱动的
+  A2UI 卡（卡渲染/动作回流已接 `store.handleChatAction`，生成器侧产出 A2UI 消息并续跑的闭环未接）。
 - **P2（上下文层移植）**：项目地图/裁剪语义进 Dart；服务端 agent 路由与 openai-agents 依赖删除
   ——**此后「带 Python 运行时」只剩服务运行时层**。
 - **P3（服务运行时 Dart 化，独立立项）**：wasmtime C API + ffigen 引擎宿主 → DDP Dart 化 →

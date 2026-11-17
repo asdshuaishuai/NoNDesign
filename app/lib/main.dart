@@ -5,13 +5,14 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'core/keys.dart';
+import 'core/nonapp_intake.dart';
 import 'core/store.dart';
 import 'core/theme.dart';
 import 'plugins/registry.dart';
-import 'widgets/chat_stream.dart';
 import 'widgets/command_palette.dart';
 import 'widgets/common.dart';
 import 'widgets/settings_dialog.dart';
+import 'widgets/shell_host.dart';
 import 'widgets/welcome.dart';
 import 'widgets/workspace.dart';
 
@@ -109,59 +110,67 @@ class NonApp extends StatelessWidget {
       // doesNotRecognizeSelector → SIGABRT（2026-11-14 崩溃报告实证）。语义树
       // 对本工具无价值纯成本，整树排除后引擎侧不再产生 AX 事件，崩溃路径
       // 不可达；待上游修复后移除。
-      home: ExcludeSemantics(
-        child: store.bootError != null
-            ? _BootError(message: store.bootError!)
-          : !store.ready
-              ? const _BootScreen()
-              // 聊天流视图（'chat'）与作品集/插件工作台一样不依赖项目，
-              // 显式进入（view=='chat'）时无条件可路由。
-              : store.view == 'chat'
-                  ? _WindowThemeSync(
-                    dark: dark,
-                    child: ChatStreamView(
-                      onSettings: () {
-                        final ctx = _navigatorContext();
-                        if (ctx != null) showSettingsDialog(ctx);
-                      },
-                    ),
-                  )
-                  // 作品集/插件工作台不依赖项目：无项目启动也必须可路由，
-                  // 否则欢迎页卡片与 ⌘5–⌘7 点了不换屏（四个入口全不可达）。
-                  // 离线移动端恢复的 docs（api==null）同样走 Workspace：
-                  // 否则恢复成功后 hasProject 仍 false，界面停在 Welcome，
-                  // 文档虽然恢复进 store 却看不见。
-                  : (store.hasProject ||
-                          store.view == 'portfolio' ||
-                          store.view.startsWith('plugin:') ||
-                          (store.api == null && store.view == 'docs'))
-                      ? const Workspace()
-                      // chatStreamHome（用户决策默认开）：无项目时的默认
-                      // 主面是聊天流；关闭即回经典 Welcome。
-                      : store.settings.chatStreamHome
-                          ? _WindowThemeSync(
-                            dark: dark,
-                            child: ChatStreamView(
-                              onSettings: () {
-                                final ctx = _navigatorContext();
-                                if (ctx != null) showSettingsDialog(ctx);
-                              },
-                            ),
-                          )
-                          // Builder：回调的 context 必须落在 MaterialApp（Navigator 子树）
-                          // 之内——NonApp 自己的 context 在其上层，showDialog/流程入口
-                          // 会以 "does not include a Navigator" 崩溃（2026-11-13 实证）。
-                          : _WindowThemeSync(
-                            dark: dark,
-                            child: Builder(
-                              builder: (ctx) => Welcome(
-                                onNewProject: () => showNewProjectFlow(ctx),
-                                onOpenPath: (path) => openProjectFlow(ctx, path),
-                                onSettings: () => showSettingsDialog(ctx),
+      // NonAppIntakeHost：OS 文件关联（.nonapp 双击/拖入）的唯一编译期
+      // 挂载点——接管 `nc/open` 通道与冷启动队列；无 handler/未接线平台
+      // 零行为（Linux/Windows/测试宿主静默降级）。
+      home: NonAppIntakeHost(
+        child: ExcludeSemantics(
+          child: store.bootError != null
+              ? _BootError(message: store.bootError!)
+            : !store.ready
+                ? const _BootScreen()
+                // 聊天流视图（'chat'）与作品集/插件工作台一样不依赖项目，
+                // 显式进入（view=='chat'）时无条件可路由。S4：聊天流由
+                // ChatWorkspaceHost 承载——≥1100 常驻 chat+workspace 分栏，
+                // 否则 chat 全屏 + 画中画工作区（全屏工作区语义不变）。
+                : store.view == 'chat'
+                    ? _WindowThemeSync(
+                      dark: dark,
+                      child: ChatWorkspaceHost(
+                        onSettings: () {
+                          final ctx = _navigatorContext();
+                          if (ctx != null) showSettingsDialog(ctx);
+                        },
+                      ),
+                    )
+                    // 作品集/插件工作台不依赖项目：无项目启动也必须可路由，
+                    // 否则欢迎页卡片与 ⌘5–⌘7 点了不换屏（四个入口全不可达）。
+                    // 离线移动端恢复的 docs（api==null）同样走 Workspace：
+                    // 否则恢复成功后 hasProject 仍 false，界面停在 Welcome，
+                    // 文档虽然恢复进 store 却看不见。
+                    : (store.hasProject ||
+                            store.view == 'portfolio' ||
+                            store.view.startsWith('plugin:') ||
+                            (store.api == null && store.view == 'docs'))
+                        ? const Workspace()
+                        // chatStreamHome（用户决策默认开）：无项目时的默认
+                        // 主面是聊天流（同一宿主：分栏/画中画按宽度自适应）；
+                        // 关闭即回经典 Welcome。
+                        : store.settings.chatStreamHome
+                            ? _WindowThemeSync(
+                              dark: dark,
+                              child: ChatWorkspaceHost(
+                                onSettings: () {
+                                  final ctx = _navigatorContext();
+                                  if (ctx != null) showSettingsDialog(ctx);
+                                },
+                              ),
+                            )
+                            // Builder：回调的 context 必须落在 MaterialApp（Navigator 子树）
+                            // 之内——NonApp 自己的 context 在其上层，showDialog/流程入口
+                            // 会以 "does not include a Navigator" 崩溃（2026-11-13 实证）。
+                            : _WindowThemeSync(
+                              dark: dark,
+                              child: Builder(
+                                builder: (ctx) => Welcome(
+                                  onNewProject: () => showNewProjectFlow(ctx),
+                                  onOpenPath: (path) => openProjectFlow(ctx, path),
+                                  onSettings: () => showSettingsDialog(ctx),
+                                ),
                               ),
                             ),
-                          ),
         ),
+      ),
     );
   }
 }

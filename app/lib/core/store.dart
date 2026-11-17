@@ -956,6 +956,70 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  /// 整屏生成统一入口（dart 循环 generate_page 工具的写路径）：与
+  /// [applyAgentOp] 同一条 _opQueue 链——链内读到的 `mbt` 才是新鲜的
+  /// （上一条 op 已 _commit）。生成信封只带 canonical（无 render 面），
+  /// 所以立即 `/engine/render` 并 [_commit]：**store.mbt 必须与循环 ctx.mbt
+  /// 锁步**，否则后续 design_op 会以陈旧 canonical 为基底提交、把生成/
+  /// 清扫的成果覆盖回去。render 失败也采纳 canonical（mbt + dirty），
+  /// 画面等下一次渲染恢复——生成成果绝不丢。
+  Future<Map<String, dynamic>> applyGeneratePage(
+          String intent, String name, Map<String, dynamic> spec) =>
+      _chainOp(() => _applyGeneratePageNow(intent, name, spec));
+
+  Future<Map<String, dynamic>> _applyGeneratePageNow(
+      String intent, String name, Map<String, dynamic> spec) async {
+    if (api == null) return {'ok': false, 'error': 'engine_unavailable'};
+    try {
+      final res = await api!.generate(mbt, intent, name, spec);
+      if (res['ok'] != true) return res;
+      await _adoptCanonical(res);
+      return res;
+    } catch (e) {
+      return {'ok': false, 'error': 'engine_generate_failed:$e'};
+    }
+  }
+
+  /// 宿主侧 session 变更统一入口（dart 循环收尾桥段：RSI `session_auto_fix`
+  /// 与空板清扫 `session_apply_agent` 的 delete-artboard）。同为 SESSION_MUTATING
+  /// 面，同样必须走 _opQueue + canonical 采纳（与 [applyGeneratePage] 同一
+  /// 锁步理由——清扫删掉的板不能被后续陈旧提交复活）。
+  Future<Map<String, dynamic>> applySessionMutation(String name, String? arg) =>
+      _chainOp(() => _applySessionMutationNow(name, arg));
+
+  Future<Map<String, dynamic>> _applySessionMutationNow(String name, String? arg) async {
+    if (api == null) return {'ok': false, 'error': 'engine_unavailable'};
+    try {
+      final res = await api!.session(mbt, name, arg);
+      if (res['ok'] != true) return res;
+      await _adoptCanonical(res);
+      return res;
+    } catch (e) {
+      return {'ok': false, 'error': 'engine_session_failed:$e'};
+    }
+  }
+
+  /// 变更信封（只带 canonical、无 render 面）的采纳：render 成功 → [_commit]
+  /// （history/render/activeBoard/dirty 全链）；render 失败 → 直接落 canonical
+  /// + dirty（不丢变更，画面待下次渲染）。只读信封（无 mbt）是 no-op。
+  Future<void> _adoptCanonical(Map<String, dynamic> env) async {
+    final canonical = env['mbt'];
+    if (canonical is! String || canonical.isEmpty) return;
+    Map<String, dynamic> rendered;
+    try {
+      rendered = await api!.render(canonical);
+    } catch (_) {
+      rendered = const {};
+    }
+    if (rendered['ok'] == true) {
+      _commit(rendered);
+    } else {
+      mbt = canonical;
+      dirty = true;
+      notifyListeners();
+    }
+  }
+
   Future<bool> _applyOpNow(String op, {bool silent = false}) async {
     if (api == null || agentBusy) {
       if (agentBusy) _toast('NoN 正在工作', '等这一轮结束再改画布。');
@@ -1690,6 +1754,16 @@ class AppStore extends ChangeNotifier {
         ));
       case 'design_spec_written':
         card.steps.add(ChatStep(label: '写入设计规范'));
+      case 'review_round':
+        card.steps.add(ChatStep(
+          label: '质量审查 第${event['round']}轮',
+          detail: (event['detail'] ?? '').toString(),
+        ));
+      case 'cleanup':
+        final removed = event['removed'];
+        card.steps.add(ChatStep(
+          label: '清理空画板 ${removed is List ? removed.join(', ') : ''}',
+        ));
       case 'failed':
         card.detail = (event['error'] ?? 'failed').toString();
     }
@@ -2118,6 +2192,13 @@ class AppStore extends ChangeNotifier {
           ].join(' · '),
         ));
         break;
+      case 'review_round':
+        _flushStreamAsAssistant();
+        timeline.add(TimelineEntry.note(
+          '质量审查 · 第${event['round']}轮',
+          (event['detail'] ?? '').toString(),
+        ));
+        break;
       case 'assistant_delta':
         _deltaBuffer += (event['text'] ?? '').toString();
         _deltaTimer ??= Timer(const Duration(milliseconds: 80), () {
@@ -2473,9 +2554,13 @@ class AppStore extends ChangeNotifier {
 /// - 检视：POST /engine/session（session_query_nodes / session_interactions /
 ///   session_states / session_lint / session_critique / session_spec /
 ///   session_export_svg / session_flows / session_list_artboards，只读面）。
+/// - 整屏生成（P1）：[AppStore.applyGeneratePage]——链内读新鲜 mbt，
+///   `/engine/generate` 后 render + commit（store.mbt 与循环 ctx.mbt 锁步）。
+/// - 宿主侧 session 变更（P1）：[AppStore.applySessionMutation]——RSI
+///   `session_auto_fix` 与空板清扫 `session_apply_agent` 同链采纳 canonical。
 /// - 注册表：GET /engine/templates、GET /engine/components。
 /// read_docs 不经引擎（server 同构：docs 在 run 请求载荷里，循环本地读）。
-class _StoreEngineGate implements EngineGateBridge {
+class _StoreEngineGate implements EngineGateBridge, EngineWriteBridge {
   final AppStore store;
   _StoreEngineGate(this.store);
 
@@ -2485,6 +2570,18 @@ class _StoreEngineGate implements EngineGateBridge {
   @override
   Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) =>
       store.api!.session(mbt, name, arg);
+
+  /// 整屏生成：入参 mbt 刻意不用（同 [applyAgent]）——链内读 store.mbt 才是
+  /// 新鲜的；render + commit 由 store 侧完成。
+  @override
+  Future<Map<String, dynamic>> generate(
+          String mbt, String intent, String name, Map<String, dynamic> spec) =>
+      store.applyGeneratePage(intent, name, spec);
+
+  /// RSI auto_fix / 空板清扫：session 变更同链采纳 canonical。
+  @override
+  Future<Map<String, dynamic>> mutateSession(String mbt, String name, [String? arg]) =>
+      store.applySessionMutation(name, arg);
 
   @override
   Future<List<dynamic>> templates() => store.api!.templates();

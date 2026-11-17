@@ -43,6 +43,10 @@ dependencies:
   flutter_svg: ^2.4.0
   webview_flutter: ^4.14.1
   webview_flutter_wkwebview: ^3.27.2
+  # `.nonapp` 单文件包（zip 容器）的读取：只用 ZipDecoder，pure Dart、无平台
+  # 通道。3.6.1 的两个传递依赖 crypto ^3.0.3 / path ^1.8.0 已在 lock 里，
+  # 离线可解析（本机 pub cache 已存在 archive-3.6.1）。
+  archive: ^3.6.1
   ai_sdk_dart: ^3.1.0
   ai_sdk_openai: ^3.1.0
 

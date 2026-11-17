@@ -30,6 +30,28 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- `.nonapp` 单文件包（文件即应用 v2）：VIEW（文件管理器点击 /
+                 “打开方式”）与 SEND（分享面板）。mimeType 由文件管理器按扩展名
+                 上报（application/zip 最常见），pathPattern 只在 content/file
+                 scheme 生效；两者都声明，拿不到 mime 时靠 .nonapp 后缀匹配。
+                 category.DEFAULT 是隐式 intent 的必要条件；BROWSABLE 让浏览器
+                 下载后的点击也能进来。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="content" android:host="*"/>
+                <data android:scheme="file"/>
+                <data android:mimeType="application/zip"/>
+                <data android:mimeType="application/x-nondesign-package"/>
+                <data android:pathPattern=".*\\.nonapp"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/zip"/>
+                <data android:mimeType="application/x-nondesign-package"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

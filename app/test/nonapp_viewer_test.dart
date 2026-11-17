@@ -1,0 +1,87 @@
+// a2ui 载荷查看器（app/lib/widgets/nonapp_viewer.dart）widget 测试。
+//
+// 覆盖：① 静态 surface 渲染出节点（零服务依赖）；② 组件错误经 onError
+// 呈现在顶部红条；③ 动作回流以 SnackBar 明示（不触发网络/续跑）。
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:nondesign/core/theme.dart';
+import 'package:nondesign/widgets/nonapp_viewer.dart';
+
+final List<Object?> _surface = [
+  {
+    'version': '1.0',
+    'createSurface': {
+      'surfaceId': 'demo',
+      'catalogId': 'https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json',
+      'components': [
+        {'id': 'root', 'component': 'Column', 'children': ['title', 'btn']},
+        {'id': 'title', 'component': 'Text', 'text': '旅行偏好'},
+        {
+          'id': 'btn',
+          'component': 'Button',
+          'child': 'btnLabel',
+          'action': {
+            'event': {'name': 'submit', 'context': {'place': 'Tokyo'}},
+          },
+        },
+        {'id': 'btnLabel', 'component': 'Text', 'text': '生成行程'},
+      ],
+    },
+  },
+];
+
+Widget _host(Widget child) => MaterialApp(
+      theme: AppTheme.build(dark: true),
+      home: child,
+    );
+
+void main() {
+  testWidgets('静态 surface 渲染：标题、文本与按钮都在，且无网络依赖', (tester) async {
+    await tester.pumpWidget(_host(NonAppA2uiViewer(title: '清单应用', messages: _surface)));
+    await tester.pump(const Duration(milliseconds: 60));
+
+    expect(find.text('清单应用'), findsOneWidget);
+    expect(find.text('旅行偏好'), findsOneWidget);
+    expect(find.text('生成行程'), findsOneWidget);
+    expect(find.text('A2UI · 本地渲染'), findsOneWidget);
+    // 无错误条
+    expect(find.byIcon(Icons.error_outline), findsNothing);
+  });
+
+  testWidgets('动作回流：点击按钮 → SnackBar 显示动作名与 context', (tester) async {
+    await tester.pumpWidget(_host(NonAppA2uiViewer(title: '清单应用', messages: _surface)));
+    await tester.pump(const Duration(milliseconds: 60));
+
+    await tester.tap(find.text('生成行程'));
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(find.textContaining('动作 submit'), findsOneWidget);
+    expect(find.textContaining('Tokyo'), findsOneWidget);
+  });
+
+  testWidgets('组件错误经 onError 呈现在顶部红条（不崩页）', (tester) async {
+    // 非内置组件目录：a2ui 0.3.0 会在渲染期抛 A2uiValidationError（整页崩），
+    // 查看器先过浅层结构门 → 顶部红条 + 空态说明，卡片不构建。
+    final broken = <Object?>[
+      {
+        'version': '1.0',
+        'createSurface': {
+          'surfaceId': 'broken',
+          'catalogId': 'https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json',
+          'components': [
+            {'id': 'root', 'component': 'CustomChart', 'text': '自定义组件不在内置目录'},
+          ],
+        },
+      },
+    ];
+    await tester.pumpWidget(_host(NonAppA2uiViewer(title: '坏包', messages: broken)));
+    await tester.pump(const Duration(milliseconds: 60));
+
+    expect(find.byIcon(Icons.error_outline), findsOneWidget, reason: '错误必须可见（顶部红条）');
+    expect(find.textContaining('组件错误'), findsOneWidget);
+    expect(find.textContaining('无法在本地渲染'), findsOneWidget);
+    expect(tester.takeException(), isNull, reason: '不得把结构错抛成渲染异常');
+  });
+}

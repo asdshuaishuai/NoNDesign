@@ -1,0 +1,675 @@
+// `.nonapp` 单文件包（文件即应用 v2）的客户端解析与校验。
+//
+// 容器与字段契约见 docs/plan-chat-stream-shell.md §1.1，服务端权威实现是
+// server/nonapp_agent.py（校验顺序与 code 与本文件一一对齐）：
+//
+//   manifest.json          formatVersion / id / name / title / renderer /
+//                          createdAt / minAppVersion（可选 brief）
+//   payload/index.html     renderer=html 的载荷（零外链）
+//   payload/surface.json   renderer=a2ui 的载荷（数组或 {"messages":[...]}）
+//   payload/data.json      a2ui 可选 DataModel 快照（object）
+//   payload/prompt.txt     a2ui 可选续跑提示（<=8KiB，本批不消费）
+//
+// **识别以 manifest.json 为唯一判据**（扩展名只用于 file_selector 过滤与
+// OS 关联）。业务数据（app.db / DataModel 运行时数据）不随包走：导入 =
+// 全新实例。
+//
+// 服务端在线时它是权威（/hotapp/import 会重跑全部校验）。因此 HTML 门分两层：
+//
+//   · `assertHtmlServerCompat`（parse 用）：**与服务端 _html_ok 同判据**，
+//     不比它严——在线导入若比服务端严，服务端接受的包（如 `<a href="https://…">`，
+//     服务端正则只覆盖 script/link/img）会在客户端解不开，导出→打开自家应用断链。
+//   · `assertHtmlOfflineSafe`（NonAppCache 写缓存 / file:// 打开前用）：允许
+//     比服务端更严（误拒可接受），绝不允许更松（file:// 下没有 CSP 兜底）。
+//
+// 漂移风险：服务端改了 hotapp_agent.py:185-227 的三条正则，要回来对
+// `assertHtmlServerCompat`（同判据）与 `assertHtmlOfflineSafe`（更严面）。
+//
+//   服务端（server/hotapp_agent.py:185-227）：
+//     _ATTR_REF_RE = <(script|link|img) ... (src|href|srcset)="...">   (re.I|re.S)
+//     _CSS_URL_RE  = url( "..." | '...' | ... )
+//     _CSS_IMPORT_RE = @import ( url( "..."|'...'|... ) | "..." | '...' | ... )
+//     _is_external_ref(v) = v 小写以 http:// | https:// | // 开头，或以 / 开头
+//     srcset 按逗号切分，每段取第一个空白前的 token 再判
+//
+//   离线更严面：属性面更宽（多认 iframe/video/source/a/... 的 src/href/poster/
+//   data），且额外全文扫 http(s)://；`//` 只在引用位置拒（JS 行注释里的
+//   `//` 不是外链）。唯一豁免：内联 SVG 的 xmlns 声明（那是命名空间标识，
+//   不是可加载引用，服务端也不拦）。
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:archive/archive.dart';
+
+/// 客户端版本（minAppVersion 语义化比较的基准）。
+///
+/// 仓库没有 package_info_plus（新依赖从严），版本号与 app/pubspec.yaml 的
+/// `version:` 手工同步——漂移风险已登记在施工记录里。
+const String nonAppClientVersion = '0.1.0';
+
+/// 与 server/nonapp_agent.py 同一套上限（改一侧必须改另一侧）。
+const int nonAppFormatVersion = 1;
+const int nonAppMaxPackageBytes = 8 * 1024 * 1024;
+const int nonAppMaxEntryBytes = 8 * 1024 * 1024;
+const int nonAppMaxTotalUncompressed = 16 * 1024 * 1024;
+const int nonAppMaxEntries = 32;
+const int nonAppMaxPromptBytes = 8 * 1024;
+const int nonAppMaxTitleChars = 120;
+const int nonAppMaxBriefChars = 2000;
+
+const Set<String> nonAppAllowedEntries = {
+  'manifest.json',
+  'payload/index.html',
+  'payload/surface.json',
+  'payload/data.json',
+  'payload/prompt.txt',
+};
+
+/// 稳定的失败码（与服务端 `nonapp_*` 同形，SnackBar 直接显示）。
+class NonAppException implements Exception {
+  const NonAppException(this.code, this.message);
+
+  /// 稳定 code（如 `nonapp_unsupported_version:2`、`nonapp_too_large`）。
+  final String code;
+
+  /// 人类可读说明（中文；UI 原样呈现）。
+  final String message;
+
+  @override
+  String toString() => message.isEmpty ? code : '$code: $message';
+}
+
+/// manifest.json 的强类型视图（字段校验见 [NonAppPackage.parse]）。
+class NonAppManifest {
+  const NonAppManifest({
+    required this.formatVersion,
+    required this.id,
+    required this.name,
+    required this.title,
+    required this.renderer,
+    required this.createdAt,
+    required this.minAppVersion,
+    this.brief,
+  });
+
+  final int formatVersion;
+  final String id;
+  final String name;
+  final String title;
+
+  /// `html` | `a2ui`。
+  final String renderer;
+  final int createdAt;
+  final String minAppVersion;
+  final String? brief;
+
+  bool get isA2ui => renderer == 'a2ui';
+
+  Map<String, dynamic> toJson() => {
+        'formatVersion': formatVersion,
+        'id': id,
+        'name': name,
+        'title': title,
+        'renderer': renderer,
+        'createdAt': createdAt,
+        'minAppVersion': minAppVersion,
+        if (brief != null) 'brief': brief,
+      };
+}
+
+/// 解析后的包载荷（html 与 a2ui 二选一；互斥字段按 renderer 为 null）。
+class NonAppPackage {
+  const NonAppPackage({
+    required this.manifest,
+    this.htmlBytes,
+    this.messages,
+    this.data,
+    this.prompt,
+  });
+
+  final NonAppManifest manifest;
+
+  /// renderer=html：UTF-8 编码的 index.html 原始字节（写缓存/传服务端都用它）。
+  final Uint8List? htmlBytes;
+
+  /// renderer=a2ui：已归一为数组的 A2UI 消息序列。
+  final List<Object?>? messages;
+
+  /// a2ui 可选 DataModel 快照（仅人类可读，不参与渲染）。
+  final Map<String, dynamic>? data;
+
+  /// a2ui 可选续跑提示（本批不消费，保留给后续 agent 续跑）。
+  final String? prompt;
+
+  String get renderer => manifest.renderer;
+
+  /// 解析并校验一个 `.nonapp` 字节流。任何失败抛 [NonAppException]（先验后落，
+  /// 不产生半成品缓存/目录）。
+  static NonAppPackage parse(List<int> bytes, {String clientVersion = nonAppClientVersion}) {
+    if (bytes.isEmpty) {
+      throw const NonAppException('nonapp_empty_body', '包体为空');
+    }
+    if (bytes.length > nonAppMaxPackageBytes) {
+      throw const NonAppException('nonapp_too_large', '包体超过 8MiB');
+    }
+
+    final Archive archive;
+    try {
+      archive = ZipDecoder().decodeBytes(bytes, verify: false);
+    } catch (e) {
+      throw NonAppException('nonapp_invalid_zip', '不是有效的 zip 包：$e');
+    }
+
+    // 条目数/解压上限先用中央目录声明的 size 预检（不解压超限包）；
+    // 声明的 size 可被伪造，真实内容长度在读取后再核一遍。
+    final files = archive.files;
+    if (files.length > nonAppMaxEntries) {
+      throw const NonAppException('nonapp_too_large', '条目数超过 32');
+    }
+    var declaredTotal = 0;
+    for (final f in files) {
+      if (f.size > nonAppMaxEntryBytes) {
+        throw NonAppException('nonapp_too_large', '条目 ${f.name} 解压后超过 8MiB');
+      }
+      declaredTotal += f.size;
+      if (declaredTotal > nonAppMaxTotalUncompressed) {
+        throw const NonAppException('nonapp_too_large', '总解压体积超过 16MiB');
+      }
+    }
+
+    final entries = <String, Uint8List>{};
+    var actualTotal = 0;
+    for (final f in files) {
+      // 目录项可选（“无目录项亦可”）：只容忍 manifest/payload 两级。
+      // 注意 archive 会把条目名的反斜杠归一为 '/'——归一后只可能落进
+      // 白名单或撞未知名，不存在逃逸路径（'..' 仍显式拒绝）。
+      if (!f.isFile) {
+        final dir = f.name.endsWith('/') ? f.name.substring(0, f.name.length - 1) : f.name;
+        if (dir == '' || dir == 'payload') continue;
+        throw NonAppException('nonapp_unexpected_entry:${f.name}', '不允许的目录项');
+      }
+      _checkEntryName(f.name);
+      if (entries.containsKey(f.name)) {
+        throw NonAppException('nonapp_unexpected_entry:${f.name}', '重复条目');
+      }
+      final data = _contentOf(f);
+      if (data.length > nonAppMaxEntryBytes) {
+        throw NonAppException('nonapp_too_large', '条目 ${f.name} 解压后超过 8MiB');
+      }
+      actualTotal += data.length;
+      if (actualTotal > nonAppMaxTotalUncompressed) {
+        throw const NonAppException('nonapp_too_large', '总解压体积超过 16MiB');
+      }
+      entries[f.name] = data;
+    }
+
+    final manifestBytes = entries['manifest.json'];
+    if (manifestBytes == null) {
+      throw const NonAppException('nonapp_missing_manifest', '缺少 manifest.json');
+    }
+    final manifest = _parseManifest(manifestBytes, clientVersion);
+
+    if (manifest.renderer == 'html') {
+      final raw = entries['payload/index.html'];
+      if (raw == null) {
+        throw const NonAppException(
+            'nonapp_missing_payload', 'renderer=html 需要 payload/index.html');
+      }
+      final html = _decodeUtf8(raw, 'payload/index.html');
+      // 在线导入的权威是服务端，这里只做**服务端等价**门（不比它严）；
+      // 离线路径另外还有 assertHtmlOfflineSafe（更严），见 nonapp_cache。
+      assertHtmlServerCompat(html);
+      return NonAppPackage(manifest: manifest, htmlBytes: raw);
+    }
+
+    final surfaceRaw = entries['payload/surface.json'];
+    if (surfaceRaw == null) {
+      throw const NonAppException(
+          'nonapp_missing_payload', 'renderer=a2ui 需要 payload/surface.json');
+    }
+    final messages = normalizeSurface(
+      _decodeJson(surfaceRaw, 'payload/surface.json', 'nonapp_invalid_surface'),
+    );
+    // 先验后落：a2ui 0.3.0 对 schema 不合法的信封是在**渲染期**抛
+    // A2uiValidationError（MessageProcessor.processMessages 在 initState 里），
+    // 打开坏包会炸整页。客户端因此比服务端更严一层：只放行 basic 内置
+    // 组件目录 + 受支持的 action 形状（见 assertSurfaceRenderable 注释）。
+    assertSurfaceRenderable(messages);
+
+    Map<String, dynamic>? dataDoc;
+    final dataRaw = entries['payload/data.json'];
+    if (dataRaw != null) {
+      final doc = _decodeJson(dataRaw, 'payload/data.json', 'nonapp_invalid_data');
+      if (doc is! Map) {
+        throw const NonAppException('nonapp_invalid_data', 'payload/data.json 必须是对象');
+      }
+      dataDoc = Map<String, dynamic>.from(doc);
+    }
+
+    String? prompt;
+    final promptRaw = entries['payload/prompt.txt'];
+    if (promptRaw != null) {
+      if (promptRaw.length > nonAppMaxPromptBytes) {
+        throw const NonAppException('nonapp_invalid_prompt', 'payload/prompt.txt 超过 8KiB');
+      }
+      prompt = _decodeUtf8(promptRaw, 'payload/prompt.txt');
+    }
+
+    return NonAppPackage(
+      manifest: manifest,
+      messages: messages,
+      data: dataDoc,
+      prompt: prompt,
+    );
+  }
+}
+
+// ---------- 内部：校验 ----------
+
+final RegExp _idRe = RegExp(r'^[a-z0-9][a-z0-9_-]{0,63}$');
+final RegExp _semverRe = RegExp(r'^\d+\.\d+(\.\d+)?([-+][0-9A-Za-z.-]+)?$');
+
+bool isValidNonAppName(Object? name) {
+  if (name is! String || name.isEmpty || name.length > 64) return false;
+  return RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(name);
+}
+
+void _checkEntryName(String name) {
+  if (name.isEmpty ||
+      name.startsWith('/') ||
+      name.contains('..') ||
+      name.codeUnits.any((c) => c < 0x20) ||
+      !nonAppAllowedEntries.contains(name)) {
+    throw NonAppException('nonapp_unexpected_entry:$name', '不允许的包内条目：$name');
+  }
+}
+
+Uint8List _contentOf(ArchiveFile f) {
+  final content = f.content;
+  if (content is Uint8List) return content;
+  if (content is List<int>) return Uint8List.fromList(content);
+  throw NonAppException('nonapp_invalid_payload:${f.name}', '条目内容不可读');
+}
+
+String _decodeUtf8(List<int> raw, String what) {
+  try {
+    return utf8.decode(raw);
+  } on FormatException catch (e) {
+    throw NonAppException('nonapp_invalid_payload:$what', '不是 UTF-8 文本（$e）');
+  }
+}
+
+Object? _decodeJson(List<int> raw, String what, String code) {
+  try {
+    return jsonDecode(_decodeUtf8(raw, what));
+  } on FormatException catch (e) {
+    throw NonAppException('$code: JSON 解析失败（$e）', '$what 不是合法 JSON');
+  }
+}
+
+NonAppManifest _parseManifest(Uint8List raw, String clientVersion) {
+  final doc = _decodeJson(raw, 'manifest.json', 'nonapp_invalid_manifest');
+  if (doc is! Map) {
+    throw const NonAppException('nonapp_invalid_manifest', 'manifest.json 顶层必须是对象');
+  }
+
+  final version = doc['formatVersion'];
+  if (version is! int || version != nonAppFormatVersion) {
+    throw NonAppException(
+        'nonapp_unsupported_version:$version', '不支持的包格式版本：$version（本机支持 v1）');
+  }
+
+  final id = doc['id'];
+  if (id is! String || !_idRe.hasMatch(id)) {
+    throw NonAppException('nonapp_invalid_id:$id', 'manifest.id 非法（只允许小写字母数字-下划线）');
+  }
+  final idStr = id;
+
+  final name = doc['name'];
+  if (!isValidNonAppName(name)) {
+    throw NonAppException('nonapp_invalid_name:$name', 'manifest.name 非法（只允许字母数字-下划线，<=64）');
+  }
+  final nameStr = name! as String;
+
+  final title = doc['title'];
+  if (title is! String || title.length > nonAppMaxTitleChars) {
+    throw const NonAppException('nonapp_invalid_manifest', 'manifest.title 必须是不超过 120 字符的字符串');
+  }
+  final titleStr = title;
+
+  final renderer = doc['renderer'];
+  if (renderer != 'html' && renderer != 'a2ui') {
+    throw NonAppException('nonapp_unsupported_renderer:$renderer', '未知渲染器：$renderer');
+  }
+  final rendererStr = renderer as String;
+
+  final createdAt = doc['createdAt'];
+  if (createdAt is! int || createdAt <= 0) {
+    throw const NonAppException('nonapp_invalid_manifest', 'manifest.createdAt 必须是 epoch 秒整数');
+  }
+  final createdAtInt = createdAt;
+
+  final minAppVersion = doc['minAppVersion'];
+  if (minAppVersion is! String || !_semverRe.hasMatch(minAppVersion)) {
+    throw const NonAppException('nonapp_invalid_manifest', 'manifest.minAppVersion 必须是语义化版本');
+  }
+  final minAppVersionStr = minAppVersion;
+  if (compareVersions(clientVersion, minAppVersionStr) < 0) {
+    throw NonAppException(
+        'nonapp_requires_app:$minAppVersionStr', '这个应用需要 NoNDesign $minAppVersionStr 及以上（当前 $clientVersion）');
+  }
+
+  final brief = doc['brief'];
+  if (brief != null && (brief is! String || brief.length > nonAppMaxBriefChars)) {
+    throw const NonAppException('nonapp_invalid_manifest', 'manifest.brief 必须是不超过 2000 字符的字符串');
+  }
+
+  return NonAppManifest(
+    formatVersion: nonAppFormatVersion,
+    id: idStr,
+    name: nameStr,
+    title: titleStr.isEmpty ? nameStr : titleStr,
+    renderer: rendererStr,
+    createdAt: createdAtInt,
+    minAppVersion: minAppVersionStr,
+    brief: brief as String?,
+  );
+}
+
+/// A2UI 消息序列归一：数组或 `{"messages":[...]}`，每项必须是对象。
+List<Object?> normalizeSurface(Object? raw) {
+  final List<Object?> messages;
+  if (raw is List) {
+    messages = List<Object?>.from(raw);
+  } else if (raw is Map && raw['messages'] is List) {
+    messages = List<Object?>.from(raw['messages'] as List);
+  } else {
+    throw const NonAppException('nonapp_invalid_surface', 'surface.json 必须是数组或 {"messages":[...]}');
+  }
+  for (var i = 0; i < messages.length; i++) {
+    if (messages[i] is! Map) {
+      throw NonAppException('nonapp_invalid_surface', 'surface.json 第 $i 项不是对象');
+    }
+  }
+  if (messages.isEmpty) {
+    throw const NonAppException('nonapp_invalid_surface', 'surface.json 消息序列为空');
+  }
+  return messages;
+}
+
+/// A2UI v1.0 basic 目录的内置组件（a2ui_flutter 0.3.0 的 v1_0 catalog）。
+///
+/// .nonapp 的 a2ui 载荷**只允许内置目录**（自定义 CatalogItem 是编译期 Dart
+/// 代码，不能随文件分发——见 docs/plan-chat-stream-shell.md §1.1）。
+/// basic 目录 v1.0 的 catalogId（A2uiCard 只注册这一个目录；别的 catalogId
+/// 会在渲染期抛 A2uiCatalogError → 炸页，所以在门口拒掉）。
+const String nonAppBasicCatalogId =
+    'https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json';
+
+const Set<String> nonAppBasicComponents = {
+  'Text',
+  'Image',
+  'Icon',
+  'Video',
+  'AudioPlayer',
+  'Row',
+  'Column',
+  'List',
+  'Card',
+  'Tabs',
+  'Modal',
+  'Divider',
+  'Button',
+  'TextField',
+  'CheckBox',
+  'ChoicePicker',
+  'Slider',
+  'DateTimeInput',
+};
+
+/// 渲染前的浅层结构门（比服务端更严）：只放行「能确定不会炸渲染」的信封。
+///
+/// 为什么需要：a2ui 0.3.0 对 schema 不合法的信封在 `processMessages` 里抛
+/// `A2uiValidationError`，而静态路径就在 `initState` 里调它——打开一个坏包
+/// 会炸整页（不是让卡片内联报错）。客户端没有 JSON Schema 校验器，所以用
+/// 白名单把攻击面收窄到「内置组件 + 受支持的 action 形状」：
+///   · 组件名必须在 [nonAppBasicComponents]；
+///   · action 只能是 `{"event": {"name": <非空字符串>}}` 或 `{"functionCall": {...}}`
+///     （其它形状 = 渲染期 VALIDATION_FAILED）。
+/// 更深的 props 形状仍由渲染器裁决；这一层只保证「不会因结构错炸页」。
+void assertSurfaceRenderable(List<Object?> messages) {
+  void checkComponent(Object? raw) {
+    if (raw is! Map) {
+      throw const NonAppException('nonapp_invalid_surface', 'surface.json 的组件不是对象');
+    }
+    final id = raw['id'];
+    final name = raw['component'];
+    if (id is! String || id.isEmpty) {
+      throw const NonAppException('nonapp_invalid_surface', 'surface.json 的组件缺少 id');
+    }
+    if (name is! String || !nonAppBasicComponents.contains(name)) {
+      throw NonAppException(
+          'nonapp_invalid_surface', '组件 $id 的类型不受支持：$name（只能使用 basic 内置组件）');
+    }
+    final action = raw['action'];
+    if (action == null) return;
+    if (action is! Map) {
+      throw NonAppException('nonapp_invalid_surface', '组件 $id 的 action 不是对象');
+    }
+    final event = action['event'];
+    if (event is Map) {
+      final eventName = event['name'];
+      if (eventName is! String || eventName.isEmpty) {
+        throw NonAppException(
+            'nonapp_invalid_surface', '组件 $id 的 action.event.name 必须是非空字符串');
+      }
+      return;
+    }
+    if (action['functionCall'] is Map) return;
+    throw NonAppException(
+        'nonapp_invalid_surface', '组件 $id 的 action 形状不受支持（只允许 event/functionCall）');
+  }
+
+  for (final message in messages) {
+    if (message is! Map) continue; // normalizeSurface 已挡；防御性
+    // 外链门（a2ui 版）：basic 目录的 Image/Video/AudioPlayer 对 http(s)
+    // 地址直接走 Image.network / 网络播放（a2ui_flutter-0.3.0 image.dart:47、
+    // media.dart:131），dataModelUpdate 里的 URL 也会经绑定喂进这些组件——
+    // 打开不受信包就会向任意外部地址发起请求，与「a2ui 内存渲染零服务依赖」
+    // 相悖。`openUrl: null` 只禁用 openUrl 函数，拦不住这个。
+    // catalogId 是结构字段（本身就是 https URL），只在 surface 信封里豁免。
+    _assertNoA2uiExternalUrls(message);
+    for (final envelope in const ['createSurface', 'surfaceUpdate']) {
+      final body = message[envelope];
+      if (body is! Map) continue;
+      final surfaceId = body['surfaceId'];
+      if (surfaceId is! String || surfaceId.isEmpty) {
+        throw const NonAppException('nonapp_invalid_surface', 'surface.json 的 surfaceId 必须是非空字符串');
+      }
+      final catalogId = body['catalogId'];
+      if (catalogId != null && catalogId != nonAppBasicCatalogId) {
+        throw NonAppException(
+            'nonapp_invalid_surface', '不支持的 catalogId：$catalogId（只能使用 basic v1.0 内置目录）');
+      }
+      final components = body['components'];
+      if (components == null) continue;
+      if (components is! List) {
+        throw const NonAppException('nonapp_invalid_surface', 'surface.json 的 components 必须是数组');
+      }
+      for (final component in components) {
+        checkComponent(component);
+      }
+    }
+  }
+}
+
+/// 递归扫描一条 A2UI 消息里的**外链地址字面量**（http(s):// 或协议相对 //）。
+///
+/// 只看「整串就是一个地址」的字符串（trim 后以协议开头），不做子串匹配：
+/// 展示文案里提到链接不该被误伤，而真正的 url/poster 属性值一定是整串地址。
+/// `catalogId` 是 surface 信封的结构字段（本身是 https URL），按信封上下文豁免
+/// ——不做键名全局豁免，避免 data model 里同名字段走私地址。
+void _assertNoA2uiExternalUrls(Object? node) {
+  void walk(Object? value) {
+    if (value is String) {
+      final v = value.trim().toLowerCase();
+      if (v.startsWith('http://') || v.startsWith('https://') || v.startsWith('//')) {
+        throw NonAppException(
+            'nonapp_a2ui_external_refs', 'a2ui 载荷含外链地址（$value）——必须零外链本地渲染');
+      }
+      return;
+    }
+    if (value is Map) {
+      final isSurfaceEnvelope = value.containsKey('surfaceId');
+      value.forEach((key, child) {
+        if (isSurfaceEnvelope && key.toString() == 'catalogId') return;
+        walk(child);
+      });
+      return;
+    }
+    if (value is List) {
+      for (final child in value) {
+        walk(child);
+      }
+    }
+  }
+
+  walk(node);
+}
+
+/// 语义化版本比较（数值元组；`1.2` == `1.2.0`；预发布后缀按字符串比）。
+///
+/// 返回 <0 / 0 / >0，与 `package:pub_semver` 的 compareTo 同向。
+int compareVersions(String a, String b) {
+  List<int> core(String v) {
+    final base = v.split(RegExp(r'[-+]')).first;
+    final parts = base.split('.').map((p) => int.tryParse(p) ?? 0).toList();
+    while (parts.length < 3) {
+      parts.add(0);
+    }
+    return parts;
+  }
+
+  String suffix(String v) {
+    final idx = v.indexOf(RegExp(r'[-+]'));
+    return idx < 0 ? '' : v.substring(idx);
+  }
+
+  final pa = core(a);
+  final pb = core(b);
+  for (var i = 0; i < 3; i++) {
+    if (pa[i] != pb[i]) return pa[i].compareTo(pb[i]);
+  }
+  // 数值核心相同：无后缀 > 有后缀（1.2 > 1.2.0-rc1），双方同形才比字符串。
+  final sa = suffix(a);
+  final sb = suffix(b);
+  if (sa == sb) return 0;
+  if (sa.isEmpty) return 1;
+  if (sb.isEmpty) return -1;
+  return sa.compareTo(sb);
+}
+
+// ---------- 内部：HTML 零外链保守预筛 ----------
+
+/// `xmlns="http://www.w3.org/2000/svg"` 这类命名空间声明不是可加载引用。
+final RegExp _xmlnsRe = RegExp(
+  r'''\sxmlns(?::[A-Za-z0-9_-]+)?\s*=\s*(?:"[^"]*"|'[^']*')''',
+  caseSensitive: false,
+);
+
+/// 服务端 `hotapp._html_ok` 的同判据集（script/link/img 的 src|href|srcset）。
+final RegExp _serverAttrRefRe = RegExp(
+  r'''<(?:script|link|img)\b[^>]*?\b(?:src|href|srcset)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))''',
+  caseSensitive: false,
+  dotAll: true,
+);
+
+/// 离线预筛的属性面：比服务端更宽（iframe/video/a/... 的 src|href|poster…）
+/// ——只严不松是允许的。
+final RegExp _offlineAttrRefRe = RegExp(
+  r'''<(?:script|link|img|iframe|video|audio|source|embed|object|track|input|a)\b[^>]*?\b(?:src|href|srcset|poster|data)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))''',
+  caseSensitive: false,
+  dotAll: true,
+);
+final RegExp _cssUrlRe =
+    RegExp(r'''url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)''', caseSensitive: false);
+final RegExp _cssImportRe = RegExp(
+  r'''@import\s+(?:url\(\s*)?(?:"([^"]*)"|'([^']*)'|([^\s;)]+))''',
+  caseSensitive: false,
+);
+
+bool _isExternalRef(String value) {
+  final v = value.trim().toLowerCase();
+  if (v.isEmpty) return false;
+  return v.startsWith('http://') || v.startsWith('https://') || v.startsWith('//') || v.startsWith('/');
+}
+
+List<String> _collectRefs(String html, RegExp attrRefRe) {
+  final found = <String>[];
+  void scan(String value) {
+    // srcset 是逗号分隔的候选列表（URL 后的 2x 描述符丢弃）
+    for (final candidate in value.split(',')) {
+      final trimmed = candidate.trim();
+      if (trimmed.isEmpty) continue;
+      final token = trimmed.split(RegExp(r'\s+')).first;
+      if (_isExternalRef(token)) found.add(token);
+    }
+  }
+
+  for (final m in attrRefRe.allMatches(html)) {
+    scan(m.group(1) ?? m.group(2) ?? m.group(3) ?? '');
+  }
+  for (final m in _cssUrlRe.allMatches(html)) {
+    scan(m.group(1) ?? m.group(2) ?? m.group(3) ?? '');
+  }
+  for (final m in _cssImportRe.allMatches(html)) {
+    scan(m.group(1) ?? m.group(2) ?? m.group(3) ?? '');
+  }
+  return found;
+}
+
+void _assertHtmlStructure(String html) {
+  // 与服务端 `_html_ok` 同判据：<body / </html / >200 字符
+  final htmlLower = html.toLowerCase();
+  if (!htmlLower.contains('<body') || !htmlLower.contains('</html>') || html.length <= 200) {
+    throw const NonAppException('nonapp_html_invalid', 'HTML 缺少 <body>/</html> 结构或长度不足');
+  }
+}
+
+/// **服务端等价**门（在线导入用）：与 `hotapp._html_ok` 同一引用面。
+///
+/// 在线路径的权威是服务端——客户端这里只做「明显会被服务端拒的包提前拒掉」，
+/// 不能比服务端严：否则服务端接受的包（如 `<a href="https://…">`，服务端
+/// 正则只覆盖 script/link/img）会在客户端解不开，导出→打开自家应用走不通。
+void assertHtmlServerCompat(String html) {
+  final found = _collectRefs(html, _serverAttrRefRe);
+  if (found.isNotEmpty) {
+    throw NonAppException(
+        'nonapp_html_external_refs', 'HTML 含外链引用（${found.take(3).join(', ')}）');
+  }
+  _assertHtmlStructure(html);
+}
+
+/// **离线**门（file:// 打开前）：比服务端 `_html_ok` 只严不松。
+///
+/// 抛 [NonAppException]（`nonapp_html_invalid` / `nonapp_html_external_refs`）。
+/// file:// 下没有服务端 CSP 与零外链门，这一层就是唯一防线。
+void assertHtmlOfflineSafe(String html) {
+  // 1) 服务端等价面（同判据，先拦最确定的）
+  assertHtmlServerCompat(html);
+
+  // 2) 全文扫 http(s)://（xmlns 声明豁免：内联 SVG 的常见形态）
+  final scrubbed = html.replaceAll(_xmlnsRe, '');
+  final lower = scrubbed.toLowerCase();
+  if (lower.contains('http://') || lower.contains('https://')) {
+    throw const NonAppException(
+        'nonapp_html_external_refs', 'HTML 含 http(s) 外链引用——离线打开必须全内联零外链');
+  }
+
+  // 3) 更宽的引用面（iframe/video/a/... + poster/data）
+  final found = _collectRefs(html, _offlineAttrRefRe);
+  if (found.isNotEmpty) {
+    throw NonAppException(
+        'nonapp_html_external_refs', 'HTML 含外链引用（${found.take(3).join(', ')}）');
+  }
+}

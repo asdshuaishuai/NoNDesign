@@ -11,13 +11,15 @@
 ///   纯文档、零引擎依赖（手机离线可跑）。
 /// - **REFINE** 真实现：读现有文档（read_docs）+ 指令改写（write_doc），不依赖
 ///   引擎写路径；有引擎桥时 design_op 亦可检视/落画布（仍过 AgentGate）。
-/// - **BUILD** 真实现：design_op 经引擎桥提交 `/engine/apply` gate=agent
-///   （AgentGate 语义——绝不绕过引擎门、绝不降级 human 门）。桌面 dart
-///   运行时用 store 锚定桥（`_StoreEngineGate`）：applyOp 同一条 _opQueue
-///   队列 + 同一个 _commit 采纳（history/render/dirty，画布实时长出）；
-///   纯 HTTP 桥（[HttpEngineGate]）供独立/移动「连接桌面」形态。
-///   整屏生成（generate_page）、RSI critique/auto_fix 评审轮、空板清扫
-///   留待迁移计划 P1。
+/// - **BUILD** 真实现：整屏生成用 generate_page（`/engine/generate` →
+///   session_generate_in），精修与连线用 design_op 经引擎桥提交
+///   `/engine/apply` gate=agent（AgentGate 语义——绝不绕过引擎门、绝不降级
+///   human 门）。桌面 dart 运行时用 store 锚定桥（`_StoreEngineGate`）：
+///   同一条 _opQueue 队列 + 同一个 _commit 采纳（history/render/dirty，画布
+///   实时长出）；纯 HTTP 桥（[HttpEngineGate]）供独立/移动「连接桌面」形态。
+///   收尾确定性桥段（P1，server/agent.py:650-700 同源）：空板清扫
+///   （`_sweepIdleArtboards`）→ RSI critique/auto_fix 评审轮（`_runRsiLoop`），
+///   全部经引擎门。
 ///
 /// 护栏铁律（docs/plan-dart-agent-migration.md §6.2）：Dart 循环产出的画布
 /// 变更必须过引擎 AgentGate，绝不绕过——本文件没有任何「直接拼 mbt 提交」
@@ -25,18 +27,19 @@
 ///
 /// 事件契约（§6.3）：与 server SSE 同形，`store._handleAgentEvent` 直接消费：
 /// note / tool_start / tool_end / assistant_delta / assistant_text /
-/// thinking_delta / doc_written / design_spec_written / preview / usage /
-/// done / failed。
+/// thinking_delta / doc_written / design_spec_written / page_generated /
+/// review_round / cleanup / preview / usage / done / failed。
 ///
 /// 与 server 的已知差异（诚实登记，非静默降级）：
 /// - 无逐字 doc_delta 直播——SDK 的工具参数增量是原始 JSON 分片，content
-///   解码器（server `_DocDeltaExtractor`）留待 P1；doc_written 全量事件是
+///   解码器（server `_DocDeltaExtractor`）留待后续；doc_written 全量事件是
 ///   正确性兜底，与 server 一致。
-/// - 无 generate_page / RSI 评审轮 / 空板清扫（P1）；无 CompactingSession
-///   持久会话记忆（P2 上下文层）。
-/// - BUILD 静态提示词里 generate_page 的两处提及已就地替换为 design_op 语法
-///   （模型拿不到该工具，照原文会幻觉调用）——见 `_staticBuild` 的
-///   `GENERATE_PAGE DEVIATION` 注释。
+/// - 无 CompactingSession 持久会话记忆（P2 上下文层）。
+/// - **空板清扫/RSI 的 PLAN 语义分歧（显式登记）**：server 的清扫在 plan
+///   模式也执行（agent.py:650 无 mode 守卫）；Dart 的 plan 模式按既有设计
+///   不给引擎面（runDartAgent 里 `bridge: request.mode == 'plan' ? null :
+///   bridge`），故清扫与 RSI 只在非 plan 生效——实现用
+///   `bridge == null → return` 表达，测试锚定 plan 零 session 调用。
 library;
 
 import 'dart:async';
@@ -117,9 +120,31 @@ abstract class EngineGateBridge {
   Future<List<dynamic>> components();
 }
 
+/// 引擎写面扩展（P1）：整屏生成 + 宿主侧 session 变更（RSI auto_fix /
+/// 空板清扫）。**刻意独立于 [EngineGateBridge]**——测试替身只实现门接口
+/// 即可（新增成员会破坏 `implements EngineGateBridge` 的编译面）。
+///
+/// 生产实现两枚，与门同构：
+/// - [HttpEngineGate]：`/engine/generate` + `/engine/session` 直连；
+/// - store 锚定的 `_StoreEngineGate`（store.dart）：同一 `_opQueue` 链内
+///   读新鲜 canonical、render + commit——保证 store.mbt 与循环 ctx.mbt 锁步。
+///
+/// 写纪律不变：generate 是引擎 `session_generate_in` 域内生成，mutateSession
+/// 只用于 `session_auto_fix` / `session_apply_agent`（SESSION_MUTATING 面）
+/// ——本接口不是「直接拼 mbt」的捷径。
+abstract class EngineWriteBridge {
+  /// 整屏生成（POST /engine/generate → session_generate_in）。
+  /// 参数顺序即契约：mbt 第一位（canonical 文档面）。
+  Future<Map<String, dynamic>> generate(
+      String mbt, String intent, String name, Map<String, dynamic> spec);
+
+  /// 宿主侧 session 变更；同样 mbt 第一位、name 第二位、arg 第三位。
+  Future<Map<String, dynamic>> mutateSession(String mbt, String name, [String? arg]);
+}
+
 /// HTTP 实现：Agent 变更走 `/engine/apply` 且 `gate: 'agent'`（AgentGate
 /// 语义，与 server `engine.apply(gate='agent')` 同门）；检视走 `/engine/session`。
-class HttpEngineGate implements EngineGateBridge {
+class HttpEngineGate implements EngineGateBridge, EngineWriteBridge {
   final NoNDesignApi api;
   HttpEngineGate(this.api);
 
@@ -129,6 +154,15 @@ class HttpEngineGate implements EngineGateBridge {
 
   @override
   Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) =>
+      api.session(mbt, name, arg);
+
+  @override
+  Future<Map<String, dynamic>> generate(
+          String mbt, String intent, String name, Map<String, dynamic> spec) =>
+      api.generate(mbt, intent, name, spec);
+
+  @override
+  Future<Map<String, dynamic>> mutateSession(String mbt, String name, [String? arg]) =>
       api.session(mbt, name, arg);
 
   @override
@@ -467,7 +501,9 @@ and verify it.
 
 ## Loop
 1. Use PROJECT MAP + the latest state. Read one board only if you need exact values.
-2. Make one targeted design_op (or a small sequence). Do not rebuild the screen unless asked.
+2. Make one targeted design_op (or a small sequence). Do not rebuild the screen unless asked;
+   a brand-new screen is generate_page {intent, name, spec} (the engine picks the template,
+   applies the design spec, self-repairs and scores).
 3. Keep flows intact. If you add a screen, connect it.
 4. Verify with inspect {kind:"critique"} or lint when the change is structural.
 5. finish with a one-line summary of what changed.
@@ -479,9 +515,8 @@ and verify it.
 - Prefer update/move/copy/reorder over delete+place.
 - If the request is ambiguous and the user asked for clarification, ask first (plain text).''';
 
-// BUILD 提示词：server STATIC_BUILD 逐字移植，仅两处 generate_page 提及就地
-// 替换为 design_op 语法（GENERATE_PAGE DEVIATION——内置 Dart 循环本阶段未接
-// generate_page；模型拿不到该工具，照原文会幻觉调用。P1 接入后回收此偏差）。
+// BUILD 提示词：server STATIC_BUILD 逐字移植；generate_page 已是真工具
+// （P1 接入），整屏路径按 server 语义改回 generation-first。
 const String _staticBuild = '''You are NoN — the embedded product designer and prototyper of NoNDesign.
 You operate on a MoonViz document: one canonical .mbt.md is the only source of truth.
 Every op is validated by the engine gate and committed immediately; the user watches artboards
@@ -495,15 +530,16 @@ appear live. You design the experience, not a pile of boxes.
 - Color pairing is a hard rule: text must read against its effective background.
 - Components are axis-aligned. Rotation only in 90° steps.
 
-## Workflow (op-first)
+## Workflow (generation-first)
 1. Read the brief, PROJECT MAP, design spec and docs. Trust the map; do not re-read the document
    just to discover what exists.
 2. Plan the screen graph; name boards in ASCII snake_case (home, settings, chat…).
-3. Use the project design spec for every op. Create each screen with `create <name> [w] [h]`,
-   then lay it out with `place <ab> <component> <id> [variant|-] [x] [y] [w] [h] [k=v ...]`.
-4. One op at a time via design_op. Do not batch several ops into one call — the engine gate
+3. Use the project design spec on every generate_page call.
+4. Generate one page per screen: generate_page {intent, name, spec}. Do NOT hand-place a whole
+   screen — the engine picks a template, applies the spec, self-repairs and scores.
+5. Refine with small design_op ops only where generation needs product specifics: real copy,
+   a specific CTA, a list row, an image placeholder. One op at a time — the engine gate
    validates each op individually and a rejected op must be read, adjusted, retried.
-5. Refine with small ops: real copy, a specific CTA, a list row, an image placeholder.
 6. Connect every screen: flow <from> <to> <tappable_node>. Bind the flow to the container the
    user taps (row, button, card), never to an inner text fragment. Back is built in for
    back-like nodes (id/text containing back/返回/←).
@@ -557,7 +593,8 @@ appear live. You design the experience, not a pile of boxes.
 - Use fill/hug modes instead of guessing sizes when the layout should adapt.
 
 ## Tools
-- design_op — one mutating op (build/refine/connect/verify).
+- generate_page — whole screen from intent + design spec (default build path).
+- design_op — one mutating op (refinements, flow wiring, verification fixes).
 - read_mbt — no args = refreshed outline; {artboard} = that board's source.
 - inspect — query_nodes / interactions / states / lint / critique / spec / export_svg /
   flows / artboards.
@@ -610,7 +647,7 @@ String composeDartInstructions({
       .join(' · ');
   final componentLine = components.map((c) => c.toString()).join(' · ');
   final designText = designSpec.isEmpty
-      ? '(none yet — generate_page without spec returns a draft)'
+      ? '(no design system yet — write one with write_design_spec before generating)'
       : const JsonEncoder.withIndent('  ').convert(designSpec);
   final docBits = <String>[];
   final prd = docs['prd'];
@@ -799,7 +836,7 @@ Future<DartAgentResult> runDartAgent({
           ? "You replied without calling tools. Deliver now: call write_doc(kind='prd'), "
               "write_doc(kind='ui'), write_design_spec, then finish. Do not reply with prose only."
           : 'You replied without changing the canvas. Proceed now with the actual tool calls '
-              '(design_op / inspect), then finish. Do not reply with prose only.';
+              '(generate_page / design_op / inspect), then finish. Do not reply with prose only.';
       await consume(nudge);
       if (await _cancelledExit(ctx, abortSignal)) return _terminal(ctx, 'cancelled');
     }
@@ -828,7 +865,16 @@ Future<DartAgentResult> runDartAgent({
       );
     }
 
+    // ---- 收尾确定性桥段（server/agent.py:650-700 同序）：空板清扫 → RSI
+    // 修复环。二者都经引擎门，且都只在非 plan（引擎面）生效；内部失败只
+    // 跳过、不影响已交付的终态。----
+    await _sweepIdleArtboards(ctx);
+    await _runRsiLoop(ctx);
+
     emit({'type': 'usage', ...usage.toMap(request.contextWindow)});
+    if (ctx.cleanup.isNotEmpty) {
+      emit({'type': 'cleanup', 'removed': List<String>.from(ctx.cleanup)});
+    }
 
     final stopReason = ctx.finished
         ? ctx.stopReason
@@ -842,7 +888,7 @@ Future<DartAgentResult> runDartAgent({
       'designSpec': ctx.designSpec,
       'usage': usage.toMap(request.contextWindow),
       'stopReason': stopReason,
-      'cleanup': <String>[], // P1：空板清扫（server _cleanup_document）
+      'cleanup': List<String>.from(ctx.cleanup),
     });
     return DartAgentResult(
       ok: true,
@@ -933,6 +979,9 @@ class _Ctx {
   String summary = '';
   String stopReason = 'done';
   final List<String> ops = [];
+  /// 空板清扫已删除的画板 id（server `ctx.cleanup`；随 cleanup 事件与 done
+  /// 事件交付前端）。
+  final List<String> cleanup = [];
   final List<String> textParts = [];
   int remoteCalls = 0;
   int previewSeq = 0;
@@ -973,6 +1022,128 @@ class _Ctx {
       out['state'] = await stateSummary(bridge, mbt, parseRevision(mbt));
     }
     return out;
+  }
+}
+
+/// 引擎文档里的种子画板 id（前端 `bootstrapFirstBoard` / server `SEED_BOARD`
+/// 同值；能力探测通过后正式引擎不再产生，仅旧文档/兜底路径可能有）。
+const String _seedBoard = '__seed';
+
+int _nodeCount(dynamic board) {
+  if (board is! Map) return 0;
+  final n = board['nodes'];
+  return n is num ? n.toInt() : 0;
+}
+
+/// 空板清扫（server `_cleanup_document` 的 Dart 移植，agent.py:732-762）：
+/// 保留 entry，删除 `__seed` 与 nodes<=1 的板；删前复核板数>1（永不删到最后
+/// 一块），删除走 `session_apply_agent` 的 `delete-artboard <id>`（AgentGate
+/// 同门分发——破坏性操作也不绕门）。
+///
+/// **PLAN 语义分歧（显式登记）**：server 的清扫在 plan 模式也执行（agent.py:650
+/// 无 mode 守卫）；Dart 的 plan 模式按既有设计不给引擎面（runDartAgent 的
+/// `bridge: request.mode == 'plan' ? null : bridge`），所以这里以
+/// `bridge == null → return` 表达「只在非 plan 生效」——是刻意的守卫，不是漏写。
+/// 清扫失败（桥缺失/门拒绝/异常）一律只跳过，绝不让已交付的 run 变 failed。
+Future<void> _sweepIdleArtboards(_Ctx ctx) async {
+  final write = ctx.bridge is EngineWriteBridge ? ctx.bridge as EngineWriteBridge : null;
+  final bridge = ctx.bridge;
+  if (write == null || bridge == null) return;
+  try {
+    final listed = await bridge.session(ctx.mbt, 'session_list_artboards');
+    final data = _listOf(listed['data']);
+    if (data.length <= 1) return;
+    final entry = _frontmatterValue(ctx.mbt, 'entry');
+    final targets = <String>[];
+    for (final board in data) {
+      if (board is! Map) continue;
+      final bid = _s(board['id']);
+      if (bid.isEmpty) continue;
+      if (bid == entry && bid != _seedBoard) continue; // 交互根永不删
+      if (bid == _seedBoard || _nodeCount(board) <= 1) targets.add(bid);
+    }
+    for (final bid in targets) {
+      final current = await bridge.session(ctx.mbt, 'session_list_artboards');
+      if (_listOf(current['data']).length <= 1) break;
+      final env = await write.mutateSession(
+          ctx.mbt, 'session_apply_agent', 'delete-artboard $bid');
+      if (env['ok'] == true && env['mbt'] is String) {
+        ctx.mbt = env['mbt'] as String;
+        ctx.cleanup.add(bid);
+      }
+    }
+  } catch (_) {
+    // 清扫是收尾卫生：异常不上抛（server 同语义——只有成功信封才记账）。
+  }
+}
+
+/// 收尾 RSI 视觉修复环（server agent.py:652-700 的 Dart 移植）：
+/// 逐板 `session_critique`（只读）→ 任一原则 verdict=='poor' 时
+/// `session_auto_fix` 定向修复，并把信封 canonical 回灌 ctx.mbt（复评必须看
+/// 修复后的文档）；最多 2 轮。
+///
+/// **实参顺序是硬契约**：[EngineGateBridge.session] 的签名是
+/// `session(mbt, name, [arg])`——板 id 必须在 arg 位。写成两参会把
+/// 'session_critique' 当 canonical 发出去，引擎必报错，RSI 静默退化成 no-op。
+/// 信封实形（server 真机探针）：`data.results = [{principle, score(1-5),
+/// verdict(poor/good), observation, advice}]`；解析不出 results 时按「无目标」
+/// 处理（break），绝不抛异常。PLAN 不给引擎面（见 `_sweepIdleArtboards` 的
+/// 分歧登记）。
+Future<void> _runRsiLoop(_Ctx ctx) async {
+  final write = ctx.bridge is EngineWriteBridge ? ctx.bridge as EngineWriteBridge : null;
+  final bridge = ctx.bridge;
+  if (write == null || bridge == null) return;
+  if (ctx.request.mode == 'plan') return;
+  try {
+    for (var rnd = 1; rnd <= 2; rnd++) {
+      final listed = await bridge.session(ctx.mbt, 'session_list_artboards');
+      // 目标：非 seed、非空板的板（与 server 过滤一致），值为 poor 项数。
+      final targets = <String, int>{};
+      for (final board in _listOf(listed['data'])) {
+        if (board is! Map) continue;
+        final bid = _s(board['id']);
+        if (bid.isEmpty || bid == _seedBoard || _nodeCount(board) <= 0) continue;
+        try {
+          final critique = await bridge.session(ctx.mbt, 'session_critique', bid);
+          final data = critique['data'];
+          final results =
+              (data is Map && data['results'] is List) ? data['results'] as List : const [];
+          final poor = results.where((r) => r is Map && r['verdict'] == 'poor').length;
+          if (poor > 0) targets[bid] = poor;
+        } catch (_) {
+          continue; // 单板检视失败跳过，不中断整轮
+        }
+      }
+      if (targets.isEmpty) {
+        if (rnd == 1) {
+          ctx.emit({'type': 'note', 'label': '质量审查', 'detail': '全部屏幕通过原则评审（无 poor 项）'});
+        }
+        break;
+      }
+      ctx.emit({
+        'type': 'review_round',
+        'round': rnd,
+        'detail': targets.entries.map((e) => '${e.key}:${e.value}项poor').join('、'),
+      });
+      for (final entry in targets.entries) {
+        ctx.emit({
+          'type': 'note',
+          'label': '修复轮',
+          'detail': '${entry.key} · ${entry.value} 项 poor → auto_fix',
+        });
+        try {
+          final fixed = await write.mutateSession(ctx.mbt, 'session_auto_fix', entry.key);
+          if (fixed['ok'] == true && fixed['mbt'] is String) {
+            ctx.mbt = fixed['mbt'] as String;
+          }
+        } catch (_) {
+          continue; // 单板修复失败跳过（服务端语义：只跳过该板）
+        }
+      }
+      await Future<void>.delayed(Duration.zero);
+    }
+  } catch (_) {
+    // 评审环是收尾增强：引擎不可达/信封异常不得把已交付的 run 变成 failed。
   }
 }
 
@@ -1122,6 +1293,74 @@ ToolSet _buildTools(_Ctx ctx) {
 
   // ---- 以下为非 plan 模式工具（server:270-395 同构：plan 不暴露引擎面）----
   if (ctx.request.mode != 'plan') {
+    // ---- generate_page（server:272-312；整屏生成 = 默认建屏路径）----
+    tools['generate_page'] = tool(
+      description: 'Generate a whole screen from an intent. This is the default build path: '
+          'the engine picks a template, applies the design spec, self-repairs and scores. '
+          'Pass the project design spec on every call.',
+      inputSchema: Schema(
+        jsonSchema: {
+          'type': 'object',
+          'properties': {
+            'intent': {'type': 'string'},
+            'name': {'type': 'string'},
+            'spec': {'type': 'object'},
+          },
+          'required': ['intent'],
+        },
+        fromJson: (m) => m,
+      ),
+      execute: (input, _) async {
+        final raw = (input as Map?) ?? const {};
+        final intent = (raw['intent'] ?? '').toString();
+        final name = (raw['name'] ?? '').toString();
+        final spec = raw['spec'] is Map
+            ? Map<String, dynamic>.from(raw['spec'] as Map)
+            : <String, dynamic>{};
+        final sw = Stopwatch()..start();
+        emit({
+          'type': 'tool_start',
+          'tool': 'generate_page',
+          'args': {'intent': intent, 'name': name},
+        });
+        ctx.remoteCalls += 1;
+        // spec 缺省取项目设计规范（server `spec or ctx.design_spec or {}`）。
+        final effective = spec.isNotEmpty ? spec : ctx.designSpec;
+        final write =
+            ctx.bridge is EngineWriteBridge ? ctx.bridge as EngineWriteBridge : null;
+        Map<String, dynamic> out;
+        if (write == null) {
+          out = {'ok': false, 'error': 'generate_unavailable'};
+        } else {
+          try {
+            // 参数顺序即契约：generate(mbt, intent, name, spec)——mbt 第一位。
+            final env = await write.generate(ctx.mbt, intent, name, effective);
+            out = await ctx.commit('generate $intent', env);
+          } catch (e) {
+            out = {'ok': false, 'error': 'engine_generate_failed:$e'};
+          }
+        }
+        emit({
+          'type': 'tool_end',
+          'tool': 'generate_page',
+          'ok': out['ok'] != false,
+          'ms': sw.elapsedMilliseconds,
+          'preview': _preview(out),
+          'error': out['error'],
+        });
+        if (out['ok'] != false) {
+          emit({
+            'type': 'page_generated',
+            'artboard': out['artboard'],
+            'template': out['template'],
+            'score': out['score'],
+            'summary': out['summary'],
+          });
+        }
+        return out;
+      },
+    );
+
     // ---- design_op（server:314-340；写路径唯一入口 = 引擎 AgentGate）----
     tools['design_op'] = tool(
       description: 'Run ONE mutating MoonViz op (place/update/move/flow/delete/reorder/'

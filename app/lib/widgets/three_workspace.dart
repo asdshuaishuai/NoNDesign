@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
+import '../core/api_shelf.dart';
 import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
@@ -60,6 +62,14 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   // 呈现（three-5：此前全部静默吞掉，pass chips 冻结在旧状态无提示）。
   // 下一次成功的 _refresh 自动清除。
   String _refreshError = '';
+  // 预览就绪态（res-2）：截图 / 四方位取证只在页面**真的跑起来**后可用。
+  // 判据是预览页自带的 JS 桥 metrics（server/three_agent.py 在页面加载
+  // 300ms 后主动 __report({kind:'metrics'})，此后每 2s 一次）——不收
+  // 页面事件。**不要换成 setOnPageFinished**：webview_flutter 平台接口
+  // 基类的 setOnPageFinished 直接 throw UnimplementedError
+  //（platform_navigation_delegate.dart:104-106），而 NavigationDelegate
+  // 构造器会同步调用它——加上它连测试里的 fake 委托都会在构造期全红。
+  bool _previewReady = false;
   // 缓存 store：dispose 里保存规范草稿时不能再 context.read（元素已停用）。
   late final AppStore _store = context.read<AppStore>();
 
@@ -88,7 +98,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   @override
   void initState() {
     super.initState();
-    if (!_wkRegistered) {
+    // 移动端（iOS）由插件注册自动完成；macOS 无 endorsed 实现才需要幂等
+    // 注册。桌面 Windows/Linux 注册 WebKit 无意义（会盖掉真实平台实现）。
+    // `instance == null` 守卫另兼测试卫生：fake 平台注入后不得被覆盖。
+    if ((Platform.isMacOS || Platform.isIOS) && !_wkRegistered && WebViewPlatform.instance == null) {
       WebKitWebViewPlatform.registerWith();
       _wkRegistered = true;
     }
@@ -243,6 +256,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   void _mountPreview() {
     final api = store.api;
     if (api == null || _project == null) return;
+    // 新控制器 = 新页面：就绪态归零，等预览页的 metrics 桥重新点亮。
+    _previewReady = false;
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel('NON3D', onMessageReceived: _onBridgeMessage)
@@ -272,11 +287,19 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   }
 
   void _onPreviewPageStarted(String url) {
-    if (_loadError.isEmpty || !mounted) return;
-    setState(() => _loadError = ''); // 新导航开始：清旧占位，失败会再置
+    // 新导航开始：旧页的就绪态作废（本次导航失败会经 onHttpError 置占位）。
+    final wasReady = _previewReady;
+    _previewReady = false;
+    if (!mounted) return;
+    if (_loadError.isNotEmpty) {
+      setState(() => _loadError = ''); // 新导航开始：清旧占位，失败会再置
+    } else if (wasReady) {
+      setState(() {}); // 就绪 → 未就绪：截图/四方位按钮要跟着变灰
+    }
   }
 
   void _setLoadError(String msg) {
+    _previewReady = false; // 主帧失败：截图/四方位立即失效（句柄指向坏页面）
     if (msg == _loadError) return;
     if (!mounted) return;
     setState(() => _loadError = msg);
@@ -284,6 +307,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
 
   /// 错误占位的重试：清占位并重新 loadRequest（controller 为空则仅复位）。
   void _retryPreview() {
+    _previewReady = false;
     setState(() => _loadError = '');
     final api = store.api;
     if (api != null && _project != null) {
@@ -305,6 +329,12 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _lastError = m;
         await api.threeFeedback(_project!, 'error', m);
       } else if (kind == 'metrics') {
+        // 预览页活着的第一信号（页面加载 300ms 后主动上报，此后每 2s 一次，
+        // server/three_agent.py 的 __loop/首帧 setTimeout）：只有此刻起
+        // 截图 / 四方位取证才有真实执行面。错误占位在场时不点亮。
+        if (_loadError.isEmpty && !_previewReady && mounted) {
+          setState(() => _previewReady = true);
+        }
         await api.threeFeedback(_project!, 'metrics', data['payload']);
       } else if (kind == 'screenshot') {
         await api.threeFeedback(_project!, 'screenshot',
@@ -363,6 +393,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     if (api == null) return;
     try {
       final res = await api.threeProjects();
+      // 列表请求也是在飞窗口：期间视图可能已被切走（⌘1/⌘5），此时再
+      // showNonDialog(context) 就是死 context 弹窗。
+      if (!mounted) return;
       final items = ((res['projects'] as List?) ?? []).cast<Map>();
       final choice = await showNonDialog<String>(
         context: context,
@@ -375,15 +408,33 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
               child: Row(children: [Icon(Icons.add, size: 16, color: ctx.palette.accent), const SizedBox(width: 8), const Text('新建项目…')]),
             ),
             for (final it in items)
-              SimpleDialogOption(
-                onPressed: () => Navigator.pop(ctx, it['name'] as String),
-                child: Row(children: [
-                  Icon(it['name'] == _project ? Icons.check : (it['blocked'] == true ? Icons.block : Icons.view_in_ar_outlined),
-                      size: 15, color: it['name'] == _project ? ctx.palette.accent : (it['blocked'] == true ? ctx.palette.warn : ctx.palette.ink3)),
-                  const SizedBox(width: 8),
-                  Text('${it['name']}（${_passLabels[it['current']] ?? it['current']}）', style: const TextStyle(fontSize: 13)),
-                ]),
-              ),
+              Row(children: [
+                Expanded(
+                  child: SimpleDialogOption(
+                    onPressed: () => Navigator.pop(ctx, it['name'] as String),
+                    child: Row(children: [
+                      Icon(it['name'] == _project ? Icons.check : (it['blocked'] == true ? Icons.block : Icons.view_in_ar_outlined),
+                          size: 15, color: it['name'] == _project ? ctx.palette.accent : (it['blocked'] == true ? ctx.palette.warn : ctx.palette.ink3)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('${it['name']}（${_passLabels[it['current']] ?? it['current']}）',
+                            style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis),
+                      ),
+                    ]),
+                  ),
+                ),
+                // res-1：/three/delete 服务端早已落地并测过（真删 + 越界防护），
+                // 客户端此前没有任何入口——blocked 项目的错误文案却指路
+                // 「POST /three/delete 删项目重开」，形成「提示了做不到的出路」。
+                IconButton(
+                  tooltip: '删除项目',
+                  icon: Icon(Icons.delete_outline, size: 16, color: ctx.palette.ink4),
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  onPressed: () => Navigator.pop(ctx, '__delete__:${it['name']}'),
+                ),
+                const SizedBox(width: 8),
+              ]),
           ],
         ),
       );
@@ -395,6 +446,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       if (!mounted) return;
       if (choice == '__new__') {
         await _createProject();
+        return;
+      }
+      if (choice.startsWith('__delete__:')) {
+        await _deleteProject(choice.substring('__delete__:'.length));
         return;
       }
       if (choice == _project) return;
@@ -418,6 +473,66 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       await _refresh();
     } catch (e) {
       _toast('项目列表失败', '$e');
+    }
+  }
+
+  /// 删除 3D 项目（res-1）：二次确认（不可恢复）→ POST /three/delete。
+  /// 删的是当前项目则整体回空态——项目名/规范/scene/controller/就绪态全清，
+  /// 否则工作台会停在一个盘上已不存在的项目上（截图/刷新全是 404 噪音）。
+  Future<void> _deleteProject(String name) async {
+    final api = store.api;
+    if (api == null) return;
+    final ok = await showNonDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ctx.palette.panel,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text('删除 3D 项目？',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+        content: Text(
+          '将删除整个项目目录（spec / scene / 证据，不可恢复）：\n~/Documents/NoNDesign/3d/$name',
+          style: TextStyle(fontSize: 13, height: 1.5, color: ctx.palette.ink2),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: ctx.palette.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || ok != true) return;
+    try {
+      final res = await api.threeDelete(name);
+      if (!mounted) return;
+      if (res['ok'] != true) {
+        _toast('删除失败', '${res['detail'] ?? res['error'] ?? 'HTTP ${res['status']}'}');
+        return;
+      }
+      if (_project == name) {
+        // 规范草稿随项目目录一起作废（留下就是幽灵草稿）。
+        _specCtl.clear();
+        _specDirty = false;
+        setState(() {
+          _project = null;
+          _state = null;
+          _spec = null;
+          _sceneJs = '';
+          _controller = null;
+          _previewReady = false;
+          _loadError = '';
+          _lastError = '';
+          _refreshError = '';
+          _face = 'preview';
+        });
+        store.setThreeSpecDraft(name, null);
+        store.setThreeProjectName('');
+      }
+      _toast('已删除 3D 项目', name);
+    } catch (e) {
+      _toast('删除失败', e.toString());
     }
   }
 
@@ -447,15 +562,18 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     }
   }
 
-  PopupMenuItem<String> _menuItem(BuildContext context, String value, IconData icon, String label) {
+  PopupMenuItem<String> _menuItem(BuildContext context, String value, IconData icon, String label,
+      {bool enabled = true}) {
     final p = context.palette;
+    final color = enabled ? p.ink3 : p.ink4;
     return PopupMenuItem<String>(
       value: value,
       height: 36,
+      enabled: enabled,
       child: Row(children: [
-        Icon(icon, size: 16, color: p.ink3),
+        Icon(icon, size: 16, color: color),
         const SizedBox(width: 8),
-        Text(label, style: const TextStyle(fontSize: 13)),
+        Text(label, style: TextStyle(fontSize: 13, color: enabled ? null : color)),
       ]),
     );
   }
@@ -631,6 +749,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         ]),
       );
 
+  /// 截图 / 四方位取证的启用判据（唯一一处）：预览页已就绪（metrics 桥到达）
+  /// 且没有在飞生成、且项目在场。未就绪时 runJavaScript 是静默 no-op——
+  /// 按钮亮着但点了没反应比禁用更糟（用户以为取证成功）。
+  bool get _captureReady => _previewReady && !_busy && _project != null;
+
   List<Widget> _primaryActions(NonPalette p, {required bool includeAll}) => [
         _TopBtn(icon: Icons.folder_open_outlined, label: '项目', onTap: _busy ? null : () => _pickProject()),
         _TopBtn(icon: Icons.auto_awesome_outlined, label: '生成当前层', onTap: _busy || _project == null ? null : _runPass),
@@ -638,15 +761,15 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _TopBtn(
               icon: Icons.camera_alt_outlined,
               label: '截图',
-              onTap: _project == null
-                  ? null
-                  : () => _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()')),
+              onTap: _captureReady
+                  ? () => _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()')
+                  : null),
           _TopBtn(
               icon: Icons.rotate_90_degrees_ccw_outlined,
               label: '四方位取证',
-              onTap: _project == null
-                  ? null
-                  : () => _controller?.runJavaScript('window.__non3d_turntable && window.__non3d_turntable()')),
+              onTap: _captureReady
+                  ? () => _controller?.runJavaScript('window.__non3d_turntable && window.__non3d_turntable()')
+                  : null),
         ],
         _TopBtn(icon: Icons.check_rounded, label: '通过并继续', onTap: _busy || _project == null ? null : _continue),
         if (includeAll)
@@ -673,6 +796,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       ];
 
   Widget _menuButton(BuildContext context, NonPalette p, {required bool landscape}) {
+    // 弹出菜单路径与 _TopBtn 路径共用同一 ready 判据（portrait 只走菜单，
+    // 只测一条会漏——res-2 两条入口都要禁用）。
+    final captureReady = _captureReady;
     return PopupMenuButton<String>(
       tooltip: '3D 操作',
       color: p.panel,
@@ -682,8 +808,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       itemBuilder: (ctx) => [
         _menuItem(ctx, 'project', Icons.folder_open_outlined, '项目'),
         _menuItem(ctx, 'pass', Icons.auto_awesome_outlined, '生成当前层'),
-        _menuItem(ctx, 'shot', Icons.camera_alt_outlined, '截图'),
-        _menuItem(ctx, 'turntable', Icons.rotate_90_degrees_ccw_outlined, '四方位取证'),
+        _menuItem(ctx, 'shot', Icons.camera_alt_outlined, '截图', enabled: captureReady),
+        _menuItem(ctx, 'turntable', Icons.rotate_90_degrees_ccw_outlined, '四方位取证', enabled: captureReady),
         _menuItem(ctx, 'continue', Icons.check_rounded, '通过并继续'),
         _menuItem(ctx, 'reload', Icons.refresh, '刷新预览'),
         const PopupMenuDivider(),
@@ -701,8 +827,12 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       case 'pass':
         _runPass();
       case 'shot':
+        // 菜单项已 disabled，这里再挡一道：任何杂散调用（键盘/自动化）都
+        // 不得在未就绪页面上跑截图（按钮亮但无操作 = 静默失败）。
+        if (!_captureReady) return;
         _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()');
       case 'turntable':
+        if (!_captureReady) return;
         _controller?.runJavaScript('window.__non3d_turntable && window.__non3d_turntable()');
       case 'continue':
         _continue();

@@ -43,6 +43,17 @@ SESSION_DIR = Path(os.environ.get("NONDESIGN_SESSION_DIR", APP_DIR / "sessions")
 WORKSPACE_DIR = Path(os.environ.get("NONDESIGN_WORKSPACE", Path.home() / "Documents" / "NoNDesign"))
 
 app = FastAPI(title="NoNDesign", version=APP_VERSION)
+
+# 可选路由模块挂载（`.nonapp` 包端点 / 视频媒体端点）：**必须可降级**——
+# 并行施工期或裁剪部署里某个模块缺失时只打 stderr，绝不拖垮整个服务
+# （否则一行 import 错误就让 /health 都起不来）。
+for _mod in ("nonapp_routes", "video_media"):
+    try:
+        _m = __import__(_mod)
+        app.include_router(_m.router)
+    except Exception as _e:  # noqa: BLE001 - 可选路由模块缺失不得拖垮服务
+        print(f"[routes] skip {_mod}: {_e}", file=sys.stderr)
+
 runs = AgentRunManager(str(SESSION_DIR))
 _engine: EngineHost | None = None
 

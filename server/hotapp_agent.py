@@ -585,10 +585,18 @@ def _unhide(p: dict[str, Any], kind: str, ref: str) -> None:
                    if not (isinstance(h, dict) and h.get("kind") == kind and h.get("ref") == ref)]
 
 
-def portfolio_upsert(kind: str, ref: str, title: str, path: str, detail: str = "") -> None:
+def portfolio_upsert(kind: str, ref: str, title: str, path: str, detail: str = "",
+                     renderer: str | None = None) -> None:
+    """登记/刷新一条作品集条目。
+
+    ``renderer`` 只有 .nonapp 导入会传（'html'|'a2ui'）：非空才写入 entry——
+    生成/补扫等既有路径逐字不变（缺省条目没有该键，语义等价 html）。
+    """
     p = _portfolio()
     entry = {"kind": kind, "ref": ref, "title": title, "path": path,
              "detail": detail, "ts": int(time.time())}
+    if renderer:
+        entry["renderer"] = renderer
     p["items"] = [e for e in p["items"]
                   if not (isinstance(e, dict) and e.get("kind") == kind and e.get("ref") == ref)]
     p["items"].insert(0, entry)

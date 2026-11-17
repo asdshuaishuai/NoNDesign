@@ -35,5 +35,46 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- `.nonapp` 单文件包（文件即应用 v2）：宣告自有 UTI + 文档类型，
+	     让 Finder 双击/拖到 Dock 走 application(_:openFiles:)（AppDelegate →
+	     NonAppOpenBridge → nc/open 通道 → Dart 导入/离线打开）。 -->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nondesign.nonapp</string>
+			<key>UTTypeDescription</key>
+			<string>NoNDesign Application Package</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.zip-archive</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>nonapp</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/x-nondesign-package</string>
+			</dict>
+		</dict>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>NoNDesign Application Package</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.nondesign.nonapp</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

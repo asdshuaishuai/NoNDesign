@@ -40,6 +40,30 @@ class MainFlutterWindow: NSWindow {
       result(nil)
     }
 
+    // `.nonapp` 文件打开通道（nc/open）：**必须建在这里**。macOS 的
+    // FlutterAppDelegate 只实现 NSApplicationDelegate + FlutterAppLifecycleProvider，
+    // 不实现 FlutterPluginRegistry（FlutterAppDelegate.h:54），
+    // `registrar(forPlugin:)` 编不过；真正实现它的是 FlutterViewController
+    // （FlutterViewController.h:73）——与上面 nc/window 同一处建通道。
+    // AppDelegate 只负责把 openFiles/open 的系统事件转发进 NonAppOpenBridge。
+    let openChannel = FlutterMethodChannel(
+      name: "nc/open",
+      binaryMessenger: flutterViewController.engine.binaryMessenger)
+    openChannel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "takePending":
+        // 冷启动：Dart 就绪后主动拉取并清空队列（否则先双击文件再启动会丢）。
+        result(NonAppOpenBridge.shared.takeAll())
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    NonAppOpenBridge.shared.onPath = { path in
+      openChannel.invokeMethod("openPath", arguments: ["path": path])
+    }
+    // 通道 handler 已就位：把启动期积压的路径立刻推给 Dart。
+    NonAppOpenBridge.shared.drain()
+
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     super.awakeFromNib()

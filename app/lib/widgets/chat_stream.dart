@@ -16,13 +16,29 @@ import 'settings_dialog.dart';
 /// 照常渲染；动作经 onAction 回流 store.handleChatAction 续跑）/ 产物卡
 /// （原型→工作区；热应用/视频/3D→对应工作台）。
 ///
-/// 顶栏保留「工作区」入口进设计视图（S4 桌面分栏 / 移动画中画之前，这是
-/// 进工作区的显式唯一门）；会话记录由 store 随 chat.json 落盘、重启恢复。
+/// 顶栏「工作区」由宿主注入动作（[onOpenWorkspace]）：桌面 ≥1100 切分栏
+/// 折叠、移动/平板竖屏开画中画浮窗（S4，承载壳见 widgets/shell_host.dart
+/// 的 ChatWorkspaceHost）；无宿主时回退原全屏路径。会话记录由 store 随
+/// chat.json 落盘、重启恢复。
 class ChatStreamView extends StatefulWidget {
   /// 设置入口回调；缺省用本视图 context 弹设置（视图在 Navigator 子树内）。
   final VoidCallback? onSettings;
 
-  const ChatStreamView({super.key, this.onSettings});
+  /// 顶栏「工作区」动作（宿主注入：桌面分栏折叠切换 / 移动开画中画）。
+  /// 缺省回退 [AppStore.openWorkspace]——无宿主时仍是原全屏路径。
+  final VoidCallback? onOpenWorkspace;
+
+  /// 「确保工作区可见」动作（产物卡点开用）：与顶栏的折叠**切换**不同，
+  /// 这里只展开不收起。宿主注入后产物卡不再 setView('design') 拆掉宿主
+  /// （review pip-2）；缺省回退 [onOpenWorkspace]，再缺省走全屏路径。
+  final VoidCallback? onRevealWorkspace;
+
+  const ChatStreamView({
+    super.key,
+    this.onSettings,
+    this.onOpenWorkspace,
+    this.onRevealWorkspace,
+  });
 
   @override
   State<ChatStreamView> createState() => _ChatStreamViewState();
@@ -59,7 +75,14 @@ class _ChatStreamViewState extends State<ChatStreamView> {
   void _openArtifact(AppStore store, ChatMessage m) {
     switch (m.artifactKind) {
       case artifactPrototype:
-        store.openWorkspace();
+        // 有宿主时只展开/打开工作区面板（review pip-2：不能 setView('design')
+        // 把聊天宿主整块拆掉）；无宿主保留原「先建后用 + 全屏设计视图」。
+        final reveal = widget.onRevealWorkspace ?? widget.onOpenWorkspace;
+        if (reveal != null) {
+          reveal();
+        } else {
+          store.openWorkspace();
+        }
       case artifactHotapp:
         final name = (m.artifactName ?? '').trim();
         if (name.isNotEmpty) store.setHotApp(name);
@@ -127,13 +150,14 @@ class _ChatStreamViewState extends State<ChatStreamView> {
             ),
           ),
           const SizedBox(width: 6),
-          // 「工作区」入口：进现有设计视图（无项目先建空项目——store.openWorkspace）。
+          // 「工作区」入口：宿主在时交给宿主（桌面分栏切换 / 移动画中画），
+          // 无宿主时回退原全屏路径（无项目先建空项目——store.openWorkspace）。
           OutlinedButton.icon(
             key: const ValueKey('chat-open-workspace'),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             ),
-            onPressed: store.openWorkspace,
+            onPressed: widget.onOpenWorkspace ?? store.openWorkspace,
             icon: Icon(Icons.space_dashboard_outlined, size: 14, color: p.ink2),
             label: Text('工作区', style: TextStyle(fontSize: 11, color: p.ink2)),
           ),

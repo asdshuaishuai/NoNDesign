@@ -60,6 +60,53 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- `.nonapp` 单文件包（文件即应用 v2）：文档类型 + 导入的 UTI。iOS 只能
+	     “导入”别处的类型（不能像 macOS 那样 exported），接收方点击「文件」
+	     App 里的 .nonapp → 打开方式选 NoNDesign → application(_:open:)。 -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>NoNDesign Application Package</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.nondesign.nonapp</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nondesign.nonapp</string>
+			<key>UTTypeDescription</key>
+			<string>NoNDesign Application Package</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.zip-archive</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>nonapp</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/x-nondesign-package</string>
+			</dict>
+		</dict>
+	</array>
+	<!-- 原地打开（邮件/文件 App 里的副本不先搬走）+ 暴露 Documents 便于
+	     “文件” App 直接放包进来。 -->
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

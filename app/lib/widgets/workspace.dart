@@ -33,7 +33,16 @@ const pluginDigitKeys = [
 ];
 
 class Workspace extends StatefulWidget {
-  const Workspace({super.key});
+  /// 嵌入式宿主（聊天流常驻分栏 / 画中画浮窗，docs/plan-chat-stream-shell.md
+  /// §2 S4）：跳过 TitleBar/StatusBar 与 play/portfolio/plugin 全屏早退，
+  /// 面板断点收紧（左栏 <760 隐藏、右栏 <1100 走 sheet）——分栏本身已有
+  /// chat 占宽，再按全屏断点摊三栏会把画布压到不可用宽度。嵌入时窄轨换
+  /// [_EmbeddedRail]（只做面板局部导航）且画板条隐藏全局视图入口：宿主内
+  /// 任何 setView 都会把聊天流整块换掉，触屏用户回不来（review pip-1）。
+  final bool embedded;
+
+  const Workspace({super.key, this.embedded = false});
+
   @override
   State<Workspace> createState() => _WorkspaceState();
 }
@@ -51,19 +60,24 @@ class _WorkspaceState extends State<Workspace> {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final p = context.palette;
-    if (store.view == 'play') {
-      return Scaffold(backgroundColor: p.bg, body: const SafeArea(child: PlayView()));
-    }
-    // 作品集/插件工作台：不进设计壳（无项目也可达）。仍包 Scaffold——
-    // 这些视图内的 SnackBar 需要 ScaffoldMessenger 的 Scaffold 祖先
-    // （旧实现早退裸视图，debug 断言、release 静默不显示）。
-    // SafeArea：移动端状态栏 / Home 指示条不压顶栏与底部操作（真机实证）。
-    if (store.view == 'portfolio') {
-      return Scaffold(backgroundColor: p.bg, body: const SafeArea(child: PortfolioView()));
-    }
-    final pluginView = pluginWorkspaceFor(store.view);
-    if (pluginView != null) {
-      return Scaffold(backgroundColor: p.bg, body: SafeArea(child: pluginView));
+    // 全屏视图早退只在完整壳里生效：嵌入式宿主（聊天流分栏 / 画中画）里
+    // store.view 恒为 'chat'，这些分支不适用；portfolio/plugin 是整壳视图，
+    // main.dart 会先路由到全屏 Workspace（embedded=false）。
+    if (!widget.embedded) {
+      if (store.view == 'play') {
+        return Scaffold(backgroundColor: p.bg, body: const SafeArea(child: PlayView()));
+      }
+      // 作品集/插件工作台：不进设计壳（无项目也可达）。仍包 Scaffold——
+      // 这些视图内的 SnackBar 需要 ScaffoldMessenger 的 Scaffold 祖先
+      // （旧实现早退裸视图，debug 断言、release 静默不显示）。
+      // SafeArea：移动端状态栏 / Home 指示条不压顶栏与底部操作（真机实证）。
+      if (store.view == 'portfolio') {
+        return Scaffold(backgroundColor: p.bg, body: const SafeArea(child: PortfolioView()));
+      }
+      final pluginView = pluginWorkspaceFor(store.view);
+      if (pluginView != null) {
+        return Scaffold(backgroundColor: p.bg, body: SafeArea(child: pluginView));
+      }
     }
     return CallbackShortcuts(
       bindings: {
@@ -102,29 +116,43 @@ class _WorkspaceState extends State<Workspace> {
             builder: (context, constraints) {
               final width = constraints.maxWidth;
               final phone = width < 700;
-              final wide = width >= 1024;
+              final showLeft = !phone && (!widget.embedded || width >= 760);
+              final wide = width >= (widget.embedded ? 1100 : 1024);
+              // 画中画可被缩到 280 高：Rail 是固定 224 的图标列，放不下时
+              // 隐藏（画布优先），否则 RenderFlex 溢出。完整壳永不触发。
+              final showRail = !(widget.embedded && constraints.maxHeight < 262);
+              // 嵌入宿主内左栏只在「项目/历史」面板安全：docs/spec 面板的
+              // 条目会 setView('docs')（left_panel.dart:416-417），点击即把
+              // 聊天宿主整块换掉——面板与底部 sheet 入口一并收掉，等用户
+              // 从嵌入窄轨切回 设计/历史 再恢复。
+              final leftPaneSafe = !widget.embedded ||
+                  (store.panel != 'docs' && store.panel != 'spec');
               return Column(
                 children: [
-                  TitleBar(
-                    onCommand: _command,
-                    onSettings: _settings,
-                    onNewProject: _newProject,
-                    onOpenProject: () => _openPath(''),
-                    onShortcuts: _shortcuts,
-                    onOpenRecent: (path) => _openPath(path),
-                  ),
+                  if (!widget.embedded)
+                    TitleBar(
+                      onCommand: _command,
+                      onSettings: _settings,
+                      onNewProject: _newProject,
+                      onOpenProject: () => _openPath(''),
+                      onShortcuts: _shortcuts,
+                      onOpenRecent: (path) => _openPath(path),
+                    ),
                   Expanded(
                     child: Row(
                       children: [
-                        const Rail(),
-                        if (!phone) const LeftPanel(),
+                        if (showRail)
+                          widget.embedded ? const _EmbeddedRail() : const Rail(),
+                        if (showLeft && leftPaneSafe) const LeftPanel(),
                         Expanded(child: _center(store)),
                         if (wide) const RightPanel(),
                       ],
                     ),
                   ),
-                  if (!wide) _narrowBar(context, leftAsSheet: phone, rightAsSheet: true),
-                  StatusBar(onCommand: _command),
+                  if (!wide)
+                    _narrowBar(context,
+                        leftAsSheet: !showLeft && leftPaneSafe, rightAsSheet: true),
+                  if (!widget.embedded) StatusBar(onCommand: _command),
                 ],
               );
             },
@@ -201,8 +229,16 @@ class _WorkspaceState extends State<Workspace> {
           'source' => const _SourceView(),
           _ => Column(
               children: [
-                const _BoardTabs(),
-                const Expanded(child: CanvasView()),
+                _BoardTabs(embedded: widget.embedded),
+                Expanded(
+                  // 嵌入宿主且无画板时不吃 CanvasView 的空态卡：那张卡带
+                  // 「先写文档」= setView('docs')（canvas_view.dart:1590），
+                  // 在宿主里点一下同样会把聊天流换掉（review pip-1 同类）。
+                  // 画板条（＋ 新建）仍在，生成入口走聊天。
+                  child: widget.embedded && store.render.artboards.isEmpty
+                      ? const _EmbeddedNoBoardHint()
+                      : const CanvasView(),
+                ),
               ],
             ),
         },
@@ -474,7 +510,12 @@ class _OpenProjectDialog extends StatelessWidget {
 }
 
 class _BoardTabs extends StatelessWidget {
-  const _BoardTabs();
+  /// 嵌入宿主（聊天分栏 / 画中画）：隐藏一切全局视图入口（源码/演示/
+  /// 作品集/插件/文档）——它们都是 setView(...)，在宿主里点一下就把聊天流
+  /// 整块换掉，触屏用户没有回聊天流的入口。画板切换与新建仍保留。
+  final bool embedded;
+
+  const _BoardTabs({this.embedded = false});
 
   @override
   Widget build(BuildContext context) {
@@ -540,17 +581,111 @@ class _BoardTabs extends StatelessWidget {
               ),
             ),
           ),
-          IconAction(icon: Icons.code, tooltip: 'MBT 源码 ${modCombo('⌘3')}', size: 26, onTap: () => store.setView('source')),
-          IconAction(icon: Icons.play_arrow_outlined, tooltip: '演示模式 ${modCombo('⌘4')}', size: 26, onTap: () => store.setView('play')),
-          IconAction(icon: Icons.collections_bookmark_outlined, tooltip: '作品集', size: 26, onTap: () => store.setView('portfolio')),
-          for (final def in pluginRegistry)
-            IconAction(icon: def.icon, tooltip: def.tooltip, size: 26, onTap: () => store.setView('plugin:${def.id}')),
-          const SizedBox(width: 4),
-          TextButton.icon(
-            onPressed: () => store.setView('docs'),
-            icon: Icon(Icons.auto_awesome, size: 11, color: p.accent),
-            label: const Text('文档', style: TextStyle(fontSize: 11)),
-          ),
+          if (!embedded) ...[
+            IconAction(icon: Icons.code, tooltip: 'MBT 源码 ${modCombo('⌘3')}', size: 26, onTap: () => store.setView('source')),
+            IconAction(icon: Icons.play_arrow_outlined, tooltip: '演示模式 ${modCombo('⌘4')}', size: 26, onTap: () => store.setView('play')),
+            IconAction(icon: Icons.collections_bookmark_outlined, tooltip: '作品集', size: 26, onTap: () => store.setView('portfolio')),
+            for (final def in pluginRegistry)
+              IconAction(icon: def.icon, tooltip: def.tooltip, size: 26, onTap: () => store.setView('plugin:${def.id}')),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: () => store.setView('docs'),
+              icon: Icon(Icons.auto_awesome, size: 11, color: p.accent),
+              label: const Text('文档', style: TextStyle(fontSize: 11)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 嵌入宿主的空画布占位：只提示，不带任何全局视图入口（空态卡的
+/// 「先写文档」是 setView('docs')，见 _center 的注释）。
+class _EmbeddedNoBoardHint extends StatelessWidget {
+  const _EmbeddedNoBoardHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.dashboard_customize_outlined, size: 24, color: p.ink4),
+            const SizedBox(height: 8),
+            Text(
+              '还没有画板——让 NoN 生成，或点画板条 ＋ 新建。',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 嵌入宿主的窄轨（聊天流分栏 / 画中画）：**只做面板局部导航**（设计 /
+/// 历史），绝不切 store.view——Rail 的「文档/规范」走 setPanel→setView('docs')，
+/// 在设计壳里正确，在聊天宿主里点一下就把宿主整块换成全屏视图，触屏用户
+/// 从此没有回聊天流的入口（无键盘 Esc / Welcome 的聊天门只在无项目时可路由）。
+/// 文档/规范是全屏面：要它们在完整设计壳里走 ⌘2 / 桌面端 ⌘1 进入设计壳。
+class _EmbeddedRail extends StatelessWidget {
+  const _EmbeddedRail();
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.watch<AppStore>();
+    final p = context.palette;
+    final items = [
+      ('project', Icons.dashboard_customize_outlined, '设计'),
+      ('history', Icons.history, '历史'),
+    ];
+    return Container(
+      key: const ValueKey('workspace-embedded-rail'),
+      width: 58,
+      decoration: BoxDecoration(
+        color: p.bgElevated,
+        border: Border(right: BorderSide(color: p.line)),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      child: Column(
+        children: [
+          for (final item in items)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Material(
+                color: store.panel == item.$1 ? p.accentSoft : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                child: InkWell(
+                  key: ValueKey('embedded-rail-${item.$1}'),
+                  borderRadius: BorderRadius.circular(10),
+                  // setPanel('project'|'history') 只改面板不动 view（store.dart
+                  // 的 setPanel：只有 docs/spec 才会连带 setView('docs')）。
+                  onTap: () => store.setPanel(item.$1),
+                  child: SizedBox(
+                    width: 42,
+                    height: 46,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(item.$2, size: 17, color: store.panel == item.$1 ? p.accent : p.ink3),
+                        const SizedBox(height: 4),
+                        Text(item.$3,
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w500,
+                                color: store.panel == item.$1 ? p.accent : p.ink3)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          const Spacer(),
         ],
       ),
     );

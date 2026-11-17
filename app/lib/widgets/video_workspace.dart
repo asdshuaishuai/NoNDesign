@@ -1,11 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../core/api_shelf.dart';
 import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import 'video_player_surface.dart';
 
 /// 轨道 B 客户端面：视频工作台（无声版，用户裁决音轨/旁白暂不做）。
 /// 加载标杆示例（或粘贴 timeline）→ 环②机械对照 → 后台渲染（job 轮询）
@@ -17,6 +20,11 @@ class VideoWorkspace extends StatefulWidget {
   @override
   State<VideoWorkspace> createState() => _VideoWorkspaceState();
 }
+
+/// 艺术架「打开」直载：切视图前设置**某个产物的 mp4 绝对路径**，本工作台
+/// initState 消费后清空（与 threeLoadOnOpen 同构的跨实例通道）。与
+/// hotAppLoadOnOpen 的取值域不同——热应用传应用名，这里传文件路径。
+String? videoLoadOnOpen;
 
 class _SampleDef {
   const _SampleDef(this.label, this.timelineAsset, this.specAsset);
@@ -41,6 +49,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   String _reviewOutput = '';
   int _previewCount = 0;
 
+  /// 产物模式：艺术架点开的某个 mp4（非 null 即整个工作台切到播放面）。
+  /// null = 默认渲染台（示例/渲染/帧预览，文案与布局保持原样）。
+  String? _artifactPath;
+
   /// job 轮询连续失败上限：1.2s × 25 ≈ 30s（ask 给出的放弃窗口）。网络抖动
   /// 期间保留轮询，但服务器中途永久下线（移动端连桌面断网）必须放弃并复位
   /// ——否则 _busy 永真、「加载示例/渲染」永久禁点（工作台死端）。
@@ -56,6 +68,14 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   @override
   void initState() {
     super.initState();
+    // 艺术架产物直载优先于一切恢复路径：用户点开的是某个产物，不是
+    // 「上次渲染态」。消费即清（跨实例通道）。
+    final pendingArtifact = videoLoadOnOpen;
+    videoLoadOnOpen = null;
+    if (pendingArtifact != null && pendingArtifact.isNotEmpty) {
+      _artifactPath = pendingArtifact;
+      return;
+    }
     // 视图切换即 dispose：示例下标与在飞 job 从设置恢复，回来接回轮询
     // （旧实现切走就永久丢失渲染进度）。
     final s = store.settings;
@@ -258,6 +278,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    final artifact = _artifactPath;
     return Column(
       children: [
         Container(
@@ -282,14 +303,26 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
             Icon(Icons.movie_outlined, size: 17, color: p.accent),
             const SizedBox(width: 8),
             ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: narrow ? 110 : 400),
-              child: Text('视频工作台',
+              constraints: BoxConstraints(maxWidth: narrow ? 150 : 400),
+              child: Text(
+                  artifact != null ? '视频产物 · ${_artifactName(artifact)}' : '视频工作台',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
             ),
+            if (artifact != null)
+              // 产物模式是工作台内部的一次导航，不占用全屏视图的返回键。
+              TextButton(
+                onPressed: () => setState(() => _artifactPath = null),
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 28),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text('返回渲染台', style: TextStyle(fontSize: 11)),
+              ),
             const SizedBox(width: 14),
-            if (!narrow)
+            if (!narrow && artifact == null)
               Text('无声版 · timeline → 逐帧 SVG → resvg → ffmpeg',
                   style: TextStyle(fontSize: 11, color: p.ink4)),
             const Spacer(),
@@ -298,7 +331,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           }),
         ),
         Expanded(
-          child: LayoutBuilder(builder: (context, constraints) {
+          child: artifact != null ? _artifactPane(context, artifact) : LayoutBuilder(builder: (context, constraints) {
             // 手机窄屏：300px 固定配置列会把帧预览压到 ~100px（无溢出但不可用）。
             // 窄屏改单列滚动：配置在上、预览固定高度在下。
             final narrow = constraints.maxWidth < 700;
@@ -323,6 +356,82 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         ),
       ],
     );
+  }
+
+  /// 产物模式：播放面 + 信息行（路径 / 复制 / 桌面端在文件夹中显示）。
+  /// 这是「视频真能播」的客户端落点——WebView 载入 /video/mp4（有服务器）
+  /// 或 file://（离线），不再只是把路径塞进 SnackBar。
+  Widget _artifactPane(BuildContext context, String path) {
+    final p = context.palette;
+    return Column(children: [
+      Expanded(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: VideoPlayerSurface(path: path, baseUrl: store.api?.baseUrl),
+          ),
+        ),
+      ),
+      Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+            color: p.bgElevated, border: Border(top: BorderSide(color: p.line))),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(children: [
+          Icon(Icons.movie_outlined, size: 14, color: p.ink4),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SelectableText(path,
+                maxLines: 1,
+                style: TextStyle(fontSize: 11, color: p.ink3, fontFamily: 'monospace')),
+          ),
+          TextButton.icon(
+            onPressed: _copyArtifactPath,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 28),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+            ),
+            icon: const Icon(Icons.copy_all_outlined, size: 14),
+            label: const Text('复制路径', style: TextStyle(fontSize: 11)),
+          ),
+          if (revealSupported)
+            TextButton.icon(
+              onPressed: _revealArtifact,
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 28),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+              icon: const Icon(Icons.folder_open_outlined, size: 14),
+              label: const Text('在文件夹中显示', style: TextStyle(fontSize: 11)),
+            ),
+        ]),
+      ),
+    ]);
+  }
+
+  static String _artifactName(String path) {
+    final parts = path.split(RegExp(r'[/\\]'));
+    // 产物固定是 <job>/frames.mp4：父目录名才是「第几个渲染」，帧名没有信息量。
+    return parts.length >= 2 ? parts[parts.length - 2] : path;
+  }
+
+  Future<void> _copyArtifactPath() async {
+    final path = _artifactPath;
+    if (path == null) return;
+    await Clipboard.setData(ClipboardData(text: path));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制路径')));
+  }
+
+  Future<void> _revealArtifact() async {
+    final path = _artifactPath;
+    if (path == null) return;
+    final ok = await revealInFolder(path);
+    if (!mounted || ok) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法在文件夹中显示')));
   }
 
   /// 配置列（宽屏固定 300 / 窄屏整宽纵向排列）。
@@ -483,7 +592,8 @@ class _FrameStrip extends StatelessWidget {
               child: Image.network(
                 '$baseUrl/video/frame?path=${Uri.encodeQueryComponent(jobDir)}&n=$n',
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Center(child: Icon(Icons.broken_image_outlined, size: 18, color: p.ink4)),
+                errorBuilder: (context, error, stackTrace) =>
+                    Center(child: Icon(Icons.broken_image_outlined, size: 18, color: p.ink4)),
               ),
             );
           },
