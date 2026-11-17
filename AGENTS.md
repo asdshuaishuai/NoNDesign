@@ -103,8 +103,10 @@ app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板�
   P3 引擎宿主 FFI 化（wasmtime C API + ffigen）。护栏铁律：Dart 循环仍必须过引擎门。
   **二次裁决（2026-11-17）**：P0–P2 升格为 chat stream 主体方案的硬前置——本体升级为聊天流
   （内置 Dart 循环）+ 艺术架（产物货架）+ 画中画工作区（桌面常驻分栏 / 移动右划浮窗）；
-  渲染层双后端：HTML 热应用（可移植）与 `a2ui_flutter`（genui 已弃用，官方继任；复杂交互组件）
-  并存自适应，`.nonapp` v2 载荷带 `renderer` 字段；桌面 ACP 保留。详见 docs/plan-chat-stream-shell.md。
+  渲染层双后端：HTML 热应用与 `a2ui_flutter`（genui 已弃用，官方继任；复杂交互组件）**并存自适应，
+  两者都只在平台内运行、都是一等小应用**；「文件即应用」= `.nonapp` 单文件压缩包（zip：manifest +
+  双载荷），分享给其他 NoNDesign 用户打开即用（a2ui 打包应用仅限内置组件目录；离线打开路径见
+  plan §1.1）；桌面 ACP 保留。详见 docs/plan-chat-stream-shell.md。
 - **移动端能力面实测与第三方智能体禁用（2026-11-16 深夜）**：① **ACP 在移动端
   禁用**（用户裁决）：设置页隐藏「外部智能体」、Agent 面板强制 NoN 内置
   （残留 acpAgentId 不生效）、`store.runAcp` 在 iOS/Android 直接拒绝并提示。

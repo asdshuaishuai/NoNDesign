@@ -9,8 +9,10 @@
 ## 0. 结论先行
 
 1. **渲染层判定**：HTML 热应用与 A2UI（`a2ui_flutter`，genui 的官方继任者）**并存、自适应分派**，
-   不是互相替代。HTML = 可移植的通用格式（任何 WebView 可开，文件即应用的根基）；a2ui = 活在
-   NoNDesign 运行时里的**富交互层**（原生表单/输入/滑杆/日期 + DataModel 绑定 + 动作回流）。
+   不是互相替代。两者**都只在 NoNDesign 平台内运行**、都是一等小应用：HTML = 自包含单文件载荷
+   （零外链，包内即开）；a2ui = 原生富交互层（表单/输入/滑杆/日期 + DataModel 绑定 + 动作回流）。
+   **「文件即应用」= 把小应用打包成 `.nonapp` 单文件压缩包，分享给其他 NoNDesign 用户，对方用我们
+   的应用打开即可用**（格式定义见 §1.1）。
 2. **信息架构**：主交互面从 Welcome 升级为 **chat stream**（聊天流）；生成物不再只有「进工作区」
    一条路，而是以卡片落在聊天流里；**艺术架**（Art Shelf）是产物的常驻货架面（热应用 / 原型交互
    UI / 视频 / 3D 小件）；**工作区**与之并存——桌面常驻分栏，移动端（pad 按屏幕尺寸自适应）
@@ -26,7 +28,8 @@ A2UI 是 a2ui_flutter 实现的那套。下文 A2UI 均指协议/包。）
 
 | 维度 | HTML 热应用（现状） | A2UI surface（a2ui_flutter 0.3.0） |
 | --- | --- | --- |
-| 可移植性 | **任何 WebView/浏览器可开**；文件即应用的载体 | 只能活在 NoNDesign 运行时（离开 app 无渲染器） |
+| 运行平台 | NoNDesign 平台内（WebView 载体） | NoNDesign 平台内（原生 surface 载体）——两者相同 |
+| 打包分享 | 单 HTML 即应用本体；`.nonapp` 包内 `payload/index.html` | `.nonapp` 包内 `payload/surface.json`（A2UI 消息序列）+ 初始 DataModel |
 | 组件复杂度 | LLM 手写全部 UI 逻辑，复杂有状态件（表单校验/日期/滑杆联动）质量方差大 | 原生 Material 件：TextField/CheckBox/ChoicePicker/Slider/DateTimeInput，**校验（props.isValid）与路径绑定（DataModel）内置** |
 | 交互回流 | 无结构化回流（app 内逻辑自洽） | 动作自动打包当前状态回 agent，**交互循环免费** |
 | 视觉动画 | canvas/SVG/CSS 母语，动画小件的主场 | 无此能力（基础目录无动画/图表；图表需自定义 CatalogItem） |
@@ -36,10 +39,29 @@ A2UI 是 a2ui_flutter 实现的那套。下文 A2UI 均指协议/包。）
 **自适应分派标准（生成时由模型决策，落盘标记）**：
 - 视觉/动画/演示类（canvas、粒子、叙事）→ `renderer: html`
 - 数据交互类（表单、清单、仪表盘、多步向导、需 agent 续写的交互）→ `renderer: a2ui`
-- 文件格式 v2（`.nonapp`）：载荷带 `renderer` 字段；HTML 载荷任何运行时可开，a2ui 载荷仅
-  NoNDesign 运行时可开（打开前如实提示）。
 - 生成器提示词同步教分派规则；复杂图表两侧都要自定义（HTML 手写 canvas / a2ui 自定义
   `ComponentImplementation`）。
+
+### 1.1 文件即应用 v2：`.nonapp` 单文件包（用户澄清 2026-11-17）
+
+**定义修正**：文件即应用 ≠ 跨出平台可移植。两种渲染器的小应用**都只在 NoNDesign 平台内运行**；
+「文件即应用」= 把小应用**打包成 `.nonapp` 单文件（单文件压缩包）**，分享给其他 NoNDesign 用户，
+对方用我们的应用打开即用。
+
+- **容器**：`.nonapp` = zip 单文件，内含——
+  - `manifest.json`：`formatVersion / id / name / title / renderer(html|a2ui) / createdAt / minAppVersion`
+  - HTML 载荷：`payload/index.html`（全内联零外链单文件）
+  - a2ui 载荷：`payload/surface.json`（createSurface / surfaceUpdate / dataModelUpdate 消息序列）
+    + `payload/data.json`（DataModel 初始态）+ 可选 `payload/prompt.txt`（接收方有 agent 运行时
+    时可续跑交互）
+- **约束**：a2ui 打包应用只能使用**内置组件目录**——自定义 `CatalogItem` 是编译期 Dart 代码，
+  不能随文件分发；需要自定义组件的 a2ui 应用随应用版本走。
+- **打开路径**：OS 文件关联 / 拖拽 / 应用内打开 → 校验 manifest → 安装进本机热应用库：
+  - 有关联服务器：`/hotapp/import` 落入 hotapps 目录 + 作品集登记 → 进工作台；
+  - 纯离线：**a2ui 直接内存打开（零服务依赖）**；HTML 解压到本地缓存经 file:// WebView 打开
+    （SQLite 桥降级提示）。
+- **数据边界**：业务数据（SQLite / DataModel 运行时数据）不随文件走——分享的是应用本体，
+  接收方获得全新实例（v1 诚实边界；可选快照携带留 v2+）。
 
 ## 2. 信息架构（三面一体）
 
@@ -90,8 +112,9 @@ A2UI 是 a2ui_flutter 实现的那套。下文 A2UI 均指协议/包。）
 - **S1 Chat Stream 面**：消息模型 + 聊天流视图 + 卡片类型（进度/A2UI/产物）+ 会话持久化；
   替换 Welcome 成为默认主面（设置可切回经典 Welcome）。
 - **S2 艺术架**：portfolio → Art Shelf 货架面；产物卡「存入艺术架」动作。
-- **S3 双后端热应用**：生成器分派提示词 + `renderer` 字段 + 文件格式 v2 + a2ui 载荷的
-  打开/导出/导入全链。
+- **S3 双后端热应用 + 文件即应用 v2**：生成器分派提示词 + `renderer` 字段 + `.nonapp` 包格式
+  （§1.1：zip 容器 / 双载荷 / 导入端点 / OS 关联 / 拖拽 / 导出 / 离线打开路径）+ a2ui 载荷的
+  打开与导出全链。
 - **S4 画中画工作区**：移动右划手势 + PiP 浮窗（拖动/缩放/全屏/收回）；桌面常驻分栏。
 - 每步带回归（widget 测试 + 门禁五件套）；a2ui_flutter 钉住小版本（0.3.x）防 API 漂移。
 
