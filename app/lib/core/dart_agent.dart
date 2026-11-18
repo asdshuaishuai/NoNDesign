@@ -1,45 +1,55 @@
-/// NoN 内置 Dart Agent 循环（三模式骨架）——`server/agent.py` 的 Dart 泛化，
-/// `app/lib/core/mobile_agent.dart`（ai_sdk_dart PLAN 直连实证）的推广形态。
+/// NoN 内置 Dart Agent 循环（三模式）——迁移前参考实现的 Dart 泛化，
+/// 现在**全部工具走本地服务**：引擎在进程内（[LocalEngineGate] → 批次 02 的
+/// `EngineService`），3D / 热应用 / 视频 / 应用包 / Figma 导出由
+/// [AgentWorkspaceServices] 接到批次 06/07/08 的本地工作台。没有 HTTP 路由、
+/// 没有固定端口、没有 Python。
 ///
-/// 权威参照（语义唯一来源）：
-/// - `server/agent.py` — 工具语义 / 三模式 / doc_not_written / nudge 轮的定义；
-/// - `server/prompts.py` — 三套静态提示词 + footer（逐字移植）；
-/// - `server/context.py` — normalize_design / artboard_section / 项目地图 / state 卡。
+/// 语义参照（迁移前的权威实现，行为已逐条移植并对账）：
+/// - 旧参考实现 — 工具语义 / 三模式 / doc_not_written / nudge 轮；
+/// - 旧参考实现 — 三套静态提示词 + footer；
+/// - 旧参考实现 — normalize_design / artboard_section / 项目地图 / state 卡。
 ///
 /// 三模式：
 /// - **PLAN** 真实现：PRD + UI 说明 + 设计规范（write_doc ×2 + write_design_spec），
 ///   纯文档、零引擎依赖（手机离线可跑）。
-/// - **REFINE** 真实现：读现有文档（read_docs）+ 指令改写（write_doc），不依赖
-///   引擎写路径；有引擎桥时 design_op 亦可检视/落画布（仍过 AgentGate）。
-/// - **BUILD** 真实现：整屏生成用 generate_page（`/engine/generate` →
-///   session_generate_in），精修与连线用 design_op 经引擎桥提交
-///   `/engine/apply` gate=agent（AgentGate 语义——绝不绕过引擎门、绝不降级
-///   human 门）。桌面 dart 运行时用 store 锚定桥（`_StoreEngineGate`）：
-///   同一条 _opQueue 队列 + 同一个 _commit 采纳（history/render/dirty，画布
-///   实时长出）；纯 HTTP 桥（[HttpEngineGate]）供独立/移动「连接桌面」形态。
-///   收尾确定性桥段（P1，server/agent.py:650-700 同源）：空板清扫
-///   （`_sweepIdleArtboards`）→ RSI critique/auto_fix 评审轮（`_runRsiLoop`），
-///   全部经引擎门。
+/// - **REFINE** 真实现：读现有文档（read_docs）+ 指令改写（write_doc）；有引擎
+///   桥时 design_op 落画布（仍过 AgentGate）。
+/// - **BUILD** 真实现：整屏生成用 generate_page（session_generate_in），精修与
+///   连线用 design_op；生产默认桥是 [LocalEngineGate]（进程内直调，`gate:
+///   'agent'`），store 锚定桥（`_StoreEngineGate`）保留同队列采纳语义。
+///   收尾确定性桥段（P1，与迁移前参考实现同源）：空板清扫
+///   （`_sweepIdleArtboards`）→ RSI critique/auto_fix 评审轮（`_runRsiLoop`，
+///   最多 2 轮），全部经引擎门。
 ///
-/// 护栏铁律（docs/plan-dart-agent-migration.md §6.2）：Dart 循环产出的画布
-/// 变更必须过引擎 AgentGate，绝不绕过——本文件没有任何「直接拼 mbt 提交」
-/// 的写路径；design_op 只透传 op 给引擎门并采纳回传的 canonical。
+/// 护栏铁律：Dart 循环产出的画布变更必须过引擎 AgentGate，绝不绕过——本文件
+/// 没有任何「直接拼 canonical 提交」的写路径；design_op 只透传 op 给引擎门并
+/// 采纳回传的文档。
 ///
-/// 事件契约（§6.3）：与 server SSE 同形，`store._handleAgentEvent` 直接消费：
+/// 用户可见文案（本批治理）：
+/// - 工具名一律经 [toolLabel]（design_op → 设计变更、read_mbt → 读取设计稿、
+///   three_* → 3D 场景 …）；未知工具回落「智能体操作」，绝不回显代码代号。
+/// - 失败先取服务层的人类句子（`out['message']`），否则按错误码经
+///   [toolFailureMessage] 映射；原始码/诊断只在 `error`/`detail` 里，供折叠的
+///   「技术详情」使用。
+///
+/// 事件契约：与迁移前的 SSE 同形，`store._handleAgentEvent` 直接消费：
 /// note / tool_start / tool_end / assistant_delta / assistant_text /
 /// thinking_delta / doc_written / design_spec_written / page_generated /
 /// review_round / cleanup / preview / usage / done / failed。
+/// `tool_end` 新增 `message`（人话）与 `detail`（原始诊断）两个字段，`error`
+/// 保留机器码以兼容历史消费者。
 ///
-/// 与 server 的已知差异（诚实登记，非静默降级）：
-/// - 无逐字 doc_delta 直播——SDK 的工具参数增量是原始 JSON 分片，content
-///   解码器（server `_DocDeltaExtractor`）留待后续；doc_written 全量事件是
-///   正确性兜底，与 server 一致。
+/// 与旧实现的已知差异（诚实登记，非静默降级）：
+/// - 无逐字 doc_delta 直播——SDK 的工具参数增量是原始 JSON 分片；doc_written
+///   全量事件是正确性兜底。
 /// - 无 CompactingSession 持久会话记忆（P2 上下文层）。
-/// - **空板清扫/RSI 的 PLAN 语义分歧（显式登记）**：server 的清扫在 plan
-///   模式也执行（agent.py:650 无 mode 守卫）；Dart 的 plan 模式按既有设计
-///   不给引擎面（runDartAgent 里 `bridge: request.mode == 'plan' ? null :
-///   bridge`），故清扫与 RSI 只在非 plan 生效——实现用
-///   `bridge == null → return` 表达，测试锚定 plan 零 session 调用。
+/// - **空板清扫/RSI 的 PLAN 语义分歧（显式登记）**：旧实现里清扫在 plan 模式
+///   也执行；Dart 的 plan 模式按既有设计不给引擎面（runDartAgent 里
+///   `bridge: request.mode == 'plan' ? null : bridge`），故清扫与 RSI 只在非
+///   plan 生效——实现用 `bridge == null → return` 表达，测试锚定 plan 零
+///   session 调用。
+/// - 工作区工具只在宿主注入 [AgentWorkspaceServices] 时暴露；手机或不支持
+///   的宿主看不到入口（能力判据由宿主决定，不在循环里猜）。
 library;
 
 import 'dart:async';
@@ -49,19 +59,25 @@ import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 
 import 'api.dart';
+import 'figma_export.dart';
+import 'hotapp_service.dart';
+import 'models.dart';
+import 'nonapp_library.dart';
+import 'three_service.dart';
+import 'video_service.dart';
 
 // ============================================================
-// thinking 方言表（权威：server/agent.py:543-547 reasoning 处理）
+// thinking 方言表（权威：迁移前参考实现的 reasoning 处理）
 // ============================================================
 
-/// server 的 reasoning effort 白名单（逐字对照 agent.py:546）。
+/// reasoning effort 白名单（逐字对照迁移前实现）。
 const Set<String> _reasoningEffortLevels = <String>{
   'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
 };
 
 /// thinking 等级 → OpenAI Chat Completions `reasoning_effort` 注入值。
 ///
-/// 权威语义（server/agent.py:543-547 逐字移植，不做 trim / 不做大小写归一）：
+/// 权威语义（迁移前参考实现逐字移植，不做 trim / 不做大小写归一）：
 /// - 空串或 `'auto'` → null（不注入，provider 默认）；
 /// - 等级 ∈ 白名单 → 原样注入；
 /// - 其余（`'off'`/`'on'` 等开关档、`'HIGH'` 大小写不符、垃圾值）→ null（丢弃）。
@@ -91,24 +107,23 @@ Map<String, Map<String, dynamic>>? thinkingProviderOptions(String level) {
 // ============================================================
 
 /// 引擎访问面：Dart 循环的引擎桥。生产实现两枚：
-/// - [HttpEngineGate]——纯 HTTP（移动端「连接桌面」与独立使用）；
+/// - [LocalEngineGate]——**当前默认**：直接调批次 02 的进程内引擎宿主
+///   （[LocalEngine]），design_op 走 `gate:'agent'`（AgentGate 语义）；
 /// - store 锚定的 `_StoreEngineGate`（store.dart）——Build/Refine 的写路径
 ///   落 `AppStore.applyAgentOp`（applyOp 同一条 _opQueue 队列 + 同一个
-///   _commit 采纳 + /engine/apply gate:'agent'）；桌面 dart 运行时用它。
+///   _commit 采纳）。
 ///
-/// 路由表（与 server/agent.py `_make_tools` 同构）：
-/// - 变更（design_op 唯一去路）：[applyAgent] → `/engine/apply` gate=agent
-///   （AgentGate 语义——绝不绕过引擎门、绝不降级 human 门）。
-/// - inspect：[session] → `/engine/session`，只读 session_* 面
+/// 路由表：
+/// - 变更（design_op 唯一去路）：[applyAgent] → AgentGate
+///   （绝不绕过引擎门、绝不降级 human 门）。
+/// - inspect：[session] → 只读 session_* 面
 ///   （query_nodes/interactions/states/lint/critique/spec/export_svg/flows/
 ///   artboards），不进 apply 分发器。
 /// - read_mbt：无参 outline 经 [session]（list_artboards+flows+逐板
 ///   query_nodes 合成 PROJECT MAP）；带 artboard 为本地文本切
-///   （server context.py artboard_section 同源，不花引擎往返）。
-/// - list_templates / list_components：`/engine/templates`、
-///   `/engine/components`。
-/// - read_docs：不经引擎——docs 在 run 请求载荷里，循环本地读（server
-///   同构：agent.py 直接查 ctx.docs）。
+///   （artboard_section 同源，不花引擎往返）。
+/// - list_templates / list_components：引擎注册表。
+/// - read_docs：不经引擎——docs 在 run 请求载荷里，循环本地读。
 abstract class EngineGateBridge {
   /// 变更 op → 引擎 AgentGate。信封 `{ok, mbt?, error?, …}`。
   Future<Map<String, dynamic>> applyAgent(String mbt, String op);
@@ -120,12 +135,18 @@ abstract class EngineGateBridge {
   Future<List<dynamic>> components();
 }
 
+/// 引擎渲染面（Figma 导出消费每板 `svg`）。独立于 [EngineGateBridge]：
+/// 测试替身只实现门接口即可，新增成员不破坏 `implements` 编译面。
+abstract class EngineRenderBridge {
+  Future<Map<String, dynamic>> render(String mbt);
+}
+
 /// 引擎写面扩展（P1）：整屏生成 + 宿主侧 session 变更（RSI auto_fix /
 /// 空板清扫）。**刻意独立于 [EngineGateBridge]**——测试替身只实现门接口
 /// 即可（新增成员会破坏 `implements EngineGateBridge` 的编译面）。
 ///
 /// 生产实现两枚，与门同构：
-/// - [HttpEngineGate]：`/engine/generate` + `/engine/session` 直连；
+/// - [LocalEngineGate]：进程内直调（[LocalEngine]）；
 /// - store 锚定的 `_StoreEngineGate`（store.dart）：同一 `_opQueue` 链内
 ///   读新鲜 canonical、render + commit——保证 store.mbt 与循环 ctx.mbt 锁步。
 ///
@@ -133,7 +154,7 @@ abstract class EngineGateBridge {
 /// 只用于 `session_auto_fix` / `session_apply_agent`（SESSION_MUTATING 面）
 /// ——本接口不是「直接拼 mbt」的捷径。
 abstract class EngineWriteBridge {
-  /// 整屏生成（POST /engine/generate → session_generate_in）。
+  /// 整屏生成（`session_generate` 面）。
   /// 参数顺序即契约：mbt 第一位（canonical 文档面）。
   Future<Map<String, dynamic>> generate(
       String mbt, String intent, String name, Map<String, dynamic> spec);
@@ -142,34 +163,662 @@ abstract class EngineWriteBridge {
   Future<Map<String, dynamic>> mutateSession(String mbt, String name, [String? arg]);
 }
 
-/// HTTP 实现：Agent 变更走 `/engine/apply` 且 `gate: 'agent'`（AgentGate
-/// 语义，与 server `engine.apply(gate='agent')` 同门）；检视走 `/engine/session`。
-class HttpEngineGate implements EngineGateBridge, EngineWriteBridge {
-  final NoNDesignApi api;
-  HttpEngineGate(this.api);
+/// 本地引擎实现（批次 02 的 [LocalEngine]，**当前生产默认**）。
+///
+/// design_op 必须带 `gate: 'agent'`（AgentGate），只读检视走 session 面，
+/// 整屏生成走 generate，宿主侧变更（auto_fix / 清扫）走 session。引擎没
+/// 就绪时返回 `engine_unavailable` 信封——绝不静默降级、绝不假装成功。
+class LocalEngineGate implements EngineGateBridge, EngineWriteBridge, EngineRenderBridge {
+  LocalEngineGate(this.engine);
+
+  final LocalEngine engine;
+
+  static Map<String, dynamic> get _missing =>
+      <String, dynamic>{'ok': false, 'error': 'engine_unavailable'};
+
+  bool get _ready => engine.isReady;
 
   @override
   Future<Map<String, dynamic>> applyAgent(String mbt, String op) =>
-      api.apply(mbt, op, gate: 'agent');
+      _ready ? engine.apply(mbt, op, gate: 'agent') : Future.value(_missing);
 
   @override
   Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) =>
-      api.session(mbt, name, arg);
+      _ready ? engine.session(mbt, name, arg) : Future.value(_missing);
 
   @override
   Future<Map<String, dynamic>> generate(
           String mbt, String intent, String name, Map<String, dynamic> spec) =>
-      api.generate(mbt, intent, name, spec);
+      _ready ? engine.generate(mbt, intent, name, spec) : Future.value(_missing);
 
   @override
   Future<Map<String, dynamic>> mutateSession(String mbt, String name, [String? arg]) =>
-      api.session(mbt, name, arg);
+      _ready ? engine.session(mbt, name, arg) : Future.value(_missing);
 
   @override
-  Future<List<dynamic>> templates() => api.templates();
+  Future<Map<String, dynamic>> render(String mbt) =>
+      _ready ? engine.render(mbt) : Future.value(_missing);
 
   @override
-  Future<List<dynamic>> components() => api.components();
+  Future<List<dynamic>> templates() async => _ready ? engine.templates() : const <dynamic>[];
+
+  @override
+  Future<List<dynamic>> components() async => _ready ? engine.components() : const <dynamic>[];
+}
+
+// ============================================================
+// 工具名与失败文案（用户可见层：绝不出现内部代号）
+// ============================================================
+
+/// 工具名 → 用户可见标签。
+///
+/// 术语表（docs/copy-glossary.md）：`design_op` → 设计变更、`read_mbt` →
+/// 读取设计稿、`inspect` → 检查、`generate_page` → 生成页面、`write_doc` →
+/// 撰写文档、`write_design_spec` → 更新设计规范、`three_*` → 3D 场景、
+/// `hotapp_*` → 热应用、`video_*` → 视频、`nonapp_*` → 应用包。
+///
+/// 未知工具一律回落「智能体操作」——**绝不把原始工具名（snake_case 代码
+/// 代号）回显给用户**。
+String toolLabel(String tool) {
+  switch (tool) {
+    case 'ask_user':
+      return '向你确认';
+    case 'design_op':
+      return '设计变更';
+    case 'read_mbt':
+      return '读取设计稿';
+    case 'inspect':
+      return '检查';
+    case 'generate_page':
+      return '生成页面';
+    case 'write_doc':
+      return '撰写文档';
+    case 'write_design_spec':
+      return '更新设计规范';
+    case 'read_docs':
+      return '读取文档';
+    case 'list_templates':
+      return '查看模板';
+    case 'list_components':
+      return '查看组件';
+    case 'finish':
+      return '完成';
+    case 'figma_export':
+      return '导出 Figma 包';
+    case 'three_list':
+      return '3D 场景';
+    case 'three_create':
+      return '3D 场景 · 新建';
+    case 'three_status':
+      return '3D 场景 · 查看';
+    case 'three_pass':
+      return '3D 场景 · 生成';
+    case 'three_continue':
+      return '3D 场景 · 推进';
+    case 'three_feedback':
+      return '3D 场景 · 反馈';
+    case 'hotapp_list':
+      return '热应用';
+    case 'hotapp_generate':
+      return '热应用 · 生成';
+    case 'hotapp_refine':
+      return '热应用 · 精修';
+    case 'hotapp_inspect':
+      return '热应用 · 查看';
+    case 'video_review':
+      return '视频 · 对照检查';
+    case 'video_render':
+      return '视频 · 渲染';
+    case 'nonapp_list':
+      return '应用包';
+    case 'nonapp_inspect':
+      return '应用包 · 查看';
+  }
+  if (tool.startsWith('three_')) return '3D 场景';
+  if (tool.startsWith('hotapp_')) return '热应用';
+  if (tool.startsWith('video_')) return '视频';
+  if (tool.startsWith('nonapp_')) return '应用包';
+  return '智能体操作';
+}
+
+/// 运行阶段 → 用户可见标签（`plan`/`build`/`refine` 是内部代号）。
+String _modeLabel(String mode) => switch (mode) {
+      'plan' => '梳理需求',
+      'refine' => '调整设计',
+      _ => '生成原型',
+    };
+
+/// 失败码 → 用户可见的一句话。
+///
+/// 映射表（docs/copy-glossary.md §4）：
+/// `engine_unavailable` → 设计服务暂时不可用，请稍后重试；
+/// `mbt_gate_block` → 这次改动未通过设计校验；
+/// `render_failed` → 预览生成失败；`download_failed` → 模型下载失败；
+/// `sha256_mismatch` → 模型文件校验失败，已删除，请重试；
+/// `nonapp_unsupported_version` → 应用版本过新，请更新本应用。
+///
+/// 复合错误（`engine_generate_failed:…`）只取冒号前的基码；未知码回落
+/// 「这次操作没有成功，请重试」——原始码只进折叠的技术详情。
+String toolFailureMessage(String? rawError) {
+  final code = normalizedErrorCode(rawError);
+  switch (code) {
+    case 'engine_unavailable':
+      return '设计服务暂时不可用，请稍后重试';
+    case 'engine_timeout':
+      return '这次操作耗时过长，已安全停止';
+    case 'engine_trap':
+      return '设计服务刚刚重启，请重试';
+    case 'engine_fuel_exhausted':
+      return '这次操作太大，已安全停止，可以拆小再试';
+    case 'engine_session_failed':
+    case 'engine_session_open_failed':
+      return '检查没有完成，请重试';
+    case 'engine_generate_failed':
+    case 'generate_unavailable':
+      return '页面生成没有完成，请重试';
+    case 'engine_gate_failed':
+    case 'mbt_gate_block':
+      return '这次改动未通过设计校验';
+    case 'render_failed':
+      return '预览生成失败';
+    case 'download_failed':
+      return '模型下载失败';
+    case 'sha256_mismatch':
+      return '模型文件校验失败，已删除，请重试';
+    case 'nonapp_unsupported_version':
+      return '应用版本过新，请更新本应用';
+    case 'doc_kind_must_be_prd_or_ui':
+      return '文档类型不对，请重试';
+    case 'doc_not_written':
+      return '这次没有生成文档，请重试';
+    case 'no_prd_doc':
+    case 'no_ui_doc':
+    case 'no_design_doc':
+      return '还没有这份文档';
+    case 'unknown_artboard':
+    case 'artboard_required':
+    case 'unknown_inspect_kind':
+      return '找不到这个画板，请重试';
+    case 'invalid_args':
+      return '参数格式不对，请重试';
+    case 'llm_error':
+      return '模型这次没有响应，请稍后重试';
+    case 'three_unavailable':
+      return '3D 场景需要先连接桌面';
+    case 'hotapp_unavailable':
+      return '热应用需要先连接桌面';
+    case 'video_unavailable':
+      return '视频工作区需要先连接桌面';
+    case 'video_render_unavailable':
+      return '视频导出只在电脑上可用';
+    case 'nonapp_unavailable':
+      return '应用包暂时不可用';
+    case 'figma_unavailable':
+      return '导出 Figma 包需要先打开一个设计稿';
+    case 'figma_mobile_unavailable':
+      return figmaFailureMessage('figma_mobile_unavailable');
+    case 'figma_nothing_to_export':
+      return figmaFailureMessage('figma_nothing_to_export');
+    case 'figma_write_failed':
+      return figmaFailureMessage('figma_write_failed');
+    case 'figma_directory_required':
+      return '先选一个导出位置再试';
+    case 'acp_desktop_only':
+      return '外部智能体只在电脑上可用';
+    default:
+      return '这次操作没有成功，请重试';
+  }
+}
+
+/// 取复合错误码的基码：`engine_generate_failed: timeout` → `engine_generate_failed`。
+String normalizedErrorCode(String? rawError) {
+  final raw = (rawError ?? '').trim();
+  if (raw.isEmpty) return '';
+  final cut = raw.indexOf(RegExp(r'[:：\s]'));
+  return cut < 0 ? raw : raw.substring(0, cut);
+}
+
+// ============================================================
+// 本地工作区服务（3D / 热应用 / 视频 / 应用包 / Figma）
+// ============================================================
+
+/// Agent 可用的本地工作区服务契约。
+///
+/// 本批只做**接线**：3D 场景由批次 06、热应用由 07、视频由 08 提供实现；
+/// 这里的 [LocalWorkspaceServices] 把它们的公开 API 适配成统一信封。
+///
+/// 约定：
+///  * 每个方法返回引擎同构信封 `{ok, error?, message?, detail?, …}`；
+///  * `error` 是机器码（只进技术详情），`message` 是用户可见的一句话；
+///  * 能力不可用（手机上没装渲染器、没有本地库）→ `{ok:false, error:
+///    …_unavailable, message: …}`，绝不 "点了没反应"。
+abstract class AgentWorkspaceServices {
+  // -- 3D 场景（批次 06） --
+  Future<Map<String, dynamic>> threeList();
+  Future<Map<String, dynamic>> threeCreate({required String name, required String brief});
+  Future<Map<String, dynamic>> threeStatus(String name);
+  Future<Map<String, dynamic>> threePass(String name);
+  Future<Map<String, dynamic>> threeContinue(String name, [String summary]);
+  Future<Map<String, dynamic>> threeFeedback({
+    required String name,
+    required String kind,
+    required Object? payload,
+  });
+
+  // -- 热应用（批次 07） --
+  Future<Map<String, dynamic>> hotAppList();
+  Future<Map<String, dynamic>> hotAppGenerate({required String name, required String brief});
+  Future<Map<String, dynamic>> hotAppRefine({required String name, required String instruction});
+  Future<Map<String, dynamic>> hotAppInspect(String name);
+
+  // -- 视频（批次 08；渲染只在桌面） --
+  Future<Map<String, dynamic>> videoReview({
+    required Map<String, dynamic> timeline,
+    Map<String, dynamic>? spec,
+  });
+  Future<Map<String, dynamic>> videoRender({
+    required Map<String, dynamic> timeline,
+    Map<String, dynamic>? spec,
+  });
+
+  // -- 应用包（批次 07） --
+  Future<Map<String, dynamic>> nonAppList();
+  Future<Map<String, dynamic>> nonAppInspect(String name);
+
+  // -- Figma 导出（本批） --
+  Future<Map<String, dynamic>> figmaExport({
+    required RenderEnvelope render,
+    required String directory,
+  });
+}
+
+/// 生产适配：把三个本地工作台 + 应用库 + Figma 导出器接进 Agent。
+///
+/// 模型连接参数随 run 请求传入（3D/热应用的生成走当前选中的模型）。
+/// 工厂可注入（测试不落用户文档目录、不打网络）。
+class LocalWorkspaceServices implements AgentWorkspaceServices {
+  LocalWorkspaceServices({
+    required this.model,
+    required this.baseUrl,
+    required this.apiKey,
+    this.thinkingLevel = 'auto',
+    Future<ThreeService> Function()? threeFactory,
+    Future<HotAppService> Function()? hotAppFactory,
+    Future<NonAppLibrary> Function()? nonAppFactory,
+    VideoService? video,
+    FigmaExporter? figma,
+  })  : _threeFactory = threeFactory ?? (() => ThreeService.open()),
+        _hotAppFactory = hotAppFactory ?? (() => HotAppService.open()),
+        _nonAppFactory = nonAppFactory ?? (() => NonAppLibrary.open()),
+        _video = video ?? VideoService.instance,
+        _figma = figma ?? FigmaExporter();
+
+  final String model;
+  final String baseUrl;
+  final String apiKey;
+  final String thinkingLevel;
+
+  final Future<ThreeService> Function() _threeFactory;
+  final Future<HotAppService> Function() _hotAppFactory;
+  final Future<NonAppLibrary> Function() _nonAppFactory;
+  final VideoService _video;
+  final FigmaExporter _figma;
+
+  ThreeLlmConfig get _threeConfig => ThreeLlmConfig(
+        model: model,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        thinkingLevel: thinkingLevel,
+      );
+
+  HotAppLlmConfig get _hotAppConfig => HotAppLlmConfig(
+        model: model,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        thinkingLevel: thinkingLevel,
+      );
+
+  static Map<String, dynamic> _failure(String code, String message, [String? detail]) =>
+      <String, dynamic>{
+        'ok': false,
+        'error': code,
+        'message': message,
+        if (detail != null && detail.isNotEmpty) 'detail': detail,
+      };
+
+  // -- 3D -------------------------------------------------------------------
+
+  @override
+  Future<Map<String, dynamic>> threeList() async {
+    try {
+      final service = await _threeFactory();
+      final projects = await service.listProjects();
+      return <String, dynamic>{
+        'ok': true,
+        'scenes': [
+          for (final p in projects)
+            <String, dynamic>{'name': p.name, 'current': p.current, 'blocked': p.blocked},
+        ],
+      };
+    } catch (error) {
+      return _failure('three_failed', threeFailureMessage(error), '$error');
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> threeCreate({required String name, required String brief}) async {
+    try {
+      final service = await _threeFactory();
+      final snapshot = await service.newProject(
+        name: name,
+        brief: brief,
+        config: _threeConfig,
+      );
+      return <String, dynamic>{
+        'ok': true,
+        'scene': snapshot.name,
+        'current': snapshot.state['current'],
+        'spec': snapshot.spec,
+      };
+    } catch (error) {
+      return _failure('three_failed', threeFailureMessage(error), '$error');
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> threeStatus(String name) async {
+    try {
+      final service = await _threeFactory();
+      final snapshot = await service.readProject(name);
+      return <String, dynamic>{
+        'ok': true,
+        'scene': snapshot.name,
+        'current': snapshot.state['current'],
+        'blocked': snapshot.state['blocked'] == true,
+        'blockedReason': snapshot.state['blocked_reason'],
+        'spec': snapshot.spec,
+        'sceneChars': snapshot.sceneJs.length,
+      };
+    } catch (error) {
+      return _failure('three_failed', threeFailureMessage(error), '$error');
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> threePass(String name) async {
+    try {
+      final service = await _threeFactory();
+      final result = await service.runPass(name, _threeConfig);
+      return <String, dynamic>{
+        'ok': true,
+        'scene': name,
+        'pass': result.pass,
+        'stale': result.stale,
+        'chars': result.chars,
+        'current': result.state['current'],
+      };
+    } catch (error) {
+      return _failure('three_failed', threeFailureMessage(error), '$error');
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> threeContinue(String name, [String summary = '']) async {
+    try {
+      final service = await _threeFactory();
+      final result = await service.continuePass(name, summary);
+      return <String, dynamic>{
+        'ok': true,
+        'scene': name,
+        'current': result.current,
+        'done': result.done,
+      };
+    } catch (error) {
+      return _failure('three_failed', threeFailureMessage(error), '$error');
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> threeFeedback({
+    required String name,
+    required String kind,
+    required Object? payload,
+  }) async {
+    try {
+      final service = await _threeFactory();
+      final result = await service.feedback(name, kind, payload);
+      return <String, dynamic>{
+        'ok': true,
+        'scene': name,
+        'pass': result.pass,
+        'status': result.status,
+        'attempts': result.attempts,
+      };
+    } catch (error) {
+      return _failure('three_failed', threeFailureMessage(error), '$error');
+    }
+  }
+
+  // -- 热应用 ---------------------------------------------------------------
+
+  @override
+  Future<Map<String, dynamic>> hotAppList() async {
+    try {
+      final service = await _hotAppFactory();
+      final apps = await service.list();
+      return <String, dynamic>{
+        'ok': true,
+        'apps': [
+          for (final app in apps)
+            <String, dynamic>{
+              'name': app.name,
+              'title': app.title,
+              'renderer': app.renderer,
+              'corrupt': app.corrupt,
+            },
+        ],
+      };
+    } catch (error) {
+      return _failure('hotapp_failed', hotAppFailureMessage(_hotAppFailure(error)), '$error');
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> hotAppGenerate({
+    required String name,
+    required String brief,
+  }) async {
+    try {
+      final service = await _hotAppFactory();
+      final app = await service.generate(name: name, brief: brief, config: _hotAppConfig);
+      return <String, dynamic>{
+        'ok': true,
+        'app': app.name,
+        'title': app.title,
+        'bytes': app.payloadBytes,
+      };
+    } catch (error) {
+      return _failure('hotapp_failed', hotAppFailureMessage(_hotAppFailure(error)), '$error');
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> hotAppRefine({
+    required String name,
+    required String instruction,
+  }) async {
+    try {
+      final service = await _hotAppFactory();
+      final app = await service.refine(
+        name: name,
+        instruction: instruction,
+        config: _hotAppConfig,
+      );
+      return <String, dynamic>{
+        'ok': true,
+        'app': app.name,
+        'title': app.title,
+        'bytes': app.payloadBytes,
+      };
+    } catch (error) {
+      return _failure('hotapp_failed', hotAppFailureMessage(_hotAppFailure(error)), '$error');
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> hotAppInspect(String name) async {
+    try {
+      final service = await _hotAppFactory();
+      final app = await service.read(name);
+      if (app == null) {
+        return _failure('hotapp_failed', '没有找到这个应用', 'no_app: $name');
+      }
+      final surface = app.isA2ui ? await service.surface(name) : null;
+      return <String, dynamic>{
+        'ok': true,
+        'app': app.name,
+        'title': app.title,
+        'renderer': app.renderer,
+        'brief': app.brief,
+        'bytes': app.payloadBytes,
+        if (surface != null) 'surfaceNodes': surface.length,
+      };
+    } catch (error) {
+      return _failure('hotapp_failed', hotAppFailureMessage(_hotAppFailure(error)), '$error');
+    }
+  }
+
+  static HotAppFailure? _hotAppFailure(Object error) =>
+      error is HotAppFailure ? error : HotAppFailure('store_error', '$error');
+
+  // -- 视频 -----------------------------------------------------------------
+
+  @override
+  Future<Map<String, dynamic>> videoReview({
+    required Map<String, dynamic> timeline,
+    Map<String, dynamic>? spec,
+  }) async {
+    try {
+      final result = _video.review(timeline: timeline, spec: spec);
+      return <String, dynamic>{
+        'ok': result.ok,
+        'summary': result.summary,
+        'problems': result.problems,
+        'notes': result.notes,
+        'seconds': result.totalSeconds,
+        if (!result.ok) 'error': 'video_review_failed',
+        if (!result.ok) 'message': result.summary,
+        if (result.technical.isNotEmpty) 'detail': result.technical.join(' | '),
+      };
+    } catch (error) {
+      return _failure('video_failed', videoFailureMessage(error), '$error');
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoRender({
+    required Map<String, dynamic> timeline,
+    Map<String, dynamic>? spec,
+  }) async {
+    try {
+      if (!_video.host.isDesktop) {
+        return _failure(
+          'video_render_unavailable',
+          videoFailureMessage(const VideoRejected('render_desktop_only')),
+        );
+      }
+      final document = VideoDocument.build(timeline: timeline, spec: spec);
+      final job = await _video.startRender(document);
+      return <String, dynamic>{
+        'ok': true,
+        'job': job.id,
+        'status': job.status.name,
+        'seconds': document.totalSeconds,
+      };
+    } catch (error) {
+      final rejected = error is VideoRejected ? error : null;
+      return _failure(
+        rejected?.code ?? 'video_failed',
+        videoFailureMessage(error),
+        '$error',
+      );
+    }
+  }
+
+  // -- 应用包 ---------------------------------------------------------------
+
+  @override
+  Future<Map<String, dynamic>> nonAppList() async {
+    try {
+      final library = await _nonAppFactory();
+      final apps = await library.scan();
+      return <String, dynamic>{
+        'ok': true,
+        'apps': [
+          for (final app in apps)
+            <String, dynamic>{
+              'name': app.name,
+              'title': app.title,
+              'renderer': app.renderer,
+              'corrupt': app.corrupt,
+            },
+        ],
+      };
+    } catch (error) {
+      return _failure('nonapp_failed', '应用包列表读不出来，请重试', '$error');
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> nonAppInspect(String name) async {
+    try {
+      final library = await _nonAppFactory();
+      final app = await library.read(name);
+      if (app == null) {
+        return _failure('nonapp_failed', '没有找到这个应用', 'no_app: $name');
+      }
+      return <String, dynamic>{
+        'ok': true,
+        'app': app.name,
+        'title': app.title,
+        'renderer': app.renderer,
+        'brief': app.brief,
+        'bytes': app.payloadBytes,
+        'corrupt': app.corrupt,
+      };
+    } catch (error) {
+      return _failure('nonapp_failed', '这个应用读不出来，请重试', '$error');
+    }
+  }
+
+  // -- Figma ----------------------------------------------------------------
+
+  @override
+  Future<Map<String, dynamic>> figmaExport({
+    required RenderEnvelope render,
+    required String directory,
+  }) async {
+    if (directory.trim().isEmpty) {
+      return _failure(
+        'figma_directory_required',
+        toolFailureMessage('figma_directory_required'),
+      );
+    }
+    final result = await _figma.export(render: render, directory: directory);
+    if (!result.ok) {
+      return _failure(
+        result.error ?? 'figma_write_failed',
+        result.message ?? figmaFailureMessage(result.error),
+        result.technical,
+      );
+    }
+    return <String, dynamic>{
+      'ok': true,
+      'dir': result.dir,
+      'boards': result.boards,
+      'files': result.files,
+    };
+  }
 }
 
 // ============================================================
@@ -446,8 +1095,46 @@ String _preview(Object? value, [int limit = 360]) {
   return raw.length <= limit ? raw : '${raw.substring(0, limit)}…';
 }
 
+/// 工具入参进轨迹前的裁剪（长源码/整篇文档不进 tool_start 标题）。
+Map<String, dynamic> _shortArgs(Map<String, dynamic> args) => <String, dynamic>{
+      for (final entry in args.entries)
+        entry.key: entry.value is String && (entry.value as String).length > 120
+            ? '${(entry.value as String).substring(0, 120)}…'
+            : entry.value,
+    };
+
 String _truncate(String text, int limit) =>
     text.isEmpty ? '' : (text.length <= limit ? text : '${text.substring(0, limit)}\n…[truncated]');
+
+/// 统一的 tool_end 事件。
+///
+/// 三个字段各司其职（改呈现前先读）：
+///  * `error` —— 原始机器码，**只进折叠的技术详情**（历史消费者兼容）；
+///  * `message` —— 用户可见的一句话（[toolFailureMessage] 映射），时间线
+///    直接显示这一条；
+///  * `detail` —— 服务层原始诊断（模型回包片段、文件异常），同样只在技术
+///    详情里展开。
+void _emitToolEnd(
+  void Function(Map<String, dynamic>) emit,
+  String tool,
+  Stopwatch watch,
+  Map<String, dynamic> out,
+) {
+  final raw = out['error']?.toString();
+  emit(<String, dynamic>{
+    'type': 'tool_end',
+    'tool': tool,
+    'ok': out['ok'] != false,
+    'ms': watch.elapsedMilliseconds,
+    'preview': _preview(out),
+    'error': raw,
+    if (raw != null && raw.isNotEmpty)
+      'message': (out['message'] is String && (out['message'] as String).isNotEmpty)
+          ? out['message']
+          : toolFailureMessage(raw),
+    if (out['detail'] != null) 'detail': out['detail'].toString(),
+  });
+}
 
 // ============================================================
 // 静态提示词（server prompts.py 逐字移植）
@@ -601,6 +1288,7 @@ appear live. You design the experience, not a pile of boxes.
 - list_templates / list_components — registries (summarized below).
 - read_docs — full PRD/UI text when the brief matters.
 - write_doc / write_design_spec — update the product definition.
+- ask_user — show a short choice card when a product decision materially changes the build.
 - finish — end with a summary.
 
 ## Context discipline
@@ -633,6 +1321,7 @@ String composeDartInstructions({
   required Map<String, dynamic> docs,
   required List<dynamic> templates,
   required List<dynamic> components,
+  bool hasWorkspaceTools = false,
 }) {
   final static = mode == 'plan'
       ? _staticPlan
@@ -680,6 +1369,18 @@ String composeDartInstructions({
     '## COMPONENTS',
     componentLine.isEmpty ? '(engine registry unavailable)' : componentLine,
     '',
+    if (hasWorkspaceTools) ...<String>[
+      '## WORKSPACE TOOLS (this device)',
+      '- 3D scenes: three_list / three_create / three_status / three_pass / '
+          'three_continue / three_feedback',
+      '- Hot apps: hotapp_list / hotapp_generate / hotapp_refine / hotapp_inspect',
+      '- Video: video_review / video_render',
+      '- App packages: nonapp_list / nonapp_inspect',
+      '- Figma: figma_export (pass an absolute folder path)',
+      'Non-canvas work goes through these; canvas changes still go through design_op / '
+          'generate_page.',
+      '',
+    ],
     '---',
     _staticFooter,
   ].join('\n');
@@ -735,6 +1436,9 @@ Future<DartAgentResult> runDartAgent({
   required DartAgentRequest request,
   Object? modelOverride,
   EngineGateBridge? bridge,
+  /// 本地工作区服务（3D / 热应用 / 视频 / 应用包 / Figma）。null = 这些工具
+  /// 不暴露（手机或未接线的宿主）——模型看不到入口，就不会点了没反应。
+  AgentWorkspaceServices? workspace,
   void Function(Map<String, dynamic> event)? onEvent,
   CancellationToken? abortSignal,
   Duration? timeout,
@@ -743,6 +1447,7 @@ Future<DartAgentResult> runDartAgent({
   final ctx = _Ctx(
     request: request,
     bridge: request.mode == 'plan' ? null : bridge, // plan 不给引擎面（server 同构）
+    workspace: request.mode == 'plan' ? null : workspace,
     emit: emit,
   );
   OpenAIProvider? provider;
@@ -753,7 +1458,7 @@ Future<DartAgentResult> runDartAgent({
     emit({
       'type': 'note',
       'label': 'NoN 开始',
-      'detail': '${request.mode} · ${request.model}',
+      'detail': '${_modeLabel(request.mode)} · ${request.model}',
     });
 
     // run 起点：空 canonical 与 server 一样留空（引擎种子/清洗是 P1 的
@@ -775,6 +1480,7 @@ Future<DartAgentResult> runDartAgent({
       docs: ctx.docs,
       templates: templates,
       components: components,
+      hasWorkspaceTools: ctx.workspace != null,
     );
     final tools = _buildTools(ctx);
 
@@ -822,7 +1528,7 @@ Future<DartAgentResult> runDartAgent({
     await consume(dartUserMessage(request.mode, request.instruction));
     if (await _cancelledExit(ctx, abortSignal)) return _terminal(ctx, 'cancelled');
 
-    // ---- nudge 轮（server/agent.py:623-639 逐语义移植）----
+    // ---- nudge 轮（迁移前参考实现逐语义移植）----
     final missingDocs = request.mode == 'plan' &&
         !_allTruthy([ctx.docs['prd'], ctx.docs['ui'], ctx.docs['design']]);
     final noWork = request.mode != 'plan' && ctx.remoteCalls == 0;
@@ -841,7 +1547,7 @@ Future<DartAgentResult> runDartAgent({
       if (await _cancelledExit(ctx, abortSignal)) return _terminal(ctx, 'cancelled');
     }
 
-    // ---- doc_not_written（server/agent.py:640-649 逐语义移植；失败门只看
+    // ---- doc_not_written（迁移前参考实现逐语义移植；失败门只看
     // prd+ui——design 由 write_design_spec 兜底，不拦终态）----
     if (request.mode == 'plan' && !_allTruthy([ctx.docs['prd'], ctx.docs['ui']])) {
       emit({
@@ -865,7 +1571,7 @@ Future<DartAgentResult> runDartAgent({
       );
     }
 
-    // ---- 收尾确定性桥段（server/agent.py:650-700 同序）：空板清扫 → RSI
+    // ---- 收尾确定性桥段（迁移前参考实现同序）：空板清扫 → RSI
     // 修复环。二者都经引擎门，且都只在非 plan（引擎面）生效；内部失败只
     // 跳过、不影响已交付的终态。----
     await _sweepIdleArtboards(ctx);
@@ -902,9 +1608,13 @@ Future<DartAgentResult> runDartAgent({
     );
   } catch (e) {
     final cancelled = abortSignal?.isCancelled == true;
+    final raw = cancelled ? 'cancelled' : e.toString();
     emit({
       'type': 'failed',
-      'error': cancelled ? 'cancelled' : e.toString(),
+      'error': raw,
+      // 用户可见的一句话；原始异常只进 error/detail（折叠的技术详情）。
+      'message': cancelled ? '已取消这一轮' : toolFailureMessage(raw),
+      'detail': raw,
       if (ctx.mbt.isNotEmpty) 'mbt_b64': base64Encode(utf8.encode(ctx.mbt)),
       'docs': ctx.docs,
       'text': ctx.textParts.join(),
@@ -966,6 +1676,9 @@ Future<T> _guard<T>(Future<T> Function() fn, {required T fallback}) async {
 class _Ctx {
   final DartAgentRequest request;
   final EngineGateBridge? bridge;
+
+  /// 本地工作区服务（非 plan 模式且宿主提供时非 null）。
+  final AgentWorkspaceServices? workspace;
   final void Function(Map<String, dynamic>) emit;
 
   /// server 形状 docs（prd/ui/design；design 为 normalize 后 map）。
@@ -986,8 +1699,12 @@ class _Ctx {
   int remoteCalls = 0;
   int previewSeq = 0;
 
-  _Ctx({required this.request, required this.bridge, required this.emit})
-      : mbt = request.mbt {
+  _Ctx({
+    required this.request,
+    required this.bridge,
+    required this.workspace,
+    required this.emit,
+  }) : mbt = request.mbt {
     final raw = request.docs;
     docs = <String, dynamic>{
       'prd': (raw['prd'] ?? '').toString(),
@@ -1116,20 +1833,20 @@ Future<void> _runRsiLoop(_Ctx ctx) async {
       }
       if (targets.isEmpty) {
         if (rnd == 1) {
-          ctx.emit({'type': 'note', 'label': '质量审查', 'detail': '全部屏幕通过原则评审（无 poor 项）'});
+          ctx.emit({'type': 'note', 'label': '质量审查', 'detail': '全部屏幕通过质量检查'});
         }
         break;
       }
       ctx.emit({
         'type': 'review_round',
         'round': rnd,
-        'detail': targets.entries.map((e) => '${e.key}:${e.value}项poor').join('、'),
+        'detail': targets.entries.map((e) => '${e.key} · ${e.value} 处待改进').join('、'),
       });
       for (final entry in targets.entries) {
         ctx.emit({
           'type': 'note',
           'label': '修复轮',
-          'detail': '${entry.key} · ${entry.value} 项 poor → auto_fix',
+          'detail': '${entry.key} · 正在自动优化 ${entry.value} 处',
         });
         try {
           final fixed = await write.mutateSession(ctx.mbt, 'session_auto_fix', entry.key);
@@ -1148,11 +1865,54 @@ Future<void> _runRsiLoop(_Ctx ctx) async {
 }
 
 // ============================================================
-// 工具面（server/agent.py `_make_tools` 九工具对齐）
+// 工具面（迁移前参考实现的九工具对齐）
 // ============================================================
 
 Map<String, String> _strArgs(Object? input) =>
     (input as Map?)?.map((k, v) => MapEntry(k.toString(), v?.toString() ?? '')) ?? const {};
+
+/// ask_user 的 A2UI v1.0 basic 目录载荷：一个问题 + 若干按钮。
+///
+/// 只使用官方 basic 目录组件（Text / Button / Column），按钮动作是协议
+/// 标准的 `event` 形状——渲染器与 `.nonapp` 查看器走同一条 A2UI 路径。
+List<Object?> _askUserSurface({required String question, required List<String> options}) {
+  final surfaceId = 'ask-${DateTime.now().microsecondsSinceEpoch}';
+  final components = <Map<String, Object?>>[
+    {
+      'id': 'root',
+      'component': 'Column',
+      'children': [
+        'question',
+        for (var i = 0; i < options.length; i++) 'option$i',
+      ],
+    },
+    {'id': 'question', 'component': 'Text', 'text': question},
+  ];
+  for (var i = 0; i < options.length; i++) {
+    components.add({
+      'id': 'option$i',
+      'component': 'Button',
+      'child': 'option${i}Label',
+      'action': {
+        'event': {
+          'name': options[i],
+          'context': {'question': question},
+        },
+      },
+    });
+    components.add({'id': 'option${i}Label', 'component': 'Text', 'text': options[i]});
+  }
+  return [
+    {
+      'version': '1.0',
+      'createSurface': {
+        'surfaceId': surfaceId,
+        'catalogId': 'https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json',
+        'components': components,
+      },
+    },
+  ];
+}
 
 ToolSet _buildTools(_Ctx ctx) {
   final emit = ctx.emit;
@@ -1194,6 +1954,7 @@ ToolSet _buildTools(_Ctx ctx) {
         'ms': sw.elapsedMilliseconds,
         'preview': _preview(out),
         'error': out['error'],
+        if (out['error'] != null) 'message': toolFailureMessage(out['error']?.toString()),
       });
       return out;
     },
@@ -1261,6 +2022,67 @@ ToolSet _buildTools(_Ctx ctx) {
       ctx.stopReason = (m['stop_reason']?.isEmpty ?? true) ? 'done' : m['stop_reason']!;
       emit({'type': 'assistant_text', 'text': ctx.summary, 'final': true});
       return {'ok': true};
+    },
+  );
+
+  // ---- ask_user（A2UI 交互卡的真实生产者）----
+  tools['ask_user'] = tool(
+    description: 'Show a quick choice card when a product decision materially changes the build '
+        '(layout direction, navigation model, tone). Two to six short options; the user picks '
+        'one and the choice comes back as the next instruction. Do not use it for trivial '
+        'confirmations; keep working when the answer is obvious.',
+    inputSchema: Schema(
+      jsonSchema: {
+        'type': 'object',
+        'properties': {
+          'question': {'type': 'string', 'description': 'One short question in the user language.'},
+          'options': {
+            'type': 'array',
+            'items': {'type': 'string'},
+            'minItems': 2,
+            'maxItems': 6,
+          },
+        },
+        'required': ['question', 'options'],
+      },
+      fromJson: (m) => m,
+    ),
+    execute: (input, _) async {
+      final raw = (input as Map?) ?? const {};
+      final question = (raw['question'] ?? '').toString().trim();
+      final rawOptions = raw['options'];
+      final options = <String>[
+        if (rawOptions is List)
+          for (final value in rawOptions)
+            if (value.toString().trim().isNotEmpty) value.toString().trim(),
+      ].take(6).toList();
+      final sw = Stopwatch()..start();
+      emit({
+        'type': 'tool_start',
+        'tool': 'ask_user',
+        'args': {'question': question, 'options': options.length},
+      });
+      if (question.isEmpty || options.length < 2) {
+        emit({
+          'type': 'tool_end',
+          'tool': 'ask_user',
+          'ok': false,
+          'ms': sw.elapsedMilliseconds,
+          'error': 'ask_user_invalid',
+          'message': '选项没有准备好，请重试',
+        });
+        return {'ok': false, 'error': 'ask_user_invalid'};
+      }
+      final messages = _askUserSurface(question: question, options: options);
+      emit({'type': 'a2ui', 'messages': messages, 'text': question});
+      emit({
+        'type': 'tool_end',
+        'tool': 'ask_user',
+        'ok': true,
+        'ms': sw.elapsedMilliseconds,
+        'preview': '${options.length} 个选项',
+      });
+      return {'ok': true, 'options': options.length};
     },
   );
 
@@ -1347,6 +2169,7 @@ ToolSet _buildTools(_Ctx ctx) {
           'ms': sw.elapsedMilliseconds,
           'preview': _preview(out),
           'error': out['error'],
+          if (out['error'] != null) 'message': toolFailureMessage(out['error']?.toString()),
         });
         if (out['ok'] != false) {
           emit({
@@ -1400,6 +2223,7 @@ ToolSet _buildTools(_Ctx ctx) {
           'ms': sw.elapsedMilliseconds,
           'preview': _preview(out),
           'error': out['error'],
+          if (out['error'] != null) 'message': toolFailureMessage(out['error']?.toString()),
         });
         return out;
       },
@@ -1420,18 +2244,32 @@ ToolSet _buildTools(_Ctx ctx) {
       ),
       execute: (input, _) async {
         final artboard = _strArgs(input)['artboard'] ?? '';
+        final sw = Stopwatch()..start();
+        emit({
+          'type': 'tool_start',
+          'tool': 'read_mbt',
+          'args': {'artboard': artboard},
+        });
+        Map<String, dynamic> out;
         if (artboard.isEmpty) {
           final bridge = ctx.bridge;
-          if (bridge == null) return {'ok': false, 'error': 'engine_unavailable'};
-          try {
-            return {'ok': true, 'outline': await composeProjectMap(bridge, ctx.mbt)};
-          } catch (e) {
-            return {'ok': false, 'error': 'engine_session_failed:$e'};
+          if (bridge == null) {
+            out = {'ok': false, 'error': 'engine_unavailable'};
+          } else {
+            try {
+              out = {'ok': true, 'outline': await composeProjectMap(bridge, ctx.mbt)};
+            } catch (e) {
+              out = {'ok': false, 'error': 'engine_session_failed:$e'};
+            }
           }
+        } else {
+          final section = artboardSection(ctx.mbt, artboard);
+          out = section == null
+              ? {'ok': false, 'error': 'unknown_artboard:$artboard'}
+              : {'ok': true, 'artboard': artboard, 'source': section};
         }
-        final section = artboardSection(ctx.mbt, artboard);
-        if (section == null) return {'ok': false, 'error': 'unknown_artboard:$artboard'};
-        return {'ok': true, 'artboard': artboard, 'source': section};
+        _emitToolEnd(emit, 'read_mbt', sw, out);
+        return out;
       },
     );
 
@@ -1465,31 +2303,49 @@ ToolSet _buildTools(_Ctx ctx) {
         final m = _strArgs(input);
         final kind = m['kind'] ?? '';
         final artboard = m['artboard'] ?? '';
+        final sw = Stopwatch()..start();
+        emit({
+          'type': 'tool_start',
+          'tool': 'inspect',
+          'args': {'kind': kind, 'artboard': artboard},
+        });
+        Map<String, dynamic> out;
         final fn = inspectMapping[kind];
-        if (fn == null) return {'ok': false, 'error': 'unknown_inspect_kind:$kind'};
-        const needsBoard = {
-          'query_nodes', 'interactions', 'states', 'lint', 'critique', 'spec', 'export_svg',
-        };
-        if (needsBoard.contains(kind) && artboard.isEmpty) {
-          return {'ok': false, 'error': 'artboard_required'};
-        }
-        final bridge = ctx.bridge;
-        if (bridge == null) return {'ok': false, 'error': 'engine_unavailable'};
-        try {
-          final env = Map<String, dynamic>.from(
-              await bridge.session(ctx.mbt, fn, artboard.isEmpty ? null : artboard));
-          if (kind == 'export_svg') {
-            final data = env['data'];
-            final svg = data is Map ? data['svg'] : null;
-            if (svg is String) {
-              env['data'] = {'ok': true, 'chars': svg.length, 'preview': svg.substring(0, svg.length < 1200 ? svg.length : 1200)};
+        if (fn == null) {
+          out = {'ok': false, 'error': 'unknown_inspect_kind:$kind'};
+        } else {
+          const needsBoard = {
+            'query_nodes', 'interactions', 'states', 'lint', 'critique', 'spec', 'export_svg',
+          };
+          final bridge = ctx.bridge;
+          if (needsBoard.contains(kind) && artboard.isEmpty) {
+            out = {'ok': false, 'error': 'artboard_required'};
+          } else if (bridge == null) {
+            out = {'ok': false, 'error': 'engine_unavailable'};
+          } else {
+            try {
+              final env = Map<String, dynamic>.from(
+                  await bridge.session(ctx.mbt, fn, artboard.isEmpty ? null : artboard));
+              if (kind == 'export_svg') {
+                final data = env['data'];
+                final svg = data is Map ? data['svg'] : null;
+                if (svg is String) {
+                  env['data'] = {
+                    'ok': true,
+                    'chars': svg.length,
+                    'preview': svg.substring(0, svg.length < 1200 ? svg.length : 1200),
+                  };
+                }
+              }
+              env['state'] = await stateSummary(bridge, ctx.mbt, parseRevision(ctx.mbt));
+              out = env;
+            } catch (e) {
+              out = {'ok': false, 'error': 'engine_session_failed:$e'};
             }
           }
-          env['state'] = await stateSummary(bridge, ctx.mbt, parseRevision(ctx.mbt));
-          return env;
-        } catch (e) {
-          return {'ok': false, 'error': 'engine_session_failed:$e'};
         }
+        _emitToolEnd(emit, 'inspect', sw, out);
+        return out;
       },
     );
 
@@ -1520,6 +2376,263 @@ ToolSet _buildTools(_Ctx ctx) {
         }
       },
     );
+
+    // ---- 本地工作区工具（3D / 热应用 / 视频 / 应用包 / Figma 导出）----
+    //
+    // 只在宿主注入服务时暴露（手机或未接线的宿主看不到入口，模型不会
+    // 点了没反应）。每个工具的统一纪律：
+    //   tool_start → 服务信封 → tool_end（失败句经 toolFailureMessage 映射，
+    //   原始码只在 error/detail 的技术详情里）。
+    final workspace = ctx.workspace;
+    if (workspace != null) {
+      void addWorkspaceTool(
+        String name,
+        String description,
+        Map<String, dynamic> properties,
+        List<String> required,
+        Future<Map<String, dynamic>> Function(Map<String, dynamic> args) run,
+      ) {
+        tools[name] = tool(
+          description: description,
+          inputSchema: Schema(
+            jsonSchema: {
+              'type': 'object',
+              'properties': properties,
+              if (required.isNotEmpty) 'required': required,
+            },
+            fromJson: (m) => m,
+          ),
+          execute: (input, _) async {
+            final raw = (input as Map?) ?? const {};
+            final args = <String, dynamic>{
+              for (final entry in raw.entries) entry.key.toString(): entry.value,
+            };
+            final sw = Stopwatch()..start();
+            emit({'type': 'tool_start', 'tool': name, 'args': _shortArgs(args)});
+            Map<String, dynamic> out;
+            try {
+              out = await run(args);
+            } catch (error) {
+              out = <String, dynamic>{
+                'ok': false,
+                'error': '${name}_failed',
+                'detail': '$error',
+              };
+            }
+            _emitToolEnd(emit, name, sw, out);
+            return out;
+          },
+        );
+      }
+
+      String str(Map<String, dynamic> args, String key) => (args[key] ?? '').toString();
+
+      addWorkspaceTool(
+        'three_list',
+        'List 3D scene projects on this device (name, current pass, blocked).',
+        const <String, dynamic>{},
+        const <String>[],
+        (_) => workspace.threeList(),
+      );
+      addWorkspaceTool(
+        'three_create',
+        'Start a 3D scene project from a one-line brief: writes the scene spec and the '
+            'layered plan (components + acceptance).',
+        const <String, dynamic>{
+          'name': {'type': 'string', 'description': 'ASCII name (a-z0-9_-)'},
+          'brief': {'type': 'string'},
+        },
+        const <String>['name', 'brief'],
+        (args) => workspace.threeCreate(name: str(args, 'name'), brief: str(args, 'brief')),
+      );
+      addWorkspaceTool(
+        'three_status',
+        'Read one 3D scene project: current pass, blocked state, spec summary.',
+        const <String, dynamic>{
+          'name': {'type': 'string'},
+        },
+        const <String>['name'],
+        (args) => workspace.threeStatus(str(args, 'name')),
+      );
+      addWorkspaceTool(
+        'three_pass',
+        'Generate the current 3D pass (one layer) from the scene spec, then report the '
+            'new scene length so the preview can be checked.',
+        const <String, dynamic>{
+          'name': {'type': 'string'},
+        },
+        const <String>['name'],
+        (args) => workspace.threePass(str(args, 'name')),
+      );
+      addWorkspaceTool(
+        'three_continue',
+        'Accept the current 3D pass (only after it has evidence) and move to the next '
+            'layer; the last pass finishes the scene.',
+        const <String, dynamic>{
+          'name': {'type': 'string'},
+          'summary': {'type': 'string'},
+        },
+        const <String>['name'],
+        (args) => workspace.threeContinue(str(args, 'name'), str(args, 'summary')),
+      );
+      addWorkspaceTool(
+        'three_feedback',
+        'Record feedback for the current 3D pass. kind=error counts a failed attempt '
+            '(blocks after the loop limit); kind=metrics records measurements only.',
+        const <String, dynamic>{
+          'name': {'type': 'string'},
+          'kind': {'type': 'string', 'enum': ['error', 'metrics']},
+          'note': {'type': 'string'},
+        },
+        const <String>['name', 'kind', 'note'],
+        (args) => workspace.threeFeedback(
+          name: str(args, 'name'),
+          kind: str(args, 'kind'),
+          payload: str(args, 'note'),
+        ),
+      );
+
+      addWorkspaceTool(
+        'hotapp_list',
+        'List installed hot apps (small interactive apps) on this device.',
+        const <String, dynamic>{},
+        const <String>[],
+        (_) => workspace.hotAppList(),
+      );
+      addWorkspaceTool(
+        'hotapp_generate',
+        'Generate a new hot app from a one-line brief: one self-contained offline page '
+            '(no external references) plus its local data store.',
+        const <String, dynamic>{
+          'name': {'type': 'string', 'description': 'lowercase ASCII (a-z0-9_-)'},
+          'brief': {'type': 'string'},
+        },
+        const <String>['name', 'brief'],
+        (args) => workspace.hotAppGenerate(name: str(args, 'name'), brief: str(args, 'brief')),
+      );
+      addWorkspaceTool(
+        'hotapp_refine',
+        'Refine an existing hot app in place (hot update). The old page is replaced only '
+            'after the new one passes validation.',
+        const <String, dynamic>{
+          'name': {'type': 'string'},
+          'instruction': {'type': 'string'},
+        },
+        const <String>['name', 'instruction'],
+        (args) => workspace.hotAppRefine(
+          name: str(args, 'name'),
+          instruction: str(args, 'instruction'),
+        ),
+      );
+      addWorkspaceTool(
+        'hotapp_inspect',
+        'Read one hot app: title, renderer, original brief and payload size.',
+        const <String, dynamic>{
+          'name': {'type': 'string'},
+        },
+        const <String>['name'],
+        (args) => workspace.hotAppInspect(str(args, 'name')),
+      );
+
+      addWorkspaceTool(
+        'video_review',
+        'Mechanical review of a video timeline against its spec (timing, formulas, '
+            'declared symbols). Timeline and spec are JSON objects; no rendering.',
+        const <String, dynamic>{
+          'timeline': {'type': 'object'},
+          'spec': {'type': 'object'},
+        },
+        const <String>['timeline'],
+        (args) {
+          final timeline = args['timeline'];
+          if (timeline is! Map) {
+            return Future.value(<String, dynamic>{
+              'ok': false,
+              'error': 'invalid_args',
+              'message': toolFailureMessage('invalid_args'),
+            });
+          }
+          final spec = args['spec'];
+          return workspace.videoReview(
+            timeline: Map<String, dynamic>.from(timeline),
+            spec: spec is Map ? Map<String, dynamic>.from(spec) : null,
+          );
+        },
+      );
+      addWorkspaceTool(
+        'video_render',
+        'Render a video from a timeline (desktop with a local encoder only). Returns a '
+            'job id that can be polled by the workspace.',
+        const <String, dynamic>{
+          'timeline': {'type': 'object'},
+          'spec': {'type': 'object'},
+        },
+        const <String>['timeline'],
+        (args) {
+          final timeline = args['timeline'];
+          if (timeline is! Map) {
+            return Future.value(<String, dynamic>{
+              'ok': false,
+              'error': 'invalid_args',
+              'message': toolFailureMessage('invalid_args'),
+            });
+          }
+          final spec = args['spec'];
+          return workspace.videoRender(
+            timeline: Map<String, dynamic>.from(timeline),
+            spec: spec is Map ? Map<String, dynamic>.from(spec) : null,
+          );
+        },
+      );
+
+      addWorkspaceTool(
+        'nonapp_list',
+        'List installed app packages (imported or generated) on this device.',
+        const <String, dynamic>{},
+        const <String>[],
+        (_) => workspace.nonAppList(),
+      );
+      addWorkspaceTool(
+        'nonapp_inspect',
+        'Read one app package: title, renderer, original brief and payload size.',
+        const <String, dynamic>{
+          'name': {'type': 'string'},
+        },
+        const <String>['name'],
+        (args) => workspace.nonAppInspect(str(args, 'name')),
+      );
+
+      addWorkspaceTool(
+        'figma_export',
+        'Export every artboard of the current design as a Figma import package: one SVG '
+            'per board plus a node manifest, written to a folder on this device.',
+        const <String, dynamic>{
+          'directory': {
+            'type': 'string',
+            'description': 'Absolute folder path to write the package into',
+          },
+        },
+        const <String>['directory'],
+        (args) async {
+          final candidate = ctx.bridge;
+          EngineRenderBridge? renderer;
+          if (candidate is EngineRenderBridge) renderer = candidate as EngineRenderBridge;
+          if (renderer == null) {
+            return <String, dynamic>{
+              'ok': false,
+              'error': 'figma_unavailable',
+              'message': toolFailureMessage('figma_unavailable'),
+            };
+          }
+          final envelope = await renderer.render(ctx.mbt);
+          final render = RenderEnvelope.fromJson(envelope);
+          return workspace.figmaExport(
+            render: render,
+            directory: str(args, 'directory'),
+          );
+        },
+      );
+    }
   }
 
   return tools;

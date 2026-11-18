@@ -131,8 +131,8 @@ void main() {
     ));
     await tester.pump(const Duration(milliseconds: 150));
     expect(find.text('smoke'), findsWidgets);
-    expect(find.text('NoN'), findsWidgets);
-    expect(find.textContaining('问 NoN'), findsOneWidget);
+    expect(find.text('NaN'), findsWidgets);
+    expect(find.textContaining('问 NaN'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.binding.setSurfaceSize(null);
   });

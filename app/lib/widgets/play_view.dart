@@ -13,9 +13,9 @@ import '../core/theme.dart';
 import 'canvas_view.dart';
 import 'common.dart';
 
-/// Demo mode is engine-driven: hotzone taps go through POST /engine/tap
-/// (session_tap) and the engine-0.2 gesture face (long press / swipe / keys)
-/// goes through api.event → POST /engine/event (session_event). Both return
+/// Demo mode is engine-driven: hotzone taps go through [NoNDesignApi.tap]
+/// (session tap) and the engine-0.2 gesture face (long press / swipe / keys)
+/// goes through [NoNDesignApi.event] (session event). Both return
 /// the same envelope contract (probed against the real wasm):
 ///   {ok, changes[], current, mbt}
 ///   changes entries: `nav_push:<board>` + `artboard_changed:<board>` (flow /
@@ -467,7 +467,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                 height: 34,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
-                child: Text('Esc 退出 · ← 返回 · 点按/长按/滑动/按键均由引擎驱动',
+                child: Text('Esc 退出 · ← 返回 · 点按、长按、滑动都能用',
                     style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.35))),
               ),
             ],
@@ -617,7 +617,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
   }
 
   /// Route the tap through the engine: node center → artboard coordinates →
-  /// POST /engine/tap. Navigation (flow / navigate_to) follows `current`; a
+  /// [NoNDesignApi.tap]. Navigation (flow / navigate_to) follows `current`; a
   /// changed `mbt` is re-rendered into the local [_live] overlay; toast text in
   /// `changes` floats at the frame bottom for 1.5s. If the call fails, a flow
   /// zone still navigates locally so the demo never dead-ends.
@@ -643,12 +643,12 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
     setState(() => _tapping = true);
     Map<String, dynamic> env;
     try {
-      env = await api.postJson('/engine/tap', {
-        'mbt': sentMbt,
-        'artboard': boardId,
-        'x': node.x + node.w / 2,
-        'y': node.y + node.h / 2,
-      });
+      env = await api.tap(
+        sentMbt,
+        boardId,
+        node.x + node.w / 2,
+        node.y + node.h / 2,
+      );
     } catch (_) {
       env = {'ok': false};
     }
@@ -697,7 +697,8 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
     return effect.any;
   }
 
-  /// Shared envelope consumption for /engine/tap and /engine/event. Navigation
+  /// Shared envelope consumption for [NoNDesignApi.tap] and
+  /// [NoNDesignApi.event]. Navigation
   /// wins over state re-render (same precedence as the original tap path); a
   /// toast alone counts as an effect. Returns which faces the envelope touched.
   Future<_EnvEffect> _applyEnvelope(
@@ -877,7 +878,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
       final t = acts?.isNotEmpty == true ? acts!.first.trigger : null;
       if (t != null && t != 'tap') triggers.add(_triggerLabel(t));
     }
-    return '${triggers.join(' · ')} 驱动 · ← 返回 · Esc 退出';
+    return '${triggers.join(' · ')} · ← 返回 · Esc 退出';
   }
 
   /// 画板坐标取整并钳制在画板范围内（引擎事件坐标是整数像素语义）。

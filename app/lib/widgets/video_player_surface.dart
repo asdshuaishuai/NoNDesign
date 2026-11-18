@@ -1,3 +1,20 @@
+/// 视频播放面（艺术架 → 视频产物 → 真播）。
+///
+/// 载体是 WebView：媒体文档由平台原生播放器承担（WKWebView macOS/iOS、
+/// Android WebView）——不引入播放器依赖，也不需要把帧序列在 Dart 侧重放。
+/// 播放的是**本机文件**（`file://`），不经任何端口或内部路由：进度条拖动
+/// 由原生播放器的本地文件读取承担。
+///
+/// **只在构造时创建控制器**：视频工作台的默认渲染台模式根本不构造本 widget，
+/// 既有工作台测试不设 WebViewPlatform 也不会炸。
+///
+/// 自动播放硬前提（真机黑屏的根因）：WebKitWebViewControllerCreationParams
+/// 的默认值是 `mediaTypesRequiringUserAction = {audio, video}` +
+/// `allowsInlineMediaPlayback = false`（webview_flutter_wkwebview
+/// 3.27.2 webkit_webview_controller.dart:73-77）——不显式放开这两个参数，
+/// 媒体会被自动播放策略静默拦住（页面加载成功但永远不播）。
+library;
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,33 +22,18 @@ import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
-import '../core/api_shelf.dart';
+import '../core/platform_capabilities.dart';
 import '../core/theme.dart';
+import '../core/toast_service.dart';
+import '../core/video_service.dart';
 
-/// 视频播放面（艺术架 → 视频产物 → 真播）。
-///
-/// 载体是 WebView：媒体文档由平台原生播放器承担（WKWebView macOS/iOS、
-/// Android WebView）——不引入播放器依赖，也不需要把帧序列在 Dart 侧重放。
-/// **只在构造时创建控制器**：视频工作台的默认渲染台模式根本不构造本 widget，
-/// 既有 video_workspace_test 不设 WebViewPlatform 也不会炸。
-///
-/// 自动播放硬前提（真机黑屏的根因）：WebKitWebViewControllerCreationParams
-/// 的默认值是 `mediaTypesRequiringUserAction = {audio, video}` +
-/// `allowsInlineMediaPlayback = false`（webview_flutter_wkwebview
-/// 3.27.2 webkit_webview_controller.dart:73-77）——不显式放开这两个参数，
-/// 媒体会被自动播放策略静默拦住（页面加载成功但永远不播）。
 bool _wkRegistered = false;
 
 class VideoPlayerSurface extends StatefulWidget {
-  const VideoPlayerSurface({super.key, required this.path, this.baseUrl});
+  const VideoPlayerSurface({super.key, required this.path});
 
-  /// mp4 绝对路径（`videos/<job>/frames.mp4`，或回退的
-  /// `video/<job>/frames.mp4`）。
+  /// mp4 绝对路径（`videos/<job>/frames.mp4`）。
   final String path;
-
-  /// 服务器地址：有则经 /video/mp4?path=… 走 HTTP（Range/seek 由服务端
-  /// FileResponse 承担）；无服务器（离线）用 file:// 本地打开。
-  final String? baseUrl;
 
   @override
   State<VideoPlayerSurface> createState() => _VideoPlayerSurfaceState();
@@ -42,8 +44,10 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
   String _error = '';
 
   /// webview_flutter 只覆盖 android/ios/macos；Linux/Windows 没有 WebView
-  /// 插件——那两平台降级为路径提示（工作台信息行仍可复制路径/定位文件）。
-  static bool get _webViewSupported => Platform.isMacOS || Platform.isIOS || Platform.isAndroid;
+  /// 实现——那两平台降级为路径提示（信息行仍可复制路径/定位文件）。
+  bool get _webViewSupported => PlatformCapabilities.current().supportsInAppWebView;
+
+  ToastService get _toasts => ToastScope.of(context);
 
   @override
   void initState() {
@@ -67,7 +71,8 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
       WebKitWebViewPlatform.registerWith();
       _wkRegistered = true;
     }
-    PlatformWebViewControllerCreationParams params = const PlatformWebViewControllerCreationParams();
+    PlatformWebViewControllerCreationParams params =
+        const PlatformWebViewControllerCreationParams();
     if (Platform.isMacOS || Platform.isIOS) {
       params = WebKitWebViewControllerCreationParams(
         // 空集合 = AudiovisualMediaType.none：视频无需用户手势即可播放；
@@ -76,52 +81,50 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
         allowsInlineMediaPlayback: true,
       );
     }
-    final c = WebViewController.fromPlatformCreationParams(params)
+    return WebViewController.fromPlatformCreationParams(params)
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(NavigationDelegate(
-        // 主帧 HTTP ≥400（/video/mp4 的 400 invalid_video_path / 404 no_video）
-        // 在 WKWebView 上不进 onWebResourceError——必须用 onHttpError。
+        // 主帧加载失败在 WKWebView 上不进 onWebResourceError——用 onHttpError
+        // 兜住 HTTP 形态的错误页（本地文件缺失通常走 onWebResourceError）。
         onHttpError: (error) {
           final code = error.response?.statusCode;
-          if (code != null) _setError('无法播放：HTTP $code（产物不存在或路径越界）');
+          if (code != null) _setError('无法播放：这个视频文件读不出来（$code）');
         },
         onWebResourceError: (error) {
           // 子资源失败不清播放面；只报主帧。
           if (error.isForMainFrame == false) return;
-          _setError('无法播放：${error.description}（${error.errorCode}）');
+          _setError('无法播放：这个视频文件不在了或无法读取');
         },
       ));
-    return c;
   }
 
   void _loadMedia() {
-    final c = _controller;
-    if (c == null) return;
-    final base = widget.baseUrl?.trim() ?? '';
-    if (base.isNotEmpty) {
-      c.loadRequest(Uri.parse(videoMp4UrlFor(base, widget.path)));
-    } else {
-      // 离线：WK 默认 readAccessPath = 文件父目录（webkit_webview_controller
-      // .dart:45-47），mp4 本体可读即可播。
-      c.loadFile(widget.path);
-    }
+    final controller = _controller;
+    if (controller == null) return;
+    // 本地文件：WK 默认 readAccessPath = 文件父目录
+    //（webkit_webview_controller.dart:45-47），mp4 本体可读即可播。
+    controller.loadFile(widget.path);
   }
 
-  void _setError(String msg) {
-    if (!mounted || msg == _error) return;
-    setState(() => _error = msg);
+  void _setError(String message) {
+    if (!mounted || message == _error) return;
+    setState(() => _error = message);
   }
 
   Future<void> _copyPath() async {
     await Clipboard.setData(ClipboardData(text: widget.path));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制路径')));
+    _toasts.info('已复制路径');
   }
 
   Future<void> _reveal() async {
-    final ok = await revealInFolder(widget.path);
+    if (!PlatformCapabilities.current().supportsRevealInFolder) {
+      _toasts.warn('这台设备不支持在文件夹中显示');
+      return;
+    }
+    final ok = await revealInSystemFileManager(widget.path);
     if (!mounted || ok) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法在文件夹中显示')));
+    _toasts.warn('没能打开文件夹', '可以先用「复制路径」拿到文件位置。');
   }
 
   @override
@@ -145,13 +148,13 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
       );
     }
     if (_error.isNotEmpty) return _errorPane(p);
-    final c = _controller;
-    if (c == null) {
+    final controller = _controller;
+    if (controller == null) {
       return Center(child: CircularProgressIndicator(strokeWidth: 1.6, color: p.accent));
     }
     return Container(
       color: Colors.black,
-      child: WebViewWidget(controller: c),
+      child: WebViewWidget(controller: controller),
     );
   }
 
@@ -179,7 +182,7 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
             icon: const Icon(Icons.copy_all_outlined, size: 14),
             label: const Text('复制路径', style: TextStyle(fontSize: 12)),
           ),
-          if (revealSupported)
+          if (PlatformCapabilities.current().supportsRevealInFolder)
             OutlinedButton.icon(
               onPressed: _reveal,
               icon: const Icon(Icons.folder_open_outlined, size: 14),

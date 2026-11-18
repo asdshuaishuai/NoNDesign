@@ -1,21 +1,33 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:provider/provider.dart';
 
+import '../core/layout.dart';
+import '../core/mediapipe_service.dart';
 import '../core/models.dart';
 import '../core/keys.dart';
+import '../core/platform_capabilities.dart';
+import '../core/remote_desktop_client.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
+import 'mediapipe_model_card.dart';
 
-Future<void> showSettingsDialog(BuildContext context) async {
+Future<void> showSettingsDialog(BuildContext context, {MediaPipeService? mediaPipeService}) async {
   await showNonDialog<void>(
     context: context,
-    builder: (context) => const _SettingsDialog(),
+    builder: (context) => _SettingsDialog(mediaPipeService: mediaPipeService),
   );
 }
 
 class _SettingsDialog extends StatefulWidget {
-  const _SettingsDialog();
+  const _SettingsDialog({this.mediaPipeService});
+
+  /// 本地语义模型服务（测试注入临时目录；默认进程内共享实例）。
+  final MediaPipeService? mediaPipeService;
+
   @override
   State<_SettingsDialog> createState() => _SettingsDialogState();
 }
@@ -29,9 +41,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   String _query = '';
   late final TextEditingController _keyController;
   late final TextEditingController _baseController;
+  late final TextEditingController _remoteUrlController;
+  late final TextEditingController _remoteTokenController;
   List<AcpAgentInfo> _acpAgents = const [];
-  // ACP 探测失败原因（含「本地服务未连接」）；null = 正常或未探测。
+  // 外部智能体探测失败的人话原因；null = 正常或未探测。
   String? _acpError;
+  // 「检测连接」内联状态：检测中 / 已连接 / 失败原因。
+  bool _remoteTesting = false;
+  bool _remoteConnected = false;
+  String? _remoteMessage;
   // 步数输入控制器：initState 赋值（字段初始化器访问不到局部 store）。
   late final TextEditingController _stepsController;
   final _stepsFocus = FocusNode();
@@ -42,16 +60,22 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     super.initState();
     final store = context.read<AppStore>();
     _keyController = TextEditingController(text: store.settings.apiKey);
-    // 内置服务商的端点来自 models.dev 快照：设置页打开时就填入，避免
-    // 「先切一次服务商才看到端点」的空态。端点本身只读（内置不可改）。
-    final provider = store.registry.provider(store.settings.providerId);
-    final providerApi = (provider?['api'] ?? '').toString();
-    final base = store.settings.baseUrl.isNotEmpty ? store.settings.baseUrl : providerApi;
-    if (store.settings.baseUrl.isEmpty && providerApi.isNotEmpty) {
-      store.settings.baseUrl = providerApi;
-      Future.microtask(store.saveSettings);
+    // 内置服务商的端点来自模型快照：设置页打开时就填入，避免「先切一次
+    // 服务商才看到端点」的空态。端点本身只读（内置不可改）。
+    //
+    // 只回填内存、不落盘：打开设置不应产生一次隐式保存（此前 initState
+    // 的微任务落盘让首次显式保存变成第二次写盘）。首次显式保存/切服务商
+    // 时才写盘；旧自定义端点保持原值，由「旧自定义端点」提示显式重置。
+    final fallback = _endpointForProvider(store, store.settings.providerId);
+    final base = store.settings.baseUrl.isNotEmpty ? store.settings.baseUrl : fallback;
+    if (store.settings.baseUrl.isEmpty && fallback.isNotEmpty) {
+      store.settings.baseUrl = fallback;
     }
     _baseController = TextEditingController(text: base);
+    _remoteUrlController = TextEditingController(text: store.settings.serverUrl);
+    _remoteTokenController = TextEditingController(text: store.serverToken);
+    _remoteConnected = store.remoteStatus.connected;
+    _remoteMessage = store.remoteStatus.connected ? store.remoteStatus.message : null;
     _stepsController = TextEditingController(text: store.settings.maxSteps.toString());
     _stepsFocus.addListener(() { if (mounted) setState(() {}); });
     _loadAcpAgents();
@@ -75,7 +99,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   Future<void> _loadAcpAgents() async {
     final api = context.read<AppStore>().api;
     if (api == null) {
-      if (mounted) setState(() => _acpError = '本地服务未连接');
+      if (mounted) setState(() => _acpError = '现在还不能检测外部智能体，请稍后重试');
       return;
     }
     try {
@@ -87,9 +111,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         });
       }
     } catch (e) {
-      // 失败显性呈现（_acp 顶部错误行 + 重试），不再静默吞掉——
-      // 服务未连上时用户要能分辨「没装 CLI」与「探测失败」。
-      if (mounted) setState(() => _acpError = '检测失败：$e');
+      // 失败显性呈现（_acp 顶部错误行 + 重试），不静默吞掉——原始错误只进日志。
+      debugPrint('[settings] external agent probe failed: $e');
+      if (mounted) setState(() => _acpError = '检测没有完成，请稍后重试');
     }
   }
 
@@ -97,9 +121,27 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   void dispose() {
     _keyController.dispose();
     _baseController.dispose();
+    _remoteUrlController.dispose();
+    _remoteTokenController.dispose();
     _stepsController.dispose();
     _stepsFocus.dispose();
     super.dispose();
+  }
+
+  String _endpointForProvider(AppStore store, String providerId) {
+    final api = (store.registry.provider(providerId)?['api'] ?? '').toString().trim();
+    return api.isNotEmpty ? api : builtInBaseUrlFor(providerId);
+  }
+
+  static String _trimEndpoint(String value) =>
+      value.trim().replaceAll(RegExp(r'/+$'), '');
+
+  /// 当前端点是否与内置端点不同（旧自定义端点：显式提示 + 可重置，不静默锁死）。
+  bool _hasLegacyEndpoint(AppStore store) {
+    final actual = _trimEndpoint(store.settings.baseUrl);
+    if (actual.isEmpty) return false;
+    final builtIn = _trimEndpoint(_endpointForProvider(store, store.settings.providerId));
+    return builtIn.isEmpty || actual != builtIn;
   }
 
   @override
@@ -133,8 +175,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final dialogWidth = (size.width - 48).clamp(320.0, size.width < 1100 ? 920.0 : 860.0).toDouble();
     final dialogHeight = (size.height - 48).clamp(420.0, 640.0).toDouble();
     final railWidth = size.width < 1100 ? 200.0 : 176.0;
-    // 移动端没有本地 agent/引擎，第三方智能体（ACP）不可用：入口整体隐藏，
-    // 只保留 NoN 内置管线（用户裁决 2026-11-16）。
+    // 外部智能体需要本机进程能力：移动端入口整体隐藏（iOS 不能拉起任意
+    // 进程、Android 不能执行 PATH 上的 CLI），只保留内置智能体。
     final mobile = Theme.of(context).platform == TargetPlatform.iOS ||
         Theme.of(context).platform == TargetPlatform.android;
     final navItems = <(String, IconData, String)>[
@@ -279,68 +321,29 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   Widget _models(BuildContext context, AppStore store) {
     final p = context.palette;
-    final models = store.registry.flatten().where((m) {
-      if (m.providerId != store.settings.providerId) return false;
-      if (_query.isEmpty) return true;
-      return m.id.toLowerCase().contains(_query.toLowerCase()) || m.name.toLowerCase().contains(_query.toLowerCase());
-    }).take(160).toList();
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: _labeled(context, '服务商', nonSelect<String>(context,
-                  value: store.settings.providerId,
-                      items: [
-                    for (final id in store.registry.providerIds)
-                      DropdownMenuItem(value: id, child: Text(store.registry.provider(id)?['name']?.toString() ?? id, style: const TextStyle(fontSize: 12))),
-                  ],
-                  onChanged: (id) async {
-                    if (id == null) return;
-                    final pv = store.registry.provider(id);
-                    final models = (pv?['models'] as Map?) ?? const {};
-                    // 显式 String 归一：keys 是 List<dynamic>，firstWhere 的
-                    // orElse 闭包推断成 () => dynamic 会以子类型错误崩溃
-                    // （2026-11-13 实证：选无 tool_call 模型的服务商即炸）。
-                    var first = '';
-                    for (final k in models.keys) {
-                      if ((models[k] as Map?)?['tool_call'] == true) {
-                        first = k.toString();
-                        break;
-                      }
-                    }
-                    if (first.isEmpty && models.isNotEmpty) {
-                      first = models.keys.first.toString();
-                    }
-                    store.settings
-                      ..providerId = id
-                      ..modelId = first
-                      ..baseUrl = (pv?['api'] ?? '').toString()
-                      ..thinkingLevel = 'auto';
-                    _baseController.text = store.settings.baseUrl;
-                    await store.saveSettings();
-                  },
-                )),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                // 内置服务商的端点来自 models.dev 快照，固定不可改（用户裁决
-                // 2026-11-17）。自定义服务商接入前这里不提供编辑面。
-                child: _labeled(context, '端点（内置只读）', TextField(
-                  controller: _baseController,
-                  readOnly: true,
-                  style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink2),
-                  decoration: InputDecoration(
-                    hintText: 'https://…/v1',
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
-                    suffixIcon: Icon(Icons.lock_outline, size: 13, color: p.ink4),
-                  ),
-                )),
-              ),
-            ],
-          ),
+          _labeled(context, '服务商',
+              KeyedSubtree(key: const ValueKey('settings-provider'), child: _providerDropdown(context, store))),
+          const SizedBox(height: 10),
+          // 模型行紧贴服务商下方：点按打开底部选择面板（搜索/更新/勾选）。
+          _labeled(context, '模型', _modelRow(context, store, keyName: 'settings-model-row')),
+          const SizedBox(height: 10),
+          _labeled(context, '端点（内置只读）', TextField(
+            key: const ValueKey('settings-endpoint'),
+            controller: _baseController,
+            readOnly: true,
+            style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink2),
+            decoration: InputDecoration(
+              hintText: '内置端点',
+              contentPadding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
+              suffixIcon: Icon(Icons.lock_outline, size: 13, color: p.ink4),
+            ),
+          )),
+          if (_hasLegacyEndpoint(store))
+            _legacyEndpointNotice(context, store, keyName: 'settings-legacy-endpoint'),
           const SizedBox(height: 12),
           _labeled(context, 'API Key（只存本机）', TextField(
             controller: _keyController,
@@ -356,84 +359,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               await store.saveSettings();
             },
           )),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  onChanged: (v) => setState(() => _query = v),
-                  style: TextStyle(fontSize: 12, color: p.ink),
-                  decoration: const InputDecoration(hintText: '搜索模型…', prefixIcon: Icon(Icons.search, size: 15)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: () => store.refreshModels(),
-                icon: const Icon(Icons.refresh, size: 13),
-                label: const Text('更新清单'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Container(
-            constraints: const BoxConstraints(maxHeight: 250),
-            decoration: BoxDecoration(
-              border: Border.all(color: p.line),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: models.length,
-              itemBuilder: (context, i) {
-                final m = models[i];
-                final active = store.settings.modelId == m.id;
-                return InkWell(
-                  onTap: () async {
-                    store.settings.modelId = m.id;
-                    if (store.settings.baseUrl.isEmpty) store.settings.baseUrl = m.baseUrl;
-                    _baseController.text = store.settings.baseUrl;
-                    await store.saveSettings();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: active ? p.accentSoft : Colors.transparent,
-                      // 0.5px hairline；末行免画——末行底线与容器 Border.all
-                      // 叠成 2px 假粗线（hairline 分隔线策略）。
-                      border: i < models.length - 1
-                          ? Border(bottom: BorderSide(color: p.line, width: 0.5))
-                          : null,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(active ? Icons.radio_button_checked : Icons.radio_button_off,
-                            size: 14, color: active ? p.accent : p.ink4),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Flexible(child: Text(m.name, overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: p.ink))),
-                                  const SizedBox(width: 5),
-                                  if (m.toolCall) Pill(label: 'tools', color: p.success),
-                                  if (m.reasoning) Pill(label: 'thinking', color: p.accent),
-                                ],
-                              ),
-                              Text('${m.id} · ${formatTokens(m.context)} ctx',
-                                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
+          const SizedBox(height: 14),
+          MediaPipeModelCard(service: widget.mediaPipeService),
           const SizedBox(height: 12),
           if (store.model != null)
             Container(
@@ -484,7 +411,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                           ),
                         ),
                       const Spacer(),
-                      Text('${formatTokens(store.model!.context)} context',
+                      Text('${formatTokens(store.model!.context)} 上下文',
                           style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
                       const SizedBox(width: 10),
                       Text('步数', style: TextStyle(fontSize: 10, color: p.ink3)),
@@ -574,6 +501,317 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     );
   }
 
+  /// 服务商下拉（桌面/平板）：切服务商同时刷新模型与内置端点。
+  Widget _providerDropdown(BuildContext context, AppStore store) {
+    return nonSelect<String>(
+      context,
+      value: store.settings.providerId,
+      items: [
+        for (final id in store.registry.providerIds)
+          DropdownMenuItem(
+            value: id,
+            child: Text(store.registry.provider(id)?['name']?.toString() ?? id,
+                style: const TextStyle(fontSize: 12)),
+          ),
+      ],
+      onChanged: (id) async {
+        if (id == null || id == store.settings.providerId) return;
+        final models = (store.registry.provider(id)?['models'] as Map?) ?? const {};
+        // 显式 String 归一：keys 是 List<dynamic>，firstWhere 的 orElse 闭包
+        // 推断成 () => dynamic 会以子类型错误崩溃（2026-11-13 实证）。
+        var first = '';
+        for (final k in models.keys) {
+          if ((models[k] as Map?)?['tool_call'] == true) {
+            first = k.toString();
+            break;
+          }
+        }
+        if (first.isEmpty && models.isNotEmpty) first = models.keys.first.toString();
+        store.settings
+          ..providerId = id
+          ..modelId = first
+          ..baseUrl = _endpointForProvider(store, id)
+          ..thinkingLevel = 'auto';
+        _baseController.text = store.settings.baseUrl;
+        _query = '';
+        await store.saveSettings();
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  /// 模型行：点按打开底部选择面板；面板里搜索、更新清单、勾选。
+  Widget _modelRow(BuildContext context, AppStore store,
+      {required String keyName, bool mobile = false}) {
+    final p = context.palette;
+    final model = store.model;
+    final emptyRegistry = store.registry.providerIds.isEmpty;
+    final name = emptyRegistry
+        ? '模型清单未加载'
+        : model?.name ?? (store.settings.modelId.isEmpty ? '还没有选择模型' : store.settings.modelId);
+    final meta = emptyRegistry
+        ? '点按打开模型清单'
+        : model == null
+            ? '从模型清单里选择一个'
+            : '${formatTokens(model.context)} 上下文${model.toolCall ? ' · 可执行操作' : ''}';
+    return InkWell(
+      key: ValueKey(keyName),
+      borderRadius: BorderRadius.circular(10),
+      onTap: () => _showModelPicker(context, store),
+      child: Container(
+        constraints: BoxConstraints(minHeight: mobile ? 52 : 40),
+        padding: EdgeInsets.symmetric(horizontal: mobile ? 14 : 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: p.panel3.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(mobile ? 12 : 8),
+          border: Border.all(color: p.line),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.auto_awesome, size: mobile ? 18 : 14, color: p.accent),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: mobile ? 15 : 12, color: p.ink)),
+                  const SizedBox(height: 1),
+                  Text(meta,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: mobile ? 12 : 10, color: p.ink4)),
+                ],
+              ),
+            ),
+            Text('选择',
+                style: TextStyle(fontSize: mobile ? 13 : 10, color: p.accent)),
+            Icon(Icons.chevron_right, size: mobile ? 20 : 14, color: p.ink4),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 模型选择底部面板：0.7 屏高、拖拽把手、安全区、搜索 + 更新 + 勾选。
+  Future<void> _showModelPicker(BuildContext context, AppStore store) async {
+    final p = context.palette;
+    _query = '';
+    final providerName =
+        (store.registry.provider(store.settings.providerId)?['name'] ?? store.settings.providerId)
+            .toString();
+    final picked = await showModalBottomSheet<ModelInfo>(
+      context: context,
+      backgroundColor: p.panel,
+      isScrollControlled: true,
+      builder: (ctx) => FractionallySizedBox(
+        key: const ValueKey('model-picker-sheet'),
+        heightFactor: 0.7,
+        child: SafeArea(
+          top: false,
+          child: StatefulBuilder(
+            builder: (ctx, setSheet) {
+              final models = store.registry.flatten().where((m) {
+                if (m.providerId != store.settings.providerId) return false;
+                if (_query.isEmpty) return true;
+                final q = _query.toLowerCase();
+                return m.id.toLowerCase().contains(q) || m.name.toLowerCase().contains(q);
+              }).take(200).toList();
+              return Column(
+                children: [
+                  // 拖拽把手（触屏/桌面的底部面板同一语义）。
+                  Center(
+                    child: Container(
+                      key: const ValueKey('model-picker-handle'),
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.only(top: 10, bottom: 10),
+                      decoration: BoxDecoration(
+                        color: p.ink4.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text('选择模型',
+                              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.ink)),
+                        ),
+                        Text(providerName, style: TextStyle(fontSize: 12, color: p.ink4)),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            key: const ValueKey('model-picker-search'),
+                            onChanged: (v) => setSheet(() => _query = v),
+                            style: TextStyle(fontSize: 13, color: p.ink),
+                            decoration: InputDecoration(
+                              hintText: '搜索模型…',
+                              isDense: true,
+                              prefixIcon: const Icon(Icons.search, size: 16),
+                              contentPadding:
+                                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: BorderSide(color: p.line),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          key: const ValueKey('model-picker-refresh'),
+                          onPressed: () async {
+                            await store.refreshModels();
+                            if (ctx.mounted) setSheet(() {});
+                          },
+                          icon: const Icon(Icons.refresh, size: 14),
+                          label: const Text('更新清单', style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: models.isEmpty
+                        ? Center(
+                            child: Text(
+                              store.registry.providerIds.isEmpty ? '模型清单还没有加载，点上方更新重试' : '没有找到匹配的模型',
+                              style: TextStyle(fontSize: 13, color: p.ink4),
+                            ),
+                          )
+                        : ListView.builder(
+                            key: const ValueKey('model-picker-list'),
+                            padding: const EdgeInsets.fromLTRB(10, 0, 10, 16),
+                            itemCount: models.length,
+                            itemBuilder: (ctx, i) {
+                              final m = models[i];
+                              final active = store.settings.modelId == m.id;
+                              return InkWell(
+                                key: ValueKey('model-picker-${m.id}'),
+                                borderRadius: BorderRadius.circular(10),
+                                onTap: () => Navigator.pop(ctx, m),
+                                child: Container(
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  margin: const EdgeInsets.only(bottom: 4),
+                                  decoration: BoxDecoration(
+                                    color: active ? p.accentSoft : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                          active
+                                              ? Icons.check_circle
+                                              : Icons.radio_button_off,
+                                          size: 18,
+                                          color: active ? p.accent : p.ink4),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(children: [
+                                              Flexible(
+                                                child: Text(m.name,
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                        fontSize: 14,
+                                                        fontWeight: FontWeight.w500,
+                                                        color: p.ink)),
+                                              ),
+                                              if (m.toolCall) ...[
+                                                const SizedBox(width: 6),
+                                                Pill(label: '可操作', color: p.success),
+                                              ],
+                                              if (m.reasoning) ...[
+                                                const SizedBox(width: 4),
+                                                Pill(label: '会思考', color: p.accent),
+                                              ],
+                                            ]),
+                                            const SizedBox(height: 2),
+                                            Text('${m.id} · ${formatTokens(m.context)} 上下文',
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                    fontSize: 11,
+                                                    fontFamily: 'Menlo',
+                                                    color: p.ink4)),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    if (picked == null) return;
+    store.settings.modelId = picked.id;
+    if (store.settings.baseUrl.trim().isEmpty) store.settings.baseUrl = picked.baseUrl;
+    _baseController.text = store.settings.baseUrl;
+    await store.saveSettings();
+    if (mounted) setState(() {});
+  }
+
+  /// 旧自定义端点提示：显示当前值来自旧设置，并给一键重置（不静默锁死）。
+  Widget _legacyEndpointNotice(BuildContext context, AppStore store,
+      {required String keyName}) {
+    final p = context.palette;
+    return Padding(
+      key: ValueKey(keyName),
+      padding: const EdgeInsets.only(top: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: p.warn.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: p.warn.withValues(alpha: 0.28)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.info_outline, size: 14, color: p.warn),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('旧自定义端点：当前地址不是这个服务商的内置端点。',
+                  style: TextStyle(fontSize: 11, height: 1.4, color: p.warn)),
+            ),
+            TextButton(
+              key: ValueKey('$keyName-reset'),
+              onPressed: () async {
+                store.settings.baseUrl = _endpointForProvider(store, store.settings.providerId);
+                _baseController.text = store.settings.baseUrl;
+                await store.saveSettings();
+                if (mounted) setState(() {});
+              },
+              child: const Text('重置为内置端点', style: TextStyle(fontSize: 11)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   List<String> _levels(ModelInfo model) {    final out = <String>{'auto'};
     for (final opt in model.reasoningOptions) {
       if (opt is Map) {
@@ -592,6 +830,22 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   Widget _appearance(BuildContext context, AppStore store) {
     final p = context.palette;
+    // 「主面」只在聊天优先壳（手机四向、iPad 竖屏）生效；桌面/iPad 横屏是
+    // 工作区优先壳，主面由壳层裁决（Welcome / Workspace），不展示无效开关。
+    final size = MediaQuery.sizeOf(context);
+    final hostOs = switch (Theme.of(context).platform) {
+      TargetPlatform.macOS => HostOs.macos,
+      TargetPlatform.windows => HostOs.windows,
+      TargetPlatform.linux => HostOs.linux,
+      TargetPlatform.iOS => HostOs.ios,
+      TargetPlatform.android => HostOs.android,
+      TargetPlatform.fuchsia => HostOs.fuchsia,
+    };
+    final chatFirst = LayoutSpec.classify(
+      width: size.width,
+      height: size.height,
+      os: hostOs,
+    ).usesChatFirstShell;
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -628,47 +882,49 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 ),
             ],
           ),
-          const SizedBox(height: 18),
-          const SectionLabel('主面'),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              for (final item in [(true, '聊天流', Icons.forum_outlined), (false, '经典 Welcome', Icons.home_outlined)])
-                Expanded(
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(10),
-                    onTap: () async {
-                      if (store.settings.chatStreamHome == item.$1) return;
-                      store.settings.chatStreamHome = item.$1;
-                      await store.saveSettings();
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: store.settings.chatStreamHome == item.$1 ? p.accentSoft : p.panel2.withValues(alpha: 0.45),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: store.settings.chatStreamHome == item.$1 ? p.accent : p.line),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(item.$3, size: 16, color: store.settings.chatStreamHome == item.$1 ? p.accent : p.ink3),
-                          const SizedBox(width: 8),
-                          Text(item.$2, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: p.ink)),
-                        ],
+          if (chatFirst) ...[
+            const SizedBox(height: 18),
+            const SectionLabel('主面'),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                for (final item in [(true, '聊天流', Icons.forum_outlined), (false, '经典 Welcome', Icons.home_outlined)])
+                  Expanded(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () async {
+                        if (store.settings.chatStreamHome == item.$1) return;
+                        store.settings.chatStreamHome = item.$1;
+                        await store.saveSettings();
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: store.settings.chatStreamHome == item.$1 ? p.accentSoft : p.panel2.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: store.settings.chatStreamHome == item.$1 ? p.accent : p.line),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(item.$3, size: 16, color: store.settings.chatStreamHome == item.$1 ? p.accent : p.ink3),
+                            const SizedBox(width: 8),
+                            Text(item.$2, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: p.ink)),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 5),
-          Text(
-            store.settings.chatStreamHome
-                ? '聊天流是默认主面；顶栏「工作区」进设计视图，Esc 返回聊天流。'
-                : '启动停留在经典 Welcome；可从顶栏「聊天流」进入聊天流。',
-            style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4),
-          ),
+              ],
+            ),
+            const SizedBox(height: 5),
+            Text(
+              store.settings.chatStreamHome
+                  ? '聊天流是默认主面；点顶栏「工作区」打开设计视图，按 Esc 回到聊天流。'
+                  : '启动停留在经典 Welcome；点顶栏「聊天流」进入聊天流。',
+              style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4),
+            ),
+          ],
           const SizedBox(height: 18),
           const SectionLabel('快捷键'),
           const SizedBox(height: 8),
@@ -701,6 +957,486 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     );
   }
 
+  static bool _isDesktopPlatform(TargetPlatform platform) =>
+      platform == TargetPlatform.macOS ||
+      platform == TargetPlatform.windows ||
+      platform == TargetPlatform.linux;
+
+  /// 合并的「运行方式」卡：内置（默认）/ 连接桌面二选一。
+  ///
+  /// 只有选「连接桌面」才展开地址与连接码；「检测连接」内联呈现
+  /// 检测中 / 已连接 / 失败原因，失败不静默回落——用户能看见结果。
+  Widget _runtimeCard(BuildContext context, AppStore store, {bool mobile = false}) {
+    final p = context.palette;
+    final remote = store.settings.agentRuntime == agentRuntimeServer;
+    final canHost = _isDesktopPlatform(Theme.of(context).platform);
+
+    Widget field({required String keyName, required String label, required TextEditingController controller,
+        String? hint, bool obscure = false}) {
+      final decoration = mobile
+          ? _mDecoration(context, hint: hint)
+          : InputDecoration(
+              hintText: hint,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: p.line)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: p.line)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: p.accent)),
+            );
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: mobile ? 12 : 10, color: p.ink3)),
+          const SizedBox(height: 4),
+          TextField(
+            key: ValueKey(keyName),
+            controller: controller,
+            obscureText: obscure,
+            style: TextStyle(fontSize: mobile ? 14 : 11, fontFamily: 'Menlo', color: p.ink),
+            decoration: decoration,
+          ),
+        ],
+      );
+    }
+
+    final children = <Widget>[
+      Text('选择助手在哪里执行：内置在本机完成；也可以连接另一台电脑上开启的连接，本机只负责显示与编辑。',
+          style: TextStyle(fontSize: mobile ? 12 : 10, height: 1.5, color: p.ink4)),
+      const SizedBox(height: 10),
+      _runtimeOption(
+        context,
+        keyName: mobile ? 'settings-m-runtime-local' : 'settings-runtime-local',
+        selected: !remote,
+        icon: Icons.memory,
+        title: '内置',
+        note: '默认。在本机执行，画布改动仍经设计校验。',
+        trailing: Text(store.engineReady ? '本机引擎就绪' : '本机运行',
+            style: TextStyle(fontSize: 10, color: p.success)),
+        onTap: () async {
+          if (!remote) return;
+          store.settings.agentRuntime = agentRuntimeLocal;
+          await store.saveSettings();
+          if (mounted) setState(() {});
+        },
+      ),
+      const SizedBox(height: 6),
+      _runtimeOption(
+        context,
+        keyName: mobile ? 'settings-m-runtime-remote' : 'settings-runtime-remote',
+        selected: remote,
+        icon: Icons.desktop_mac_outlined,
+        title: '连接桌面',
+        note: '在另一台电脑上执行；先在那边开启「手机连接」，再把地址与连接码填到这里。',
+        trailing: Pill(
+          label: _remoteConnected ? '已连接' : '可选',
+          color: _remoteConnected ? p.success : p.ink4,
+        ),
+        onTap: () async {
+          if (remote) return;
+          store.settings.agentRuntime = agentRuntimeServer;
+          await store.saveSettings();
+          if (mounted) setState(() {});
+        },
+      ),
+      if (remote) ...[
+        const SizedBox(height: 12),
+        if (mobile) ...[
+          field(
+            keyName: 'settings-m-remote-url',
+            label: '桌面地址',
+            hint: '粘贴桌面端显示的地址',
+            controller: _remoteUrlController,
+          ),
+          const SizedBox(height: 10),
+          field(
+            keyName: 'settings-m-remote-token',
+            label: '连接码（桌面端显示的一次性码）',
+            controller: _remoteTokenController,
+            obscure: true,
+          ),
+        ] else
+          Row(
+            children: [
+              Expanded(
+                child: field(
+                  keyName: 'settings-remote-url',
+                  label: '桌面地址',
+                  hint: '粘贴桌面端显示的地址',
+                  controller: _remoteUrlController,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: field(
+                  keyName: 'settings-remote-token',
+                  label: '连接码（必填）',
+                  controller: _remoteTokenController,
+                  obscure: true,
+                ),
+              ),
+            ],
+          ),
+        const SizedBox(height: 6),
+        Text('连接码是桌面端显示的一次性码，必须填写；地址与连接码只保存在本机。',
+            style: TextStyle(fontSize: mobile ? 11 : 9, height: 1.4, color: p.ink4)),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            SizedBox(
+              height: mobile ? 44 : 30,
+              child: OutlinedButton.icon(
+                key: ValueKey(mobile ? 'settings-m-remote-test' : 'settings-remote-test'),
+                onPressed: _remoteTesting ? null : () => _probeRemote(store),
+                icon: const Icon(Icons.cable, size: 14),
+                label: Text('检测连接', style: TextStyle(fontSize: mobile ? 13 : 11)),
+              ),
+            ),
+            const SizedBox(width: 10),
+            if (_remoteTesting) ...[
+              const SizedBox(
+                width: 13,
+                height: 13,
+                child: CircularProgressIndicator(strokeWidth: 1.8),
+              ),
+              const SizedBox(width: 6),
+              Text('正在检测…', style: TextStyle(fontSize: mobile ? 12 : 10, color: p.ink3)),
+            ] else if (_remoteMessage != null) ...[
+              Icon(_remoteConnected ? Icons.check_circle : Icons.error_outline,
+                  size: 14, color: _remoteConnected ? p.success : p.warn),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(_remoteMessage!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: mobile ? 12 : 10,
+                        color: _remoteConnected ? p.success : p.warn)),
+              ),
+            ],
+          ],
+        ),
+        if (store.settings.serverUrl.isNotEmpty ||
+            store.remote != null ||
+            _remoteConnected) ...[
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: ValueKey(mobile ? 'settings-m-remote-disconnect' : 'settings-remote-disconnect'),
+              onPressed: _remoteTesting
+                  ? null
+                  : () async {
+                      await store.disconnectRemoteDesktop();
+                      _remoteUrlController.clear();
+                      _remoteTokenController.clear();
+                      if (!mounted) return;
+                      setState(() {
+                        _remoteConnected = false;
+                        _remoteMessage = '已断开桌面连接，接下来使用本机运行';
+                      });
+                      store.toasts.info('已断开桌面连接');
+                    },
+              icon: const Icon(Icons.link_off, size: 14),
+              label: Text('断开桌面', style: TextStyle(fontSize: mobile ? 13 : 11)),
+            ),
+          ),
+        ],
+      ],
+      // 桌面端同时可以充当「连接桌面」宿主：手机/iPad 连到这台电脑。
+      if (canHost) ...[
+        const SizedBox(height: 12),
+        _desktopHostCard(context, store, mobile: mobile),
+      ],
+    ];
+
+    if (mobile) {
+      return _mCard(context,
+          title: '运行方式',
+          helper: '地址与连接码都只保存在本机；检测失败会如实显示原因。',
+          children: children);
+    }
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: p.panel2.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: p.line),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+    );
+  }
+
+  /// 桌面端宿主卡：手机/iPad 连接这台电脑的唯一入口。
+  ///
+  /// 打开后显示本机实际监听的地址与一次性连接码；关闭即停止监听。没有
+  /// 这一步，应用里就从未启动过宿主，设置卡上的「桌面端显示的地址」也就
+  /// 永远不存在。
+  Widget _desktopHostCard(BuildContext context, AppStore store, {required bool mobile}) {
+    final p = context.palette;
+    final status = store.desktopHostStatus;
+    final running = status?.running ?? false;
+    final busy = store.desktopHostBusy;
+    final switchOn = running || (busy && store.settings.desktopHostEnabled);
+
+    Widget valueBlock(String label, String value, {Color? color}) => Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: TextStyle(fontSize: mobile ? 11 : 9, color: p.ink4)),
+              const SizedBox(height: 2),
+              SelectableText(
+                value,
+                style: TextStyle(
+                  fontSize: mobile ? 13 : 11,
+                  fontFamily: 'Menlo',
+                  height: 1.4,
+                  color: color ?? p.ink,
+                ),
+              ),
+            ],
+          ),
+        );
+
+    return Container(
+      key: ValueKey(mobile ? 'settings-m-desktop-host' : 'settings-desktop-host'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: p.panel3.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: running ? p.success.withValues(alpha: 0.55) : p.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.phone_iphone, size: 16, color: running ? p.success : p.ink3),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('手机连接这台电脑',
+                        style: TextStyle(fontSize: mobile ? 14 : 12, fontWeight: FontWeight.w600, color: p.ink)),
+                    const SizedBox(height: 2),
+                    Text('开启后，手机与 iPad 可以连到本机执行；关闭时不对外开放连接。',
+                        style: TextStyle(fontSize: mobile ? 11 : 9, height: 1.4, color: p.ink4)),
+                  ],
+                ),
+              ),
+              Switch.adaptive(
+                key: ValueKey(mobile ? 'settings-m-desktop-host-switch' : 'settings-desktop-host-switch'),
+                value: switchOn,
+                onChanged: busy
+                    ? null
+                    : (value) async {
+                        await store.setDesktopHostEnabled(value);
+                        if (mounted) setState(() {});
+                      },
+              ),
+            ],
+          ),
+          if (busy)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 1.8),
+                  ),
+                  const SizedBox(width: 6),
+                  Text('正在启动…', style: TextStyle(fontSize: mobile ? 12 : 10, color: p.ink3)),
+                ],
+              ),
+            )
+          else if (store.desktopHostError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('连接没有启动成功，请稍后再试。',
+                  style: TextStyle(fontSize: mobile ? 11 : 9, color: p.warn)),
+            )
+          else if (running && status != null) ...[
+            const SizedBox(height: 10),
+            valueBlock(
+              status.lanEnabled && status.lanUrls.isNotEmpty
+                  ? '桌面地址'
+                  : '本机地址（手机需开启局域网访问）',
+              status.lanEnabled && status.lanUrls.isNotEmpty
+                  ? status.lanUrls.first
+                  : status.baseUrl,
+            ),
+            valueBlock('连接码', status.token),
+            if (status.lanEnabled && status.lanUrls.length > 1) ...[
+              valueBlock('其他局域网地址', status.lanUrls.skip(1).join('\n')),
+            ],
+            if (status.lanEnabled) ...[
+              Text(status.warning,
+                  style: TextStyle(fontSize: mobile ? 11 : 9, height: 1.4, color: p.warn)),
+              const SizedBox(height: 6),
+            ],
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                OutlinedButton.icon(
+                  key: ValueKey(mobile ? 'settings-m-desktop-host-copy' : 'settings-desktop-host-copy'),
+                  onPressed: () {
+                    final url = status.lanEnabled && status.lanUrls.isNotEmpty
+                        ? status.lanUrls.first
+                        : status.baseUrl;
+                    Clipboard.setData(ClipboardData(text: '$url\n${status.token}'));
+                    store.toasts.info('已复制地址与连接码');
+                  },
+                  icon: const Icon(Icons.copy_all_outlined, size: 14),
+                  label: Text('复制地址与连接码', style: TextStyle(fontSize: mobile ? 12 : 10)),
+                ),
+                TextButton.icon(
+                  key: ValueKey(mobile ? 'settings-m-desktop-host-rotate' : 'settings-desktop-host-rotate'),
+                  onPressed: () {
+                    store.regenerateDesktopHostToken();
+                    setState(() {});
+                  },
+                  icon: const Icon(Icons.autorenew, size: 14),
+                  label: Text('换一个连接码', style: TextStyle(fontSize: mobile ? 12 : 10)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: Text('允许局域网访问（同一 Wi-Fi 下的手机可连接）',
+                      style: TextStyle(fontSize: mobile ? 11 : 9, height: 1.4, color: p.ink3)),
+                ),
+                Switch.adaptive(
+                  key: ValueKey(mobile ? 'settings-m-desktop-host-lan' : 'settings-desktop-host-lan'),
+                  value: status.lanEnabled,
+                  onChanged: busy
+                      ? null
+                      : (value) async {
+                          await store.setDesktopHostAllowLan(value);
+                          if (mounted) setState(() {});
+                        },
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _runtimeOption(
+    BuildContext context, {
+    required String keyName,
+    required bool selected,
+    required IconData icon,
+    required String title,
+    required String note,
+    required Widget trailing,
+    required VoidCallback onTap,
+  }) {
+    final p = context.palette;
+    return InkWell(
+      key: ValueKey(keyName),
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 52),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: selected ? p.accentSoft : p.panel3.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? p.accent : p.line),
+        ),
+        child: Row(
+          children: [
+            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_off,
+                size: 18, color: selected ? p.accent : p.ink4),
+            const SizedBox(width: 9),
+            Icon(icon, size: 16, color: selected ? p.accent : p.ink3),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w600, color: p.ink)),
+                  const SizedBox(height: 1),
+                  Text(note, style: TextStyle(fontSize: 11, height: 1.4, color: p.ink3)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            trailing,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _probeRemote(AppStore store) async {
+    final url = _remoteUrlController.text.trim();
+    if (url.isEmpty) {
+      setState(() {
+        _remoteConnected = false;
+        _remoteMessage = '先填写桌面地址';
+      });
+      return;
+    }
+    // 宿主对每条 /v1 请求都要求连接码；空输入只允许复用上次保存的码，
+    // 两者都没有就明确提示，不能发出必然 401 的探测。
+    final typedToken = _remoteTokenController.text.trim();
+    final token = typedToken.isEmpty ? store.serverToken : typedToken;
+    if (token.isEmpty) {
+      setState(() {
+        _remoteConnected = false;
+        _remoteMessage = '先填写连接码（桌面端显示的连接码）';
+      });
+      return;
+    }
+    setState(() {
+      _remoteTesting = true;
+      _remoteConnected = false;
+      _remoteMessage = null;
+    });
+    RemoteDesktopStatus status;
+    try {
+      status = await store.testRemoteConnection(url, token: token);
+    } catch (e) {
+      debugPrint('[settings] connect probe failed: $e');
+      status = const RemoteDesktopStatus.notConfigured();
+    }
+    if (!mounted) return;
+    var connected = status.connected;
+    if (connected) {
+      try {
+        // 检测通过即接线：路由切到桌面端；失败按下一次探测的真实结果呈现。
+        status = await store.applyRemoteDesktop(url, token: token);
+        connected = status.connected;
+      } catch (e) {
+        debugPrint('[settings] connect apply failed: $e');
+        connected = false;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _remoteTesting = false;
+      _remoteConnected = connected;
+      _remoteMessage = connected ? '已连接' : status.message;
+    });
+    if (connected) {
+      store.toasts.success('已连接桌面');
+    }
+  }
+
   Widget _agent(BuildContext context, AppStore store) {
     final p = context.palette;
     final cacheRate = (store.usage['inputTokens'] as num? ?? 0) > 0
@@ -710,35 +1446,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionLabel('运行时'),
+          const SectionLabel('运行方式'),
           const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: p.panel2.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: p.line),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.smart_toy_outlined, size: 16, color: p.accent),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('内置 Dart 循环',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
-                      const SizedBox(height: 2),
-                      Text('桌面与移动共用；循环在客户端执行，画布变更仍经引擎 AgentGate 校验。',
-                          style: TextStyle(fontSize: 10, height: 1.45, color: p.ink3)),
-                    ],
-                  ),
-                ),
-                Pill(label: '内置', color: p.accent),
-              ],
-            ),
-          ),
+          _runtimeCard(context, store),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(14),
@@ -750,32 +1460,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   children: [
                     Icon(Icons.layers, size: 14, color: p.accent),
                     const SizedBox(width: 5),
-                    Text('前缀缓存分层', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
+                    Text('上下文与缓存', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
                     const SizedBox(width: 6),
-                    Pill(label: 'append-only', color: p.accent),
+                    Pill(label: '自动管理', color: p.accent),
                   ],
                 ),
                 const SizedBox(height: 6),
-                Text('上下文按「稳定 → 易变」排序；变更以追加方式进入最新 tool 结果，不重写历史。',
+                Text('项目说明与工具说明会优先复用；新的改动只追加到最新结果，不重写历史。',
                     style: TextStyle(fontSize: 11, height: 1.5, color: p.ink3)),
                 const SizedBox(height: 10),
-                for (final row in [
-                  ('L0', '静态指令 + 工具 schema', '逐字节稳定'),
-                  ('L1', 'PROJECT MAP', '项目内稳定'),
-                  ('L2', '设计规范 + 产品文档', '编辑后变化'),
-                  ('L3', '会话记忆 + 最新 state', '每轮追加'),
-                ])
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Row(
-                      children: [
-                        SizedBox(width: 18, child: Text(row.$1, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.accent))),
-                        Expanded(child: Text(row.$2, style: TextStyle(fontSize: 10, color: p.ink3))),
-                        Text(row.$3, style: TextStyle(fontSize: 10, color: p.ink4)),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 8),
                 Row(
                   children: [
                     _metric(context, '上下文窗口', formatTokens(store.model?.context)),
@@ -806,7 +1499,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 },
               ))),
               const SizedBox(width: 10),
-              Expanded(child: _labeled(context, '会话键', TextFormField(
+              Expanded(child: _labeled(context, '项目位置', TextFormField(
                 initialValue: store.projectPath ?? store.projectName,
                 readOnly: true,
                 style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink3),
@@ -834,13 +1527,13 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('确定性上下文治理', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
+                Text('上下文管理', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
                 const SizedBox(height: 6),
                 for (final line in [
-                  '工具结果剥离 canonical 与 SVG，只保留摘要 + 最新 state',
-                  '旧 read/inspect 结果被占位替换（去 supersede）',
-                  '上下文窗口来自 models.dev 的 limit.context',
-                  '会话超过 80 条自动压缩为确定性摘要，不额外调用 LLM',
+                  '工具结果去掉整份源码，只保留摘要与最新状态',
+                  '旧的读取结果会被占位替换，避免上下文重复堆积',
+                  '上下文窗口来自随包发布的模型清单',
+                  '会话超过 80 条自动压缩为摘要，不额外调用模型',
                 ])
                   Padding(
                     padding: const EdgeInsets.only(bottom: 3),
@@ -893,10 +1586,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ),
         const SizedBox(height: 16),
         for (final row in [
-          ('运行时', 'Flutter 3.50'),
-          ('引擎', 'MoonViz classic wasm · 0.2 dev 构建'),
-          ('引擎宿主', store.api == null ? '未就绪' : '就绪'),
-          ('数据', '~/.nondesign · DDP 单文件'),
+          ('应用版本', '0.1 · 本地优先'),
+          ('设计引擎', store.api == null ? '未就绪' : '就绪'),
+          ('项目文件', '加密单文件 · 保存在本机'),
+          ('模型清单', '内置快照 · 可手动更新'),
         ])
           Padding(
             padding: const EdgeInsets.only(bottom: 7),
@@ -908,10 +1601,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             ),
           ),
         const SizedBox(height: 12),
-        Text('唯一事实源是一份 canonical .mbt.md；人类与 Agent 的每次修改都经引擎门校验后回写同一份文档。DDP 只是它的认证加密容器。',
+        Text('每个项目是一份加密项目文件；你与内置智能体的每次修改都经设计校验后写回同一份文档。',
             style: TextStyle(fontSize: 11, height: 1.55, color: p.ink3)),
         const Spacer(),
-        Text('模型与端点来自 models.dev 快照；上下文与缓存策略在本地确定性执行。',
+        Text('模型清单来自内置快照；上下文与缓存策略在本机确定性执行。',
             style: TextStyle(fontSize: 10, color: p.ink4)),
       ],
     );
@@ -921,10 +1614,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final p = context.palette;
     return ListView(
       children: [
-        Text('外部智能体（ACP 协议）', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
+        Text('外部智能体', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
         const SizedBox(height: 4),
-        Text('自动检测本机已安装的支持 ACP 的智能体 CLI（Claude Code / Codex / Kimi / Gemini / Qwen 等）。'
-            '选中后右侧输入框的消息将发给该智能体，流式回显进时间线；NoN 内置管线保持可用。',
+        Text('自动检测本机已安装、支持通用协作协议的外部智能体（Claude Code / Codex / Kimi / Gemini / Qwen 等）。'
+            '选中后右侧输入框的消息将发给该智能体，流式回显进时间线；内置智能体保持可用。',
             style: TextStyle(fontSize: 11, height: 1.5, color: p.ink3)),
         const SizedBox(height: 12),
         if (_acpError != null)
@@ -948,7 +1641,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               ),
             ),
           ),
-        _acpOption(context, store, null, 'NoN 内置管线', '一句话 → 文档 → 原型（默认）', true, false, ''),
+        _acpOption(context, store, null, '内置智能体', '一句话 → 文档 → 原型（默认）', true, false, ''),
         for (final a in _acpAgents)
           _acpOption(
             context,
@@ -963,11 +1656,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 : a.probeState == 'verified'
                     ? '已验证'
                     : a.installed
-                        ? (a.executable ?? '适配器经 npx 拉取')
+                        ? '已安装'
                         : '未安装',
           ),
         const SizedBox(height: 10),
-        Text('检测基于 PATH 探测；适配器类（claude-code-acp 等）需先全局安装。'
+        Text('检测基于本机已安装的智能体；部分适配器需要先全局安装。'
             '权限请求自动放行并记录在时间线；文件读写限制在工作区目录内。',
             style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4)),
       ],
@@ -1140,7 +1833,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             id: 'agent',
             icon: Icons.smart_toy_outlined,
             title: '智能体',
-            subtitle: '内置 Dart · 最大步数 ${store.settings.maxSteps} · 本地上下文治理',
+            subtitle:
+                '${store.settings.agentRuntime == agentRuntimeServer ? '连接桌面' : '内置智能体'} · 最大步数 ${store.settings.maxSteps}',
             onTap: () => setState(() => _mobileSection = 'agent')),
         _mSectionTile(context,
             id: 'appearance',
@@ -1153,10 +1847,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             id: 'about',
             icon: Icons.info_outline,
             title: '关于',
-            subtitle: 'NoNDesign v0.1 · Flutter 3.50',
+            subtitle: 'NoNDesign v0.1 · 本地优先',
             onTap: () => setState(() => _mobileSection = 'about')),
         const SizedBox(height: 10),
-        Text('设置即时生效并保存在本机；模型与端点来自 models.dev 快照。',
+        Text('设置即时生效并保存在本机；模型清单来自内置快照，可随时更新。',
             style: TextStyle(fontSize: 12, height: 1.5, color: p.ink4)),
       ],
     );
@@ -1226,12 +1920,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final p = context.palette;
     final provider = store.registry.provider(store.settings.providerId);
     final providerName = (provider?['name'] ?? store.settings.providerId).toString();
-    final models = store.registry.flatten().where((m) {
-      if (m.providerId != store.settings.providerId) return false;
-      if (_query.isEmpty) return true;
-      final q = _query.toLowerCase();
-      return m.id.toLowerCase().contains(q) || m.name.toLowerCase().contains(q);
-    }).take(40).toList();
     return ListView(
       key: const ValueKey('settings-m-detail-models'),
       padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
@@ -1269,18 +1957,45 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             ),
           ),
         ]),
+        _mCard(context, title: '模型', children: [
+          _modelRow(context, store, keyName: 'settings-m-model-row', mobile: true),
+        ]),
         _mCard(context, title: '端点（内置只读）',
-            helper: '内置服务商端点来自 models.dev 快照，固定不可改动。', children: [
+            helper: '内置服务商端点来自随包清单，固定不可改动。', children: [
           TextField(
             key: const ValueKey('settings-m-endpoint'),
             controller: _baseController,
             readOnly: true,
             style: TextStyle(fontSize: 13, fontFamily: 'Menlo', color: p.ink),
             decoration: _mDecoration(context,
-                hint: 'https://…/v1',
+                hint: '内置端点',
                 suffix: Icon(Icons.lock_outline, size: 18, color: p.ink4)),
           ),
         ]),
+        if (_hasLegacyEndpoint(store))
+          KeyedSubtree(
+            key: const ValueKey('settings-m-legacy-endpoint'),
+            child: _mCard(context,
+                title: '旧自定义端点',
+                helper: '当前地址不是这个服务商的内置端点，保存时会沿用旧地址。',
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    height: 44,
+                    child: OutlinedButton(
+                      key: const ValueKey('settings-m-legacy-endpoint-reset'),
+                      onPressed: () async {
+                        store.settings.baseUrl =
+                            _endpointForProvider(store, store.settings.providerId);
+                        _baseController.text = store.settings.baseUrl;
+                        await store.saveSettings();
+                        if (mounted) setState(() {});
+                      },
+                      child: const Text('重置为内置端点', style: TextStyle(fontSize: 14)),
+                    ),
+                  ),
+                ]),
+          ),
         _mCard(context, title: 'API Key（只存本机）', helper: '仅保存在本机设置中，不上传。', children: [
           TextField(
             key: const ValueKey('settings-m-apikey'),
@@ -1309,34 +2024,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             },
           ),
         ]),
-        _mCard(context, title: '模型清单', children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  key: const ValueKey('settings-m-model-search'),
-                  onChanged: (v) => setState(() => _query = v),
-                  style: TextStyle(fontSize: 14, color: p.ink),
-                  decoration: _mDecoration(context, hint: '搜索模型…'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                height: 48,
-                child: OutlinedButton.icon(
-                  onPressed: () => store.refreshModels(),
-                  icon: const Icon(Icons.refresh, size: 16),
-                  label: const Text('更新', style: TextStyle(fontSize: 13)),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          for (final m in models) _mModelRow(context, store, m),
-        ]),
+        MediaPipeModelCard(service: widget.mediaPipeService),
+        const SizedBox(height: 14),
         if (store.model != null)
           _mCard(context, title: '思考等级',
-              helper: '当前模型：${store.model!.name} · ${formatTokens(store.model!.context)} context',
+              helper: '当前模型：${store.model!.name} · ${formatTokens(store.model!.context)} 上下文',
               children: [
                 Wrap(
                   spacing: 8,
@@ -1375,67 +2067,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     );
   }
 
-  Widget _mModelRow(BuildContext context, AppStore store, ModelInfo m) {
-    final p = context.palette;
-    final active = store.settings.modelId == m.id;
-    return InkWell(
-      key: ValueKey('settings-m-model-${m.id}'),
-      borderRadius: BorderRadius.circular(10),
-      onTap: () async {
-        store.settings.modelId = m.id;
-        if (store.settings.baseUrl.isEmpty) store.settings.baseUrl = m.baseUrl;
-        _baseController.text = store.settings.baseUrl;
-        await store.saveSettings();
-        if (mounted) setState(() {});
-      },
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 56),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        margin: const EdgeInsets.only(bottom: 6),
-        decoration: BoxDecoration(
-          color: active ? p.accentSoft : p.panel3.withValues(alpha: 0.35),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: active ? p.accent : p.line),
-        ),
-        child: Row(
-          children: [
-            Icon(active ? Icons.check_circle : Icons.circle_outlined,
-                size: 20, color: active ? p.accent : p.ink4),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(m.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: p.ink)),
-                  const SizedBox(height: 2),
-                  Row(children: [
-                    Flexible(
-                      child: Text('${m.id} · ${formatTokens(m.context)} ctx',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink4)),
-                    ),
-                    if (m.toolCall) ...[
-                      const SizedBox(width: 6),
-                      Pill(label: 'tools', color: p.success),
-                    ],
-                    if (m.reasoning) ...[
-                      const SizedBox(width: 4),
-                      Pill(label: 'thinking', color: p.accent),
-                    ],
-                  ]),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Future<void> _mPickProvider(BuildContext context, AppStore store) async {
     final p = context.palette;
     final ids = store.registry.providerIds.toList();
@@ -1459,7 +2090,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 ListTile(
                   minVerticalPadding: 14,
                   title: Text('模型清单未加载', style: TextStyle(fontSize: 15, color: p.ink3)),
-                  subtitle: Text('点按重试拉取 models.dev 快照',
+                  subtitle: Text('点按重新加载内置模型清单',
                       style: TextStyle(fontSize: 12, color: p.ink4)),
                   onTap: () async {
                     await store.refreshModels();
@@ -1499,9 +2130,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     store.settings
       ..providerId = picked
       ..modelId = first
-      ..baseUrl = (pv?['api'] ?? '').toString()
+      ..baseUrl = _endpointForProvider(store, picked)
       ..thinkingLevel = 'auto';
     _baseController.text = store.settings.baseUrl;
+    _query = '';
     await store.saveSettings();
     if (mounted) setState(() {});
   }
@@ -1573,23 +2205,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       children: [
-        _mCard(context, title: '运行时',
-            helper: '桌面与移动共用内置 Dart；循环在客户端执行，画布变更仍经引擎门校验。', children: [
-          Row(children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(color: p.accentSoft, borderRadius: BorderRadius.circular(10)),
-              child: Icon(Icons.smart_toy_outlined, size: 19, color: p.accent),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text('内置 Dart 循环',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
-            ),
-            Pill(label: '内置', color: p.accent),
-          ]),
-        ]),
+        _runtimeCard(context, store, mobile: true),
         Row(children: [
           _mStat(context, '上下文窗口', formatTokens(store.model?.context)),
           _mStat(context, '本轮输入', formatTokens(store.usage['inputTokens'] as num?)),
@@ -1633,7 +2249,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           ),
           const SizedBox(height: 12),
           Row(children: [
-            Text('会话键', style: TextStyle(fontSize: 13, color: p.ink3)),
+            Text('项目位置', style: TextStyle(fontSize: 13, color: p.ink3)),
             const SizedBox(width: 10),
             Expanded(
               child: Text(store.projectPath ?? store.projectName,
@@ -1654,12 +2270,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             ),
           ),
         ]),
-        _mCard(context, title: '确定性上下文治理', children: [
+        _mCard(context, title: '上下文治理', children: [
           for (final line in [
-            '工具结果剥离 canonical 与 SVG，只保留摘要 + 最新 state',
-            '旧 read/inspect 结果被占位替换（去 supersede）',
-            '上下文窗口来自 models.dev 的 limit.context',
-            '会话超过 80 条自动压缩为确定性摘要，不额外调用 LLM',
+            '工具结果去掉整份源码，只保留摘要与最新状态',
+            '旧的读取结果会被占位替换，避免上下文重复堆积',
+            '上下文窗口来自随包发布的模型清单',
+            '会话超过 80 条自动压缩为摘要，不额外调用模型',
           ])
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
@@ -1732,10 +2348,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         const SizedBox(height: 14),
         _mCard(context, title: '运行信息', children: [
           for (final row in [
-            ('运行时', 'Flutter 3.50'),
-            ('引擎', 'MoonViz classic wasm · 0.2 dev 构建'),
-            ('引擎宿主', store.api == null ? '未就绪' : '就绪'),
-            ('数据', '~/.nondesign · DDP 单文件'),
+            ('应用版本', '0.1 · 本地优先'),
+            ('设计引擎', store.api == null ? '未就绪' : '就绪'),
+            ('项目文件', '加密单文件 · 保存在本机'),
+            ('模型清单', '内置快照 · 可手动更新'),
           ])
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
@@ -1754,7 +2370,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             ),
         ]),
         _mCard(context, title: '唯一事实源', children: [
-          Text('一份 canonical .mbt.md；人类与 Agent 的每次修改都经引擎门校验后回写同一份文档。DDP 只是它的认证加密容器。',
+          Text('每个项目是一份加密项目文件；你与内置智能体的每次修改都经设计校验后写回同一份文档。',
               style: TextStyle(fontSize: 13, height: 1.6, color: p.ink3)),
         ]),
       ],

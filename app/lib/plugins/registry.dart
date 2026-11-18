@@ -47,8 +47,8 @@ final List<PluginDef> pluginRegistry = [
   ),
   PluginDef(
     id: 'hotapp',
-    title: 'NoN 热应用',
-    tooltip: 'NoN 热应用 ⌘7',
+    title: 'NaN 热应用',
+    tooltip: 'NaN 热应用 ⌘7',
     icon: Icons.auto_fix_high_outlined,
     builder: () => const HotAppWorkspace(),
   ),

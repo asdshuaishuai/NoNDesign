@@ -1,10 +1,18 @@
 # plan-chat-stream-shell.md — Chat Stream 主体 + 艺术架 + 画中画工作区（方案）
 
-> 状态：**已实施（2026-11-17）** · 用户裁决来源：本轮对话原文（「本体升级成 chat stream 的类
-> dots 应用…存在艺术架，专门放生成的热应用、原型交互 UI、视频和 3d 小玩意…彻底剔除 python 的
-> agents sdk…桌面端的工作区是常驻的，移动端右划呈现在聊天式上方覆盖，画中画形态…桌面端同样保留
-> 本地 agent 检测和使用」）。§5 逐条记录实际范围与残留。依赖文档：docs/plan-dart-agent-migration.md
-> （agent 循环 Dart 化，本方案的前置）。
+> 状态：**已实施（2026-11-17）；Python 服务已退场（2026-11-18，批次 15）** ·
+> 用户裁决来源：本轮对话原文（「本体升级成 chat stream 的类 dots 应用…存在艺术架，
+> 专门放生成的热应用、原型交互 UI、视频和 3d 小玩意…彻底剔除 python 的 agents sdk…
+> 桌面端的工作区是常驻的，移动端右划呈现在聊天式上方覆盖，画中画形态…桌面端同样保留
+> 本地 agent 检测和使用」）。§5 逐条记录实际范围与残留。依赖文档：
+> docs/plan-dart-agent-migration.md（agent 循环 Dart 化，本方案的前置）。
+>
+> **退场注记（2026-11-18）**：文中 `server/nonapp_agent.py`、
+> `server/nonapp_routes.py`、`/hotapp/*` 端点等描述是当时实现的历史记录；这些
+> Python 文件与路由已随 `server/` 删除。热应用 / `.nonapp` 的生成、导入导出、
+> 本地库与预览现在全部在 Dart 客户端完成（`hotapp_service.dart`、
+> `nonapp_library.dart`、`nonapp_package.dart`）。S3 的「服务端」章节只作历史
+> 背景，不要据此恢复 HTTP 端点。
 
 ## 0. 结论先行
 
@@ -162,7 +170,9 @@ A2UI 是 a2ui_flutter 实现的那套。下文 A2UI 均指协议/包。）
   交换（画布不丢，滚动/选中态可能复位）；无键盘快捷键；聊天流「工作区」按钮不再隐式建项目
   （有意变更，旧 `openWorkspace` 语义保留在无宿主/产物卡路径）；窄屏右缘条带会覆盖聊天面最右
   20px；浮窗高度 <262 隐藏 Rail（避免 280 最小高度 RenderFlex 溢出）。
-- 回归（本轮实跑）：S2 = `flutter test` 8 文件 68 项全绿 + `test_shelf_media.py`（双根 200、
+- 回归（本轮实跑；其中 `test_shelf_media.py` / `test_nonapp.py` / `test_hotapp.py`
+  / `test_server_routes.py` 已随 `server/` 在 2026-11-18 退役，仅作历史记录）：
+  S2 = `flutter test` 8 文件 68 项全绿 + `test_shelf_media.py`（双根 200、
   Range→206、HEAD、穿越 400）；S3 = `test_nonapp.py` / `test_hotapp.py` / `test_server_routes.py`
   全绿 + nonapp 与既有测试 47 项 + `flutter build macos --debug` / `flutter build ios --no-codesign
   --debug` 成功；S4 = `test/pip_*.dart` 14 项 + 六个既有文件 63 项全绿；P1 = `agent_p1_test` /

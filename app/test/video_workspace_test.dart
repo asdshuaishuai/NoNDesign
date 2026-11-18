@@ -1,226 +1,288 @@
-// 视频工作台可恢复性与反馈时序（2026-11-17 批次）：
-// ① job 轮询连续失败达上限（25 × 1.2s ≈ 30s）必须放弃并复位 _busy——服务器
-//    中途永久下线时 _busy 永真、「加载示例/渲染」永久禁点（工作台死端）；
-// ② 环② review FAIL（ok=false / exit≠0）必须当场禁用渲染按钮并就近亮出
-//    原因——此前只把 output 铺进面板，用户点了渲染才被 render.py 独立硬门
-//    拒掉（反馈滞后一拍）。
-import 'dart:convert';
+// 视频工作区（批次 08：全本地）的行为测试。
+//
+// 覆盖本批次不可回退的语义：
+//  1. 示例加载与规范对照都在本地完成：对照通过才放开渲染，失败原因当场
+//     列在按钮旁边（不等点渲染才报错）；
+//  2. 渲染走本地任务：创建任务 → 轮询 → 终态（成功/失败）的提示与复位；
+//  3. 手机/平板点渲染必须得到明确提示（视频导出只在电脑上可用），
+//     不允许「点了没反应」；
+//  4. 进程重启后的旧任务号查无此项：清持久化并轻提示，不空转轮询；
+//  5. 脚本编辑器提供第二条输入路径：粘贴/修改后本地校验并载入。
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:nondesign/core/api.dart';
-import 'package:nondesign/core/models.dart';
+import 'package:nondesign/core/capability_hub.dart';
+import 'package:nondesign/core/platform_capabilities.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
+import 'package:nondesign/core/toast_service.dart';
+import 'package:nondesign/core/video_service.dart';
 import 'package:nondesign/widgets/video_workspace.dart';
 
-/// json 响应（必须带 charset=utf-8：http 包的 Response 字符串体默认按
-/// latin1 编码，含 ✗/中文会抛 "Contains invalid characters"——假服务器
-/// 与 FastAPI 真实响应（application/json; charset=utf-8）对齐）。
-http.Response _jsonRes(Object body, [int status = 200]) => http.Response(
-      body is String ? body : jsonEncode(body),
-      status,
-      headers: {'content-type': 'application/json; charset=utf-8'},
+/// 可编排的本地服务：示例文档可替换，渲染任务可脚本化。
+class _FakeVideoService extends VideoService {
+  _FakeVideoService({
+    super.host,
+    this.sample,
+    this.startError,
+    this.nextJob,
+  }) : super(videosRoot: () async {
+          final dir = Directory.systemTemp.createTempSync('video_ws_test');
+          addTearDown(() {
+            if (dir.existsSync()) dir.deleteSync(recursive: true);
+          });
+          return dir;
+        });
+
+  final VideoDocument? sample;
+  final Object? startError;
+  final VideoRenderJob? nextJob;
+  final List<String> renderCalls = <String>[];
+
+  /// 轮询读取的任务快照（按 id 返回；null 走真实注册表——空）。
+  VideoRenderJob? Function(String id)? jobLookup;
+
+  @override
+  VideoDocument loadSample(int index) => sample ?? super.loadSample(index);
+
+  @override
+  Future<VideoRenderJob> startRender(
+    VideoDocument document, {
+    int? fps,
+    bool keepSvg = false,
+  }) async {
+    renderCalls.add('render:${fps ?? document.fps}');
+    final error = startError;
+    if (error != null) throw error;
+    return nextJob!;
+  }
+
+  @override
+  VideoRenderJob? job(String id) => jobLookup?.call(id);
+}
+
+VideoDocument _sampleDoc() => VideoService(host: VideoHost.macos).loadSample(0);
+
+VideoDocument _badBeatsDoc() => VideoDocument.build(
+      timeline: <String, dynamic>{
+        'fps': 10,
+        'width': 640,
+        'height': 360,
+        'spec': 'screenplay.json',
+        'scenes': <dynamic>[
+          <String, dynamic>{
+            'duration': 2.0,
+            'elements': <dynamic>[
+              <String, dynamic>{'type': 'text', 'text': 'hi', 'x': '50%', 'y': 100},
+            ],
+          },
+        ],
+      },
+      spec: <String, dynamic>{
+        'kind': 'screenplay',
+        'style': '简笔',
+        'beats': <dynamic>[
+          <String, dynamic>{'at': 99, 'what': '结尾'},
+        ],
+      },
     );
 
-/// /video/* 的假服务器。statusThrows：状态查询恒失败（测放弃上限）；
-/// statusScript：逐次脚本（true=该次失败，false=该次成功，耗尽后恒成功，
-/// 测「连续失败计数被成功响应清零」）。
-class _Stub {
-  bool statusThrows = false;
-  final List<bool> statusScript = [];
-  bool reviewFail = false;
+VideoRenderJob _job({
+  VideoJobStatus status = VideoJobStatus.running,
+  int frames = 0,
+  String? mp4,
+}) =>
+    VideoRenderJob(
+      id: 'job-1',
+      status: status,
+      fps: 10,
+      frames: frames,
+      totalFrames: 6,
+      totalSeconds: 0.6,
+      directory: '/tmp/video-job-1',
+      mp4Path: mp4,
+    );
 
-  NoNDesignApi api() => NoNDesignApi('http://mock.local', MockClient((request) async {
-        switch (request.url.path) {
-          case '/video/sample':
-            return _jsonRes({
-              'ok': true,
-              'timeline': {
-                'spec': 'spec.json',
-                'scenes': [
-                  {'duration': 2.0, 'beats': []},
-                ],
-              },
-              'spec': {'params': {}, 'formulas': {}},
-            });
-          case '/video/review':
-            if (reviewFail) {
-              return _jsonRes({
-                'ok': false,
-                'exit': 1,
-                'output':
-                    "[环② spec 对照] FAIL（片长 2.0s）\n  ✗ undeclared_symbol: ['undeclared_x'] 不在 spec.params ∪ spec.formulas",
-              });
-            }
-            return _jsonRes({
-              'ok': true,
-              'exit': 0,
-              'output': '[环② spec 对照] PASS（片长 2.0s）',
-            });
-          case '/video/render':
-            return _jsonRes({'ok': true, 'job': 'job-1', 'dir': '/v/j1'});
-          case '/video/render/status':
-            if (statusThrows) throw const SocketException('connection refused');
-            if (statusScript.isNotEmpty) {
-              final fail = statusScript.removeAt(0);
-              if (fail) throw const SocketException('connection refused');
-            }
-            return _jsonRes({'ok': true, 'status': 'running', 'frames': 0});
-        }
-        return _jsonRes('{"ok":false,"detail":"no_route"}', 404);
-      }));
-}
+AppStore _store({
+  ToastService? toasts,
+  HostOs os = HostOs.macos,
+}) =>
+    AppStore(
+      toasts: toasts ?? ToastService(autoDismiss: false),
+      capabilities: CapabilityHub(platform: PlatformCapabilities.forOs(os)),
+    )..ready = true;
 
-AppStore _store(NoNDesignApi api) {
-  final store = AppStore()
-    ..ready = true
-    ..settings = AppSettings(providerId: 'deepseek', modelId: 'deepseek-v4.1-flash');
-  store.api = api;
-  return store;
-}
-
-Widget _wrap(AppStore store) => ChangeNotifierProvider<AppStore>.value(
+Widget _wrap(AppStore store, VideoService service) => ChangeNotifierProvider<AppStore>.value(
       value: store,
       child: MaterialApp(
         theme: AppTheme.build(dark: true),
-        home: Scaffold(body: const VideoWorkspace()),
+        home: Scaffold(body: VideoWorkspace(service: service)),
       ),
     );
 
-Future<void> _pump(WidgetTester tester, AppStore store) async {
+Future<void> _pump(WidgetTester tester, AppStore store, VideoService service) async {
   tester.view.physicalSize = const Size(1440, 900);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
-  await tester.pumpWidget(_wrap(store));
-  await tester.pump(const Duration(milliseconds: 50));
-}
-
-/// 加载示例并等环②评审返回（两跳异步：sample → review）。
-Future<void> _loadSampleAwaitingReview(WidgetTester tester) async {
-  await tester.tap(find.text('加载示例'));
-  await tester.pump();
+  await tester.pumpWidget(_wrap(store, service));
   await tester.pump(const Duration(milliseconds: 50));
 }
 
 OutlinedButton _renderButton(WidgetTester tester) =>
     tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '渲染（后台）'));
 
-/// 冲掉 SnackBar / 周期定时器并卸载工作台，避免测试尾部 pending timer。
-Future<void> _drain(WidgetTester tester) async {
-  await tester.pump(const Duration(seconds: 5));
-  await tester.pump(const Duration(seconds: 1));
-  await tester.pumpWidget(const SizedBox.shrink());
-  await tester.pump(const Duration(milliseconds: 100));
-}
+String _lastToastTitle(AppStore store) =>
+    store.toasts.history.isEmpty ? '' : store.toasts.history.first.title;
 
 void main() {
   setUp(() {
     // setVideoState → saveSettings：无 mock 时 getInstance 抛 MissingPluginException。
     SharedPreferences.setMockInitialValues({});
+    videoLoadOnOpen = null;
   });
+  tearDown(() => videoLoadOnOpen = null);
 
-  testWidgets('环② review FAIL：渲染按钮当场禁用 + 失败原因就近可见', (tester) async {
-    final stub = _Stub()..reviewFail = true;
-    final store = _store(stub.api());
-    await _pump(tester, store);
-    await _loadSampleAwaitingReview(tester);
+  testWidgets('示例在本地载入并完成对照：渲染按钮放开，不依赖任何外部连接', (tester) async {
+    final store = _store();
+    final service = _FakeVideoService(sample: _sampleDoc());
+    await _pump(tester, store, service);
 
-    // 渲染门：FAIL 即禁用（此前 gate 只看 _busy/_tl，用户先撞渲染失败 toast）。
-    expect(_renderButton(tester).onPressed, isNull);
-    // 原因就近可见：机械对照的具体拒绝项（✗ 行）落在按钮下方的警示条里
-    //（精确匹配——✗ 行全文 ≠ 面板 SelectableText 的全文）。
-    expect(
-        find.text("✗ undeclared_symbol: ['undeclared_x'] 不在 spec.params ∪ spec.formulas"),
-        findsOneWidget);
-    // 环②输出面板照常铺全文。
-    expect(find.textContaining('环② spec 对照'), findsWidgets);
-
-    await tester.pumpWidget(const SizedBox.shrink());
+    expect(find.text('视频工作台'), findsOneWidget);
+    expect(find.text('标杆示例'), findsOneWidget);
+    // 三个内置示例都在。
+    expect(service.samples.length, 3);
+    // 对照通过（内嵌示例都是干净样例）。
+    expect(find.textContaining('对照检查通过'), findsWidgets);
+    expect(_renderButton(tester).onPressed, isNotNull);
+    // 没有任务在跑。
     expect(store.settings.videoJob, isEmpty);
   });
 
-  testWidgets('环② review PASS：渲染可用，点渲染建 job 并进入轮询', (tester) async {
-    final stub = _Stub();
-    final store = _store(stub.api());
-    await _pump(tester, store);
-    await _loadSampleAwaitingReview(tester);
+  testWidgets('对照 FAIL：渲染按钮禁用，失败原因就近可见', (tester) async {
+    final store = _store();
+    final service = _FakeVideoService(sample: _badBeatsDoc());
+    await _pump(tester, store, service);
 
-    expect(_renderButton(tester).onPressed, isNotNull);
+    expect(_renderButton(tester).onPressed, isNull);
+    expect(find.textContaining('第 1 个节拍落在片长之外'), findsWidgets);
+  });
+
+  testWidgets('点渲染创建本地任务并进入轮询；完成后续接成功提示', (tester) async {
+    final store = _store();
+    final service = _FakeVideoService(sample: _sampleDoc(), nextJob: _job());
+    service.jobLookup = (id) =>
+        _job(status: VideoJobStatus.done, frames: 6, mp4: '/tmp/video-job-1/frames.mp4');
+    await _pump(tester, store, service);
 
     await tester.tap(find.text('渲染（后台）'));
     await tester.pump(const Duration(milliseconds: 50));
-    // busy 中：两按钮都禁用。
-    expect(_renderButton(tester).onPressed, isNull);
-    // 轮询第一跳（1.2s 后）拿到 running：预览态显示渲染中。
-    await tester.pump(const Duration(milliseconds: 1300));
-    expect(find.textContaining('渲染中'), findsOneWidget);
-    // 失联清场语义不受 PASS 路径影响：job 已持久化以便切视图接回。
+    // 任务号已持久化（切视图回来能接回轮询）。
     expect(store.settings.videoJob, 'job-1');
-
-    await tester.pumpWidget(const SizedBox.shrink()); // dispose 取消周期定时器
-    await tester.pump(const Duration(milliseconds: 50));
-  });
-
-  testWidgets('轮询连续失败 25 次（≈30s）即放弃：复位 _busy、清 job、toast 告知', (tester) async {
-    final stub = _Stub()..statusThrows = true;
-    final store = _store(stub.api());
-    await _pump(tester, store);
-    await _loadSampleAwaitingReview(tester);
-
-    await tester.tap(find.text('渲染（后台）'));
-    await tester.pump(const Duration(milliseconds: 50));
-    expect(_renderButton(tester).onPressed, isNull); // 轮询中
-
-    // 前 24 次连续失败：仍在容忍窗口内，不得提前放弃。
-    for (var i = 0; i < 24; i++) {
-      await tester.pump(const Duration(milliseconds: 1200));
-    }
+    expect(service.renderCalls.single, 'render:10');
+    // 轮询中：按钮禁用。
     expect(_renderButton(tester).onPressed, isNull);
 
-    // 第 25 次：达到上限 → 取消轮询、复位 _busy、按钮恢复、toast 显式告知。
-    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.pump(const Duration(milliseconds: 400));
     expect(_renderButton(tester).onPressed, isNotNull);
-    expect(find.textContaining('渲染任务失联'), findsOneWidget);
-    expect(find.textContaining('已停止轮询'), findsOneWidget);
-    // 失联任务不再持久化为在飞 job（回来不会对死任务空转轮询）。
+    expect(_lastToastTitle(store), contains('渲染完成'));
+    // 终态不再持久化在飞 job。
     expect(store.settings.videoJob, isEmpty);
-
-    await _drain(tester);
   });
 
-  testWidgets('成功响应清零连续失败计数：断续失败永不放弃，只有连续达限才放弃', (tester) async {
-    final stub = _Stub()
-      ..statusScript.addAll([
-        ...List<bool>.filled(24, true), // 第 1–24 次：失败（未达限）
-        false, // 第 25 次：成功 → 计数清零
-        ...List<bool>.filled(25, true), // 第 26–50 次：再连续失败 25 次
-      ]);
-    final store = _store(stub.api());
-    await _pump(tester, store);
-    await _loadSampleAwaitingReview(tester);
+  testWidgets('渲染失败：人话提示 + 原始诊断只进折叠的技术详情', (tester) async {
+    final store = _store();
+    final service = _FakeVideoService(
+      sample: _sampleDoc(),
+      startError: const VideoRejected('rasterizer_missing', 'resvg not found'),
+    );
+    await _pump(tester, store, service);
 
     await tester.tap(find.text('渲染（后台）'));
     await tester.pump(const Duration(milliseconds: 50));
 
-    // 第 1–24 次失败 + 第 25 次成功（计数清零）+ 第 26–49 次失败：始终未达连续 25。
-    for (var i = 0; i < 49; i++) {
-      await tester.pump(const Duration(milliseconds: 1200));
-    }
-    expect(_renderButton(tester).onPressed, isNull); // 仍在轮询
+    expect(_lastToastTitle(store), '这台电脑缺少把画面转成图片的组件，请先安装后重试');
+    expect(find.text('技术详情'), findsOneWidget);
+    // 原始诊断默认不展开：展开后才可见。
+    await tester.tap(find.text('技术详情'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('rasterizer_missing'), findsOneWidget);
+  });
 
-    // 第 50 次 = 连续第 25 次失败 → 放弃。
-    await tester.pump(const Duration(milliseconds: 1200));
+  testWidgets('手机（iOS）：点渲染给明确提示，不创建任何任务', (tester) async {
+    final store = _store(os: HostOs.ios);
+    final service = _FakeVideoService(host: VideoHost.ios, sample: _sampleDoc());
+    await _pump(tester, store, service);
+
+    // 能力文案在按钮下方常驻可见。
+    expect(find.text('视频导出只在电脑上可用'), findsOneWidget);
     expect(_renderButton(tester).onPressed, isNotNull);
-    expect(find.textContaining('渲染任务失联'), findsOneWidget);
 
-    await _drain(tester);
+    await tester.tap(find.text('渲染（后台）'));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(_lastToastTitle(store), '视频导出只在电脑上可用');
+    expect(service.renderCalls, isEmpty);
+    expect(store.settings.videoJob, isEmpty);
+  });
+
+  testWidgets('进程重启后的旧任务：清持久化并轻提示，不留空转轮询', (tester) async {
+    final store = _store();
+    store.settings.videoJob = 'video-gone-1';
+    final service = _FakeVideoService(sample: _sampleDoc());
+    await _pump(tester, store, service);
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(store.settings.videoJob, isEmpty);
+    expect(_lastToastTitle(store), '上次的渲染任务已经不在了');
+  });
+
+  testWidgets('脚本编辑器：粘贴坏规范 → 本地校验失败并禁用渲染', (tester) async {
+    final store = _store();
+    final service = _FakeVideoService(sample: _sampleDoc());
+    await _pump(tester, store, service);
+
+    expect(_renderButton(tester).onPressed, isNotNull);
+    await tester.tap(find.widgetWithText(TextButton, '编辑脚本'));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // 两个输入框：时间线脚本 / 规范。把规范换成空对象。
+    final fields = find.byType(TextField);
+    expect(fields, findsNWidgets(2));
+    await tester.enterText(fields.at(1), '{}');
+    await tester.tap(find.text('检查并载入'));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(_renderButton(tester).onPressed, isNull);
+    expect(find.textContaining('说明规范不完整'), findsWidgets);
+  });
+
+  testWidgets('脚本编辑器：粘贴合规脚本 → 重新通过对照', (tester) async {
+    final store = _store();
+    final service = _FakeVideoService(sample: _sampleDoc());
+    await _pump(tester, store, service);
+
+    await tester.tap(find.widgetWithText(TextButton, '编辑脚本'));
+    await tester.pump(const Duration(milliseconds: 100));
+    final fields = find.byType(TextField);
+    await tester.enterText(
+      fields.at(0),
+      '{"fps": 10, "width": 640, "height": 360, "scenes": [{"duration": 1.0, '
+          '"elements": [{"type": "text", "text": "hi", "x": "50%", "y": 100}]}]}',
+    );
+    await tester.enterText(
+      fields.at(1),
+      '{"kind": "science", "subject": "小样", "laws": ["x"], '
+          '"assumptions": ["y"], "facts": ["z"]}',
+    );
+    await tester.tap(find.text('检查并载入'));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(_renderButton(tester).onPressed, isNotNull);
+    expect(find.textContaining('对照检查通过'), findsWidgets);
   });
 }

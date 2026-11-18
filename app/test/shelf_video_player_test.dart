@@ -1,28 +1,24 @@
-// 视频产物真播回归（2026-11-17 艺术架批次）：
-// ① 艺术架「打开」→ videoLoadOnOpen → 视频工作台产物模式（播放面 + 路径行），
-//    不再是只弹一条 SnackBar 的路径字符串；
-// ② 播放面经 /video/mp4?path=… 走 HTTP（服务端 FileResponse 承担 Range/seek），
-//    无服务器时回落 loadFile；
-// ③ WebKit 创建参数必须是「内联播放 + 无需用户手势」——默认值是
+// 视频产物真播回归（批次 08：本机文件播放）。
+//
+// 覆盖：
+//  ① 艺术架「打开」→ videoLoadOnOpen → 视频工作台产物模式（播放面 + 路径行），
+//    不再是只弹一条提示的路径字符串；
+//  ② 播放面直接载入**本机文件**（不再经任何内部路由取流），URL 加载一次都不发；
+//  ③ WebKit 创建参数必须是「内联播放 + 无需用户手势」——默认值是
 //    mediaTypesRequiringUserAction={audio,video} + allowsInlineMediaPlayback=false，
-//    不开这两个参数视频会被自动播放策略静默拦住（真机黑屏的根因）。
-//    本测试对 fake 平台收到的 creationParams 做结构断言；若某天 fake 不再暴露
-//    参数，可退化为源码常量断言（测试名会注明）。
-// ④ 主帧 HTTP ≥400 → 覆盖层「无法播放」+ 复制路径（失败不是死端）。
-// ⑤ 默认渲染台模式一字不动：文案保持，且**不创建** WebView（既有
-//    video_workspace_test 不设 WebViewPlatform 也能跑，靠的就是这条）。
+//    不开这两个参数视频会被自动播放策略静默拦住（真机黑屏的根因）；
+//  ④ 主帧加载失败 → 覆盖层「无法播放」+ 复制路径（失败不是死端）；
+//  ⑤ 默认渲染台模式不创建 WebView（工作台测试无需平台桩）。
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 // ignore: depend_on_referenced_packages
 import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
-import 'package:nondesign/core/api.dart';
-import 'package:nondesign/core/models.dart';
+import 'package:nondesign/core/capability_hub.dart';
+import 'package:nondesign/core/platform_capabilities.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/widgets/video_player_surface.dart';
@@ -30,17 +26,14 @@ import 'package:nondesign/widgets/video_workspace.dart';
 
 const _mp4 = '/Users/x/Documents/NoNDesign/videos/job-1/frames.mp4';
 
-AppStore _store() {
-  final store = AppStore()
-    ..ready = true
-    ..settings = AppSettings(providerId: 'deepseek', modelId: 'deepseek-v4.1-flash');
-  // 产物模式不需要真正的服务器；baseUrl 用于拼 /video/mp4 播放地址。
-  store.api = NoNDesignApi(
-      'http://mock.local',
-      MockClient((request) async => http.Response('{"ok":false,"detail":"no_route"}', 404,
-          headers: {'content-type': 'application/json; charset=utf-8'})));
-  return store;
-}
+/// 本文件验收的是 macOS 播放面：显式给 macOS 能力矩阵。
+///
+/// `flutter test` 的 `defaultTargetPlatform` 默认是 android，
+/// `PlatformCapabilities.current()` 会把工作台当成手机（渲染/定位入口隐藏），
+/// 与本文件的桌面场景不符。
+AppStore _store() => AppStore(
+      capabilities: CapabilityHub(platform: PlatformCapabilities.forOs(HostOs.macos)),
+    )..ready = true;
 
 Widget _wrap(Widget child) => MaterialApp(
       theme: AppTheme.build(dark: true),
@@ -109,8 +102,8 @@ class _FakeVideoNavigationDelegate extends PlatformNavigationDelegate {
   Future<void> setOnWebResourceError(WebResourceErrorCallback cb) async =>
       onWebResourceError = cb;
 
-  void fireHttpError(int statusCode) => onHttpError?.call(
-      HttpResponseError(response: WebResourceResponse(uri: null, statusCode: statusCode)));
+  void fireMainFrameError(int code) => onWebResourceError?.call(
+      WebResourceError(errorCode: code, description: 'no such file', isForMainFrame: true));
 }
 
 class _FakeVideoWebViewWidget extends PlatformWebViewWidget {
@@ -143,7 +136,7 @@ void main() {
   });
   tearDown(() => videoLoadOnOpen = null);
 
-  testWidgets('产物模式：videoLoadOnOpen → 播放面 + 路径行，URL 走 /video/mp4?path=…', (tester) async {
+  testWidgets('产物模式：videoLoadOnOpen → 播放面 + 路径行，按本机文件加载', (tester) async {
     final fake = await _installFake();
     videoLoadOnOpen = _mp4;
     final store = _store();
@@ -163,10 +156,9 @@ void main() {
     final pathText = tester.widget<SelectableText>(find.byType(SelectableText));
     expect(pathText.data, _mp4);
 
-    // WebView 载入的服务端 URL。
-    final uri = fake.lastController!.loadedUrls.single;
-    expect(uri.path, '/video/mp4');
-    expect(uri.queryParameters['path'], _mp4);
+    // 本机文件直读：不做任何 URL 请求。
+    expect(fake.lastController!.loadedFiles, [_mp4]);
+    expect(fake.lastController!.loadedUrls, isEmpty);
 
     // 创建参数：允许内联播放 + 无需用户手势（自动播放策略硬前提）。
     final params = fake.lastParams;
@@ -193,7 +185,7 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.textContaining('视频产物'), findsOneWidget);
     expect(find.text('返回渲染台'), findsOneWidget);
-    expect(fake.lastController!.loadedUrls.single.path, '/video/mp4');
+    expect(fake.lastController!.loadedFiles, [_mp4]);
   });
 
   testWidgets('默认渲染台：文案不变且不创建 WebView', (tester) async {
@@ -209,13 +201,13 @@ void main() {
 
     expect(find.text('视频工作台'), findsOneWidget);
     expect(find.text('标杆示例'), findsOneWidget);
-    expect(find.text('加载示例后点「渲染」'), findsOneWidget);
+    expect(find.text('点「渲染（后台）」开始出片'), findsOneWidget);
     expect(find.byType(VideoPlayerSurface), findsNothing);
     // 「默认模式不构造播放面」是可测事实：fake 平台一次控制器都没创建。
     expect(fake.lastController, isNull);
   });
 
-  testWidgets('离线（无服务器）：播放面回落 loadFile 本地文件', (tester) async {
+  testWidgets('单独挂播放面：不传任何地址也只读本机文件', (tester) async {
     final fake = await _installFake();
     await _pump(tester, _wrap(const VideoPlayerSurface(path: _mp4)));
 
@@ -224,11 +216,11 @@ void main() {
     expect(fake.lastController!.loadedUrls, isEmpty);
   });
 
-  testWidgets('主帧 HTTP ≥400：覆盖层「无法播放」+ 复制路径', (tester) async {
+  testWidgets('主帧加载失败：覆盖层「无法播放」+ 复制路径', (tester) async {
     final fake = await _installFake();
-    await _pump(tester, _wrap(const VideoPlayerSurface(path: _mp4, baseUrl: 'http://mock.local')));
+    await _pump(tester, _wrap(const VideoPlayerSurface(path: _mp4)));
 
-    fake.lastController!.navDelegate!.fireHttpError(404);
+    fake.lastController!.navDelegate!.fireMainFrameError(-1009);
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.byKey(const ValueKey('video-error')), findsOneWidget);

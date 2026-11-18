@@ -1,14 +1,17 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection; // Agent 面板手势门用
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
 
+import '../core/dart_agent.dart' show toolLabel;
 import '../core/models.dart';
 import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import 'a2ui_card.dart';
 import 'common.dart';
 
 part 'agent_panel.dart';
@@ -35,13 +38,13 @@ class RightPanel extends StatelessWidget {
             decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
             child: Row(
               children: [
-                _tab(context, 'agent', Icons.auto_awesome, 'NoN'),
+                _tab(context, 'agent', Icons.auto_awesome, 'NaN'),
                 _tab(context, 'inspect', Icons.center_focus_strong_outlined, '检查'),
                 const Spacer(),
                 if (store.usage['totalTokens'] != null)
                   Pill(
                     label:
-                        '${formatTokens((store.usage['totalTokens'] as num?) ?? 0)} tok${_cacheRate(store) > 0 ? ' · ⚡${(_cacheRate(store) * 100).round()}%' : ''}',
+                        '上下文 ${formatTokens((store.usage['totalTokens'] as num?) ?? 0)}${_cacheRate(store) > 0 ? ' · ⚡${(_cacheRate(store) * 100).round()}%' : ''}',
                     color: _cacheRate(store) >= 0.5 ? p.success : p.ink4,
                   ),
               ],

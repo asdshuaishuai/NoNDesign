@@ -2,16 +2,26 @@
 // - 平板竖屏 768：左栏常驻、右栏折叠为底部 sheet、Welcome 走双栏；
 // - 平板横屏 1024：三栏全开、底部 sheet 条消失；
 // - 字体在平板上 +5%（responsiveTextScale），一并验证无溢出。
+//
+// 批次 12 追加：iPad 横版进桌面壳（工作区优先 + 右侧唯一聊天窄栏），
+// Workspace 自带 348 右栏必须关掉（showRightPanel:false）；竖屏仍是
+// 聊天优先壳（裁决 C）。
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:nondesign/core/models.dart';
+import 'package:nondesign/core/platform_capabilities.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
+import 'package:nondesign/widgets/chat_pip_shell.dart';
+import 'package:nondesign/widgets/desktop_shell.dart';
 import 'package:nondesign/widgets/hotapp_workspace.dart';
 import 'package:nondesign/widgets/portfolio_view.dart';
+import 'package:nondesign/widgets/right_panel.dart';
 import 'package:nondesign/widgets/settings_dialog.dart';
+import 'package:nondesign/widgets/shell_host.dart';
 import 'package:nondesign/widgets/three_workspace.dart';
 import 'package:nondesign/widgets/video_workspace.dart';
 import 'package:nondesign/widgets/welcome.dart';
@@ -64,23 +74,26 @@ void main() {
     final store = _store(project: true)..view = 'design';
     await _pumpAt(tester, const Workspace(), _tabletPortrait, store: store);
     // 左栏常驻（空画板提示可见）；右栏折叠成底部 sheet。
-    expect(find.text('还没有画板——让 NoN 生成，或点面板顶部 ＋ 新建。'), findsOneWidget);
+    expect(find.text('还没有画板——让 NaN 生成，或点面板顶部 ＋ 新建。'), findsOneWidget);
     expect(find.text('项目面板'), findsNothing);
-    expect(find.text('NoN 面板'), findsOneWidget);
+    expect(find.text('NaN 面板'), findsOneWidget);
   });
 
   testWidgets('iPad landscape opens all three panes', (tester) async {
     final store = _store(project: true)..view = 'design';
     await _pumpAt(tester, const Workspace(), _tabletLandscape, store: store);
-    expect(find.text('还没有画板——让 NoN 生成，或点面板顶部 ＋ 新建。'), findsOneWidget);
+    expect(find.text('还没有画板——让 NaN 生成，或点面板顶部 ＋ 新建。'), findsOneWidget);
     expect(find.text('项目面板'), findsNothing);
-    expect(find.text('NoN 面板'), findsNothing);
+    expect(find.text('NaN 面板'), findsNothing);
   });
 
   testWidgets('video workspace uses the side-by-side layout on iPad', (tester) async {
     await _pumpAt(tester, const Scaffold(body: VideoWorkspace()), _tabletPortrait);
     expect(find.text('标杆示例'), findsOneWidget);
-    expect(find.text('加载示例后点「渲染」'), findsOneWidget);
+    // iPad 属于移动端：配置列与预览面并排，但预览面明确说不能出片
+    //（移动端不能 spawn 渲染组件），不是静默空着。
+    expect(find.text('渲染（后台）'), findsOneWidget);
+    expect(find.text('手机上不能出片，可以从艺术架打开已有的视频'), findsOneWidget);
   });
 
   testWidgets('热应用 and portfolio fit iPad portrait', (tester) async {
@@ -293,5 +306,63 @@ void main() {
     // 不得外溢到桌面（settings-1 的反向锚点）。
     final close = tester.getRect(find.byTooltip('关闭'));
     expect(close.width, lessThan(44));
+  });
+
+  // ---- 批次 12：iPad 横/竖的壳裁决 ---------------------------------------
+
+  Widget shellWrap(AppStore store, HostOs os) => ChangeNotifierProvider<AppStore>.value(
+        value: store,
+        child: MaterialApp(
+          theme: AppTheme.build(dark: true),
+          builder: (context, child) =>
+              withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
+          home: ShellHost(capabilities: PlatformCapabilities.forOs(os)),
+        ),
+      );
+
+  Future<void> pumpShell(WidgetTester tester, AppStore store, Size size, HostOs os) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = size;
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(shellWrap(store, os));
+    await tester.pump(const Duration(milliseconds: 80));
+  }
+
+  testWidgets('iPad 横版 1024×768 → DesktopShell：Workspace 主面 + 右侧唯一窄栏', (tester) async {
+    final store = _store(project: true)..view = 'design';
+    await pumpShell(tester, store, _tabletLandscape, HostOs.ios);
+
+    expect(find.byType(DesktopShell), findsOneWidget);
+    expect(find.byType(ChatPiPShell), findsNothing);
+    expect(find.byType(Workspace), findsOneWidget);
+    final ws = tester.widget<Workspace>(find.byType(Workspace));
+    expect(ws.showRightPanel, isFalse, reason: '348 右栏必须让位给唯一窄栏');
+    expect(find.byType(RightPanel), findsNothing);
+    expect(find.byKey(const ValueKey('desktop-chat-rail-strip')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('iPad 竖版 768×1024 → ChatPiPShell（裁决 C，禁止桌面壳）', (tester) async {
+    final store = _store(project: true)..view = 'design';
+    await pumpShell(tester, store, _tabletPortrait, HostOs.ios);
+
+    expect(find.byType(ChatPiPShell), findsOneWidget);
+    expect(find.byType(DesktopShell), findsNothing);
+    expect(find.byKey(const ValueKey('desktop-chat-rail')), findsNothing);
+    expect(find.byKey(const ValueKey('chat-input')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Workspace(showRightPanel:false) 不渲染 348 RightPanel；默认仍渲染', (tester) async {
+    final store = _store(project: true)..view = 'design';
+    await _pumpAt(tester, const Workspace(showRightPanel: false), _tabletLandscape, store: store);
+    expect(find.byType(RightPanel), findsNothing);
+    expect(find.text('还没有画板——让 NaN 生成，或点面板顶部 ＋ 新建。'), findsOneWidget,
+        reason: '画布主面仍在');
+
+    await _pumpAt(tester, const Workspace(), _tabletLandscape, store: store);
+    expect(find.byType(RightPanel), findsOneWidget, reason: '独立 Workspace 默认保留右栏');
   });
 }

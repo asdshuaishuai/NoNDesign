@@ -432,18 +432,46 @@ class ModelRegistry {
   }
 }
 
-/// Agent 循环运行时（docs/plan-dart-agent-migration.md P0）：
-/// - `dart`：内置 Dart 循环（core/dart_agent.dart）——桌面与移动共用；
-///   Build 的 design_op 仍经引擎 AgentGate（绝不绕过引擎门）。
+/// Agent 循环运行时（设置界面「运行方式」）：
+/// - `local`（默认）：内置循环在本机执行，桌面与移动一致；Build 的
+///   design_op 仍经设计校验（绝不绕过引擎门）。
+/// - `server`：消息发给显式连接的桌面端执行（wire 值 `server` 保持稳定，
+///   设置界面文案称「连接桌面」）。显式选择远程时绝不静默回落本地。
 ///
-/// `server`（Python `/agent/run`）已从设置面退役（用户裁决 2026-11-17：
-/// 桌面与移动内置能力一致、Python 服务退出运行时）；旧存档读到 `server`
-/// 时统一迁移到 `dart`，不再提供第二种运行时选择。
-const String agentRuntimeDart = 'dart';
-/// 仅用于旧存档读取与迁移；不再作为可选运行时。
+/// 旧存档里的 `dart`（历史内置循环取值）与任何未知值统一回落 `local`——
+/// 迁移不抹掉用户显式选择的 `server`，也不把未知值静默当成远程。
+const String agentRuntimeLocal = 'local';
+
+/// 历史内置循环取值：与 [agentRuntimeLocal] 同义（旧存档/旧测试只读兼容）。
+const String agentRuntimeDart = agentRuntimeLocal;
+
+/// 「连接桌面」远程运行时（wire 值保持 `server`）。
 const String agentRuntimeServer = 'server';
 
-String defaultAgentRuntime() => agentRuntimeDart;
+String defaultAgentRuntime() => agentRuntimeLocal;
+
+/// 把任意存档值归一到两个合法运行时：显式 `server` 保留，其余一律 `local`。
+String normalizeAgentRuntime(String? raw) =>
+    raw == agentRuntimeServer ? agentRuntimeServer : agentRuntimeLocal;
+
+/// 内置服务商端点兜底表（模型清单快照不可用时，设置页仍能显示端点）。
+///
+/// 与 `store.dart` 的私有回退表逐字一致：设置页与请求层看到同一组地址，
+/// 避免「界面显示 A、请求发往 B」。端点在内置服务商下只读。
+const Map<String, String> builtInBaseUrls = {
+  'openai': 'https://api.openai.com/v1',
+  'deepseek': 'https://api.deepseek.com',
+  'zhipuai': 'https://open.bigmodel.cn/api/paas/v4',
+  'moonshotai-cn': 'https://api.moonshot.cn/v1',
+  'moonshotai': 'https://api.moonshot.ai/v1',
+  'minimax-cn': 'https://api.minimax.cn/v1',
+  'minimax': 'https://api.minimax.io/v1',
+  'stepfun': 'https://api.stepfun.com/v1',
+};
+
+/// 服务商的内置端点（快照优先未命中时用这张表；未知服务商回落 openai）。
+String builtInBaseUrlFor(String providerId) =>
+    builtInBaseUrls[providerId] ?? builtInBaseUrls['openai'] ?? '';
 
 class AppSettings {
   String providerId;
@@ -467,17 +495,23 @@ class AppSettings {
   String videoJob;
   /// 3D 规范手编草稿（项目名 → JSON 文本）：未保存的编辑跨视图保留。
   Map<String, String> threeSpecDrafts;
-  /// 「连接桌面」模式：桌面端服务器地址（如 http://192.168.1.5:8799）。
-  /// 非空时 launch 优先连接它（移动端无法本地跑 Python 服务器）；
-  /// 留空且本地 spawn 失败时回落 PLAN 直连（Dart AI SDK）。
+  /// 「连接桌面」模式：桌面端地址（如 http://192.168.1.5:12345）。
+  /// 非空时运行方式可切换到桌面端执行（移动端不能在本机提供全部桌面能力）；
+  /// 留空则只使用内置本机运行时。地址与连接码都由用户显式填写。
   String serverUrl;
-  /// Agent 循环运行时（dart | server）。缺省按平台解析（见
-  /// [defaultAgentRuntime]），旧存档无此键时自动落平台默认。
-  String agentRuntime;
-  /// 主面 = 聊天流（docs/plan-chat-stream-shell.md §2 S1，用户决策默认开）。
-  /// 关闭即回经典 Welcome；工作区经聊天流顶栏「工作区」入口进入
-  /// （桌面常驻分栏与移动画中画是 S4，不在本轮）。
+  /// Agent 循环运行时（`local` | `server`）。缺省 [agentRuntimeLocal]；
+  /// 旧存档的 `dart` 与未知值读入即回落 `local`，显式 `server` 保留。
+  String _agentRuntime;
+  String get agentRuntime => _agentRuntime;
+  set agentRuntime(String value) => _agentRuntime = normalizeAgentRuntime(value);
+  /// 聊天优先壳（手机四向、iPad 竖屏）的主面选择：true = 聊天流，
+  /// false = 经典 Welcome。桌面/iPad 横屏的工作区壳不使用该值——设置面
+  /// 只在聊天优先壳展示这一项，避免「开关打开却在桌面无效果」。
   bool chatStreamHome;
+  /// 让手机/iPad 连接这台桌面电脑（本机连接宿主）。桌面独占，默认关。
+  bool desktopHostEnabled;
+  /// 连接宿主是否允许局域网访问（默认只监听 127.0.0.1）。
+  bool desktopHostAllowLan;
 
   AppSettings({
     this.providerId = 'deepseek',
@@ -497,9 +531,11 @@ class AppSettings {
     this.serverUrl = '',
     String? agentRuntime,
     this.chatStreamHome = true,
+    this.desktopHostEnabled = false,
+    this.desktopHostAllowLan = false,
   })  : threeSpecDrafts = threeSpecDrafts ?? {},
-        // 单一运行时：旧构造参数（含 'server'）一律收敛到内置 Dart。
-        agentRuntime = agentRuntimeDart;
+        // 默认内置；旧存档的 `dart`/未知值归一 local，显式 `server` 保留。
+        _agentRuntime = normalizeAgentRuntime(agentRuntime);
 
   Map<String, dynamic> toJson() => {
         'providerId': providerId,
@@ -519,6 +555,8 @@ class AppSettings {
         'serverUrl': serverUrl,
         'agentRuntime': agentRuntime,
         'chatStreamHome': chatStreamHome,
+        'desktopHostEnabled': desktopHostEnabled,
+        'desktopHostAllowLan': desktopHostAllowLan,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> m) => AppSettings(
@@ -541,14 +579,16 @@ class AppSettings {
                     .map((e) => MapEntry(e.key.toString(), e.value.toString())))
             : <String, String>{},
         serverUrl: (m['serverUrl'] ?? '').toString(),
-        // 旧存档的 `server` 与未知值统一迁移到内置 Dart（不再有第二种运行时）。
-        agentRuntime: agentRuntimeDart,
+        // 默认 local；旧存档的 `dart` / 未知值回落 local，显式 `server` 保留。
+        agentRuntime: normalizeAgentRuntime(m['agentRuntime']?.toString()),
         // 旧存档无此键：默认开（用户决策 2026-11-17，聊天流是主面）。
         chatStreamHome: m['chatStreamHome'] is bool ? m['chatStreamHome'] as bool : true,
+        desktopHostEnabled: m['desktopHostEnabled'] == true,
+        desktopHostAllowLan: m['desktopHostAllowLan'] == true,
       );
 }
 
-/// ACP 目录项（服务端 /acp/agents 探测结果）。
+/// ACP 目录项（外部智能体探测结果）。
 class AcpAgentInfo {
   final String id;
   final String name;
@@ -719,6 +759,8 @@ class TimelineEntry {
   int? ms;
   String? preview;
   String? error;
+  /// 服务层给出的人话失败句（`tool_end.message`）；原始码只留在 [error]。
+  String? message;
   bool running;
   final DateTime ts;
 
@@ -732,6 +774,7 @@ class TimelineEntry {
     this.ms,
     this.preview,
     this.error,
+    this.message,
     this.running = false,
     DateTime? ts,
   }) : ts = ts ?? DateTime.now();

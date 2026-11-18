@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import '../core/toast_service.dart';
 import '../plugins/registry.dart';
 import 'common.dart';
 import 'workspace.dart';
@@ -12,7 +13,23 @@ class Welcome extends StatefulWidget {
   final VoidCallback onNewProject;
   final void Function(String path) onOpenPath;
   final VoidCallback onSettings;
-  const Welcome({super.key, required this.onNewProject, required this.onOpenPath, required this.onSettings});
+
+  /// 「聊天」入口：桌面壳展开右侧聊天窄栏；手机经典主面切回聊天流。
+  /// 缺省回退 `store.setView('chat')`（独立使用 Welcome 时的旧语义）。
+  final VoidCallback? onOpenChat;
+
+  /// 是否显示顶栏聊天入口。桌面主页没有右侧栏，隐藏它避免死按钮；
+  /// 手机/iPad 经典 Welcome 仍显示（默认 true）。
+  final bool showChatEntry;
+
+  const Welcome({
+    super.key,
+    required this.onNewProject,
+    required this.onOpenPath,
+    required this.onSettings,
+    this.onOpenChat,
+    this.showChatEntry = true,
+  });
 
   @override
   State<Welcome> createState() => _WelcomeState();
@@ -43,9 +60,7 @@ class _WelcomeState extends State<Welcome> {
     if (brief.isEmpty || store.agentBusy) return;
     if (store.settings.apiKey.trim().isEmpty) {
       widget.onSettings();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('先在设置里填入服务商 API Key'), behavior: SnackBarBehavior.floating),
-      );
+      ToastService.instance.warn('还没配置模型', '先在设置里选择服务商并填入密钥');
       return;
     }
     store.generateFromBrief(brief);
@@ -111,13 +126,15 @@ class _WelcomeState extends State<Welcome> {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    // 聊天流入口（S1 主面切换）：Welcome 只在关闭
-                    // chatStreamHome 时出现，这里给出回聊天流的显式门。
-                    IconAction(
-                      icon: Icons.forum_outlined,
-                      tooltip: '聊天流',
-                      onTap: () => store.setView('chat'),
-                    ),
+                    // 聊天入口：桌面壳展开右侧窄栏；手机经典主面切回聊天流。
+                    // 桌面主页没有右栏（2026-11-18），入口由壳层关闭。
+                    if (widget.showChatEntry)
+                      IconAction(
+                        key: const ValueKey('welcome-open-chat'),
+                        icon: Icons.forum_outlined,
+                        tooltip: '聊天',
+                        onTap: widget.onOpenChat ?? () => store.setView('chat'),
+                      ),
                     IconAction(
                       icon: store.settings.theme == 'light' ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
                       tooltip: '切换主题',
@@ -147,10 +164,19 @@ class _WelcomeState extends State<Welcome> {
                         children: [
                           Expanded(
                             flex: 6,
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
+                            // 左列（标题/说明/输入卡/提示）在矮窗口里会超过
+                            // 可用高：手机横屏 844×390 实测溢出 147px，「开始
+                            // 创作」落到屏幕外且无法滚到（审查 layout-4）。
+                            // 与右列同款可滚动；内容短于视口时仍垂直居中
+                            // （minHeight 钉满视口，保留原 center 语义）。
+                            child: LayoutBuilder(
+                              builder: (context, constraints) => SingleChildScrollView(
+                                child: ConstrainedBox(
+                                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                   decoration: BoxDecoration(
@@ -184,8 +210,8 @@ class _WelcomeState extends State<Welcome> {
                                 ),
                                 const SizedBox(height: 14),
                                 Text(
-                                  '描述你要解决的问题和受众。NoN 会先写设计文档，再把它变成可交互原型；'
-                                  '同一个工作台里还能做 3D 场景、代码生成的视频，以及带 SQLite 数据库的热应用。',
+                                  '描述你要解决的问题和受众。NaN 会先写设计文档，再把它变成可交互原型；'
+                                  '同一个工作台里还能做 3D 场景、代码生成的视频，以及带本地数据的热应用。',
                                   style: TextStyle(fontSize: 13, height: 1.65, color: p.ink3),
                                 ),
                                 if (store.recovery != null) ...[
@@ -211,7 +237,10 @@ class _WelcomeState extends State<Welcome> {
                                 _briefCard(context, store),
                                 const SizedBox(height: 10),
                                 _briefHints(context),
-                              ],
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                           const SizedBox(width: 44),
@@ -241,9 +270,9 @@ class _WelcomeState extends State<Welcome> {
                                         spacing: 5,
                                         runSpacing: 5,
                                         children: const [
-                                          Pill(label: '引擎门校验', icon: Icons.verified_outlined),
-                                          Pill(label: 'DDP 单文件', icon: Icons.lock_outline),
-                                          Pill(label: '前缀缓存', icon: Icons.bolt_outlined),
+                                          Pill(label: '设计校验', icon: Icons.verified_outlined),
+                                          Pill(label: '单文件项目', icon: Icons.lock_outline),
+                                          Pill(label: '离线可用', icon: Icons.bolt_outlined),
                                         ],
                                       ),
                                     ],
@@ -263,7 +292,7 @@ class _WelcomeState extends State<Welcome> {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text('NoNDesign v0.1 · MoonViz engine · 模型与端点来自 models.dev · 所有操作可撤销',
+                child: Text('NoNDesign · 本地创作 · 文档、原型与作品都在你手里 · 所有操作可撤销',
                     textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 10, height: 1.3, color: p.ink4)),
               ),
@@ -322,8 +351,8 @@ class _WelcomeState extends State<Welcome> {
           ),
           const SizedBox(height: 12),
           Text(
-            '描述你要解决的问题和受众。NoN 会先写设计文档，再把它变成可交互原型；'
-            '同一个工作台里还能做 3D 场景、代码生成的视频，以及带 SQLite 数据库的热应用。',
+            '描述你要解决的问题和受众。NaN 会先写设计文档，再把它变成可交互原型；'
+            '同一个工作台里还能做 3D 场景、代码生成的视频，以及带本地数据的热应用。',
             style: TextStyle(fontSize: 12.5, height: 1.6, color: p.ink3),
           ),
           if (store.recovery != null) ...[
@@ -361,9 +390,9 @@ class _WelcomeState extends State<Welcome> {
             spacing: 5,
             runSpacing: 5,
             children: const [
-              Pill(label: '引擎门校验', icon: Icons.verified_outlined),
-              Pill(label: 'DDP 单文件', icon: Icons.lock_outline),
-              Pill(label: '前缀缓存', icon: Icons.bolt_outlined),
+              Pill(label: '设计校验', icon: Icons.verified_outlined),
+              Pill(label: '单文件项目', icon: Icons.lock_outline),
+              Pill(label: '离线可用', icon: Icons.bolt_outlined),
             ],
           ),
         ],
@@ -386,6 +415,7 @@ class _WelcomeState extends State<Welcome> {
       child: Column(
         children: [
           TextField(
+            key: const ValueKey('welcome-brief'),
             controller: _brief,
             minLines: 3,
             maxLines: 5,
@@ -465,7 +495,7 @@ class _WelcomeState extends State<Welcome> {
         const SizedBox(width: 10),
         InkWell(
           onTap: () => openProjectFlow(context, ''),
-          child: Text('打开 DDP', style: TextStyle(fontSize: 10, color: p.ink4)),
+          child: Text('打开项目', style: TextStyle(fontSize: 10, color: p.ink4)),
         ),
       ],
     );
@@ -478,7 +508,7 @@ class _WelcomeState extends State<Welcome> {
     final statuses = {
       'three': store.settings.threeProjectName.isEmpty ? '未开始' : store.settings.threeProjectName,
       'video': '无声版 · 六类标杆示例',
-      'hotapp': 'HTML + SQLite · 覆盖即热更新',
+      'hotapp': '改完即生效 · 自动保存',
     };
     return Container(
       padding: const EdgeInsets.all(13),

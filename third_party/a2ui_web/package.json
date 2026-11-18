@@ -1,0 +1,20 @@
+{
+  "name": "nondesign-a2ui-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Build-time bundling of the official A2UI web renderer (@a2ui/web_core + @a2ui/lit) into a self-contained offline page for the NoNDesign .nonapp WebView spike.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "node build.mjs",
+    "probe": "node build.mjs --probe"
+  },
+  "dependencies": {
+    "@a2ui/lit": "0.15.0",
+    "@a2ui/web_core": "0.15.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "happy-dom": "21.0.4"
+  }
+}

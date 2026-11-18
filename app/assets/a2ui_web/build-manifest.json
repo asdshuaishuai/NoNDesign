@@ -1,0 +1,43 @@
+{
+  "name": "nondesign-a2ui-web",
+  "protocol": "1.0",
+  "bridgeVersion": 1,
+  "packages": {
+    "@a2ui/web_core": "0.15.0",
+    "@a2ui/lit": "0.15.0"
+  },
+  "bundledPackages": {
+    "@a2ui/lit": "0.15.0",
+    "@a2ui/web_core": "0.15.0",
+    "@lit/context": "1.1.6",
+    "@lit/reactive-element": "2.1.2",
+    "@preact/signals-core": "1.14.5",
+    "lit": "3.3.3",
+    "lit-element": "4.2.2",
+    "lit-html": "3.3.3",
+    "redos-detector": "6.1.4",
+    "signal-polyfill": "0.2.3",
+    "signal-utils": "0.21.1",
+    "validate-color": "2.2.4",
+    "zod": "3.25.76",
+    "zod-to-json-schema": "3.25.2"
+  },
+  "toolchain": {
+    "esbuild": "0.28.2"
+  },
+  "csp": "default-src 'none'; script-src 'sha256-zHajk5YVNmN7j/9XLKGL1H2qTvoBN8iVWr5hj6dcjIg='; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  "files": {
+    "index.html": {
+      "sha256": "5bc067dec7c49dcd3721933ce7bc4930528641a49dc0c1b9776c67b90a5a37e8",
+      "bytes": 530539
+    },
+    "a2ui_web.js": {
+      "sha256": "cc76a393961536637b8fff572ca18bd47daa4efa0137c8955abe618fa75c8c88",
+      "bytes": 529489
+    },
+    "fixture_surface.json": {
+      "sha256": "27ae574dc786e7bd7fc320000b8548e759b1b1b3190e48c9183080c4ac21ce50",
+      "bytes": 2088
+    }
+  }
+}

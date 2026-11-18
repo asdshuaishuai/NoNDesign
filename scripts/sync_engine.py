@@ -25,6 +25,7 @@ import argparse
 import base64
 import hashlib
 import json
+import shutil
 import sys
 import urllib.request
 from pathlib import Path
@@ -34,7 +35,16 @@ ROOT = Path(__file__).resolve().parent.parent
 ENGINE_DIR = ROOT / "engine"
 WASM = ENGINE_DIR / "moonviz.wasm"
 MANIFEST = ENGINE_DIR / "manifest.json"
+COMPONENTS = ENGINE_DIR / "components.json"
 ENGINE_LOCAL = ENGINE_DIR / "ENGINE_LOCAL"
+# 应用侧资产镜像（批次 01 起）：Flutter 只读 app/assets/engine/，绝不读
+# 仓库根的 engine/。两份必须 byte-identical；--check 与
+# app/test/engine_asset_drift_test.dart 双向守门（ENGINE_LOCAL 重建后
+# 忘记同步 → drift test 必红）。
+APP_ENGINE_DIR = ROOT / "app" / "assets" / "engine"
+APP_WASM = APP_ENGINE_DIR / "moonviz.wasm"
+APP_MANIFEST = APP_ENGINE_DIR / "manifest.json"
+APP_COMPONENTS = APP_ENGINE_DIR / "components.json"
 RELEASE_TAG = "engine-v0.1.11"
 RELEASE_ASSET = "moonviz-wasm-classic-0.1.11.wasm"
 RELEASE_SHA512 = "sha512-3z5jItQ5FHzeQ6nGuBzBQbIOtTsDnB9JIlSs9DH0GQNT+w17sfLkgh6pnN57ut9tacBS1GKO5Jf1g0jP7PRQZA=="
@@ -84,11 +94,104 @@ def _fetch_release() -> bytes:
     return data
 
 
+def mirror_to_app() -> None:
+    """Copy engine/ assets into app/assets/engine/ (Flutter bundle source)."""
+    APP_ENGINE_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(WASM, APP_WASM)
+    shutil.copyfile(MANIFEST, APP_MANIFEST)
+    shutil.copyfile(COMPONENTS, APP_COMPONENTS)
+
+
+def _load_manifest(path: Path, errors: list[str]) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - reported, not raised
+        errors.append(f"{path}: unreadable manifest ({exc})")
+        return {}
+
+
+def _check_pin(label: str, wasm_path: Path, manifest_path: Path, errors: list[str]) -> dict[str, Any]:
+    if not wasm_path.exists():
+        errors.append(f"{label}: missing {wasm_path}")
+        return {}
+    manifest = _load_manifest(manifest_path, errors)
+    if not manifest:
+        return {}
+    data = wasm_path.read_bytes()
+    digest = sha512(data)
+    if manifest.get("sha512") != digest:
+        errors.append(
+            f"{label}: wasm sha512 does not match manifest\n"
+            f"    manifest {manifest.get('sha512')}\n"
+            f"    actual   {digest}"
+        )
+    if manifest.get("bytes") != len(data):
+        errors.append(f"{label}: wasm size {len(data)} != manifest bytes {manifest.get('bytes')}")
+    return manifest
+
+
+def check() -> None:
+    """Verify engine/ ⇄ app/assets/engine/ pins without touching anything.
+
+    Deliberately does not import the Python wasm host (server/engine.py): this
+    check must work on machines without wasmtime and after server/ is retired.
+    """
+    errors: list[str] = []
+    engine_manifest = _check_pin("engine/", WASM, MANIFEST, errors)
+    app_manifest = _check_pin("app/assets/engine/", APP_WASM, APP_MANIFEST, errors)
+
+    if engine_manifest and app_manifest and engine_manifest != app_manifest:
+        errors.append(
+            "engine/manifest.json and app/assets/engine/manifest.json differ\n"
+            "    → 重新跑 `python3 scripts/sync_engine.py` 同步应用侧资产"
+        )
+    if APP_MANIFEST.exists() and MANIFEST.exists() and APP_MANIFEST.read_bytes() != MANIFEST.read_bytes():
+        errors.append("manifest bytes differ between engine/ and app/assets/engine/")
+    if COMPONENTS.exists() and APP_COMPONENTS.exists() and APP_COMPONENTS.read_bytes() != COMPONENTS.read_bytes():
+        errors.append("components.json differs between engine/ and app/assets/engine/")
+
+    for label, components_path, manifest in (
+        ("engine/", COMPONENTS, engine_manifest),
+        ("app/assets/engine/", APP_COMPONENTS, app_manifest),
+    ):
+        if not components_path.exists():
+            errors.append(f"{label}: missing {components_path}")
+            continue
+        try:
+            components = json.loads(components_path.read_text("utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{label}: components.json unreadable ({exc})")
+            continue
+        ids = [c.get("id") for c in components if isinstance(c, dict)]
+        if manifest.get("components") != len(ids):
+            errors.append(
+                f"{label}: components.json has {len(ids)} ids, manifest says {manifest.get('components')}"
+            )
+        if len(set(ids)) != len(ids):
+            errors.append(f"{label}: duplicate component ids in components.json")
+
+    if errors:
+        print("[sync_engine] check FAILED", file=sys.stderr)
+        for err in errors:
+            print(f"  ✗ {err}", file=sys.stderr)
+        raise SystemExit(1)
+
+    print(
+        "[sync_engine] check ok: app/assets/engine matches manifest "
+        f"({app_manifest.get('bytes')} B · {app_manifest.get('sha512')[:28]}… · "
+        f"{app_manifest.get('templates')} templates / {app_manifest.get('components')} components)"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--local", help="copy a local wasm build (writes the ENGINE_LOCAL marker)")
     parser.add_argument("--release", action="store_true", help="download the pinned release (overrides the marker for this run)")
+    parser.add_argument("--check", action="store_true", help="verify engine/ ⇄ app/assets/engine/ pins and exit")
     args = parser.parse_args()
+    if args.check:
+        check()
+        return
     ENGINE_DIR.mkdir(parents=True, exist_ok=True)
 
     if args.local:
@@ -180,9 +283,10 @@ def main() -> None:
         + "\n",
         "utf-8",
     )
+    mirror_to_app()
     print(
         f"[sync_engine] ✓ {version.get('version')} ({build_line}) · {len(templates)} templates / "
-        f"{len(components)} components / render ok"
+        f"{len(components)} components / render ok → app/assets/engine/ synced"
     )
 
 

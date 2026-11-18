@@ -5,6 +5,12 @@
 > A2UI 1.0 / MediaPipe for Flutter / Genkit Dart 1.0）。
 > 生成内容改代码前必须先读 AGENTS.md 的边界与既有裁决；本文件是排期依据，不是施工令。
 >
+> **门禁更新（2026-11-18，批次 15）**：Python 服务已退场，文中提到的
+> `test_hotapp` / `test_server_routes` / `compileall` 等 Python 门禁不再存在。
+> 现在的门禁是 `flutter analyze --no-pub` + `flutter test` +
+> `flutter build macos --release` + `scripts/wf/check_desktop_release.dart`。
+> 涉及「与 Python 宿主对拍」的条目改为「与既有 Dart golden / 引擎探针对拍」。
+>
 > **决策记录（2026-11-17）**：① MediaPipe for Flutter —— **采纳，只引入基础 task 能力**
 > （视觉 / 文本 / 检索，见 N6）；**端侧 LLM（LiteRT-LM / Gemma）暂不考虑**（难度大，用户决策）；
 > ② Genkit Dart 1.0 —— **不引入**，维持原判定（见 §2）。
@@ -34,7 +40,8 @@
    material_ui API（这是迁移期唯一的硬错来源）；
 4. 仍依赖旧导入的第三方包（a2ui_flutter / webview_flutter 等，按检出结果）用
    `MaterialUiCompatibilityBridge` 包在 `MaterialApp.builder` 里过渡；
-5. 跑五门禁（compileall / analyze / flutter test 全量 / test_hotapp / test_server_routes），
+5. 跑门禁（`flutter analyze --no-pub` / `flutter test` 全量 /
+   `flutter build macos --release` / `scripts/wf/check_desktop_release.dart`），
    回归画布、inspector、设置、聊天流四个主面。
 
 风险：`dart fix` 早期版本有 pubspec 更新失败的问题——失败就手动 `pub add` 后重跑。桥接器
@@ -66,12 +73,14 @@
   `cached_engine_id` 不可由外部 Intent 传入）——`.nonapp` 文件关联的 intent-filter 不得
   依赖传 engine 参数，文件内容一律走插件/通道读取。
 
-### N4（P2）wasmtime FFI 宿主立项（`docs/plan-dart-agent-migration.md` P3 路线）
+### N4（已完成，原 P2）wasm 宿主：wasm_run 路线（不是 wasmtime C API + ffigen）
 
-3.50 让这条路线从「高风险探索」降为「按官方手册施工」：FFIgen（C + Objective-C）与
-JNIgen（Java/Kotlin）均 stable，支持同步调用与后台 isolate 调用，官方新增 interop 文档区。
-先做 spike：wasmtime C API + `ffigen` 绑定、`_in` 槽 ABI 在 Dart 侧的最小闭环、与现有
-Python 宿主的结果对拍。结论再决定是否立项。
+原计划是 wasmtime C API + `ffigen`。实际落地选择了 **`wasm_run` 执行器 + isolate 队列**
+（`app/lib/core/engine/`）：桌面用 vendored 动态库，iOS 用 wasmi，Android arm64 用
+wasmtime，`_in` 槽 ABI、UTF-16 读、会话缓存、trap 恢复、fuel 与内存回收都由
+`engine_worker.dart` 实现，并被 `engine_contract_test.dart` / `engine_host_test.dart`
+锚定。**不要再按 wasmtime C API 重做一遍**；如果未来要换执行器，先保持
+`EngineService` 面不变并跑全量引擎测试。
 
 ### N5（P2）桌面多窗口 / 工作区拆窗（S4 之后可选）
 

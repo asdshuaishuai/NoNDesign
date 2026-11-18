@@ -1,13 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
 
+import '../core/dart_agent.dart' show toolLabel;
 import '../core/models.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'a2ui_card.dart';
 import 'common.dart';
 import 'settings_dialog.dart';
+import 'workspace.dart' show openProjectFlow, showNewProjectFlow;
 
 /// 聊天流主面（docs/plan-chat-stream-shell.md §2 S1）。
 ///
@@ -16,10 +20,10 @@ import 'settings_dialog.dart';
 /// 照常渲染；动作经 onAction 回流 store.handleChatAction 续跑）/ 产物卡
 /// （原型→工作区；热应用/视频/3D→对应工作台）。
 ///
-/// 顶栏「工作区」由宿主注入动作（[onOpenWorkspace]）：桌面 ≥1100 切分栏
-/// 折叠、移动/平板竖屏开画中画浮窗（S4，承载壳见 widgets/shell_host.dart
-/// 的 ChatWorkspaceHost）；无宿主时回退原全屏路径。会话记录由 store 随
-/// chat.json 落盘、重启恢复。
+/// 顶栏「工作区」由宿主注入动作（[onOpenWorkspace]）：手机/竖屏平板开画中画
+/// 浮窗（承载壳见 widgets/chat_pip_shell.dart）；桌面壳的右侧窄栏用
+/// [railMode] 隐藏该入口（工作区就是主面）。无宿主时回退原全屏路径。
+/// 会话记录由 store 随 chat.json 落盘、重启恢复。
 class ChatStreamView extends StatefulWidget {
   /// 设置入口回调；缺省用本视图 context 弹设置（视图在 Navigator 子树内）。
   final VoidCallback? onSettings;
@@ -33,11 +37,15 @@ class ChatStreamView extends StatefulWidget {
   /// （review pip-2）；缺省回退 [onOpenWorkspace]，再缺省走全屏路径。
   final VoidCallback? onRevealWorkspace;
 
+  /// 右侧窄栏形态：更窄的顶栏（只有标题/主题/设置），没有「工作区」入口。
+  final bool railMode;
+
   const ChatStreamView({
     super.key,
     this.onSettings,
     this.onOpenWorkspace,
     this.onRevealWorkspace,
+    this.railMode = false,
   });
 
   @override
@@ -128,12 +136,12 @@ class _ChatStreamViewState extends State<ChatStreamView> {
 
   Widget _topBar(BuildContext context, AppStore store, NonPalette p) {
     return Container(
-      height: 60,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      height: widget.railMode ? 48 : 60,
+      padding: EdgeInsets.symmetric(horizontal: widget.railMode ? 12 : 20),
       decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
       child: Row(
         children: [
-          const NonLogo(size: 26),
+          NonLogo(size: widget.railMode ? 22 : 26),
           const SizedBox(width: 9),
           Expanded(
             child: Column(
@@ -143,24 +151,28 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                 Text('NoNDesign',
                     maxLines: 1, overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
-                Text('聊天流',
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, letterSpacing: 1.6, color: p.ink4)),
+                if (!widget.railMode)
+                  // 项目入口：项目名 + 未保存点 + 保存/另存/打开/新建。
+                  // 聊天优先壳没有桌面 TitleBar/StatusBar，这里是手机上
+                  // 唯一常驻的项目面（docs/design-system.md 可见入口纪律）。
+                  const ChatProjectMenu(),
               ],
             ),
           ),
-          const SizedBox(width: 6),
-          // 「工作区」入口：宿主在时交给宿主（桌面分栏切换 / 移动画中画），
-          // 无宿主时回退原全屏路径（无项目先建空项目——store.openWorkspace）。
-          OutlinedButton.icon(
-            key: const ValueKey('chat-open-workspace'),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          if (!widget.railMode) ...[
+            const SizedBox(width: 6),
+            // 「工作区」入口：宿主在时交给宿主（手机/竖屏平板开画中画），
+            // 无宿主时回退原全屏路径（无项目先建空项目——store.openWorkspace）。
+            OutlinedButton.icon(
+              key: const ValueKey('chat-open-workspace'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              ),
+              onPressed: widget.onOpenWorkspace ?? store.openWorkspace,
+              icon: Icon(Icons.space_dashboard_outlined, size: 14, color: p.ink2),
+              label: Text('工作区', style: TextStyle(fontSize: 11, color: p.ink2)),
             ),
-            onPressed: widget.onOpenWorkspace ?? store.openWorkspace,
-            icon: Icon(Icons.space_dashboard_outlined, size: 14, color: p.ink2),
-            label: Text('工作区', style: TextStyle(fontSize: 11, color: p.ink2)),
-          ),
+          ],
           const SizedBox(width: 4),
           IconAction(
             icon: store.settings.theme == 'light' ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
@@ -191,7 +203,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
           Text('从一句话开始',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3)),
           const SizedBox(height: 8),
-          Text('描述要解决的问题与受众——NoN 先写设计文档，再生成可交互原型。',
+          Text('描述要解决的问题与受众——NaN 先写设计文档，再生成可交互原型。',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, height: 1.6, color: p.ink3)),
           const SizedBox(height: 16),
@@ -329,7 +341,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                     color: s.running ? p.accent : s.ok ? p.success : p.danger,
                   ),
                   const SizedBox(width: 6),
-                  Text(s.label,
+                  Text(_stepLabel(s.label),
                       style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: p.ink2)),
                   if (s.detail != null && s.detail!.isNotEmpty) ...[
                     const SizedBox(width: 6),
@@ -450,6 +462,19 @@ class _ChatStreamViewState extends State<ChatStreamView> {
     );
   }
 
+  /// 进度步骤里的工具调用一律经 [toolLabel]（术语表：design_op → 设计变更，
+  /// inspect → 检查）；中文步骤（「撰写产品文档」「NaN 开始」「生成画板 home」）
+  /// 原样保留。
+  ///
+  /// 判定不按「是否含下划线」——inspect / finish 这类工具没有下划线，曾以
+  /// 英文代号原样上屏。这里以 [toolLabel] 的未知哨兵反查：返回
+  /// 「智能体操作」说明原文不是已知工具名（是人话步骤或未知工具），原文
+  /// 保留；已知工具一律用术语表译文。
+  String _stepLabel(String raw) {
+    final label = toolLabel(raw);
+    return label == '智能体操作' ? raw : label;
+  }
+
   Widget _composer(BuildContext context, AppStore store, NonPalette p) {
     final busy = store.agentBusy;
     return Container(
@@ -468,7 +493,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
               enabled: !busy,
               style: TextStyle(fontSize: 13, height: 1.5, color: p.ink),
               decoration: InputDecoration(
-                hintText: busy ? 'NoN 正在工作……' : '描述你要做的东西，回车发送',
+                hintText: busy ? 'NaN 正在工作……' : '描述你要做的东西，回车发送',
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
               onSubmitted: (_) => _send(store),
@@ -493,6 +518,255 @@ class _ChatStreamViewState extends State<ChatStreamView> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 项目菜单：手机/iPad 竖屏聊天主面与画中画工作区共用的唯一项目入口。
+///
+/// 聊天优先壳里没有桌面 TitleBar/StatusBar；画中画渲染的
+/// `Workspace(embedded: true)` 同样隐藏标题栏与状态栏。没有这个入口，
+/// 手机用户既看不到项目名与未保存点，也无法把当前项目保存下来
+/// （docs/design-system.md：所有操作都有可见入口）。
+///
+/// 保存/另存走 [AppStore.saveProject]：手机没有系统保存对话框，store 在
+/// 应用文档目录分配默认路径；另存为落在同一项目库，可经「打开项目」找回。
+class ChatProjectMenu extends StatelessWidget {
+  const ChatProjectMenu({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.watch<AppStore>();
+    final p = context.palette;
+    final name = store.hasProject ? store.projectName : '还没有项目';
+    return PopupMenuButton<String>(
+      key: const ValueKey('chat-project-menu'),
+      tooltip: '项目菜单',
+      offset: const Offset(0, 22),
+      constraints: const BoxConstraints(minWidth: 184, maxWidth: 260),
+      color: p.panel,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: p.lineStrong),
+      ),
+      onSelected: (value) => _onSelected(context, store, value),
+      itemBuilder: (context) => [
+        if (store.hasProject) ...[
+          _item(context, 'save', Icons.save_outlined, '保存'),
+          _item(context, 'save_as', Icons.save_as_outlined, '另存为…'),
+          const PopupMenuDivider(),
+        ],
+        _item(context, 'open', Icons.folder_open_outlined, '打开项目…'),
+        _item(context, 'new', Icons.add_box_outlined, '新建项目'),
+        if (store.recent.isNotEmpty) ...[
+          const PopupMenuDivider(),
+          _section(context, '最近项目'),
+          for (final r in store.recent.take(4))
+            _item(
+              context,
+              'recent:${r['path']}',
+              Icons.history,
+              (r['name'] ?? '').toString(),
+            ),
+        ],
+      ],
+      child: Container(
+        height: 22,
+        padding: const EdgeInsets.only(left: 6, right: 3),
+        decoration: BoxDecoration(
+          color: p.panel2.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(7),
+          border: Border.all(color: p.line),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10.5, color: p.ink2),
+              ),
+            ),
+            if (store.dirty)
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Tooltip(
+                  message: '有未保存的改动',
+                  child: Container(
+                    key: const ValueKey('chat-project-dirty'),
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(color: p.warn, shape: BoxShape.circle),
+                  ),
+                ),
+              ),
+            Icon(Icons.expand_more, size: 13, color: p.ink4),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onSelected(BuildContext context, AppStore store, String value) async {
+    switch (value) {
+      case 'save':
+        await store.saveProject();
+      case 'save_as':
+        await _saveProjectAs(context, store);
+      case 'open':
+        await openProjectFlow(context, '');
+      case 'new':
+        await showNewProjectFlow(context);
+      default:
+        if (value.startsWith('recent:')) {
+          await openProjectFlow(context, value.substring('recent:'.length));
+        }
+    }
+  }
+
+  Future<void> _saveProjectAs(BuildContext context, AppStore store) async {
+    final name = await showNonDialog<String>(
+      context: context,
+      builder: (_) => _SaveAsDialog(initial: store.projectName),
+    );
+    if (name == null || !context.mounted) return;
+    await _saveProjectAsNamed(store, name);
+  }
+
+  /// 另存：与当前项目同目录（手机上即应用文档目录）新建一个不重名的文件；
+  /// 还没落过盘时改个项目名直接走 store 的默认保存路径。
+  Future<void> _saveProjectAsNamed(AppStore store, String rawName) async {
+    final base = _safeFileBase(rawName);
+    if (base.isEmpty) return;
+    final current = store.projectPath;
+    if (current != null && current.isNotEmpty) {
+      final slash = current.lastIndexOf(RegExp(r'[\\/]'));
+      if (slash > 0) {
+        final dir = current.substring(0, slash);
+        var candidate = '$dir/$base.ddp';
+        var n = 2;
+        while (File(candidate).existsSync()) {
+          candidate = '$dir/$base-$n.ddp';
+          n += 1;
+        }
+        await store.saveProject(path: candidate);
+        return;
+      }
+    }
+    final previous = store.projectName;
+    store.projectName = base;
+    final ok = await store.saveProject();
+    if (!ok && store.projectPath == null) store.projectName = previous;
+  }
+
+  PopupMenuItem<String> _item(
+      BuildContext context, String value, IconData icon, String label) {
+    final p = context.palette;
+    return PopupMenuItem<String>(
+      value: value,
+      height: 36,
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: p.ink4),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(label,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: p.ink2)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  PopupMenuItem<String> _section(BuildContext context, String label) {
+    final p = context.palette;
+    return PopupMenuItem<String>(
+      enabled: false,
+      height: 24,
+      child: Text(label,
+          style: TextStyle(fontSize: 10, letterSpacing: 0.6, color: p.ink4)),
+    );
+  }
+}
+
+/// 文件名安全化（用户输入不包含路径分隔符；重名由调用侧追加序号）。
+String _safeFileBase(String raw) {
+  final cleaned = raw
+      .replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '-')
+      .replaceAll(RegExp(r'^\.+'), '')
+      .trim();
+  return cleaned.length > 60 ? cleaned.substring(0, 60) : cleaned;
+}
+
+/// 另存为的命名对话框（手机上没有系统保存对话框，名称与落点都在应用内）。
+class _SaveAsDialog extends StatefulWidget {
+  final String initial;
+  const _SaveAsDialog({required this.initial});
+
+  @override
+  State<_SaveAsDialog> createState() => _SaveAsDialogState();
+}
+
+class _SaveAsDialogState extends State<_SaveAsDialog> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    Navigator.of(context).pop(text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return AlertDialog(
+      backgroundColor: p.panel,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: p.lineStrong),
+      ),
+      title: const Text('另存为',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+      content: SizedBox(
+        width: 340,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              key: const ValueKey('chat-save-as-name'),
+              controller: _controller,
+              autofocus: true,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+              decoration: const InputDecoration(
+                labelText: '项目名称',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text('会保存到应用内项目库，之后可在「打开项目」里重新找到。',
+                style: TextStyle(fontSize: 10.5, height: 1.5, color: p.ink4)),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('保存')),
+      ],
     );
   }
 }

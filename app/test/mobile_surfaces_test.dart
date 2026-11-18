@@ -5,11 +5,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:nondesign/core/models.dart';
+import 'package:nondesign/core/platform_capabilities.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
+import 'package:nondesign/widgets/chat_pip_shell.dart';
 import 'package:nondesign/widgets/hotapp_workspace.dart';
+import 'package:nondesign/widgets/pip_window.dart';
+import 'package:nondesign/widgets/shell_host.dart';
 import 'package:nondesign/widgets/play_view.dart';
 import 'package:nondesign/widgets/portfolio_view.dart';
 import 'package:nondesign/widgets/settings_dialog.dart';
@@ -65,7 +70,7 @@ void main() {
 
     testWidgets('热应用 workspace body fits ${width.toInt()}px', (tester) async {
       await _pumpAt(tester, const Scaffold(body: HotAppWorkspace()), width);
-      expect(find.text('NoN 热应用'), findsWidgets);
+      expect(find.text('NaN 热应用'), findsWidgets);
     });
 
     testWidgets('portfolio fits ${width.toInt()}px', (tester) async {
@@ -135,7 +140,7 @@ void main() {
 
       await tester.pumpWidget(_wrap(store, const Workspace()));
       await tester.pump(const Duration(milliseconds: 200));
-      await tester.tap(find.text('NoN 面板'));
+      await tester.tap(find.text('NaN 面板'));
       await tester.pump(const Duration(milliseconds: 350));
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -153,4 +158,39 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('标杆示例'), findsOneWidget);
   });
+
+  // ---- 批次 12：手机壳层（聊天全屏 + 工作区画中画） ----------------------
+
+  Widget shellWrap(AppStore store) => ChangeNotifierProvider<AppStore>.value(
+        value: store,
+        child: MaterialApp(
+          theme: AppTheme.build(dark: true),
+          builder: (context, child) =>
+              withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
+          home: ShellHost(capabilities: PlatformCapabilities.forOs(HostOs.ios)),
+        ),
+      );
+
+  for (final size in const [Size(390, 844), Size(844, 390)]) {
+    testWidgets('${size.width.toInt()}×${size.height.toInt()} 壳层：聊天全屏 + 画中画无溢出',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final store = _store(project: true); // 复用文件头的 store 工厂
+      await tester.pumpWidget(shellWrap(store));
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(tester.takeException(), isNull);
+      expect(find.byType(ChatPiPShell), findsOneWidget);
+      expect(find.byKey(const ValueKey('chat-input')), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('pip-edge-capsule')));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byType(PipWindow), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
 }

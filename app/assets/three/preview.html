@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--
+  严格 CSP（与热应用/连接桌面的资源页同一道门）：file:// 页没有响应头，只能
+  经 meta 生效，且必须早于页面上的第一个脚本。场景代码由模型生成，属于不可信
+  输入——这里把外联通道整体关掉（connect-src 'none'），也不允许加载远端脚本、
+  样式或框架；预览页因此只能内联运行、自包含渲染。
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-ancestors 'none'">
+<title>3D 预览</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d12; }
+  #err {
+    position: fixed; top: 8px; left: 8px; color: #ff8a7a;
+    font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap; max-width: 70%; z-index: 9;
+  }
+</style>
+<!--
+  离线预览宿主页（批次 06）——**模板，不是最终页面**。
+
+  应用在挂载预览时把模块脚本里的两个占位注释替换成真实代码，生成一份自包含的
+  preview.html：
+
+    第一个占位：渲染库源码（r160，出口语句改写成 `const THREE = {...}`）
+    第二个占位：场景源码（去掉 `export default` 与 import，得到可直接调用的
+                构建函数，并以 `__non3d_scene_build__` 暴露）
+
+  ⚠️ 本注释里**不要写出占位字面量**：组装器按字面量定位替换，写在这里会被当成
+  第一个命中点，把渲染库注入到注释里（页面直接白屏）。
+
+  为什么必须自包含：桌面 WKWebView 与移动端 Chromium 都**禁止 file:// 页面
+  通过模块 import / fetch 读取同目录文件**（实测报错
+  `Cross-origin script load denied by Cross-Origin Resource Sharing policy`）。
+  相对 importmap + ./three.module.js 的写法在 file:// 下必白屏。把两份源码内联
+  进同一个模块脚本后不再发生任何网络/文件读取，file:// 直接可用，也不需要
+  importmap。
+
+  已实测（2026-11-18，同一份组装产物）：
+    * macOS WKWebView（file:// + allowingReadAccessTo）：canvas 就位，
+      metrics = {meshes:2, triangles:3104, user:{planet:true,ring:true}}，
+      screenshot 桥回传 data:image/png;base64,…；
+    * Chromium（file://）：同样的 metrics（meshes 2 / triangles 3104）；
+    * 两家的模块 import 版本（相对 importmap）都失败在白屏 + CORS。
+  手机/平板的系统 WebView 仍以 integration_test/three_webview_test.dart 为准。
+
+  project 目录里仍然并排保留 preview.html / scene.js / three.module.js 三件套
+  （可读、可核对、可复制），只是页面本身不再去读后两者。
+-->
+</head>
+<body>
+<pre id="err"></pre>
+<script>
+// —— 执行反馈桥：一切运行时错误回传宿主（JavaScriptChannel NON3D）——
+function __report(obj) {
+  try { window.NON3D.postMessage(JSON.stringify(obj)); } catch (e) {}
+}
+window.onerror = function (msg, src, line, col) {
+  document.getElementById('err').textContent = msg + ' @' + line + ':' + col;
+  __report({ kind: 'error', message: String(msg), line: line, col: col });
+  return true;
+};
+window.addEventListener('unhandledrejection', function (e) {
+  __report({ kind: 'error', message: 'unhandledrejection: ' + String(e.reason) });
+});
+// 看门狗：8s 内没有首帧 metrics 就如实上报「这台设备跑不了内嵌预览」，宿主
+// 换成可读的降级面（不算生成失败，也不推进任何一层）。
+window.__non3d_booted = false;
+setTimeout(function () {
+  if (!window.__non3d_booted) __report({ kind: 'unsupported', message: 'preview_boot_timeout' });
+}, 8000);
+</script>
+<script type="module">
+/*__THREE_MODULE__*/
+
+/*__SCENE_SOURCE__*/
+
+// —— 宿主：场景 / 相机 / 渲染器 / 轨道 / 测量 / 动画 / 取证 ——
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0d12);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 2000);
+camera.position.set(6, 4, 8);
+
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+} catch (e) {
+  __report({ kind: 'unsupported', message: 'webgl_unavailable: ' + String(e) });
+  throw e;
+}
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+// 轨道控制（自实现，零 addons 依赖）：接口兼容 controls.target / update()。
+class MiniOrbit {
+  constructor(camera, dom, targetInit) {
+    this.target = targetInit;
+    this.spherical = {
+      r: 10,
+      theta: Math.atan2(camera.position.x - targetInit.x, camera.position.z - targetInit.z),
+      phi: Math.acos(Math.min(1, Math.max(-1,
+        (camera.position.y - targetInit.y) /
+        Math.max(0.001, camera.position.distanceTo(targetInit))))),
+    };
+    this.goal = { ...this.spherical };
+    this.pan = targetInit.clone();
+    this.panGoal = targetInit.clone();
+    let mode = 0, lx = 0, ly = 0;
+    dom.addEventListener('contextmenu', (e) => e.preventDefault());
+    dom.addEventListener('pointerdown', (e) => {
+      mode = e.button === 2 || e.button === 1 ? 2 : 1;
+      lx = e.clientX; ly = e.clientY;
+      dom.setPointerCapture(e.pointerId);
+    });
+    dom.addEventListener('pointermove', (e) => {
+      if (!mode) return;
+      const dx = e.clientX - lx, dy = e.clientY - ly;
+      lx = e.clientX; ly = e.clientY;
+      if (mode === 1) {
+        this.goal.theta -= dx * 0.006;
+        this.goal.phi = Math.min(Math.PI - 0.05, Math.max(0.05, this.goal.phi - dy * 0.006));
+      } else {
+        const scale = this.goal.r * 0.0012;
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0).multiplyScalar(-dx * scale);
+        const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1).multiplyScalar(dy * scale);
+        this.panGoal.add(right).add(up);
+      }
+    });
+    dom.addEventListener('pointerup', () => { mode = 0; });
+    dom.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      this.goal.r = Math.min(500, Math.max(0.5, this.goal.r * Math.exp(e.deltaY * 0.0011)));
+    }, { passive: false });
+  }
+
+  update() {
+    const k = 0.16;
+    this.spherical.r += (this.goal.r - this.spherical.r) * k;
+    this.spherical.theta += (this.goal.theta - this.spherical.theta) * k;
+    this.spherical.phi += (this.goal.phi - this.spherical.phi) * k;
+    this.pan.lerp(this.panGoal, k);
+    const sp = this.spherical;
+    camera.position.set(
+      this.pan.x + sp.r * Math.sin(sp.phi) * Math.sin(sp.theta),
+      this.pan.y + sp.r * Math.cos(sp.phi),
+      this.pan.z + sp.r * Math.sin(sp.phi) * Math.cos(sp.theta),
+    );
+    camera.lookAt(this.pan);
+  }
+
+  // 直写 goal + spherical 绕过阻尼：四方位取证需要确定性视角（update() 只从
+  // 自持 spherical 重建 camera.position，直设 position 会被下一帧覆写）。
+  setView(theta, phi) {
+    this.goal.theta = theta; this.goal.phi = phi;
+    this.spherical.theta = theta; this.spherical.phi = phi;
+  }
+}
+
+const controls = new MiniOrbit(camera, renderer.domElement, new THREE.Vector3(0, 0, 0));
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+const clock = new THREE.Clock();
+let metrics = {};
+let userUpdate = null;
+try {
+  const ret = __non3d_scene_build__(THREE, scene, camera, controls, renderer);
+  if (ret && ret.metrics) metrics = ret.metrics;
+  if (ret && ret.update) userUpdate = ret.update;
+} catch (e) {
+  document.getElementById('err').textContent = String(e);
+  __report({ kind: 'error', message: String(e) });
+}
+
+// 测量反馈：场景几何自检，随帧回传。
+function __measure() {
+  let meshes = 0, tris = 0;
+  scene.traverse((o) => {
+    if (o.isMesh) {
+      meshes++;
+      tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
+    }
+  });
+  const box = new THREE.Box3().setFromObject(scene);
+  const size = box.isEmpty() ? { x: 0, y: 0, z: 0 } : box.getSize(new THREE.Vector3());
+  return {
+    meshes,
+    triangles: Math.round(tris),
+    bounds: { x: +size.x.toFixed(2), y: +size.y.toFixed(2), z: +size.z.toFixed(2) },
+    user: metrics,
+  };
+}
+
+function __firstFrame() {
+  window.__non3d_booted = true;
+  __report({ kind: 'metrics', payload: __measure() });
+}
+
+let lastSent = 0;
+function __loop() {
+  if (userUpdate) {
+    try { userUpdate(clock.getDelta()); } catch (e) {}
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  const now = performance.now();
+  if (now - lastSent > 2000) {
+    lastSent = now;
+    __report({ kind: 'metrics', payload: __measure() });
+  }
+}
+renderer.setAnimationLoop(__loop);
+
+// 视觉反馈：截图给评审（preserveDrawingBuffer 开启）。tag 进证据文件名；
+// 四方位按 0/90/180/270 各一张（单视角不是模型的证据）。
+window.__non3d_screenshot = function (tag) {
+  const data = renderer.domElement.toDataURL('image/png');
+  __report({ kind: 'screenshot', payload: data, tag: tag || 'shot' });
+};
+
+window.__non3d_turntable = function () {
+  if (window.__non3d_turning) return;
+  window.__non3d_turning = true;
+  // 暂停动画循环：__loop 每帧 controls.update() 会用阻尼态重建 camera.position，
+  // 把直设的取证视角立即覆写回旧值（四张截图同一视角的事故根因）。
+  renderer.setAnimationLoop(null);
+  const baseAngle = Math.atan2(
+    camera.position.x - controls.target.x,
+    camera.position.z - controls.target.z);
+  const phi0 = controls.spherical.phi; // 保持原仰角与距离，只转方位
+  const angles = [0, 90, 180, 270];
+  let i = 0;
+  const step = () => {
+    if (i >= angles.length) {
+      controls.setView(baseAngle, phi0);
+      renderer.render(scene, camera);
+      clock.getDelta(); // 吞掉暂停期的 dt，恢复后用户动画不瞬移
+      renderer.setAnimationLoop(__loop);
+      window.__non3d_turning = false;
+      return;
+    }
+    const a = baseAngle + angles[i] * Math.PI / 180;
+    controls.setView(a, phi0);
+    renderer.render(scene, camera);
+    __report({
+      kind: 'screenshot',
+      payload: renderer.domElement.toDataURL('image/png'),
+      tag: 'turn-' + angles[i],
+    });
+    i++;
+    setTimeout(step, 150);
+  };
+  step();
+};
+
+setTimeout(__firstFrame, 300);
+</script>
+</body>
+</html>

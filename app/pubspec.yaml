@@ -1,5 +1,5 @@
 name: nondesign
-description: "NoNDesign — AI-native product design studio (Flutter + Python Agents SDK)."
+description: "NoNDesign — AI-native product design studio (local-first, on-device design engine)."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -69,6 +69,42 @@ dependencies:
   mediapipe_retrieval: ^0.3.0
   mediapipe_vision: ^0.3.0
   mediapipe_text: ^0.3.0
+  # ---- 本地能力层依赖（批次 01 起） ----------------------------------------
+  # cryptography：DDP1/DDP2 的纯 Dart 实现（批次 05 起替换 Python ddp.py）。
+  cryptography: ^2.9.0
+  # sqlite3 3.x 自己带 build hook 编译 SQLite 原生库；sqlite3_flutter_libs
+  # 0.6.0+eol 是官方退役标记包（pubspec 自述 "Not used anymore"），迁移计划
+  # 仍要求显式锁定它，故保留为 direct dependency（不提供任何代码）。
+  sqlite3: ^3.9.1
+  sqlite3_flutter_libs: ^0.6.0+eol
+  # 进程内 wasm 宿主（引擎）。wasm_run_flutter 只是 Flutter 侧注册，
+  # 真正的执行器来自 wasm_run；后者 vendored 到 third_party/wasm_run
+  # （hooks 2.x 兼容 + 离线动态库，见 docs/wasm-run-vendoring.md）。
+  wasm_run_flutter: ^0.2.0+1
+  # 应用数据目录（缓存/数据库/日志），从传递依赖提升为直接依赖：
+  # 批次 07/08 的离线缓存与本地库都要自己决定落盘位置。
+  path_provider: ^2.1.6
+
+# sqlite3 3.x 的构建 hook 默认从 GitHub 下载预编译库（离线构建会失败）。
+# 改为使用系统自带的 SQLite（macOS/iOS/Linux/Android 都有），构建全程离线。
+# ⚠️ Windows 不自带 sqlite3.dll：批次 07 接通 app.db 前必须补 vendored 源码
+# 或随包二进制，否则 Windows 上「应用数据」能力不可用（已登记，不静默降级）。
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
+
+# wasm_run 必须以 path 覆盖：pub.dev 的 0.2.0+2 依赖 build_rust_binaries
+# （hooks ^1.0.0），与 mediapipe_core 0.3.0 的 hooks >=2.0.0 无法共存。
+# 覆盖版本与 pub.dev 同号（0.2.0+2），只替换构建 hook。升级 wasm_run 时
+# 同步刷新 third_party/wasm_run 与 scripts/fetch_wasm_run_libs.sh 的 sha256 表。
+dependency_overrides:
+  wasm_run:
+    path: ../third_party/wasm_run
+  # wasm_run_flutter 的 iOS/macOS 原生桩会硬引用静态库符号（EnforceBundling.swift），
+  # 与 vendored 动态库方案冲突 → 同样 vendored（仅中和该桩，Dart 面不变）。
+  wasm_run_flutter:
+    path: ../third_party/wasm_run/wasm_run_flutter
 
 dev_dependencies:
   flutter_test:
@@ -95,11 +131,15 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # 离线模型注册表：server/models.json 的入库副本（scripts/sync_models.py
-  # 双写保持同步）。移动端离线（PLAN 直连/连接桌面失败）时模型选择与
+  # 离线模型注册表：models.dev 快照（scripts/sync_models.py 是唯一写入方）。
+  # 移动端离线（PLAN 直连/连接桌面失败）时模型选择与
   # toolCall/protocol 门控的数据源；store.ensureBundledRegistry 消费。
   assets:
     - assets/models.json
+    # 引擎资产（批次 01 起由 scripts/sync_engine.py 同步）：
+    # moonviz.wasm + components.json + manifest.json 三者同源同版本；
+    # 漂移由 test/engine_asset_drift_test.dart 守门。
+    - assets/engine/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

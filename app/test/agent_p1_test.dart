@@ -416,10 +416,12 @@ void main() {
       final round = events.where((e) => e['type'] == 'review_round').toList();
       expect(round, hasLength(1));
       expect(round.single['round'], 1);
-      expect(round.single['detail'], contains('home:1项poor'));
+      expect(round.single['detail'], contains('home · 1 处待改进'));
       expect(
         events.any((e) =>
-            e['type'] == 'note' && e['label'] == '修复轮' && '${e['detail']}'.contains('auto_fix')),
+            e['type'] == 'note' &&
+            e['label'] == '修复轮' &&
+            '${e['detail']}'.contains('自动优化')),
         isTrue,
       );
     });
@@ -444,7 +446,7 @@ void main() {
       expect(bridge.mutateNames, isEmpty);
       final notes = events.where((e) => e['type'] == 'note' && e['label'] == '质量审查').toList();
       expect(notes, hasLength(1));
-      expect(notes.single['detail'], contains('全部屏幕通过原则评审'));
+      expect(notes.single['detail'], contains('全部屏幕通过质量检查'));
     });
 
     test('最多 2 轮：auto_fix 未能修复时只跑两轮', () async {

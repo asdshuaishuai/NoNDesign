@@ -6,6 +6,13 @@ import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
 
+/// 顶栏命令条让位断点（整条顶栏的宽度）。
+///
+/// 中部命令条（搜索图标 + 文案 + ⌘K 键帽 + 模型胶囊）在顶栏 730–820 区间
+/// 实测溢出 1.5–61px（批次：桌面壳层）。880 是命令条真正放得下的宽度：
+/// 低于它时空出中部，只留搜索图标；高于它时命令条文案仍可收缩省略。
+const double kTitleBarNarrowWidth = 880;
+
 class TitleBar extends StatelessWidget {
   final VoidCallback onCommand;
   final VoidCallback onSettings;
@@ -30,18 +37,17 @@ class TitleBar extends StatelessWidget {
     final store = context.watch<AppStore>();
     final p = context.palette;
     final model = store.model;
-    return Container(
-      height: 52,
-      decoration: BoxDecoration(
-        color: p.bgElevated.withValues(alpha: 0.94),
-        border: Border(bottom: BorderSide(color: p.line)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      // 窄屏（手机 390–410）断点：命令条/模型规格/忙碌标签让位——顶栏
-      // 曾横向溢出 64–221px，右侧按钮在手机上不可见。
-      child: LayoutBuilder(builder: (context, constraints) {
-        final narrow = constraints.maxWidth < 700;
-        return Row(
+    return LayoutBuilder(builder: (context, constraints) {
+      // 窄断点按整条顶栏宽度判定（命令条在 880 以下放不下，见常量注释）。
+      final narrow = constraints.maxWidth < kTitleBarNarrowWidth;
+      return Container(
+        height: 52,
+        decoration: BoxDecoration(
+          color: p.bgElevated.withValues(alpha: 0.94),
+          border: Border(bottom: BorderSide(color: p.line)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
         children: [
           const NonLogo(size: 24),
           const SizedBox(width: 8),
@@ -74,7 +80,7 @@ class TitleBar extends StatelessWidget {
             },
             itemBuilder: (context) => [
               _menu(context, 'new', Icons.add_box_outlined, '新建项目', modCombo('⌘N')),
-              _menu(context, 'open', Icons.folder_open_outlined, '打开 DDP…', modCombo('⌘O')),
+              _menu(context, 'open', Icons.folder_open_outlined, '打开项目…', modCombo('⌘O')),
               _menu(context, 'save', Icons.save_outlined, '保存', modCombo('⌘S')),
               const PopupMenuDivider(),
               _menu(context, 'html', Icons.download_outlined, '导出 HTML 原型', modCombo('⇧⌘H')),
@@ -121,6 +127,7 @@ class TitleBar extends StatelessWidget {
           const Spacer(),
           if (narrow)
             IconAction(
+              key: const ValueKey('title-bar-command-icon'),
               icon: Icons.search,
               tooltip: '命令 ${modCombo('⌘K')}',
               onTap: onCommand,
@@ -132,6 +139,7 @@ class TitleBar extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 440),
                 child: Material(
+                  key: const ValueKey('title-bar-command-bar'),
                   color: p.panel2.withValues(alpha: 0.65),
                   borderRadius: BorderRadius.circular(10),
                   child: InkWell(
@@ -148,8 +156,16 @@ class TitleBar extends StatelessWidget {
                         children: [
                           Icon(Icons.search, size: 14, color: p.ink4),
                           const SizedBox(width: 7),
-                          Text('问 NoN，或运行一个命令…', style: TextStyle(fontSize: 12, color: p.ink3)),
-                          const Spacer(),
+                          // 文案可收缩省略：宽度不够时截断而不是把整条命令条撑出。
+                          Expanded(
+                            child: Text(
+                              '问 NaN，或运行一个命令…',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 12, color: p.ink3),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
                           _Kbd(modCombo('⌘K')),
                         ],
                       ),
@@ -217,7 +233,7 @@ class TitleBar extends StatelessWidget {
                 ),
               ),
               const PopupMenuDivider(),
-              _menu(context, 'settings', Icons.tune, '模型与 API Key…', ''),
+              _menu(context, 'settings', Icons.tune, '模型与密钥…', ''),
             ],
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: narrow ? 3 : 6, vertical: 6),
@@ -240,9 +256,12 @@ class TitleBar extends StatelessWidget {
               ),
             ),
           ),
-          IconAction(icon: Icons.bolt_outlined, tooltip: 'NoN 面板', active: store.rightTab == 'agent',
+          IconAction(
+            key: const ValueKey('title-bar-rail-toggle'),
+            icon: Icons.bolt_outlined, tooltip: 'NaN 面板', active: store.rightTab == 'agent',
               onTap: () => store.setRightTab(store.rightTab == 'agent' ? 'inspect' : 'agent')),
           IconAction(
+            key: const ValueKey('title-bar-theme'),
             icon: store.settings.theme == 'light' ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
             tooltip: '切换主题',
             onTap: () async {
@@ -250,11 +269,13 @@ class TitleBar extends StatelessWidget {
               await store.saveSettings();
             },
           ),
-          IconAction(icon: Icons.settings_outlined, tooltip: '设置 ${modCombo('⌘,')}', onTap: onSettings),
+          IconAction(
+            key: const ValueKey('title-bar-settings'),
+            icon: Icons.settings_outlined, tooltip: '设置 ${modCombo('⌘,')}', onTap: onSettings),
         ],
-        );
-      }),
-    );
+        ),
+      );
+    });
   }
 
   /// 菜单统一宽度（弹层宽度 = 最宽项）：固定 236，避免长文件名把菜单撑爆。

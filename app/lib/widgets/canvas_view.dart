@@ -620,7 +620,7 @@ class _CanvasViewState extends State<CanvasView> {
                         children: [
                           Container(width: 5, height: 5, decoration: BoxDecoration(color: p.accent, shape: BoxShape.circle)),
                           const SizedBox(width: 5),
-                          Text('LIVE · NoN 正在工作', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
+                          Text('LIVE · NaN 正在工作', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
                         ],
                       ),
                     ),
@@ -1563,7 +1563,7 @@ class _EmptyCanvas extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('从一句话开始', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
-                      Text('NoN 先写产品文档与设计规范，再把原型画到画布上。',
+                      Text('NaN 先写产品文档与设计规范，再把原型画到画布上。',
                           style: TextStyle(fontSize: 11, color: p.ink3)),
                     ],
                   ),
@@ -1573,8 +1573,8 @@ class _EmptyCanvas extends StatelessWidget {
             const SizedBox(height: 14),
             Text(
               MediaQuery.sizeOf(context).width < 700
-                  ? '在底部 NoN 面板描述你的产品；或先用文档页生成 PRD。'
-                  : '在右侧 NoN 面板描述你的产品；或先用文档页生成 PRD。',
+                  ? '在底部 NaN 面板描述你的产品；或先用文档页生成 PRD。'
+                  : '在右侧 NaN 面板描述你的产品；或先用文档页生成 PRD。',
               style: TextStyle(fontSize: 12, height: 1.6, color: p.ink3),
             ),
             const SizedBox(height: 10),
@@ -1584,7 +1584,7 @@ class _EmptyCanvas extends StatelessWidget {
               children: [
                 FilledButton(
                   onPressed: () => store.setRightTab('agent'),
-                  child: const Text('打开 NoN'),
+                  child: const Text('打开 NaN'),
                 ),
                 OutlinedButton(
                   onPressed: () => store.setView('docs'),

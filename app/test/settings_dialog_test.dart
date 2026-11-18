@@ -67,6 +67,9 @@ void main() {
     await tester.tap(find.text('open-settings'));
     await tester.pumpAndSettle();
     expect(find.text('设置'), findsOneWidget);
+    // 打开设置只回填端点/模型到内存，不自动落盘（batch 11：删掉 initState
+    // 的 saveSettings 微任务后，首次显式保存才是唯一一次写盘）。
+    expect(store.saves, 0, reason: '打开设置不落盘');
 
     // 「步数+保存」在默认「模型与端点」tab 的模型卡内（store.model 非空时渲染）。
     await tester.ensureVisible(find.text('保存'));

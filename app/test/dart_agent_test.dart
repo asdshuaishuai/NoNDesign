@@ -9,7 +9,7 @@
 //   （fixture 由该 Python 逻辑生成，见 fixtures/thinking_dialect.json）；
 // - design_op 引擎门：唯一写路径 = bridge.applyAgent（gate=agent 语义），
 //   canonical 回写 + ops 记账 + preview + state 卡；拒绝 op 不入 ops。
-// - models.dart agentRuntime 默认与往返（移动 dart / 桌面 server / 未知回落）。
+// - models.dart agentRuntime 默认 local / 显式 server 保留 / 未知回落 local。
 //
 // 事件契约即 store._handleAgentEvent 的消费面——事件形状改动必须同步该函数。
 import 'dart:async';
@@ -563,20 +563,25 @@ void main() {
     });
   });
 
-  group('AppSettings.agentRuntime（移动 dart / 桌面 server）', () {
-    test('默认按平台解析；宿主 macOS 上默认 server', () {
-      // flutter test 跑在 macOS 宿主：非 iOS/Android → server。
-      expect(defaultAgentRuntime(), agentRuntimeServer);
-      expect(AppSettings().agentRuntime, agentRuntimeServer);
+  group('AppSettings.agentRuntime（默认 local / 显式 server）', () {
+    test('默认内置本机，与平台无关', () {
+      expect(defaultAgentRuntime(), agentRuntimeLocal);
+      expect(AppSettings().agentRuntime, agentRuntimeLocal);
     });
 
     test('toJson/fromJson 往返与容错', () {
-      expect(AppSettings.fromJson(AppSettings().toJson()).agentRuntime, agentRuntimeServer);
-      expect(AppSettings.fromJson({'agentRuntime': 'dart'}).agentRuntime, 'dart');
-      expect(AppSettings.fromJson({'agentRuntime': 'server'}).agentRuntime, 'server');
-      // 旧存档无键 → 平台默认；未知值不静默当 server → 平台默认。
+      expect(AppSettings.fromJson(AppSettings().toJson()).agentRuntime, agentRuntimeLocal);
+      // 旧存档的 dart 等同内置；显式 server（连接桌面）保留。
+      expect(AppSettings.fromJson({'agentRuntime': 'dart'}).agentRuntime, agentRuntimeLocal);
+      expect(AppSettings.fromJson({'agentRuntime': 'server'}).agentRuntime, agentRuntimeServer);
+      // 旧存档无键 → 默认 local；未知值静默回落 local，绝不当成远程。
       expect(AppSettings.fromJson({}).agentRuntime, defaultAgentRuntime());
-      expect(AppSettings.fromJson({'agentRuntime': 'bogus'}).agentRuntime, defaultAgentRuntime());
+      expect(AppSettings.fromJson({'agentRuntime': 'bogus'}).agentRuntime, agentRuntimeLocal);
+      // 赋值同样归一：未知值不留在存档里。
+      final s = AppSettings()..agentRuntime = 'bogus';
+      expect(s.agentRuntime, agentRuntimeLocal);
+      s.agentRuntime = agentRuntimeServer;
+      expect(s.toJson()['agentRuntime'], agentRuntimeServer);
     });
   });
 

@@ -1,62 +1,91 @@
-// 艺术架（Art Shelf）布局与数据面回归（2026-11-17 S2）：
-// ① 五个固定分类签（全部/热应用/原型/视频/3D）恒在场——旧实现按当前条目
-//    动态拼 chip，空分类在架子上不可见；手机 390/402 宽下五个签与标题同排
-//    必溢出，故分类签独立一行横向滚动（本文件的溢出断言就是那条约束的锚）。
+// 艺术架（Art Shelf）布局与本地数据面回归（批次 07 重写）。
+//
+// 覆盖：
+// ① 五个固定分类签（全部/热应用/原型/视频/3D）恒在场——空分类在架子上也
+//    必须可见；手机 390/402 宽下分类签独立一行横向滚动（溢出断言是锚）。
 // ② 分类签筛选生效（只留该分类的货架行）。
-// ③ 加载失败显式呈现（错误条 + 重试）——旧实现的空 catch 把「加载失败」
-//    伪装成「还没有作品」。
-// ④ api==null 时原型段仍展示，且「未连接服务器」与「没有作品」是两种文案。
+// ③ 本地来源：热应用库 / 3D 项目 / 视频产物全部来自本机扫描，不需要连接。
+// ④ shelf-2：原型卡片**本地可打开**且不给「从艺术架移除」，行首明示它在
+//    「最近项目」里管理——不再有一条点了必失败的出路。
+// ⑤ 热应用可由艺术架删除（本地目录 + 数据一起移除）。
+// ⑥ 加载失败显式呈现（错误条 + 重试），不伪装成「还没有作品」。
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:nondesign/core/api.dart';
 import 'package:nondesign/core/models.dart';
+import 'package:nondesign/core/nonapp_library.dart';
+import 'package:nondesign/core/nonapp_package.dart';
+import 'package:nondesign/core/project_service.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
+import 'package:nondesign/core/three_service.dart';
+import 'package:nondesign/core/toast_service.dart';
 import 'package:nondesign/widgets/art_shelf_card.dart';
 import 'package:nondesign/widgets/portfolio_view.dart';
+import 'package:nondesign/widgets/toast_host.dart';
 
-http.Response _json(Object body, [int status = 200]) => http.Response(
-      body is String ? body : jsonEncode(body),
-      status,
-      headers: {'content-type': 'application/json; charset=utf-8'},
-    );
+String _html({String marker = 'shelf-marker'}) =>
+    '<!doctype html><html><head><meta charset="utf-8"><style>'
+    'body{background:#111;color:#eee;font:14px system-ui;padding:12px}'
+    '</style></head><body><div>$marker</div>'
+    '<script>document.body.dataset.ready="1";</script></body></html>';
 
-AppStore _store({NoNDesignApi? api, List<Map<String, dynamic>>? recent}) {
-  final store = AppStore();
-  store.ready = true;
-  store.settings = AppSettings(providerId: 'deepseek', modelId: 'deepseek-v4.1-flash');
-  store.api = api;
-  if (recent != null) store.recent = recent;
-  return store;
+List<int> _package({required String name, required String title}) {
+  final archive = Archive();
+  void add(String entry, List<int> bytes) =>
+      archive.addFile(ArchiveFile(entry, bytes.length, bytes));
+  add('manifest.json', utf8.encode(jsonEncode({
+    'formatVersion': 1,
+    'id': name,
+    'name': name,
+    'title': title,
+    'renderer': 'html',
+    'createdAt': 1700000000,
+    'minAppVersion': '0.1.0',
+  })));
+  add('payload/index.html', utf8.encode(_html(marker: title)));
+  return ZipEncoder().encode(archive);
 }
 
-/// /portfolio 假服务器（health / project/list 走最小成功信封，refreshProjects
-/// 不会覆盖测试自己播种的 serverProjects）。
-NoNDesignApi _api({
-  List<Map<String, dynamic>> items = const [],
-  bool failPortfolio = false,
-}) =>
-    NoNDesignApi('http://mock.local', MockClient((request) async {
-      switch (request.url.path) {
-        case '/health':
-          return _json({'ok': true});
-        case '/project/list':
-          return _json({'ok': true, 'projects': []});
-        case '/portfolio':
-          if (failPortfolio) return _json({'detail': 'portfolio_index_corrupt'}, 500);
-          return _json({'ok': true, 'items': items});
-      }
-      return _json({'ok': false, 'detail': 'no_route'}, 404);
-    }));
+/// 第一次 scan 失败、之后恢复（错误条 + 重试的恢复路径）。
+class _FlakyLibrary extends NonAppLibrary {
+  _FlakyLibrary({required super.root});
 
-Future<void> _pumpAt(WidgetTester tester, Widget child, double width, {required AppStore store}) async {
+  var calls = 0;
+
+  @override
+  Future<List<LibraryApp>> scan() async {
+    calls++;
+    if (calls == 1) throw const FileSystemException('permission denied');
+    return super.scan();
+  }
+}
+
+Future<void> _settle(WidgetTester tester) async {
+  // 本地扫描走 dart:io（目录枚举/文件 stat）：widget test 的假时钟只推进
+  // 微任务，不推进真实 IO。交替 pump 与 runAsync 若干轮，让整条
+  // 「项目发现 → 热应用库 → 3D → 视频」链路逐段完成。
+  for (var i = 0; i < 25; i++) {
+    await tester.pump();
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    });
+  }
+  await tester.pump(const Duration(milliseconds: 120));
+}
+
+Future<void> _pumpAt(
+  WidgetTester tester,
+  Widget child,
+  double width, {
+  required AppStore store,
+}) async {
   tester.view.physicalSize = Size(width, 874);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
@@ -65,11 +94,14 @@ Future<void> _pumpAt(WidgetTester tester, Widget child, double width, {required 
     value: store,
     child: MaterialApp(
       theme: AppTheme.build(dark: true).copyWith(platform: TargetPlatform.iOS),
-      builder: (context, child) => withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
+      builder: (context, child) => ToastHost(
+        service: store.toasts,
+        child: withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
+      ),
       home: Scaffold(body: child),
     ),
   ));
-  await tester.pump(const Duration(milliseconds: 150));
+  await _settle(tester);
   expect(tester.takeException(), isNull);
 }
 
@@ -77,168 +109,176 @@ Finder _chip(String label) =>
     find.descendant(of: find.byType(SingleChildScrollView), matching: find.text(label));
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  late Directory temp;
+  late Directory projectsDir;
+  late Directory threeDir;
+  late Directory videoDir;
+  late NonAppLibrary library;
+
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    temp = Directory.systemTemp.createTempSync('shelf_');
+    projectsDir = Directory('${temp.path}/projects')..createSync(recursive: true);
+    threeDir = Directory('${temp.path}/3d')..createSync(recursive: true);
+    videoDir = Directory('${temp.path}/videos/job-1')..createSync(recursive: true);
+    library = await NonAppLibrary.open(root: Directory('${temp.path}/hotapps'));
+  });
+
+  tearDown(() {
+    if (temp.existsSync()) temp.deleteSync(recursive: true);
+  });
+
+  AppStore makeStore({
+    List<Map<String, dynamic>>? recent,
+    List<Map<String, dynamic>>? serverProjects,
+  }) {
+    final store = AppStore(
+      projects: ProjectService(root: () async => projectsDir),
+      toasts: ToastService(autoDismiss: false),
+    );
+    store.ready = true;
+    store.settings = AppSettings(providerId: 'deepseek', modelId: 'deepseek-v4.1-flash');
+    store.recent = recent ?? const [];
+    store.serverProjects = serverProjects ?? const [];
+    return store;
+  }
+
+  PortfolioView makeView({
+    NonAppLibrary? appLibrary,
+    List<Map<String, dynamic>> projectEntries = const [],
+  }) =>
+      PortfolioView(
+        library: appLibrary ?? library,
+        threeService: ThreeService(root: threeDir),
+        videoRoot: videoDir,
+        // 测试永远不扫真实 Desktop（refreshProjects 会带上它）。
+        projectEntries: projectEntries,
+      );
 
   for (final width in const [402.0, 390.0]) {
     testWidgets('五个固定分类签在 ${width.toInt()}px 下恒在场且不溢出', (tester) async {
-      await _pumpAt(tester, const PortfolioView(), width, store: _store());
-      // 「作品集」标题仍是独立一处 Text（mobile_surfaces_test 的锚）。
+      await _pumpAt(tester, makeView(), width, store: makeStore());
       expect(find.text('作品集'), findsOneWidget);
       for (final label in const ['全部', '热应用', '原型', '视频', '3D']) {
         expect(_chip(label), findsOneWidget, reason: '分类签 $label 必须固定存在');
       }
+      // 空态是统一措辞，不是「连不上」。
+      expect(find.text('还没有作品'), findsOneWidget);
     });
   }
 
   testWidgets('分类签筛选只留对应货架行', (tester) async {
-    final items = [
-      {'kind': 'hotapp', 'ref': 'app-a', 'title': '热应用甲', 'path': '/tmp/hotapps/app-a/index.html', 'detail': '热应用'},
-      {'kind': 'video', 'ref': '/v/job-1/frames.mp4', 'title': '视频乙', 'path': '/v/job-1/frames.mp4', 'detail': '视频渲染产物'},
-      {'kind': 'three', 'ref': 'scene-c', 'title': '3D 丙', 'path': '/tmp/3d/scene-c/scene.js', 'detail': 'three.js 场景'},
-    ];
-    await _pumpAt(tester, const PortfolioView(), 402, store: _store(api: _api(items: items)));
+    await library.install(NonAppPackage.parse(_package(name: 'app-a', title: '热应用甲')));
+    final store = makeStore();
+    await _pumpAt(
+      tester,
+      makeView(projectEntries: [
+        {'path': '${projectsDir.path}/proto-a.ddp', 'name': 'proto-a'},
+      ]),
+      402,
+      store: store,
+    );
 
     expect(find.text('热应用甲'), findsOneWidget);
-    expect(find.text('视频乙'), findsOneWidget);
-    expect(find.text('3D 丙'), findsOneWidget);
-
-    await tester.tap(_chip('视频'));
-    await tester.pump(const Duration(milliseconds: 50));
-
-    expect(find.text('视频乙'), findsOneWidget);
-    expect(find.text('热应用甲'), findsNothing);
-    expect(find.text('3D 丙'), findsNothing);
-  });
-
-  testWidgets('作品集加载失败：错误条 + 重试可恢复', (tester) async {
-    var fail = true;
-    final api = NoNDesignApi('http://mock.local', MockClient((request) async {
-      switch (request.url.path) {
-        case '/health':
-          return _json({'ok': true});
-        case '/project/list':
-          return _json({'ok': true, 'projects': []});
-        case '/portfolio':
-          if (fail) return _json({'detail': 'portfolio_index_corrupt'}, 500);
-          return _json({
-            'ok': true,
-            'items': [
-              {'kind': 'hotapp', 'ref': 'app-a', 'title': '热应用甲', 'path': '/tmp/hotapps/app-a/index.html', 'detail': '热应用'},
-            ],
-          });
-      }
-      return _json({'ok': false, 'detail': 'no_route'}, 404);
-    }));
-    await _pumpAt(tester, const PortfolioView(), 402, store: _store(api: api));
-
-    expect(find.byKey(const ValueKey('shelf-error')), findsOneWidget);
-    expect(find.textContaining('portfolio_index_corrupt'), findsOneWidget);
-
-    fail = false;
-    await tester.tap(find.text('重试'));
-    await tester.pump(const Duration(milliseconds: 120));
-
-    expect(find.byKey(const ValueKey('shelf-error')), findsNothing);
-    expect(find.text('热应用甲'), findsOneWidget);
-  });
-
-  testWidgets('未连接服务器：原型段仍展示，离线提示条与「没作品」区分', (tester) async {
-    final store = _store()
-      ..serverProjects = [
-        {'path': '/tmp/proto-a.ddp', 'name': 'proto-a', 'bytes': 1, 'modified': 1},
-      ];
-    await _pumpAt(tester, const PortfolioView(), 402, store: store);
-
-    // 原型项目来自 store.serverProjects（客户端聚合，不需要服务器 portfolio）。
-    expect(find.byType(ArtShelfCard), findsOneWidget);
     expect(find.text('proto-a'), findsOneWidget);
-    // 离线是显式状态，不是空态。
-    expect(find.byKey(const ValueKey('shelf-offline')), findsOneWidget);
-    expect(find.textContaining('未连接服务器'), findsWidgets);
-    expect(find.text('还没有作品'), findsNothing);
 
-    // shelf-2：提示条文案与 _open / store.openProjectPath 的门一致——原型
-    // 同样需要桌面服务（api==null 时 openProjectPath 直接 failed），不再
-    // 承诺「原型项目仍可打开」。
-    expect(find.text('未连接服务器：热应用 / 视频 / 3D / 原型都需要桌面服务，连接后可打开。'), findsOneWidget);
-    expect(find.textContaining('原型项目仍可打开'), findsNothing);
+    await tester.tap(_chip('热应用'));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('热应用甲'), findsOneWidget);
+    expect(find.text('proto-a'), findsNothing);
 
-    // 行为锚：离线点原型 → 明确提示需要桌面服务，不切视图（文案=行为）。
-    final viewBefore = store.view;
-    final card = find.ancestor(of: find.text('proto-a'), matching: find.byType(ArtShelfCard));
-    await tester.tap(find.descendant(of: card, matching: find.text('打开')));
-    await tester.pump(const Duration(milliseconds: 80));
-    expect(find.text('打开 DDP 项目需要桌面服务。'), findsOneWidget);
-    expect(store.view, viewBefore, reason: '离线打开失败不得切视图');
-    expect(store.hasProject, isFalse);
-    await tester.pumpAndSettle(); // 收掉 toast 的展示定时器
+    await tester.tap(_chip('原型'));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('proto-a'), findsOneWidget);
+    expect(find.text('热应用甲'), findsNothing);
   });
 
-  testWidgets('未连接且无产物：空态文案是「未连接服务器」而不是「还没有作品」', (tester) async {
-    await _pumpAt(tester, const PortfolioView(), 402, store: _store());
-    expect(find.text('未连接服务器'), findsOneWidget);
-    expect(find.text('还没有作品'), findsNothing);
-  });
-
-  testWidgets('原型卡片不提供「从艺术架移除」（服务端 kind 白名单无 prototype）', (tester) async {
-    final store = _store(api: _api(items: [
-      {'kind': 'hotapp', 'ref': 'app-a', 'title': '热应用甲', 'path': '/tmp/hotapps/app-a/index.html', 'detail': '热应用'},
-    ]))
-      ..recent = [
-        {'path': '/tmp/proto-a.ddp', 'name': 'proto-a', 'ts': 1},
-      ];
-    await _pumpAt(tester, const PortfolioView(), 1440, store: store);
-
-    Future<void> openMenuOf(String title) async {
-      final card = find.ancestor(of: find.text(title), matching: find.byType(ArtShelfCard));
-      await tester.tap(find.descendant(of: card, matching: find.byTooltip('更多操作')));
-      await tester.pumpAndSettle();
-    }
-
-    // 原型项目不在服务端作品集里：显示「移除」就是一条点必 400 的死路。
-    await openMenuOf('proto-a');
-    expect(find.text('复制路径'), findsOneWidget);
-    expect(find.text('从艺术架移除'), findsNothing);
-
-    await tester.tapAt(const Offset(10, 860)); // 点屏障外关菜单
-    await tester.pumpAndSettle();
-
-    // 服务端条目照常提供移除动作（对照）。
-    await openMenuOf('热应用甲');
-    expect(find.text('从艺术架移除'), findsOneWidget);
-  });
-
-  testWidgets('移除被服务端拒绝：显式 toast，卡片保留（不再静默吞掉 res.ok）', (tester) async {
-    final api = NoNDesignApi('http://mock.local', MockClient((request) async {
-      switch (request.url.path) {
-        case '/health':
-          return _json({'ok': true});
-        case '/project/list':
-          return _json({'ok': true, 'projects': []});
-        case '/portfolio':
-          return _json({
-            'ok': true,
-            'items': [
-              {'kind': 'video', 'ref': '/v/job-1/frames.mp4', 'title': '视频乙', 'path': '/v/job-1/frames.mp4', 'detail': '视频渲染产物'},
-            ],
-          });
-        case '/portfolio/delete':
-          return _json({'detail': 'invalid_kind:video'}, 400);
-      }
-      return _json({'ok': false, 'detail': 'no_route'}, 404);
+  testWidgets('本地来源：3D 项目与视频产物都从本机目录扫出来', (tester) async {
+    final project = Directory('${threeDir.path}/scene-c')..createSync(recursive: true);
+    File('${project.path}/build-state.json').writeAsStringSync(jsonEncode({
+      'current': 'blockout',
+      'blocked': false,
+      'passes': <Object>[],
     }));
-    await _pumpAt(tester, const PortfolioView(), 1440, store: _store(api: api));
+    File('${videoDir.path}/frames.mp4').writeAsBytesSync([0, 0, 0, 0]);
+    final store = makeStore();
+    await _pumpAt(tester, makeView(), 402, store: store);
 
-    final card = find.ancestor(of: find.text('视频乙'), matching: find.byType(ArtShelfCard));
+    expect(find.text('scene-c'), findsOneWidget);
+    expect(find.text('frames.mp4'), findsOneWidget);
+    expect(find.byKey(const ValueKey('shelf-error')), findsNothing);
+    expect(find.text('还没有作品'), findsNothing);
+  });
+
+  testWidgets('shelf-2：原型卡片不给移除动作，行首明示在「最近项目」里管理', (tester) async {
+    final store = makeStore();
+    await _pumpAt(
+      tester,
+      makeView(projectEntries: [
+        {'path': '${projectsDir.path}/proto-a.ddp', 'name': 'proto-a'},
+      ]),
+      1440,
+      store: store,
+    );
+
+    expect(find.textContaining('原型项目在「最近项目」里管理'), findsOneWidget);
+
+    final card = find.ancestor(of: find.text('proto-a'), matching: find.byType(ArtShelfCard));
+    await tester.tap(find.descendant(of: card, matching: find.byTooltip('更多操作')));
+    await tester.pumpAndSettle();
+    expect(find.text('复制路径'), findsOneWidget);
+    expect(find.text('从艺术架移除'), findsNothing,
+        reason: '原型不归艺术架所有：不提供点了必失败的移除');
+  });
+
+  testWidgets('热应用可由艺术架删除：确认后本地目录与数据一起移除', (tester) async {
+    final entry = await library.install(
+      NonAppPackage.parse(_package(name: 'gone-app', title: '要删的热应用')),
+    );
+    final store = makeStore();
+    await _pumpAt(tester, makeView(), 1440, store: store);
+
+    final card = find.ancestor(of: find.text('要删的热应用'), matching: find.byType(ArtShelfCard));
     await tester.tap(find.descendant(of: card, matching: find.byTooltip('更多操作')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('从艺术架移除'));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '隐藏'));
-    await tester.pumpAndSettle();
+    expect(find.textContaining('会同时删除它在本机的数据'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '删除'));
+    await _settle(tester);
 
-    expect(find.text('移除失败'), findsOneWidget);
-    expect(find.textContaining('invalid_kind:video'), findsOneWidget);
-    expect(find.text('视频乙'), findsOneWidget); // 服务端拒绝 = 条目仍在
+    expect(Directory(entry.dir).existsSync(), isFalse);
+    expect(
+      find.descendant(of: find.byType(ArtShelfCard), matching: find.text('要删的热应用')),
+      findsNothing,
+      reason: '通知里可以保留标题，但货架上不得再有这张卡',
+    );
+    expect(find.text('还没有作品'), findsOneWidget);
+  });
+
+  testWidgets('作品集加载失败：错误条 + 重试可恢复', (tester) async {
+    final flaky = _FlakyLibrary(root: Directory('${temp.path}/hotapps'));
+    await flaky.install(NonAppPackage.parse(_package(name: 'app-b', title: '恢复后的应用')));
+    final store = makeStore();
+    await _pumpAt(tester, PortfolioView(library: flaky, threeService: ThreeService(root: threeDir), videoRoot: videoDir),
+        402, store: store);
+
+    expect(find.byKey(const ValueKey('shelf-error')), findsOneWidget);
+    expect(find.text('作品集暂时打不开，请稍后重试'), findsOneWidget);
+
+    await tester.tap(find.text('重试'));
+    await _settle(tester);
+
+    expect(find.byKey(const ValueKey('shelf-error')), findsNothing);
+    expect(find.text('恢复后的应用'), findsOneWidget);
+  });
+
+  testWidgets('搜索无结果与「还没有作品」区分', (tester) async {
+    await _pumpAt(tester, makeView(), 402, store: makeStore());
+    await tester.enterText(find.byKey(const ValueKey('shelf-search')), 'zzz');
+    await tester.pump(const Duration(milliseconds: 260));
+
+    expect(find.byKey(const ValueKey('shelf-search-empty')), findsOneWidget);
+    expect(find.text('还没有作品'), findsNothing);
   });
 }

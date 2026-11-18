@@ -1,16 +1,14 @@
-// `.nonapp` 的打开编排：应用内打开（file_selector）/ OS 关联 / 冷启动队列
-// 都汇到 [openNonAppFromPath] 一条路径。
+// 应用包（`.nonapp`）的打开编排：应用内选择 / 系统关联 / 冷启动队列都汇到
+// [openNonAppFromPath] 一条路径。
 //
-// 分派（docs/plan-chat-stream-shell.md §1.1「打开路径」）：
-//   有服务器（api != null）→ POST /hotapp/import 落 hotapps + 作品集登记
-//       · html → hotAppLoadOnOpen = name; setView('plugin:hotapp')
-//       · a2ui → 拉 /hotapp/a2ui/{name} 后 push NonAppA2uiViewer
-//   无服务器（api == null）→ **零服务依赖**
-//       · a2ui → 直接 push 查看器（内存渲染，零 HTTP）
-//       · html → 写本地缓存后 hotAppOfflinePath = 缓存路径（file:// WebView）
+// 批次 07 起全部本地：
+//   · 先等应用完成启动（冷启动时系统可能比应用先就绪，review nonapp-2）；
+//   · 包解析 → 安装进本地应用库（目录 + 每个应用自己的数据库）；
+//   · html 载荷 → 工作台（file:// + 本地数据桥）；a2ui 载荷 → 内嵌查看器；
+//   · 安装失败（磁盘异常/平台限制）时 html 仍可**临时预览**，并明示不会保存。
 //
-// 先验后落：NonAppPackage.parse 失败（NonAppException）直接 SnackBar 显示
-// 稳定 code，不写缓存、不打服务端、不产生半成品。
+// 先验后落：NonAppPackage.parse / 安装校验失败直接给一句人话，不写缓存、
+// 不留半成品目录、不产生任何网络请求。
 import 'dart:async';
 import 'dart:io';
 
@@ -18,9 +16,10 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../core/api_nonapp.dart';
 import '../core/nonapp_cache.dart';
+import '../core/nonapp_library.dart';
 import '../core/nonapp_package.dart';
+import '../core/platform_capabilities.dart';
 import '../core/store.dart';
 import 'hotapp_workspace.dart';
 import 'nonapp_viewer.dart';
@@ -28,38 +27,96 @@ import 'nonapp_viewer.dart';
 const XTypeGroup _nonAppTypeGroup =
     XTypeGroup(label: 'NoNDesign 应用', extensions: ['nonapp']);
 
-/// 冷启动打开文件时等 boot 完成的上限：桌面端 spawn Python + /health 的
-/// 正常耗时在数秒内（ServerLauncher 自身 30s 启动超时），20s 后按当前
+/// 冷启动打开文件时等应用就绪的上限。
+///
+/// 系统可能在应用完成初始化前就把文件交过来；此时应用库/本地数据面还没
+/// 准备好，立刻判定会误走「临时预览」分支（review nonapp-2）。20s 后按当前
 /// 状态继续——绝不让打开动作永久挂起。
 const Duration nonAppBootWait = Duration(seconds: 20);
 
-/// 应用内打开：`file_selector` 选一个 `.nonapp` 并走同一条分派。
-Future<void> pickAndOpenNonApp(BuildContext context) async {
+/// 应用包失败码 → 用户可见句子（术语表 §4；原始码只进日志/技术详情）。
+String nonAppExceptionMessage(NonAppException error) {
+  final code = error.code;
+  if (code.startsWith('nonapp_unsupported_version')) {
+    return '应用版本过新，请更新本应用';
+  }
+  if (code.startsWith('nonapp_requires_app')) {
+    return '这个应用需要更新版本的 NoNDesign 才能打开';
+  }
+  if (code.startsWith('nonapp_too_large')) {
+    return '这个应用包太大了，无法打开';
+  }
+  if (code.startsWith('nonapp_invalid_zip') || code.startsWith('nonapp_empty_body')) {
+    return '这个文件不是有效的应用包';
+  }
+  if (code.startsWith('nonapp_html_external_refs') ||
+      code.startsWith('nonapp_a2ui_external_refs')) {
+    return '这个应用引用了网络资源，无法在本机打开';
+  }
+  if (code.startsWith('nonapp_invalid_surface') ||
+      code.startsWith('nonapp_unsupported_renderer') ||
+      code.startsWith('nonapp_invalid_payload')) {
+    return '这个应用的内容格式不受支持';
+  }
+  if (code.startsWith('nonapp_missing_')) {
+    return '这个应用包不完整，无法打开';
+  }
+  if (code.startsWith('nonapp_install_failed') ||
+      code.startsWith('nonapp_cache_failed') ||
+      code.startsWith('nonapp_delete_failed')) {
+    return '这个应用没能保存到本机，请检查磁盘空间';
+  }
+  if (code.startsWith('nonapp_invalid_name') || code.startsWith('nonapp_invalid_id')) {
+    return '这个应用的名字不合法，无法打开';
+  }
+  return '这个应用包暂时打不开，请稍后重试';
+}
+
+/// 没有系统文件关联的平台明示「从应用内打开」（不得静默缺失）。
+///
+/// Linux/Windows 的文件关联不在本轮实现范围（运行时清单不在本批文件内），
+/// 所以界面必须给出可行的替代路径，而不是让用户双击后什么都没有发生。
+String? nonAppOpenHint(PlatformCapabilities host) {
+  if (host.os == HostOs.linux || host.os == HostOs.windows) {
+    return '在这台电脑上，请从应用内打开应用包（暂不支持双击文件打开）。';
+  }
+  return null;
+}
+
+/// 应用内打开：选一个应用包并走同一条分派。
+Future<void> pickAndOpenNonApp(BuildContext context, {NonAppLibrary? library}) async {
   final XFile? file;
   try {
     file = await openFile(acceptedTypeGroups: const [_nonAppTypeGroup]);
-  } catch (e) {
-    if (context.mounted) _snack(context, '打开失败', '文件选择器不可用：$e');
+  } catch (error) {
+    if (context.mounted) {
+      _notify(context, '打开失败', '这台设备暂时打不开文件选择器。', error);
+    }
     return;
   }
   if (file == null) return; // 用户取消
   if (!context.mounted) return;
-  await openNonAppFromPath(context, file.path);
+  await openNonAppFromPath(context, file.path, library: library);
 }
 
-/// 打开一个 `.nonapp` 文件（OS 关联 / 冷启动队列 / 应用内选择共用）。
-Future<void> openNonAppFromPath(BuildContext context, String rawPath) async {
+/// 打开一个应用包文件（系统关联 / 冷启动队列 / 应用内选择共用）。
+Future<void> openNonAppFromPath(
+  BuildContext context,
+  String rawPath, {
+  NonAppLibrary? library,
+}) async {
   final path = _localPath(rawPath);
   if (path == null) {
-    _snack(context, '打开失败', '不支持的路径：$rawPath');
+    _notify(context, '打开失败', '这个位置的应用包无法读取。');
     return;
   }
 
   final List<int> bytes;
   try {
     bytes = await File(path).readAsBytes();
-  } catch (e) {
-    if (context.mounted) _snack(context, '打开失败', '$path：$e');
+  } catch (error) {
+    if (!context.mounted) return;
+    _notify(context, '打开失败', '这个文件读不出来，可能已经被移走。', error);
     return;
   }
   if (!context.mounted) return;
@@ -67,39 +124,129 @@ Future<void> openNonAppFromPath(BuildContext context, String rawPath) async {
   final NonAppPackage pkg;
   try {
     pkg = NonAppPackage.parse(bytes);
-  } on NonAppException catch (e) {
-    _snack(context, '应用包被拒', e.code);
+  } on NonAppException catch (error) {
+    _notify(context, '应用包被拒', nonAppExceptionMessage(error), error);
     return;
-  } catch (e) {
-    _snack(context, '应用包被拒', '$e');
+  } catch (error) {
+    _notify(context, '应用包被拒', '这个文件不是有效的应用包。', error);
     return;
   }
   if (!context.mounted) return;
 
   final store = _storeOf(context);
   if (store == null) {
-    _snack(context, '打开失败', '应用状态未就绪');
+    _notify(context, '打开失败', '应用还没有准备好，请稍后再试。');
     return;
   }
 
-  // 冷启动竞态：intake 在首帧就 drain 平台队列，而 api 要等
-  // ServerLauncher.launch()（spawn Python + /health）完成后才赋值——不等就
-  // 判成「离线」，桌面冷启动双击文件会误走离线分支（不导入、不进作品集）。
+  // 冷启动竞态：系统先交付、应用后完成初始化。等就绪后再决定安装/预览。
   await _awaitBoot(store);
   if (!context.mounted) return;
 
-  final api = store.api;
-  if (api != null) {
-    await _installAndOpen(context, store, pkg, bytes);
-  } else {
-    await _openOffline(context, store, pkg);
+  NonAppLibrary lib;
+  try {
+    lib = library ?? await NonAppLibrary.open();
+  } catch (error) {
+    debugPrint('[nonapp] library open failed: $error');
+    if (!context.mounted) return;
+    _notify(context, '应用包被拒', '应用库暂时打不开，请稍后重试。', error);
+    return;
   }
+
+  LibraryApp entry;
+  try {
+    entry = await lib.install(pkg);
+  } on NonAppException catch (error) {
+    debugPrint('[nonapp] install rejected: $error');
+    // html 仍可临时打开（不保存）；a2ui 走内存渲染——两条都不依赖磁盘。
+    if (pkg.renderer == 'html' && pkg.htmlBytes != null && context.mounted) {
+      await _openTemporary(context, store, pkg, error);
+    } else if (pkg.renderer == 'a2ui' && pkg.messages != null && context.mounted) {
+      await _openTemporaryA2ui(context, pkg, error);
+    } else if (context.mounted) {
+      _notify(context, '应用包被拒', nonAppExceptionMessage(error), error);
+    }
+    return;
+  } catch (error) {
+    debugPrint('[nonapp] install failed: $error');
+    if (pkg.renderer == 'html' && pkg.htmlBytes != null && context.mounted) {
+      await _openTemporary(context, store, pkg, error);
+    } else if (pkg.renderer == 'a2ui' && pkg.messages != null && context.mounted) {
+      await _openTemporaryA2ui(context, pkg, error);
+    } else if (context.mounted) {
+      _notify(context, '应用包被拒', '这个应用没能保存到本机，请检查磁盘空间。', error);
+    }
+    return;
+  }
+  if (!context.mounted) return;
+
+  if (pkg.renderer == 'a2ui') {
+    final messages = pkg.messages;
+    if (messages == null) {
+      _notify(context, '打开失败', '这个应用的内容读不出来。');
+      return;
+    }
+    _notify(context, '已打开', pkg.manifest.title);
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => NonAppA2uiViewer(title: pkg.manifest.title, messages: messages),
+    ));
+    return;
+  }
+
+  hotAppOfflinePath = null;
+  hotAppLoadOnOpen = entry.name;
+  store.setView('plugin:hotapp');
+  _notify(context, '已导入热应用', entry.title);
 }
 
-/// 等 store 完成 boot（`ready == true`），上限 [nonAppBootWait]。
+/// 库不可用时的临时预览：写缓存文件（CSP + 数据桥），明示不会保存。
+Future<void> _openTemporary(
+  BuildContext context,
+  AppStore store,
+  NonAppPackage pkg,
+  Object error,
+) async {
+  final html = pkg.htmlBytes;
+  if (html == null) return;
+  String cachePath;
+  try {
+    cachePath = await NonAppCache.writeHtml(
+      name: pkg.manifest.name,
+      htmlBytes: html,
+      withDbBridge: true,
+    );
+  } catch (cacheError) {
+    if (!context.mounted) return;
+    _notify(context, '打开失败', '这个应用暂时无法打开，请稍后重试。', cacheError);
+    return;
+  }
+  if (!context.mounted) return;
+  hotAppLoadOnOpen = null;
+  hotAppOfflinePath = cachePath;
+  store.setView('plugin:hotapp');
+  debugPrint('[nonapp] temporary preview: $error');
+  _notify(context, '已临时打开', '这个应用没有保存到本机，重新打开需要再导入一次。');
+}
+
+/// a2ui 载荷的临时预览：内存渲染（零磁盘/零网络），明示不会保存。
+Future<void> _openTemporaryA2ui(
+  BuildContext context,
+  NonAppPackage pkg,
+  Object error,
+) async {
+  final messages = pkg.messages;
+  if (messages == null) return;
+  debugPrint('[nonapp] temporary a2ui preview: $error');
+  _notify(context, '已临时打开', '这个应用没有保存到本机，重新打开需要再导入一次。');
+  await Navigator.of(context).push(MaterialPageRoute(
+    builder: (_) => NonAppA2uiViewer(title: pkg.manifest.title, messages: messages),
+  ));
+}
+
+/// 等应用完成启动（`ready == true`），上限 [timeout]。
 ///
-/// boot 已失败（bootError）时 ready 同样会变 true，api 仍是 null → 走离线，
-/// 这是正确降级。超时则按当前状态继续（不把用户挂在启动屏外）。
+/// 启动失败（bootError）时 ready 同样会变 true；此时本地库通常是好的
+/// （启动失败可能只是「连接桌面」不可达），照常安装。
 Future<void> _awaitBoot(AppStore store, {Duration timeout = nonAppBootWait}) async {
   if (store.ready) return;
   final completer = Completer<void>();
@@ -115,96 +262,7 @@ Future<void> _awaitBoot(AppStore store, {Duration timeout = nonAppBootWait}) asy
   }
 }
 
-/// 有服务器：安装进本机热应用库 + 作品集，再进工作台/查看器。
-Future<void> _installAndOpen(
-  BuildContext context,
-  AppStore store,
-  NonAppPackage pkg,
-  List<int> bytes,
-) async {
-  final api = store.api;
-  if (api == null) return;
-  Map<String, dynamic> res;
-  try {
-    res = await api.hotAppImport(bytes, name: pkg.manifest.name);
-  } catch (e) {
-    if (context.mounted) _snack(context, '导入失败', '$e');
-    return;
-  }
-  if (res['ok'] != true) {
-    if (context.mounted) _snack(context, '导入被拒', '${res['detail'] ?? res['error'] ?? '未知错误'}');
-    return;
-  }
-  if (!context.mounted) return;
-
-  if (pkg.renderer != 'a2ui') {
-    // 只写应用名：html 载荷由服务端托管（/hotapp/page/{name}）。
-    hotAppOfflinePath = null;
-    hotAppLoadOnOpen = pkg.manifest.name;
-    store.setView('plugin:hotapp');
-    _snack(context, '已导入热应用', '${pkg.manifest.title}（${pkg.manifest.name}）');
-    return;
-  }
-
-  Map<String, dynamic> a2;
-  try {
-    a2 = await api.hotAppA2ui(pkg.manifest.name);
-  } catch (e) {
-    if (context.mounted) _snack(context, '读取 a2ui 失败', '$e');
-    return;
-  }
-  final raw = a2['messages'];
-  if (!context.mounted) return;
-  if (a2['ok'] != true || raw is! List) {
-    _snack(context, '读取 a2ui 失败', '${a2['detail'] ?? a2['error'] ?? '无消息序列'}');
-    return;
-  }
-  await Navigator.of(context).push(MaterialPageRoute(
-    builder: (_) => NonAppA2uiViewer(
-      title: (a2['title'] ?? pkg.manifest.title).toString(),
-      messages: raw,
-    ),
-  ));
-}
-
-/// 无服务器：a2ui 内存渲染（零 HTTP）；html 落缓存走 file:// 离线工作台。
-Future<void> _openOffline(
-  BuildContext context,
-  AppStore store,
-  NonAppPackage pkg,
-) async {
-  if (pkg.renderer == 'a2ui') {
-    final messages = pkg.messages;
-    if (messages == null) {
-      _snack(context, '打开失败', '包内缺少 surface 消息');
-      return;
-    }
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => NonAppA2uiViewer(title: pkg.manifest.title, messages: messages),
-    ));
-    return;
-  }
-
-  final html = pkg.htmlBytes;
-  if (html == null) {
-    _snack(context, '打开失败', '包内缺少 index.html');
-    return;
-  }
-  String cachePath;
-  try {
-    cachePath = await NonAppCache.writeHtml(name: pkg.manifest.name, htmlBytes: html);
-  } on NonAppException catch (e) {
-    if (context.mounted) _snack(context, '离线打开失败', e.code);
-    return;
-  }
-  if (!context.mounted) return;
-  // 应用名通道留空：离线态没有服务端应用，只有本机缓存文件。
-  hotAppLoadOnOpen = null;
-  hotAppOfflinePath = cachePath;
-  store.setView('plugin:hotapp');
-}
-
-/// `file://` URL → 本地路径；普通路径原样返回（OS 两侧都可能给）。
+/// `file://` URL → 本地路径；普通路径原样返回（系统两侧都可能给）。
 String? _localPath(String raw) {
   final value = raw.trim();
   if (value.isEmpty) return null;
@@ -224,21 +282,17 @@ AppStore? _storeOf(BuildContext context) {
   }
 }
 
-void _snack(BuildContext context, String title, String detail) {
+/// 通知统一走 ToastService（宿主渲染；调试详情只进日志）。
+void _notify(BuildContext context, String title, String detail, [Object? error]) {
   if (!context.mounted) return;
-  final messenger = ScaffoldMessenger.maybeOf(context);
-  if (messenger == null) return;
-  messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(SnackBar(
-    content: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-        if (detail.trim().isNotEmpty)
-          Text(detail.trim(),
-              style: const TextStyle(fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
-      ],
-    ),
-  ));
+  if (error != null) debugPrint('[nonapp] $title: $error');
+  final store = _storeOf(context);
+  final toasts = store?.toasts;
+  if (toasts != null) {
+    toasts.show(title, detail: detail);
+    return;
+  }
+  // 没有 store 的独立宿主（测试/嵌入页）：不退回 SnackBar——通知的呈现只
+  // 有一个出口，缺失时宁可只留日志也不制造第二套弹条。
+  debugPrint('[nonapp] $title — $detail');
 }

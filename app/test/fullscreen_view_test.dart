@@ -54,14 +54,44 @@ void main() {
     }
   });
 
-  test('boot loads settings before launching the server and degrades on mobile', () {
+  test('boot reads settings before building runtimes; no Python spawn remains', () {
     final store = _read('lib/core/store.dart');
+    final api = _read('lib/core/api.dart');
+
+    // Ordering: preferences (connect-desktop address + token) → local engine →
+    // remote client. The opposite order made a saved address miss the launch.
     final prefs = store.indexOf('SharedPreferences.getInstance()');
-    final launch = store.indexOf('ServerLauncher.launch()');
+    final local = store.indexOf('_startLocalEngine()');
+    final remote = store.indexOf('_buildRemoteClient()');
     expect(prefs, greaterThan(0));
-    expect(launch, greaterThan(prefs), reason: 'manualBaseUrl 必须先于 launch 就位');
-    expect(store.contains('Platform.isIOS'), isTrue, reason: '移动端 launch 失败降级');
-    expect(store.contains('manualBaseUrl = settings.serverUrl'), isTrue);
+    expect(local, greaterThan(prefs), reason: '本地引擎在设置之后启动');
+    expect(remote, greaterThan(local), reason: '连接桌面客户端最后构建（地址来自设置）');
+
+    // Python runtime is gone from the client: no process spawn, no port file,
+    // no fixed port, no env-var server discovery.
+    for (final forbidden in [
+      'ServerLauncher',
+      'Process.start',
+      'server/main.py',
+      'NONDESIGN_SERVER',
+      'NONDESIGN_PYTHON',
+      'NONDESIGN_ROOT',
+      'server.json',
+      '--port',
+    ]) {
+      expect(store.contains(forbidden), isFalse, reason: 'store.dart 不得再出现 $forbidden');
+      expect(api.contains(forbidden), isFalse, reason: 'api.dart 不得再出现 $forbidden');
+    }
+
+    // A configured desktop that cannot be reached is a visible boot error.
+    expect(
+      RegExp(r'if \(!status\.connected\)[\s\S]{0,400}bootError = mobileDegradedBootError\(')
+          .hasMatch(store),
+      isTrue,
+      reason: '连不上必须显性报错，不能静默回落本地',
+    );
+    expect(store.contains('WasmRuntimeGate.mobileLocalEngineEnabled'), isTrue,
+        reason: '移动端本地引擎受设备验证开关约束');
   });
 
   test('Mobile PLAN is cancellable and establishes a minimal project state', () {
@@ -89,19 +119,24 @@ void main() {
   });
 
   test('Restored dead video job is treated as terminal (no permanent spinner)', () {
+    // 批次 08：任务从「服务端 job 号 + HTTP 轮询」改为进程内本地任务。
+    // 语义不变：查无此任务/进入终态都必须停轮询、清持久化 job，绝不留下
+    // 永真的 spinner。
     final video = _read('lib/widgets/video_workspace.dart');
     expect(
-      RegExp(r"res\['ok'\] != true[\s\S]{0,900}store\.setVideoState\(job: ''\)").hasMatch(video),
+      RegExp(r"snapshot == null[\s\S]{0,400}store\.setVideoState\(job: ''\)").hasMatch(video),
       isTrue,
-      reason: '404/!ok 必须清 _job/_busy 与持久化 job',
+      reason: '未知任务（进程重启）必须清持久化 job',
     );
     expect(
-      RegExp(r"_job = null;[\s\S]{0,400}_busy = false").hasMatch(video),
+      RegExp(r"_service\.job\(id\)[\s\S]{0,400}_poll\?\.cancel\(\)[\s\S]{0,300}_jobId = null")
+          .hasMatch(video),
       isTrue,
-      reason: '终态必须同时清在飞 job 与 spinner',
+      reason: '任务消失必须停轮询并清在飞 job',
     );
     expect(
-      RegExp(r"status.*== 'done'.*status.*== 'failed'[\s\S]{0,900}store\.setVideoState\(job: ''\)").hasMatch(video),
+      RegExp(r"if \(snapshot\.isRunning\) return;[\s\S]{0,300}store\.setVideoState\(job: ''\)")
+          .hasMatch(video),
       isTrue,
       reason: 'done/failed 也要清持久化 videoJob',
     );

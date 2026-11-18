@@ -128,6 +128,7 @@ class A2uiCard extends StatefulWidget {
     this.onOutbound,
     this.onError,
     this.onTextChunk,
+    this.offlineOnly = false,
   }) : messages = null;
 
   /// 静态路径：surface 消息 JSON 直灌（.nonapp 载荷 / 离线打开 / 测试）。
@@ -142,6 +143,7 @@ class A2uiCard extends StatefulWidget {
     this.onAction,
     this.onOutbound,
     this.onError,
+    this.offlineOnly = false,
   }) : instruction = null,
        transport = null,
        systemPreamble = null,
@@ -178,6 +180,13 @@ class A2uiCard extends StatefulWidget {
   /// 外链放行回调；null 即禁用（openUrl 调用报 EXECUTION_ERROR）。
   final A2uiOpenUrlCallback? openUrl;
 
+  /// `.nonapp` 等不可信载荷：媒体组件只渲染 data: 内容，绝不发起网络请求。
+  ///
+  /// 静态门（[assertSurfaceRenderable]）已经拒绝外链与动态拼接，但图/视频
+  /// 的 URL 也可能来自 data model；这一层在渲染时再做一次兜底，即使门被
+  /// 绕过也不会触发 `Image.network` / 网络播放器。
+  final bool offlineOnly;
+
   /// 动作回流：surface 上的用户事件动作（name/context/surfaceId）。
   final void Function(A2uiRendererAction action)? onAction;
 
@@ -209,7 +218,11 @@ class _A2uiCardState extends State<A2uiCard> {
   @override
   void initState() {
     super.initState();
-    _catalog = basicCatalog(locale: widget.locale, openUrl: widget.openUrl);
+    _catalog = _catalogFor(
+      locale: widget.locale,
+      openUrl: widget.openUrl,
+      offlineOnly: widget.offlineOnly,
+    );
     final processor = MessageProcessor<ComponentImplementation>(
       catalogs: [_catalog!],
       defaultVersion: A2uiProtocolVersion.v1_0,
@@ -421,4 +434,130 @@ class _A2uiCardState extends State<A2uiCard> {
       ),
     );
   }
+}
+
+/// 离线载荷的 basic 目录：媒体组件换成不发起网络请求的本地实现。
+///
+/// 仍复用官方 [`basicCatalog`] 的 schema/functions（协议面不变），只替换
+/// Image / Video / AudioPlayer 三个会走网络的 builder。
+CatalogImplementation _catalogFor({
+  required String locale,
+  A2uiOpenUrlCallback? openUrl,
+  required bool offlineOnly,
+}) {
+  final base = basicCatalog(locale: locale, openUrl: openUrl);
+  if (!offlineOnly) return base;
+  return base.copyWith(components: [
+    for (final component in base.components.values)
+      if (component.name == 'Image')
+        _replaceComponent(component, _offlineImageBuilder)
+      else if (component.name == 'Video' || component.name == 'AudioPlayer')
+        _replaceComponent(component, _offlineMediaBuilder)
+      else
+        component,
+  ]);
+}
+
+ComponentImplementation _replaceComponent(
+  ComponentImplementation base,
+  Widget Function(
+    BuildContext,
+    ComponentNode<ComponentImplementation>,
+    ComponentProps,
+    ChildWidgetBuilder,
+  ) builder,
+) =>
+    ComponentImplementation(
+      name: base.name,
+      schema: base.schema,
+      allowedParents: base.allowedParents,
+      allowedChildren: base.allowedChildren,
+      builder: builder,
+    );
+
+Widget _offlineImageBuilder(
+  BuildContext context,
+  ComponentNode<ComponentImplementation> node,
+  ComponentProps props,
+  ChildWidgetBuilder buildChild,
+) {
+  final url = (props.string('url') ?? '').trim();
+  final description = props.string('description') ?? '';
+  final broken = description.isEmpty
+      ? const Icon(Icons.broken_image)
+      : Semantics(image: true, label: description, child: const Icon(Icons.broken_image));
+  Widget image = broken;
+  if (url.startsWith('data:')) {
+    final bytes = Uri.tryParse(url)?.data?.contentAsBytes();
+    if (bytes != null && bytes.isNotEmpty) {
+      image = Image.memory(
+        bytes,
+        fit: BoxFit.fill,
+        semanticLabel: description.isEmpty ? null : description,
+        excludeFromSemantics: description.isEmpty,
+        errorBuilder: (context, error, stackTrace) => broken,
+      );
+    }
+  }
+  return switch (props.string('variant')) {
+    'icon' => Align(
+        alignment: AlignmentDirectional.topStart,
+        widthFactor: 1,
+        heightFactor: 1,
+        child: SizedBox.square(dimension: 24, child: image),
+      ),
+    'avatar' => Align(
+        alignment: AlignmentDirectional.topStart,
+        widthFactor: 1,
+        heightFactor: 1,
+        child: SizedBox.square(dimension: 40, child: ClipOval(child: image)),
+      ),
+    'smallFeature' => Align(
+        alignment: AlignmentDirectional.topStart,
+        widthFactor: 1,
+        heightFactor: 1,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 100),
+          child: image,
+        ),
+      ),
+    'largeFeature' => ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 400),
+        child: image,
+      ),
+    'header' => SizedBox(height: 200, child: image),
+    _ => image,
+  };
+}
+
+/// 离线载荷的音视频占位：不创建播放器、不解析网络地址。
+Widget _offlineMediaBuilder(
+  BuildContext context,
+  ComponentNode<ComponentImplementation> node,
+  ComponentProps props,
+  ChildWidgetBuilder buildChild,
+) {
+  final description =
+      (props.string('description') ?? props.string('label') ?? '').trim();
+  return Container(
+    constraints: const BoxConstraints(maxWidth: 300),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.movie_outlined, size: 18),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            description.isEmpty ? '本地预览不播放外部媒体' : description,
+            style: const TextStyle(fontSize: 12),
+          ),
+        ),
+      ],
+    ),
+  );
 }

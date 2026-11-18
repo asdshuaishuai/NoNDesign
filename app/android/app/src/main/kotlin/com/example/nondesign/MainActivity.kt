@@ -55,7 +55,10 @@ class MainActivity : FlutterActivity() {
 
     private fun queueFromIntent(intent: Intent?) {
         if (intent == null) return
-        val uri: Uri? = when (intent.action) {
+        // 声明为非空 Uri（`: Uri` 而非 `Uri?`）：K2 不再按 `?: return` 的
+        // 初始化式收窄显式可空声明的局部 val，保留 `Uri?` 会让
+        // materialize(uri) 报 "actual type is 'Uri?', but 'Uri' was expected"。
+        val uri: Uri = when (intent.action) {
             Intent.ACTION_VIEW -> intent.data
             Intent.ACTION_SEND -> streamOf(intent)
             else -> null

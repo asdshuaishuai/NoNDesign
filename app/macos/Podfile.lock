@@ -1,0 +1,21 @@
+PODS:
+  - FlutterMacOS (1.0.0)
+  - wasm_run_flutter (0.0.1)
+
+DEPENDENCIES:
+  - FlutterMacOS (from `Flutter/ephemeral`)
+  - wasm_run_flutter (from `Flutter/ephemeral/.symlinks/plugins/wasm_run_flutter/macos`)
+
+EXTERNAL SOURCES:
+  FlutterMacOS:
+    :path: Flutter/ephemeral
+  wasm_run_flutter:
+    :path: Flutter/ephemeral/.symlinks/plugins/wasm_run_flutter/macos
+
+SPEC CHECKSUMS:
+  FlutterMacOS: c232990155153907050900a2e175c7773903ba4e
+  wasm_run_flutter: dac33adc4f8930941cfaa95a30565e13665a2aaa
+
+PODFILE CHECKSUM: 1e95c36afbfd1cb6423ceca4de7a8e1b256fb6ac
+
+COCOAPODS: 1.16.2

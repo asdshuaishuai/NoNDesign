@@ -1,7 +1,10 @@
-// 模拟器/真机 UI 冒烟：移动端主页 → 3D 工作台 → 返回设计。
-// 覆盖两个真实回归点：
-//  - 无项目时作品集/工作台入口仍能路由（nav-2 修复：主页卡片不再点了没反应）；
-//  - 插件全屏视图有可见返回出口且能回到 Welcome（nav-1 修复）。
+// 模拟器/真机 UI 冒烟：手机聊天主面 → 经典主页 → 3D 工作台 → 返回主页。
+//
+// 批次 12 后的手机裁决：默认主面是**聊天全屏 + 工作区画中画**（ChatPiPShell）；
+// 经典 Welcome 仍可通过「启动主面 = 欢迎页」偏好进入（这里直接翻转偏好模拟
+// 用户选择），并且无项目时作品集/工作台入口必须仍能路由、全屏插件视图必须
+// 有可见返回出口。
+//
 // 运行：flutter test integration_test/mobile_smoke_test.dart -d <simulator-id>
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,7 +18,7 @@ import 'package:nondesign/main.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('mobile: welcome -> 3D workbench -> back', (tester) async {
+  testWidgets('mobile: chat home -> welcome -> 3D workbench -> back', (tester) async {
     final store = AppStore();
     store.ready = true;
     store.hasProject = false;
@@ -26,8 +29,16 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 400));
 
-    // 移动端启动降级后的主页（无服务器、无项目）。
+    // 手机默认主面：聊天全屏 + 右缘工作区胶囊（工作区是画中画，不常驻）。
+    expect(find.byKey(const ValueKey('chat-input')), findsOneWidget);
+    expect(find.byKey(const ValueKey('pip-edge-capsule')), findsOneWidget);
+
+    // 经典主页偏好：主面切回 Welcome（聊天入口保留为右下角胶囊）。
+    store.settings.chatStreamHome = false;
+    store.notifyListeners();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('把想法变成\n能用的作品'), findsOneWidget);
+    expect(find.byKey(const ValueKey('chat-first-fab')), findsOneWidget);
 
     // 主页工作台卡 → 插件视图（无项目也必须能路由）。
     await tester.tap(find.text('3D 工作台'));
