@@ -143,6 +143,11 @@ flutter:
     # 3D 预览模板与 three.module.js（发布包必须随包，否则 3D 工作台报
     # “assets/three/preview.html: Unable to load asset”）。
     - assets/three/
+    # vendored three-live 1.4.0（预览页沙箱执行面；LICENSE / NOTICE 同目录）。
+    # Flutter 目录资产不递归子目录，所以显式列出。
+    - assets/three/vendor/
+    # vendored ThreeUI Community 组件页面（画廊；catalog.json + LICENSE/NOTICE）。
+    - assets/three/threeui/
     # A2UI 官方 Web 渲染器的自包含页面（release 依赖 asset 声明，debug 回退
     # 仓库路径只用于测试）。
     - assets/a2ui_web/

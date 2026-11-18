@@ -76,6 +76,13 @@ class _FakeLlm {
   }
 }
 
+/// 极小的 ThreeUI 清单（真实资源校验在 three_threeui_test.dart）。
+const String _fakeThreeUiCatalog = '''
+{"version":1,"components":[
+{"id":"spark-badge","name":"火花徽章","description":"一枚会发光的徽章","file":"spark-badge.html","hint":"暗底"}
+]}
+''';
+
 /// 假资源：宿主页模板 + 与锚点等长的渲染库（长度校验必须过）。
 class _FakeAssets {
   _FakeAssets({String? template}) : template = template ?? _template;
@@ -96,6 +103,12 @@ window.NON3D.postMessage(JSON.stringify({kind:'metrics', payload:{}}));
     loads++;
     if (key == threePreviewAssetKey) return Uint8List.fromList(utf8.encode(template));
     if (key == threeModuleAssetKey) return fakeThreeModuleBytes();
+    if (key == threeLiveAssetKey) {
+      return Uint8List.fromList(utf8.encode('/* three-live vendor (fake) */'));
+    }
+    if (key == threeUiCatalogAssetKey) {
+      return Uint8List.fromList(utf8.encode(_fakeThreeUiCatalog));
+    }
     throw ThreeFailure('asset_missing', key);
   }
 }

@@ -64,8 +64,22 @@ final Uint8List _moduleBytes = () {
 Future<Uint8List> _loadAsset(String key) async {
   if (key == threePreviewAssetKey) return Uint8List.fromList(utf8.encode(_previewTemplate));
   if (key == threeModuleAssetKey) return _moduleBytes;
+  if (key == threeLiveAssetKey) {
+    return Uint8List.fromList(utf8.encode('/* three-live vendor (fake) */'));
+  }
+  if (key == threeUiCatalogAssetKey) {
+    return Uint8List.fromList(utf8.encode(_fakeThreeUiCatalog));
+  }
   throw ThreeFailure('asset_missing', key);
 }
+
+/// 极小的 ThreeUI 清单：画廊 UI 测试只关心「解析出来 → 卡片 → 打开」。
+const String _fakeThreeUiCatalog = '''
+{"version":1,"components":[
+{"id":"spark-badge","name":"火花徽章","description":"一枚会发光的徽章","file":"spark-badge.html","hint":"暗底"},
+{"id":"gallery-heading","name":"画廊标题","description":"颗粒渐变的大标题动效","file":"gallery-heading.html","hint":"大标题"}
+]}
+''';
 
 String _fence(String lang, String body) => '```$lang\n$body\n```';
 

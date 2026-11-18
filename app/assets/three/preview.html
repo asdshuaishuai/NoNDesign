@@ -8,11 +8,19 @@
   经 meta 生效，且必须早于页面上的第一个脚本。场景代码由模型生成，属于不可信
   输入——这里把外联通道整体关掉（connect-src 'none'），也不允许加载远端脚本、
   样式或框架；预览页因此只能内联运行、自包含渲染。
+
+  `script-src` 里的 'unsafe-eval' 与 `worker-src blob:` 是 three-live
+  `allow-client-scripts` 沙箱路径的最小放宽：场景脚本在 Worker 里由 three-live
+  用 new Function 编译（Worker 继承文档 CSP，所以 eval 必须在文档 CSP 里放行），
+  Worker 本身用 blob: 创建。沙箱内已移除网络/存储/消息通道，只允许回传场景消息。
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-ancestors 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; worker-src blob:; frame-ancestors 'none'">
 <title>3D 预览</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d12; }
+  three-live { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+  #fallback { position: absolute; inset: 0; }
+  #fallback canvas { display: block; }
   #err {
     position: fixed; top: 8px; left: 8px; color: #ff8a7a;
     font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -20,31 +28,38 @@
   }
 </style>
 <!--
-  离线预览宿主页（批次 06）——**模板，不是最终页面**。
+  离线预览宿主页——**模板，不是最终页面**。
 
-  应用在挂载预览时把模块脚本里的两个占位注释替换成真实代码，生成一份自包含的
-  preview.html：
+  应用在挂载预览时把四个占位替换成真实代码，生成一份自包含的 preview.html：
 
-    第一个占位：渲染库源码（r160，出口语句改写成 `const THREE = {...}`）
-    第二个占位：场景源码（去掉 `export default` 与 import，得到可直接调用的
-                构建函数，并以 `__non3d_scene_build__` 暴露）
+    THREE 占位    渲染库源码（r160，出口语句改写成 `const THREE = {...}`），
+                  只服务「旧路径」：沙箱不可用时的直跑降级面。
+    SCENE 占位    场景源码（去 export default 与 import 后可直接调用的构建函数），
+                  同样只给旧路径。
+    LIVE 占位     vendored three-live 1.4.0（经典脚本，见 assets/three/vendor/）。
+    SANDBOX 占位  同一份场景函数，放进 <three-live allow-client-scripts> 的
+                  `<script type="text/three">` 里，在沙箱 Worker 中执行。
+
+  执行面有两条，默认走沙箱：
+    1. **沙箱（默认）**：场景脚本在 three-live 的 sandbox Worker 里构建 Scene，
+       three-live 把场景转成 GLB，由它的 viewer（自带渲染器 + 相机操控）显示。
+       脚本不能碰 DOM/网络/存储，出错只经桥回传；页面用 viewer 的 canvas 截图。
+    2. **旧路径（降级）**：Worker 被拦 / 没有 WebGL / 沙箱脚本空场景时，页面
+       隐藏 three-live，用内联的 r160 渲染库在本页直接跑同一份场景函数，保留
+       逐帧 update 动画与自实现轨道控制——绝不给白屏。
 
   ⚠️ 本注释里**不要写出占位字面量**：组装器按字面量定位替换，写在这里会被当成
-  第一个命中点，把渲染库注入到注释里（页面直接白屏）。
+  第一个命中点，把内容注入到注释里（页面直接白屏）。
 
   为什么必须自包含：桌面 WKWebView 与移动端 Chromium 都**禁止 file:// 页面
   通过模块 import / fetch 读取同目录文件**（实测报错
   `Cross-origin script load denied by Cross-Origin Resource Sharing policy`）。
-  相对 importmap + ./three.module.js 的写法在 file:// 下必白屏。把两份源码内联
-  进同一个模块脚本后不再发生任何网络/文件读取，file:// 直接可用，也不需要
-  importmap。
+  把源码内联进同一份 HTML 后不再发生任何文件读取，file:// 直接可用。
 
-  已实测（2026-11-18，同一份组装产物）：
-    * macOS WKWebView（file:// + allowingReadAccessTo）：canvas 就位，
-      metrics = {meshes:2, triangles:3104, user:{planet:true,ring:true}}，
-      screenshot 桥回传 data:image/png;base64,…；
-    * Chromium（file://）：同样的 metrics（meshes 2 / triangles 3104）；
-    * 两家的模块 import 版本（相对 importmap）都失败在白屏 + CORS。
+  已实测（2026-11-19，同一份组装产物）：
+    * Chromium（file://）：沙箱路径渲染出画面，`<three-live>` 的
+      isModelLoaded=true；viewer canvas 截图非空；CSP 无 worker/eval 报错。
+    * Chrome headless 截图与 WKWebView 探针证据在 dist/screens/（gitignored）。
   手机/平板的系统 WebView 仍以 integration_test/three_webview_test.dart 为准。
 
   project 目录里仍然并排保留 preview.html / scene.js / three.module.js 三件套
@@ -53,216 +68,465 @@
 </head>
 <body>
 <pre id="err"></pre>
+<div id="fallback"></div>
+
+<!-- —— 执行反馈桥：一切运行时错误 / 测量 / 截图回传宿主（JavaScriptChannel NON3D）—— -->
 <script>
-// —— 执行反馈桥：一切运行时错误回传宿主（JavaScriptChannel NON3D）——
 function __report(obj) {
   try { window.NON3D.postMessage(JSON.stringify(obj)); } catch (e) {}
 }
 window.onerror = function (msg, src, line, col) {
-  document.getElementById('err').textContent = msg + ' @' + line + ':' + col;
+  var el = document.getElementById('err');
+  if (el) el.textContent = msg + ' @' + line + ':' + col;
   __report({ kind: 'error', message: String(msg), line: line, col: col });
   return true;
 };
 window.addEventListener('unhandledrejection', function (e) {
   __report({ kind: 'error', message: 'unhandledrejection: ' + String(e.reason) });
 });
-// 看门狗：8s 内没有首帧 metrics 就如实上报「这台设备跑不了内嵌预览」，宿主
-// 换成可读的降级面（不算生成失败，也不推进任何一层）。
+// 执行面状态：'' = 还在启动；'live' = three-live 沙箱；'legacy' = 页内直跑。
+window.__non3d_mode = '';
 window.__non3d_booted = false;
-setTimeout(function () {
-  if (!window.__non3d_booted) __report({ kind: 'unsupported', message: 'preview_boot_timeout' });
-}, 8000);
 </script>
+
+<!-- —— three-live 1.4.0（vendored；Apache-2.0；含 file:// 引擎内联补丁，见 NOTICE.md）——
+     经典脚本必须内联：file:// 下外链脚本会被 CORS 拦。内联脚本的 textContent 就是
+     sandbox Worker 的引擎源（上游用 importScripts 拉自身 bundle，file:// 的
+     blob:null 拉不动；补丁把引擎源直接拼进 Worker 启动脚本）。 -->
+<script id="three-live-runtime">/*__THREE_LIVE__*/</script>
+<script>
+window.__three_live_engine_source__ =
+  document.getElementById('three-live-runtime').textContent;
+</script>
+
+<!-- —— 默认执行面：场景脚本在 three-live 沙箱 Worker 里构建场景 ——
+     Worker 里的全局是 THREE / scene / camera / renderer（不是文档作用域），
+     所以这里显式给构建函数传参；controls 用最小占位（viewer 自己管相机）。
+     update 只能先跑一帧：three-live 的沙箱脚本是「构建一次 → 转 GLB → viewer
+     显示」，Worker 在 DONE 后即终止，不提供逐帧回调；逐帧动画由降级路径负责。 -->
+<three-live id="non3d-live" allow-client-scripts camera-controls auto-rotate>
+<script type="text/three">
+/*__SCENE_SANDBOX__*/
+var __non3d_controls = {
+  target: new THREE.Vector3(0, 0, 0),
+  update: function () {},
+  setView: function () {}
+};
+try {
+  var __non3d_ret = __non3d_scene_build__(THREE, scene, camera, __non3d_controls, renderer);
+  if (__non3d_ret && typeof __non3d_ret.update === 'function') {
+    try { __non3d_ret.update(0.016); } catch (e) {}
+  }
+} catch (e) {
+  throw e;
+}
+</script>
+</three-live>
+
+<!-- —— 降级执行面：内联渲染库 + 同一份场景函数；只在沙箱不可用时启动 —— -->
 <script type="module">
 /*__THREE_MODULE__*/
 
 /*__SCENE_SOURCE__*/
 
-// —— 宿主：场景 / 相机 / 渲染器 / 轨道 / 测量 / 动画 / 取证 ——
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b0d12);
+window.__non3d_legacy_boot = function () {
+  if (window.__non3d_mode === 'live' || window.__non3d_mode === 'legacy') return;
+  window.__non3d_mode = 'legacy';
+  var live = document.getElementById('non3d-live');
+  if (live) live.style.display = 'none';
+  var host = document.getElementById('fallback');
 
-const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 2000);
-camera.position.set(6, 4, 8);
+  // —— 宿主：场景 / 相机 / 渲染器 / 轨道 / 测量 / 动画 / 取证 ——
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b0d12);
 
-let renderer;
-try {
-  renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-} catch (e) {
-  __report({ kind: 'unsupported', message: 'webgl_unavailable: ' + String(e) });
-  throw e;
-}
-renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-document.body.appendChild(renderer.domElement);
+  const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 2000);
+  camera.position.set(6, 4, 8);
 
-// 轨道控制（自实现，零 addons 依赖）：接口兼容 controls.target / update()。
-class MiniOrbit {
-  constructor(camera, dom, targetInit) {
-    this.target = targetInit;
-    this.spherical = {
-      r: 10,
-      theta: Math.atan2(camera.position.x - targetInit.x, camera.position.z - targetInit.z),
-      phi: Math.acos(Math.min(1, Math.max(-1,
-        (camera.position.y - targetInit.y) /
-        Math.max(0.001, camera.position.distanceTo(targetInit))))),
-    };
-    this.goal = { ...this.spherical };
-    this.pan = targetInit.clone();
-    this.panGoal = targetInit.clone();
-    let mode = 0, lx = 0, ly = 0;
-    dom.addEventListener('contextmenu', (e) => e.preventDefault());
-    dom.addEventListener('pointerdown', (e) => {
-      mode = e.button === 2 || e.button === 1 ? 2 : 1;
-      lx = e.clientX; ly = e.clientY;
-      dom.setPointerCapture(e.pointerId);
-    });
-    dom.addEventListener('pointermove', (e) => {
-      if (!mode) return;
-      const dx = e.clientX - lx, dy = e.clientY - ly;
-      lx = e.clientX; ly = e.clientY;
-      if (mode === 1) {
-        this.goal.theta -= dx * 0.006;
-        this.goal.phi = Math.min(Math.PI - 0.05, Math.max(0.05, this.goal.phi - dy * 0.006));
-      } else {
-        const scale = this.goal.r * 0.0012;
-        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0).multiplyScalar(-dx * scale);
-        const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1).multiplyScalar(dy * scale);
-        this.panGoal.add(right).add(up);
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  } catch (e) {
+    __report({ kind: 'unsupported', message: 'webgl_unavailable: ' + String(e) });
+    throw e;
+  }
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  host.appendChild(renderer.domElement);
+
+  // 轨道控制（自实现，零 addons 依赖）：接口兼容 controls.target / update()。
+  class MiniOrbit {
+    constructor(camera, dom, targetInit) {
+      this.target = targetInit;
+      this.spherical = {
+        r: 10,
+        theta: Math.atan2(camera.position.x - targetInit.x, camera.position.z - targetInit.z),
+        phi: Math.acos(Math.min(1, Math.max(-1,
+          (camera.position.y - targetInit.y) /
+          Math.max(0.001, camera.position.distanceTo(targetInit))))),
+      };
+      this.goal = { ...this.spherical };
+      this.pan = targetInit.clone();
+      this.panGoal = targetInit.clone();
+      let mode = 0, lx = 0, ly = 0;
+      dom.addEventListener('contextmenu', (e) => e.preventDefault());
+      dom.addEventListener('pointerdown', (e) => {
+        mode = e.button === 2 || e.button === 1 ? 2 : 1;
+        lx = e.clientX; ly = e.clientY;
+        dom.setPointerCapture(e.pointerId);
+      });
+      dom.addEventListener('pointermove', (e) => {
+        if (!mode) return;
+        const dx = e.clientX - lx, dy = e.clientY - ly;
+        lx = e.clientX; ly = e.clientY;
+        if (mode === 1) {
+          this.goal.theta -= dx * 0.006;
+          this.goal.phi = Math.min(Math.PI - 0.05, Math.max(0.05, this.goal.phi - dy * 0.006));
+        } else {
+          const scale = this.goal.r * 0.0012;
+          const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0).multiplyScalar(-dx * scale);
+          const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1).multiplyScalar(dy * scale);
+          this.panGoal.add(right).add(up);
+        }
+      });
+      dom.addEventListener('pointerup', () => { mode = 0; });
+      dom.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        this.goal.r = Math.min(500, Math.max(0.5, this.goal.r * Math.exp(e.deltaY * 0.0011)));
+      }, { passive: false });
+    }
+
+    update() {
+      const k = 0.16;
+      this.spherical.r += (this.goal.r - this.spherical.r) * k;
+      this.spherical.theta += (this.goal.theta - this.spherical.theta) * k;
+      this.spherical.phi += (this.goal.phi - this.spherical.phi) * k;
+      this.pan.lerp(this.panGoal, k);
+      const sp = this.spherical;
+      camera.position.set(
+        this.pan.x + sp.r * Math.sin(sp.phi) * Math.sin(sp.theta),
+        this.pan.y + sp.r * Math.cos(sp.phi),
+        this.pan.z + sp.r * Math.sin(sp.phi) * Math.cos(sp.theta),
+      );
+      camera.lookAt(this.pan);
+    }
+
+    // 直写 goal + spherical 绕过阻尼：四方位取证需要确定性视角（update() 只从
+    // 自持 spherical 重建 camera.position，直设 position 会被下一帧覆写）。
+    setView(theta, phi) {
+      this.goal.theta = theta; this.goal.phi = phi;
+      this.spherical.theta = theta; this.spherical.phi = phi;
+    }
+  }
+
+  const controls = new MiniOrbit(camera, renderer.domElement, new THREE.Vector3(0, 0, 0));
+
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  const clock = new THREE.Clock();
+  let metrics = {};
+  let userUpdate = null;
+  try {
+    const ret = __non3d_scene_build__(THREE, scene, camera, controls, renderer);
+    if (ret && ret.metrics) metrics = ret.metrics;
+    if (ret && ret.update) userUpdate = ret.update;
+  } catch (e) {
+    document.getElementById('err').textContent = String(e);
+    __report({ kind: 'error', message: String(e) });
+  }
+
+  // 测量反馈：场景几何自检，随帧回传。
+  function __measure() {
+    let meshes = 0, tris = 0;
+    scene.traverse((o) => {
+      if (o.isMesh) {
+        meshes++;
+        tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
       }
     });
-    dom.addEventListener('pointerup', () => { mode = 0; });
-    dom.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      this.goal.r = Math.min(500, Math.max(0.5, this.goal.r * Math.exp(e.deltaY * 0.0011)));
-    }, { passive: false });
+    const box = new THREE.Box3().setFromObject(scene);
+    const size = box.isEmpty() ? { x: 0, y: 0, z: 0 } : box.getSize(new THREE.Vector3());
+    return {
+      path: 'legacy',
+      meshes,
+      triangles: Math.round(tris),
+      bounds: { x: +size.x.toFixed(2), y: +size.y.toFixed(2), z: +size.z.toFixed(2) },
+      user: metrics,
+    };
   }
 
-  update() {
-    const k = 0.16;
-    this.spherical.r += (this.goal.r - this.spherical.r) * k;
-    this.spherical.theta += (this.goal.theta - this.spherical.theta) * k;
-    this.spherical.phi += (this.goal.phi - this.spherical.phi) * k;
-    this.pan.lerp(this.panGoal, k);
-    const sp = this.spherical;
-    camera.position.set(
-      this.pan.x + sp.r * Math.sin(sp.phi) * Math.sin(sp.theta),
-      this.pan.y + sp.r * Math.cos(sp.phi),
-      this.pan.z + sp.r * Math.sin(sp.phi) * Math.cos(sp.theta),
-    );
-    camera.lookAt(this.pan);
-  }
-
-  // 直写 goal + spherical 绕过阻尼：四方位取证需要确定性视角（update() 只从
-  // 自持 spherical 重建 camera.position，直设 position 会被下一帧覆写）。
-  setView(theta, phi) {
-    this.goal.theta = theta; this.goal.phi = phi;
-    this.spherical.theta = theta; this.spherical.phi = phi;
-  }
-}
-
-const controls = new MiniOrbit(camera, renderer.domElement, new THREE.Vector3(0, 0, 0));
-
-addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-});
-
-const clock = new THREE.Clock();
-let metrics = {};
-let userUpdate = null;
-try {
-  const ret = __non3d_scene_build__(THREE, scene, camera, controls, renderer);
-  if (ret && ret.metrics) metrics = ret.metrics;
-  if (ret && ret.update) userUpdate = ret.update;
-} catch (e) {
-  document.getElementById('err').textContent = String(e);
-  __report({ kind: 'error', message: String(e) });
-}
-
-// 测量反馈：场景几何自检，随帧回传。
-function __measure() {
-  let meshes = 0, tris = 0;
-  scene.traverse((o) => {
-    if (o.isMesh) {
-      meshes++;
-      tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
-    }
-  });
-  const box = new THREE.Box3().setFromObject(scene);
-  const size = box.isEmpty() ? { x: 0, y: 0, z: 0 } : box.getSize(new THREE.Vector3());
-  return {
-    meshes,
-    triangles: Math.round(tris),
-    bounds: { x: +size.x.toFixed(2), y: +size.y.toFixed(2), z: +size.z.toFixed(2) },
-    user: metrics,
-  };
-}
-
-function __firstFrame() {
-  window.__non3d_booted = true;
-  __report({ kind: 'metrics', payload: __measure() });
-}
-
-let lastSent = 0;
-function __loop() {
-  if (userUpdate) {
-    try { userUpdate(clock.getDelta()); } catch (e) {}
-  }
-  controls.update();
-  renderer.render(scene, camera);
-  const now = performance.now();
-  if (now - lastSent > 2000) {
-    lastSent = now;
+  function __firstFrame() {
+    window.__non3d_booted = true;
     __report({ kind: 'metrics', payload: __measure() });
   }
-}
-renderer.setAnimationLoop(__loop);
 
-// 视觉反馈：截图给评审（preserveDrawingBuffer 开启）。tag 进证据文件名；
-// 四方位按 0/90/180/270 各一张（单视角不是模型的证据）。
-window.__non3d_screenshot = function (tag) {
-  const data = renderer.domElement.toDataURL('image/png');
-  __report({ kind: 'screenshot', payload: data, tag: tag || 'shot' });
-};
+  let lastSent = 0;
+  function __loop() {
+    if (userUpdate) {
+      try { userUpdate(clock.getDelta()); } catch (e) {}
+    }
+    controls.update();
+    renderer.render(scene, camera);
+    const now = performance.now();
+    if (now - lastSent > 2000) {
+      lastSent = now;
+      __report({ kind: 'metrics', payload: __measure() });
+    }
+  }
+  renderer.setAnimationLoop(__loop);
 
-window.__non3d_turntable = function () {
-  if (window.__non3d_turning) return;
-  window.__non3d_turning = true;
-  // 暂停动画循环：__loop 每帧 controls.update() 会用阻尼态重建 camera.position，
-  // 把直设的取证视角立即覆写回旧值（四张截图同一视角的事故根因）。
-  renderer.setAnimationLoop(null);
-  const baseAngle = Math.atan2(
-    camera.position.x - controls.target.x,
-    camera.position.z - controls.target.z);
-  const phi0 = controls.spherical.phi; // 保持原仰角与距离，只转方位
-  const angles = [0, 90, 180, 270];
-  let i = 0;
-  const step = () => {
-    if (i >= angles.length) {
-      controls.setView(baseAngle, phi0);
+  // 视觉反馈：截图给评审（preserveDrawingBuffer 开启）。tag 进证据文件名；
+  // 四方位按 0/90/180/270 各一张（单视角不是模型的证据）。
+  window.__non3d_screenshot = function (tag) {
+    const data = renderer.domElement.toDataURL('image/png');
+    __report({ kind: 'screenshot', payload: data, tag: tag || 'shot' });
+  };
+
+  window.__non3d_turntable = function () {
+    if (window.__non3d_turning) return;
+    window.__non3d_turning = true;
+    // 暂停动画循环：__loop 每帧 controls.update() 会用阻尼态重建 camera.position，
+    // 把直设的取证视角立即覆写回旧值（四张截图同一视角的事故根因）。
+    renderer.setAnimationLoop(null);
+    const baseAngle = Math.atan2(
+      camera.position.x - controls.target.x,
+      camera.position.z - controls.target.z);
+    const phi0 = controls.spherical.phi; // 保持原仰角与距离，只转方位
+    const angles = [0, 90, 180, 270];
+    let i = 0;
+    const step = () => {
+      if (i >= angles.length) {
+        controls.setView(baseAngle, phi0);
+        controls.update(); // setView 只改 spherical，必须 update() 才重建 camera
+        renderer.render(scene, camera);
+        clock.getDelta(); // 吞掉暂停期的 dt，恢复后用户动画不瞬移
+        renderer.setAnimationLoop(__loop);
+        window.__non3d_turning = false;
+        return;
+      }
+      const a = baseAngle + angles[i] * Math.PI / 180;
+      controls.setView(a, phi0);
+      controls.update(); // 同上：暂停循环时没有 __loop 帮忙更新相机
       renderer.render(scene, camera);
-      clock.getDelta(); // 吞掉暂停期的 dt，恢复后用户动画不瞬移
-      renderer.setAnimationLoop(__loop);
-      window.__non3d_turning = false;
+      __report({
+        kind: 'screenshot',
+        payload: renderer.domElement.toDataURL('image/png'),
+        tag: 'turn-' + angles[i],
+      });
+      i++;
+      setTimeout(step, 150);
+    };
+    step();
+  };
+
+  setTimeout(__firstFrame, 300);
+};
+</script>
+
+<!-- —— 执行面编排：沙箱优先，失败/空场景/不支持时切旧路径 —— -->
+<script>
+(function () {
+  var live = document.getElementById('non3d-live');
+  var liveReported = false;
+  var legacyTried = false;
+
+  function liveMetrics() {
+    var el = document.getElementById('non3d-live');
+    var v = el && el.viewer;
+    var meshes = v && Array.isArray(v.meshes) ? v.meshes.length : 0;
+    var tris = 0;
+    var model = el && el.currentModel;
+    var gltf = model && model.gltf;
+    if (gltf && Array.isArray(gltf.meshes)) {
+      for (var i = 0; i < gltf.meshes.length; i++) {
+        var prims = gltf.meshes[i].primitives || [];
+        for (var j = 0; j < prims.length; j++) {
+          var p = prims[j];
+          var acc = p.indices != null
+            ? (gltf.accessors || [])[p.indices]
+            : (gltf.accessors || [])[(p.attributes || {}).POSITION];
+          if (acc && typeof acc.count === 'number') tris += acc.count / 3;
+        }
+      }
+    }
+    var b = v && v.bounds;
+    var d = b && typeof b.radius === 'number' ? +(b.radius * 2).toFixed(2) : 0;
+    return {
+      path: 'three-live',
+      sandbox: true,
+      meshes: meshes,
+      triangles: Math.round(tris),
+      bounds: { x: d, y: d, z: d },
+    };
+  }
+
+  function hideLive() {
+    if (live) live.style.display = 'none';
+  }
+
+  function tryLegacy(reason) {
+    if (legacyTried || window.__non3d_mode === 'live' || window.__non3d_mode === 'legacy') return;
+    legacyTried = true;
+    hideLive();
+    var attempts = 0;
+    (function wait() {
+      if (window.__non3d_mode === 'live') return;
+      // 模块脚本是 deferred：沙箱报错可能早于它执行完，等它把函数挂上来。
+      if (typeof window.__non3d_legacy_boot === 'function') {
+        try { window.__non3d_legacy_boot(); } catch (e) {
+          __report({ kind: 'error', message: String(e) });
+        }
+        return;
+      }
+      if (attempts++ < 40) setTimeout(wait, 50);
+      else __report({ kind: 'unsupported', message: 'legacy_boot_missing: ' + reason });
+    })();
+  }
+
+  function liveReady() {
+    if (liveReported) return;
+    if (window.__non3d_mode === 'legacy') return;
+    var m = liveMetrics();
+    // 空场景（例如骨架只有辅助线，沙箱不支持线网格）：切旧路径，别给一张
+    // 「加载成功但什么也没有」的白屏。
+    if (m.meshes <= 0) { tryLegacy('empty-model'); return; }
+    liveReported = true;
+    window.__non3d_mode = 'live';
+    window.__non3d_booted = true;
+    hideLiveFallback();
+    // viewer 默认清屏色是白的，和工作台的深色执行面对不上：按页面底色统一。
+    try {
+      var v = live && live.viewer;
+      if (v && v.setClearColor) {
+        v.setClearColor(11 / 255, 13 / 255, 18 / 255, 1);
+        v.render();
+      }
+    } catch (e) {}
+    __report({ kind: 'metrics', payload: m });
+  }
+
+  function hideLiveFallback() {
+    var host = document.getElementById('fallback');
+    if (host) host.style.display = 'none';
+  }
+
+  window.__non3d_screenshot = function (tag) {
+    var el = document.getElementById('non3d-live');
+    try {
+      var data = el && el.toDataURL ? el.toDataURL('image/png') : '';
+      if (!data || data.length < 1024) {
+        __report({ kind: 'unsupported', message: 'screenshot_empty' });
+        return;
+      }
+      __report({ kind: 'screenshot', payload: data, tag: tag || 'shot' });
+    } catch (e) {
+      __report({ kind: 'error', message: String(e) });
+    }
+  };
+
+  window.__non3d_turntable = function () {
+    var el = document.getElementById('non3d-live');
+    if (!el || !el.viewer || !el.toDataURL) return;
+    if (window.__non3d_turning) return;
+    window.__non3d_turning = true;
+    var orbit = el.getCameraOrbit();
+    var baseTheta = orbit.theta * 180 / Math.PI;
+    var basePhi = orbit.phi * 180 / Math.PI;
+    var dist = orbit.radius;
+    var angles = [0, 90, 180, 270];
+    var i = 0;
+    var step = function () {
+      if (i >= angles.length) {
+        el.setCamera(baseTheta, basePhi, dist);
+        el.jumpCameraToGoal();
+        window.__non3d_turning = false;
+        return;
+      }
+      el.setCamera(baseTheta + angles[i], basePhi, dist);
+      el.jumpCameraToGoal();
+      try {
+        var data = el.toDataURL('image/png');
+        if (data && data.length > 1024) {
+          __report({ kind: 'screenshot', payload: data, tag: 'turn-' + angles[i] });
+        }
+      } catch (e) {}
+      i++;
+      setTimeout(step, 150);
+    };
+    step();
+  };
+
+  // 上游沙箱失败的消息里，哪些属于「这台机器/这个宿主跑不了」而不是场景代码
+  // 写错了：能力问题走旧路径，代码问题记一次修复轮。
+  var CAPABILITY = [
+    'Web Workers are unavailable',
+    'Web Workers unavailable',
+    'CSP may block blob workers',
+    'Failed to initialize Web Worker',
+    'Sandbox failed to load',
+    'Could not locate Three-Live bundle URL',
+    'sandbox engine URL is not configured',
+    'WebGL',
+  ];
+
+  function isCapability(msg) {
+    for (var i = 0; i < CAPABILITY.length; i++) {
+      if (msg.indexOf(CAPABILITY[i]) >= 0) return true;
+    }
+    return false;
+  }
+
+  function onLiveError(e) {
+    // three-live 的 error 是 bubbles/composed 的 CustomEvent；让它冒到 window 会
+    // 触发 window.onerror（把事件对象当异常消息，误记一次修复轮）。就地截断。
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    if (window.__non3d_mode === 'legacy') return;
+    var detail = (e && e.detail) || {};
+    var msg = String(detail.message || (detail.error && detail.error.message) || '');
+    if (!msg) msg = 'three_live_error';
+    if (isCapability(msg)) {
+      tryLegacy('capability: ' + msg);
       return;
     }
-    const a = baseAngle + angles[i] * Math.PI / 180;
-    controls.setView(a, phi0);
-    renderer.render(scene, camera);
-    __report({
-      kind: 'screenshot',
-      payload: renderer.domElement.toDataURL('image/png'),
-      tag: 'turn-' + angles[i],
-    });
-    i++;
-    setTimeout(step, 150);
-  };
-  step();
-};
+    // 脚本自身写错（Worker script error / 超时）：这是一次真实的执行失败，
+    // 交给宿主计修复轮；不要再跑旧路径重复同一份错误。
+    __report({ kind: 'error', message: msg });
+  }
 
-setTimeout(__firstFrame, 300);
+  if (live) {
+    live.addEventListener('load', liveReady);
+    live.addEventListener('three-load', liveReady);
+    // 只监听 three-error：`error` 同名事件会冒到 window.onerror（见上）。
+    live.addEventListener('three-error', onLiveError);
+    // `error` 同名事件也会冒到 window.onerror；这里只截断冒泡，不重复上报
+    // （真正可读的消息由 three-error 的 detail 提供）。
+    live.addEventListener('error', function (e) {
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    }, true);
+  }
+
+  // 没有 Worker（老宿主/受限宿主）直接走旧路径；否则给沙箱一个启动窗口，
+  // 超时仍未出画面就切旧路径（旧路径也跑不了时由它的桥回 unsupported）。
+  if (typeof Worker === 'undefined') {
+    tryLegacy('no-worker');
+  } else {
+    setTimeout(function () {
+      if (window.__non3d_booted || liveReported) return;
+      if (window.__non3d_mode === 'legacy') return;
+      tryLegacy('boot-timeout');
+    }, 5000);
+  }
+
+  setTimeout(function () {
+    if (!window.__non3d_booted) {
+      __report({ kind: 'unsupported', message: 'preview_boot_timeout' });
+    }
+  }, 9000);
+})();
 </script>
 </body>
 </html>

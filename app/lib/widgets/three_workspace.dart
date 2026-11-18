@@ -8,12 +8,20 @@
 /// 每步带证据。界面只做三件事：把状态画出来、把用户动作翻译成一次服务调用、
 /// 把失败翻成一句人话（原始诊断进折叠的「技术详情」）。
 ///
+/// 执行面有两条：预览页默认把场景脚本放进 vendored three-live 的
+/// `allow-client-scripts` 沙箱 Worker（真实执行，非截图/外链）；沙箱被宿主拦掉
+/// 或场景为空时，页面自动降到同一份 HTML 里的内联渲染库直跑（旧路径），
+/// 两条路都经 `window.NON3D` 回传 error / metrics / screenshot 三类桥消息。
+/// 空态另有一块「ThreeUI 组件」画廊：vendored 自包含页面由应用内 WebView
+/// 按资源键读取渲染，点开即真实运行。
+///
 /// 平台矩阵（唯一判据是 [PlatformCapabilities]，不再自己嗅探平台）：
 ///  * 内嵌预览需要 WebView 插件（桌面 macOS/iOS/Android 有，Linux/Windows 没有），
 ///    移动端还额外受 [ThreeWebViewGate] 约束（file:// 模块脚本未验证前不启用）；
 ///  * 「在文件夹中显示」只在桌面三平台出现。
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -108,6 +116,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   // setOnPageFinished**：webview_flutter 平台接口基类的 setOnPageFinished 直接
   // throw UnimplementedError，而 NavigationDelegate 构造器会同步调用它。
   bool _previewReady = false;
+  // ThreeUI 组件画廊：清单从应用资源读（失败不空屏，显示可重试的人话）。
+  List<ThreeUiComponent>? _uiCatalog;
+  String _uiCatalogError = '';
+  bool _uiCatalogLoading = false;
 
   late final AppStore _store = context.read<AppStore>();
   AppStore get store => _store;
@@ -178,6 +190,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       return;
     }
     _service = service;
+    unawaited(_loadUiCatalog());
     if (saved.isNotEmpty) {
       _project = saved;
       final draft = store.threeSpecDraft(saved);
@@ -267,6 +280,86 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   /// 新动作开始：上一轮的动作失败退场（刷新失败保留，等刷新自愈）。
   void _beginAction() {
     if (_errorSource == 'action') _clearError();
+  }
+
+  // -- ThreeUI 组件画廊 -----------------------------------------------------
+
+  /// 读取 vendored ThreeUI 组件清单（应用资源，离线）。
+  ///
+  /// 清单读不出来不影响 3D 主流程：画廊区显示一句人话 + 重试，不空屏、不
+  /// 阻塞工作台其余部分。
+  Future<void> _loadUiCatalog() async {
+    final service = _service;
+    if (service == null || _uiCatalogLoading) return;
+    _uiCatalogLoading = true;
+    try {
+      final catalog = await service.loadUiCatalog();
+      if (!mounted) return;
+      setState(() {
+        _uiCatalog = catalog;
+        _uiCatalogError = '';
+      });
+    } on ThreeFailure {
+      if (!mounted) return;
+      setState(() => _uiCatalogError = '组件清单没有读出来，请重试');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _uiCatalogError = '组件清单没有读出来，请重试');
+    } finally {
+      _uiCatalogLoading = false;
+    }
+  }
+
+  /// 打开一个 ThreeUI 组件页（应用内 WebView 真实渲染）。
+  Future<void> _openThreeUi(ThreeUiComponent component) async {
+    if (!_webViewSupported) {
+      _toasts.warn('这台设备不支持内嵌组件预览', '可以在电脑上打开同一个应用查看。');
+      return;
+    }
+    await showNonDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => _ThreeUiViewerDialog(
+        component: component,
+        webViewSupported: _webViewSupported,
+      ),
+    );
+  }
+
+  /// 已开项目时也能进画廊：弹一个可滚动的卡片面板，点开即渲染。
+  Future<void> _openGalleryPicker() async {
+    var catalog = _uiCatalog;
+    if (catalog == null || catalog.isEmpty) {
+      await _loadUiCatalog();
+      if (!mounted) return;
+      catalog = _uiCatalog;
+    }
+    if (catalog == null || catalog.isEmpty) {
+      _toasts.warn('组件清单没有读出来', '可以先继续做场景，稍后再试。');
+      return;
+    }
+    final choice = await showNonDialog<ThreeUiComponent>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        backgroundColor: ctx.palette.panel,
+        title: Text('ThreeUI 组件',
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 620, maxHeight: 460),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: _ThreeUiGallery(
+                catalog: catalog,
+                onOpen: (component) => Navigator.pop(ctx, component),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (choice != null && mounted) await _openThreeUi(choice);
   }
 
   // -- 场景质检 -------------------------------------------------------------
@@ -1117,6 +1210,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
                 : null,
           ),
         ],
+        _TopBtn(
+          icon: Icons.widgets_outlined,
+          label: '组件画廊',
+          onTap: _openGalleryPicker,
+        ),
         KeyedSubtree(
           key: const ValueKey('three-lint'),
           child: _TopBtn(
@@ -1168,6 +1266,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _menuItem(ctx, 'turntable', Icons.rotate_90_degrees_ccw_outlined, '四方位取证', enabled: captureReady),
         _menuItem(ctx, 'continue', Icons.check_rounded, '通过并继续'),
         _menuItem(ctx, 'reload', Icons.refresh, '刷新预览'),
+        _menuItem(ctx, 'gallery', Icons.widgets_outlined, '组件画廊'),
         const PopupMenuDivider(),
         _menuItem(ctx, 'face:preview', Icons.visibility_outlined, landscape ? '预览（全屏）' : '预览'),
         _menuItem(ctx, 'face:source', Icons.code_outlined, landscape ? '源码（侧栏）' : '源码'),
@@ -1194,6 +1293,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _continue();
       case 'reload':
         if (_project != null) _mountPreview();
+      case 'gallery':
+        _openGalleryPicker();
       case 'face:preview':
       case 'face:source':
       case 'face:spec':
@@ -1207,6 +1308,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         onCreate: _createProject,
         onCreateKit: _createFromKit,
         busy: _busy,
+        catalog: _uiCatalog,
+        catalogError: _uiCatalogError,
+        onReloadCatalog: _loadUiCatalog,
+        onOpenUi: _webViewSupported ? _openThreeUi : null,
       );
     }
     // 无 WebView / 未验证的移动端最先分流：不构造控制器，给可复制的路径与
@@ -1366,10 +1471,26 @@ class _TechDetails extends StatelessWidget {
 }
 
 class _EmptyNew extends StatelessWidget {
-  const _EmptyNew({required this.onCreate, this.onCreateKit, required this.busy});
+  const _EmptyNew({
+    required this.onCreate,
+    this.onCreateKit,
+    required this.busy,
+    this.catalog,
+    this.catalogError = '',
+    this.onReloadCatalog,
+    this.onOpenUi,
+  });
   final VoidCallback onCreate;
   final void Function(ThreeKit kit)? onCreateKit;
   final bool busy;
+
+  /// vendored ThreeUI 组件清单（null = 还在读）。
+  final List<ThreeUiComponent>? catalog;
+  final String catalogError;
+  final Future<void> Function()? onReloadCatalog;
+
+  /// 打开组件首页（WebView 不可用的平台为 null）。
+  final void Function(ThreeUiComponent component)? onOpenUi;
 
   @override
   Widget build(BuildContext context) {
@@ -1473,6 +1594,360 @@ class _EmptyNew extends StatelessWidget {
             ),
           ),
         ],
+        const SizedBox(height: 30),
+        _ThreeUiGallery(
+          catalog: catalog,
+          error: catalogError,
+          onReload: onReloadCatalog,
+          onOpen: onOpenUi,
+          padHorizontal: 24,
+          maxWidth: 620,
+        ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// ThreeUI 组件画廊（空态区块 + 已开项目时的弹出面板共用）。
+///
+/// 卡片只给名称 / 一句说明 / 缩略提示——不截假图、不外链。点开由调用方在
+/// 应用内 WebView 里真实渲染 vendored 页面（[_ThreeUiViewerDialog]）。
+class _ThreeUiGallery extends StatelessWidget {
+  const _ThreeUiGallery({
+    required this.catalog,
+    this.error = '',
+    this.onReload,
+    this.onOpen,
+    this.padHorizontal = 0,
+    this.maxWidth = 620,
+  });
+
+  final List<ThreeUiComponent>? catalog;
+  final String error;
+  final Future<void> Function()? onReload;
+  final void Function(ThreeUiComponent component)? onOpen;
+  final double padHorizontal;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final items = catalog;
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: padHorizontal),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: Column(
+          key: const ValueKey('threeui-gallery'),
+          children: [
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.widgets_outlined, size: 14, color: p.accent),
+              const SizedBox(width: 6),
+              Text('ThreeUI 组件',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink3)),
+            ]),
+            const SizedBox(height: 4),
+            Text('组件库里选一个真实页面，在应用内打开看效果',
+                style: TextStyle(fontSize: 11, color: p.ink4)),
+            const SizedBox(height: 12),
+            if (items == null)
+              if (error.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 1.8, color: p.accent),
+                  ),
+                )
+              else
+                _ThreeUiCatalogError(message: error, onReload: onReload)
+            else if (items.isEmpty)
+              _ThreeUiCatalogError(message: '组件清单是空的', onReload: onReload)
+            else
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final component in items)
+                    InkWell(
+                      key: ValueKey('threeui-${component.id}'),
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: onOpen == null || items.isEmpty
+                          ? null
+                          : () => onOpen!(component),
+                      child: Container(
+                        width: 186,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: p.panel.withValues(alpha: 0.6),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: p.line),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              Icon(Icons.auto_awesome_mosaic_outlined, size: 14, color: p.accent),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(component.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: p.ink)),
+                              ),
+                            ]),
+                            const SizedBox(height: 6),
+                            Text(component.description,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 10.5, height: 1.45, color: p.ink3)),
+                            const SizedBox(height: 6),
+                            Text(component.hint,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 9.5, color: p.ink4)),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 组件清单读不出来：一句人话 + 重试，不空屏。
+class _ThreeUiCatalogError extends StatelessWidget {
+  const _ThreeUiCatalogError({required this.message, this.onReload});
+
+  final String message;
+  final Future<void> Function()? onReload;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: p.panel2.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: p.line),
+      ),
+      child: Row(children: [
+        Icon(Icons.info_outline, size: 14, color: p.warn),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(message, style: TextStyle(fontSize: 11, color: p.ink3)),
+        ),
+        if (onReload != null)
+          TextButton(
+            key: const ValueKey('threeui-catalog-retry'),
+            onPressed: () => onReload!(),
+            child: const Text('重试'),
+          ),
+      ]),
+    );
+  }
+}
+
+/// 组件预览弹窗：应用内 WebView 按资源键加载自包含 HTML，失败有人话 + 重试。
+///
+/// 为什么不发外链、不截图：用户要看的是「组件真的在这个应用里跑起来」。
+/// 页面本身自包含（零网络请求），`loadFlutterAsset` 直接读应用包内文件。
+class _ThreeUiViewerDialog extends StatefulWidget {
+  const _ThreeUiViewerDialog({
+    required this.component,
+    required this.webViewSupported,
+  });
+
+  final ThreeUiComponent component;
+  final bool webViewSupported;
+
+  @override
+  State<_ThreeUiViewerDialog> createState() => _ThreeUiViewerDialogState();
+}
+
+class _ThreeUiViewerDialogState extends State<_ThreeUiViewerDialog> {
+  WebViewController? _controller;
+  String _error = '';
+  String _detail = '';
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.webViewSupported) unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    if (!widget.webViewSupported) return;
+    final controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(NavigationDelegate(
+        onWebResourceError: _onResourceError,
+      ));
+    try {
+      await controller.loadFlutterAsset(widget.component.assetKey);
+    } catch (error) {
+      if (!mounted) return;
+      _setError('组件没能打开，请重试', '$error');
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _controller = controller;
+      _error = '';
+      _detail = '';
+    });
+  }
+
+  void _onResourceError(WebResourceError error) {
+    // 子资源失败不整块替换：只有主帧失败才是「组件打不开」。
+    if (error.isForMainFrame == false) return;
+    _setError('组件没能打开，请重试', '${error.description} (${error.errorCode})');
+  }
+
+  void _setError(String message, [String detail = '']) {
+    if (!mounted) return;
+    setState(() {
+      _error = message;
+      _detail = detail;
+      _controller = null;
+    });
+  }
+
+  Future<void> _retry() async {
+    if (!mounted) return;
+    setState(() {
+      _error = '';
+      _detail = '';
+    });
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final component = widget.component;
+    return Dialog(
+      key: const ValueKey('threeui-viewer'),
+      backgroundColor: p.panel,
+      insetPadding: const EdgeInsets.all(18),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1040, maxHeight: 760),
+        child: Column(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
+            child: Row(children: [
+              Icon(Icons.auto_awesome_mosaic_outlined, size: 16, color: p.accent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(component.name,
+                        style: TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w700, color: p.ink)),
+                    const SizedBox(height: 2),
+                    Text(component.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11, color: p.ink3)),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: '重试',
+                icon: const Icon(Icons.refresh, size: 17),
+                color: p.ink3,
+                onPressed: _retry,
+              ),
+              IconButton(
+                tooltip: '关闭',
+                icon: const Icon(Icons.close, size: 17),
+                color: p.ink3,
+                onPressed: () => Navigator.pop(context),
+              ),
+            ]),
+          ),
+          Container(height: 1, color: p.line),
+          Expanded(
+            child: Container(
+              color: p.bg,
+              child: !widget.webViewSupported
+                  ? Center(
+                      child: Text('这台设备不能内嵌显示组件预览',
+                          style: TextStyle(fontSize: 12, color: p.ink3)),
+                    )
+                  : _error.isNotEmpty
+                      ? _ThreeUiViewError(
+                          message: _error,
+                          detail: _detail,
+                          onRetry: _retry,
+                        )
+                      : _controller == null
+                          ? Center(
+                              child: SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: p.accent),
+                              ),
+                            )
+                          : WebViewWidget(controller: _controller!),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// 组件渲染失败占位：一句人话 + 折叠的技术详情 + 重试。
+class _ThreeUiViewError extends StatelessWidget {
+  const _ThreeUiViewError({
+    required this.message,
+    required this.detail,
+    required this.onRetry,
+  });
+
+  final String message;
+  final String detail;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.broken_image_outlined, size: 30, color: p.warn),
+          const SizedBox(height: 10),
+          Text(message,
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
+          const SizedBox(height: 4),
+          Text('可以重试；如果一直打不开，换一个组件看看。',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, color: p.ink3)),
+          if (detail.isNotEmpty)
+            _TechDetails(detail: detail, palette: p),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: () => onRetry(),
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('重试'),
+          ),
         ]),
       ),
     );

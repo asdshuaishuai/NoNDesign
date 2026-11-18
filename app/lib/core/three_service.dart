@@ -60,6 +60,14 @@ const String threePreviewAssetKey = 'assets/three/preview.html';
 /// 渲染库资源键（vendored r160，1,272,972 B）。
 const String threeModuleAssetKey = 'assets/three/three.module.js';
 
+/// three-live 资源键（vendored 1.4.0，经典脚本，含 file:// 引擎内联补丁）。
+///
+/// 预览页把它内联进 `#three-live-runtime`：`allow-client-scripts` 的沙箱
+/// Worker 以该脚本的 textContent 作为自己的引擎源（见 assets/three/vendor/
+/// NOTICE.md）。不校验字节长度——上游每次 patch 版本都可能变；资源缺失会在
+/// [preparePreview] 里显性失败。
+const String threeLiveAssetKey = 'assets/three/vendor/three-live.min.js';
+
 /// 渲染库的 sha256（与 `scripts/sync_three_assets.dart` 的锚点一致）。
 ///
 /// 只用于诊断与同步脚本对账：运行时不重新校验 1.2MB 资源，但拷贝到项目
@@ -449,6 +457,104 @@ class ThreePreviewBundle {
   final String htmlPath;
   final String scenePath;
   final String modulePath;
+}
+
+// ---------------------------------------------------------------------------
+// ThreeUI 组件画廊（vendored ThreeUI Community 1.1.0）
+// ---------------------------------------------------------------------------
+
+/// ThreeUI 组件清单资源键（vendored 自包含 HTML 页面，见 threeui/NOTICE.md）。
+const String threeUiCatalogAssetKey = 'assets/three/threeui/catalog.json';
+
+/// 画廊清单的取用区间：小于 8 说明 vendored 资产被裁掉，超过 12 说明清单
+/// 没同步（应用包会白白变大）。不是硬门：运行时不因为数量不对而空屏，
+/// 由测试与 [threeUiCatalogHealth] 把问题暴露出来。
+const int threeUiMinComponents = 8;
+const int threeUiMaxComponents = 12;
+
+/// 画廊里的一张卡片：一个自包含 ThreeUI 页面。
+class ThreeUiComponent {
+  const ThreeUiComponent({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.assetKey,
+    required this.hint,
+  });
+
+  /// 稳定 id（小写字母/数字/短横线；卡片 Key 与测试都用它）。
+  final String id;
+
+  /// 用户可见名称。
+  final String name;
+
+  /// 一句说明（用户可见，遵守文案表）。
+  final String description;
+
+  /// Flutter 资源键：`assets/three/threeui/<file>.html`。
+  final String assetKey;
+
+  /// 缩略提示（列表里的一行小字，不做截图）。
+  final String hint;
+}
+
+/// 解析 ThreeUI 画廊清单。
+///
+/// 清单是应用资源（不是用户输入），但仍按不可信输入处理：字段缺失 / 命名
+/// 不合法 / 文件不是同目录 HTML 的条目直接丢弃，不把坏路径递给 WebView。
+/// 全部条目都坏时显性失败（空画廊比报错更难排查）。
+List<ThreeUiComponent> parseThreeUiCatalog(String raw) {
+  final Object? decoded;
+  try {
+    decoded = jsonDecode(raw);
+  } catch (error) {
+    throw ThreeFailure('asset_missing', 'threeui catalog: $error');
+  }
+  if (decoded is! Map) {
+    throw ThreeFailure('asset_missing', 'threeui catalog: not an object');
+  }
+  final entries = decoded['components'];
+  if (entries is! List) {
+    throw ThreeFailure('asset_missing', 'threeui catalog: components missing');
+  }
+  final idPattern = RegExp(r'^[a-z0-9-]+$');
+  final seen = <String>{};
+  final out = <ThreeUiComponent>[];
+  for (final entry in entries) {
+    if (entry is! Map) continue;
+    final id = '${entry['id'] ?? ''}'.trim();
+    final name = '${entry['name'] ?? ''}'.trim();
+    final description = '${entry['description'] ?? ''}'.trim();
+    final file = '${entry['file'] ?? ''}'.trim();
+    final hint = '${entry['hint'] ?? ''}'.trim();
+    if (id.isEmpty || name.isEmpty || description.isEmpty) continue;
+    if (!idPattern.hasMatch(id) || !seen.add(id)) continue;
+    // 只允许同目录 .html：清单不能把 WebView 引到目录外或远端 URL。
+    if (!file.endsWith('.html') || file.contains('/') || file.contains('\\')) continue;
+    out.add(ThreeUiComponent(
+      id: id,
+      name: name,
+      description: description,
+      assetKey: 'assets/three/threeui/$file',
+      hint: hint,
+    ));
+  }
+  if (out.isEmpty) {
+    throw ThreeFailure('asset_missing', 'threeui catalog: no valid components');
+  }
+  return out;
+}
+
+/// 清单健康度：`null` 表示数量落在取用区间内，否则是一句内部诊断
+/// （只进测试/技术详情，不上屏）。
+String? threeUiCatalogHealth(int count) {
+  if (count < threeUiMinComponents) {
+    return 'threeui catalog: only $count components (< $threeUiMinComponents)';
+  }
+  if (count > threeUiMaxComponents) {
+    return 'threeui catalog: $count components (> $threeUiMaxComponents)';
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -852,9 +958,14 @@ class ThreeService {
 
     final Uint8List templateBytes;
     final Uint8List moduleBytes;
+    final Uint8List? liveBytes;
     try {
       templateBytes = await _assets(threePreviewAssetKey);
       moduleBytes = await _assets(threeModuleAssetKey);
+      // 只有模板真的要沙箱执行面时才要求 three-live 在场：测试与旧模板
+      // 不带该占位时不该被迫提供 225KB 资源（缺了仍由组装器显性失败）。
+      final needsLive = utf8.decode(templateBytes).contains('/*__THREE_LIVE__*/');
+      liveBytes = needsLive ? await _assets(threeLiveAssetKey) : null;
     } on ThreeFailure {
       rethrow;
     } catch (error) {
@@ -872,6 +983,7 @@ class ThreeService {
     final rendered = assembleThreePreview(
       template: utf8.decode(templateBytes),
       threeSource: utf8.decode(moduleBytes),
+      threeLiveSource: liveBytes == null ? '' : utf8.decode(liveBytes),
       sceneSource: sceneSource,
       version: DateTime.now().millisecondsSinceEpoch,
     );
@@ -889,6 +1001,24 @@ class ThreeService {
       scenePath: scene.path,
       modulePath: module.path,
     );
+  }
+
+  // -- ThreeUI 画廊 --------------------------------------------------------
+
+  /// 读取并解析 vendored ThreeUI 组件清单（应用资源，离线，不联网）。
+  ///
+  /// 失败时抛 [ThreeFailure]：界面据此显示「组件清单没读出来」，而不是
+  /// 静默给一个空画廊。
+  Future<List<ThreeUiComponent>> loadUiCatalog() async {
+    final Uint8List bytes;
+    try {
+      bytes = await _assets(threeUiCatalogAssetKey);
+    } on ThreeFailure {
+      rethrow;
+    } catch (error) {
+      throw ThreeFailure('asset_missing', '$error');
+    }
+    return parseThreeUiCatalog(utf8.decode(bytes));
   }
 
   // -- 内部：提示词 ---------------------------------------------------------
@@ -1238,12 +1368,16 @@ String threeModuleAsInlineNamespace(String source) {
 /// file:// 页没有响应头，只能经 `<meta http-equiv>` 生效，且必须早于页面上的
 /// 第一个脚本。场景代码由模型生成，属于**不可信输入**：
 ///  * `script-src 'unsafe-inline'`：只允许页面内联脚本（渲染库与场景都内联）；
+///  * `script-src 'unsafe-eval'` + `worker-src blob:`：three-live 的
+///    `allow-client-scripts` 沙箱要把场景脚本放进 Worker 里用 `new Function`
+///    编译（Worker 继承文档 CSP），Worker 自身用 blob: 创建——这是让真实
+///    three-live 沙箱跑起来的最小放宽。沙箱内网络/存储/消息通道已被上游移除；
 ///  * `connect-src 'none'`：关闭 fetch/XHR/WebSocket/beacon 等全部外联通道；
 ///  * `default-src 'none'`：其余资源（远端脚本/样式/图片/字体）一律不加载；
 ///  * `frame-ancestors 'none'`：不允许被任何页面嵌套。
-const String threePreviewCsp = "default-src 'none'; script-src 'unsafe-inline'; "
+const String threePreviewCsp = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; "
     "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; "
-    "connect-src 'none'; frame-ancestors 'none'";
+    "connect-src 'none'; worker-src blob:; frame-ancestors 'none'";
 
 const String _cspMetaMarker = 'http-equiv="Content-Security-Policy"';
 
@@ -1268,9 +1402,12 @@ String assembleThreePreview({
   required String threeSource,
   required String sceneSource,
   required int version,
+  String threeLiveSource = '',
 }) {
   const threeSlot = '/*__THREE_MODULE__*/';
   const sceneSlot = '/*__SCENE_SOURCE__*/';
+  const liveSlot = '/*__THREE_LIVE__*/';
+  const sandboxSlot = '/*__SCENE_SANDBOX__*/';
   if (!template.contains(threeSlot) || !template.contains(sceneSlot)) {
     throw ThreeFailure('asset_missing', 'preview.html: inline placeholders missing');
   }
@@ -1282,13 +1419,31 @@ String assembleThreePreview({
   if (sceneSlot.allMatches(template).length != 1) {
     throw ThreeFailure('asset_missing', 'preview.html: scene placeholder must appear exactly once');
   }
+  final hasLive = template.contains(liveSlot);
+  final hasSandbox = template.contains(sandboxSlot);
+  if (hasLive && liveSlot.allMatches(template).length != 1) {
+    throw ThreeFailure('asset_missing', 'preview.html: three-live placeholder must appear exactly once');
+  }
+  if (hasSandbox && sandboxSlot.allMatches(template).length != 1) {
+    throw ThreeFailure('asset_missing', 'preview.html: sandbox placeholder must appear exactly once');
+  }
+  if (hasLive && threeLiveSource.isEmpty) {
+    // 模板要求沙箱执行面，却没拿到 three-live 源码：显性失败，不产出
+    // 「占位没被替换」的半成品页面（那会白屏）。
+    throw ThreeFailure('asset_missing', 'preview.html: three-live source missing');
+  }
   final namespace = threeModuleAsInlineNamespace(threeSource);
   final scene = threeSceneAsInlineFunction(sceneSource);
   final callable = '${scene.source}\n'
       'const __non3d_scene_build__ = ${scene.entry};\n'
       '// build $version\n';
-  final injected = template.replaceFirst(threeSlot, namespace).replaceFirst(sceneSlot, callable);
-  if (injected.contains(threeSlot) || injected.contains(sceneSlot)) {
+  var injected = template.replaceFirst(threeSlot, namespace).replaceFirst(sceneSlot, callable);
+  if (hasLive) injected = injected.replaceFirst(liveSlot, threeLiveSource);
+  if (hasSandbox) injected = injected.replaceFirst(sandboxSlot, callable);
+  if (injected.contains(threeSlot) ||
+      injected.contains(sceneSlot) ||
+      (hasLive && injected.contains(liveSlot)) ||
+      (hasSandbox && injected.contains(sandboxSlot))) {
     throw ThreeFailure('asset_missing', 'preview.html: placeholders left after assembly');
   }
   // CSP 是预览页的第二道防线（第一道是内容自包含）：模板没带就补上，
