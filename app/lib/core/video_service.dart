@@ -1760,6 +1760,7 @@ class VideoService {
         log: log.toString(),
       );
       _jobs[job.id] = job;
+      _discardFailedFrames(directory);
     } catch (error) {
       record('$error');
       job = job.copyWith(
@@ -1768,7 +1769,25 @@ class VideoService {
         log: log.toString(),
       );
       _jobs[job.id] = job;
+      _discardFailedFrames(directory);
     }
+  }
+
+  /// 失败任务的帧是废纸（没有 mp4 可播）：把 PNG/SVG 清掉，目录留给日志，
+  /// 不留 100+ 张孤儿 PNG 占着艺术架的坑。
+  void _discardFailedFrames(Directory directory) {
+    try {
+      if (!directory.existsSync()) return;
+      for (final entity in directory.listSync()) {
+        if (entity is! File) continue;
+        final lower = entity.path.toLowerCase();
+        if (lower.endsWith('.png') || lower.endsWith('.svg')) {
+          try {
+            entity.deleteSync();
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
   }
 
   Future<ProcessResult> _rasterize(
@@ -1805,17 +1824,54 @@ class VideoService {
   static Future<ProcessResult> _defaultRunner(String executable, List<String> arguments) =>
       Process.run(executable, arguments);
 
+  /// GUI 应用拿到的是精简 PATH（macOS 下通常只有 /usr/bin:/bin…），homebrew
+  /// /cargo 装的 ffmpeg、resvg 用 `which` 根本探不到——发布包「视频工作台」
+  /// 因此在装好了工具的机器上仍然报「找不到编码器」。`which` 失败后补扫这些
+  /// 常见安装位置（首个存在且带可执行位的候选直接采用）。
+  static const List<String> _binaryFallbackDirs = <String>[
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    '/opt/local/bin',
+  ];
+
   static Future<String?> _defaultBinaryResolver(String name) async {
     try {
       final result = Platform.isWindows
           ? await Process.run('where', <String>[name])
           : await Process.run('which', <String>[name]);
-      if (result.exitCode != 0) return null;
-      final first = result.stdout.toString().split('\n').first.trim();
-      return first.isEmpty ? null : first;
-    } catch (_) {
+      if (result.exitCode == 0) {
+        final first = result.stdout.toString().split('\n').first.trim();
+        if (first.isNotEmpty) return first;
+      }
+    } catch (_) {}
+    if (Platform.isWindows) {
+      final profile = Platform.environment['USERPROFILE'] ?? '';
+      for (final dir in <String>[
+        if (profile.isNotEmpty) '$profile\\scoop\\shims',
+        if (profile.isNotEmpty)
+          '$profile\\AppData\\Local\\Microsoft\\WindowsApps',
+      ]) {
+        final candidate = File('$dir/$name.exe');
+        if (candidate.existsSync()) return candidate.path;
+      }
       return null;
     }
+    final home = Platform.environment['HOME'] ?? '';
+    final dirs = <String>[
+      ..._binaryFallbackDirs,
+      if (home.isNotEmpty) '$home/.cargo/bin',
+    ];
+    for (final dir in dirs) {
+      final candidate = File('$dir/$name');
+      try {
+        final stat = candidate.statSync();
+        // 存在 + 任意可执行位（rwx 任一），排除同名非可执行文件。
+        if ((stat.mode & 0x49) != 0) return candidate.path;
+      } catch (_) {}
+    }
+    return null;
   }
 
   static String _desktopDocumentsRoot() {

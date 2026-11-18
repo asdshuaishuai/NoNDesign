@@ -111,6 +111,14 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
     setState(() => _error = message);
   }
 
+  /// 失败可能是时序性的：渲染刚完成 mp4 还在落盘、或网络盘短暂掉线——
+  /// 给一次手动重载，错误态不能是死端。
+  void _retryLoad() {
+    if (!mounted) return;
+    setState(() => _error = '');
+    _loadMedia();
+  }
+
   Future<void> _copyPath() async {
     await Clipboard.setData(ClipboardData(text: widget.path));
     if (!mounted) return;
@@ -177,6 +185,11 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
             textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: p.ink4)),
         const SizedBox(height: 10),
         Wrap(spacing: 8, children: [
+          FilledButton.icon(
+            onPressed: _retryLoad,
+            icon: const Icon(Icons.refresh_outlined, size: 14),
+            label: const Text('重新加载', style: TextStyle(fontSize: 12)),
+          ),
           OutlinedButton.icon(
             onPressed: _copyPath,
             icon: const Icon(Icons.copy_all_outlined, size: 14),
