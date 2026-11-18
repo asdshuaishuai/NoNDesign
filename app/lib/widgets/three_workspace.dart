@@ -27,6 +27,8 @@ import '../core/keys.dart';
 import '../core/platform_capabilities.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import '../core/three_kits.dart';
+import '../core/three_lint.dart';
 import '../core/three_service.dart';
 import '../core/toast_service.dart';
 import 'common.dart';
@@ -267,6 +269,120 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     if (_errorSource == 'action') _clearError();
   }
 
+  // -- 场景质检 -------------------------------------------------------------
+
+  ThreeLintReport? get _lint {
+    final snapshot = _snapshot;
+    if (snapshot == null) return null;
+    return lintThreeProject(snapshot);
+  }
+
+  String _lintLabel() {
+    final lint = _lint;
+    if (lint == null) return '质检';
+    if (lint.errors > 0) return '质检 ${lint.errors}';
+    if (lint.warns > 0) return '质检 ${lint.warns}';
+    return '质检 通过';
+  }
+
+  /// 只读质检面板：把「场景为什么看起来不对」拆成可修的条目，而不是一句
+  /// 主观评价。数据全部来自磁盘快照，打开面板不产生任何变更。
+  Future<void> _showLint() async {
+    final lint = _lint;
+    if (lint == null) return;
+    final p = context.palette;
+    await showNonDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: p.panel,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Row(children: [
+          Icon(Icons.rule_outlined, size: 18, color: p.accent),
+          const SizedBox(width: 8),
+          Text('场景质检',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: p.ink)),
+          const Spacer(),
+          Text(
+            lint.clean
+                ? '通过'
+                : '${lint.errors} 必修 · ${lint.warns} 建议',
+            style: TextStyle(
+                fontSize: 11,
+                color: lint.errors > 0 ? p.danger : (lint.warns > 0 ? p.warn : p.success)),
+          ),
+        ]),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: lint.clean
+                ? Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    child: Text('场景没有可判定的问题：相机、灯光、材质与六层进度都成立。',
+                        style: TextStyle(fontSize: 12, color: p.ink3)),
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final issue in lint.issues)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: p.panel2.withValues(alpha: 0.4),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: p.line),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(children: [
+                                Icon(
+                                  issue.level == ThreeLintLevel.error
+                                      ? Icons.error_outline
+                                      : issue.level == ThreeLintLevel.warn
+                                          ? Icons.warning_amber_outlined
+                                          : Icons.info_outline,
+                                  size: 14,
+                                  color: issue.level == ThreeLintLevel.error
+                                      ? p.danger
+                                      : issue.level == ThreeLintLevel.warn
+                                          ? p.warn
+                                          : p.ink4,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(issue.title,
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: p.ink)),
+                                ),
+                              ]),
+                              if (issue.detail.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Text(issue.detail,
+                                      style: TextStyle(fontSize: 11, height: 1.5, color: p.ink3)),
+                                ),
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text('怎么修：${issue.fix}',
+                                    style: TextStyle(fontSize: 11, color: p.accent)),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('知道了')),
+        ],
+      ),
+    );
+  }
+
   // -- 用户动作 -------------------------------------------------------------
 
   Future<void> _createProject() async {
@@ -345,6 +461,61 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       await _mountPreview();
       final components = (snapshot.spec['components'] as List?)?.length ?? 0;
       _toasts.success('规范已生成（$components 组件）', '点「生成当前层」开始第一层。');
+    } on ThreeFailure catch (failure) {
+      _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
+    } catch (error) {
+      _showError(threeFailureMessage(null), '$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// 从一个场景套件直接新建项目：套件的 brief 就是规范阶段的一句话目标，
+  /// 用户不用先想清楚构图（three-live Domain Kits 的用法）。
+  Future<void> _createFromKit(ThreeKit kit) async {
+    if (_busy) return;
+    final service = _service;
+    final config = _llmConfig();
+    if (service == null) {
+      _toasts.warn('3D 场景的存储目录还没有准备好');
+      return;
+    }
+    if (!config.isConfigured) {
+      _toasts.warn('先在设置里配好模型连接', '3D 生成使用当前选中的模型。');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      ThreeProjectSnapshot? snapshot;
+      Object? lastError;
+      for (var i = 0; i < 3 && snapshot == null; i++) {
+        final name = i == 0 ? kit.id : '${kit.id}-${i + 1}';
+        try {
+          snapshot = await service.newProject(name: name, brief: kit.brief, config: config);
+          store.setThreeProjectName(name);
+        } on ThreeFailure catch (failure) {
+          if (failure.code != 'project_exists') rethrow;
+          lastError = failure;
+        }
+      }
+      if (snapshot == null) {
+        throw lastError ?? const ThreeFailure('project_exists');
+      }
+      if (!mounted) return;
+      setState(() {
+        _project = snapshot!.name;
+        _snapshot = snapshot;
+        _lastError = '';
+        _specDirty = false;
+        _loadError = '';
+        _loadDetail = '';
+        _errorKey = '';
+        _errorText = '';
+        _errorDetail = '';
+      });
+      await _mountPreview();
+      final components = (snapshot.spec['components'] as List?)?.length ?? 0;
+      _toasts.success('${kit.name}：规范已生成（$components 组件）', '点「生成当前层」开始第一层。');
     } on ThreeFailure catch (failure) {
       _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
     } catch (error) {
@@ -946,6 +1117,14 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
                 : null,
           ),
         ],
+        KeyedSubtree(
+          key: const ValueKey('three-lint'),
+          child: _TopBtn(
+            icon: Icons.rule_outlined,
+            label: _lintLabel(),
+            onTap: _snapshot == null ? null : _showLint,
+          ),
+        ),
         _TopBtn(
           icon: Icons.check_rounded,
           label: '通过并继续',
@@ -1024,7 +1203,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
 
   Widget _body(BuildContext context, NonPalette p, {required double width}) {
     if (_project == null) {
-      return _EmptyNew(onCreate: _createProject, busy: _busy);
+      return _EmptyNew(
+        onCreate: _createProject,
+        onCreateKit: _createFromKit,
+        busy: _busy,
+      );
     }
     // 无 WebView / 未验证的移动端最先分流：不构造控制器，给可复制的路径与
     // 能力说明（不把「加载预览…」当作终态）。
@@ -1183,15 +1366,20 @@ class _TechDetails extends StatelessWidget {
 }
 
 class _EmptyNew extends StatelessWidget {
-  const _EmptyNew({required this.onCreate, required this.busy});
+  const _EmptyNew({required this.onCreate, this.onCreateKit, required this.busy});
   final VoidCallback onCreate;
+  final void Function(ThreeKit kit)? onCreateKit;
   final bool busy;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     return Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
+      // 手机横屏（844×390）放不下「说明 + 新建 + 六个套件」：空态整体可滚，
+      // 不靠裁掉套件来适配小屏。
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.view_in_ar_outlined, size: 44, color: p.ink4),
         const SizedBox(height: 14),
         Text('直接制作 3D', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.ink)),
@@ -1215,7 +1403,78 @@ class _EmptyNew extends StatelessWidget {
           icon: const Icon(Icons.add, size: 16),
           label: const Text('新建 3D 项目'),
         ),
-      ]),
+        if (onCreateKit != null) ...[
+          const SizedBox(height: 26),
+          Text('或从一个场景套件开始',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink3)),
+          const SizedBox(height: 4),
+          Text('套件已经想好构图与材质方向，可直接进入分层细化',
+              style: TextStyle(fontSize: 11, color: p.ink4)),
+          const SizedBox(height: 12),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 620),
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                for (final kit in threeKits)
+                  InkWell(
+                    key: ValueKey('three-kit-${kit.id}'),
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: busy ? null : () => onCreateKit!(kit),
+                    child: Container(
+                      width: 186,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: p.panel.withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: p.line),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            Icon(Icons.view_in_ar_outlined, size: 14, color: p.accent),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(kit.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
+                            ),
+                          ]),
+                          const SizedBox(height: 6),
+                          Text(kit.hint,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 10.5, height: 1.45, color: p.ink4)),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 4,
+                            children: [
+                              for (final tag in kit.tags.take(2))
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: p.accent.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(tag, style: TextStyle(fontSize: 9, color: p.accent)),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+        ]),
+      ),
     );
   }
 }
