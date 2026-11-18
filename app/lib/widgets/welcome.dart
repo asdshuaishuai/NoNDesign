@@ -448,23 +448,19 @@ class _WelcomeState extends State<Welcome> {
             _briefExamples(),
           ],
           const SizedBox(height: 10),
+          // 左下角：这次落到哪个工作台（用户裁决 2026-11-19）。
+          // 选择器独占一行（窗口窄时可以换行），下面一行是说明 + 开始创作，
+          // 按钮固定在右下角——聊天框因此比旧版通栏尺寸小一圈。
+          _workspaceSelector(context, store),
+          const SizedBox(height: 8),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // 左下角：这次落到哪个工作台（用户裁决 2026-11-19）。
-                    _workspaceSelector(context, store),
-                    const SizedBox(height: 5),
-                    Text(
-                      _workspaceHintText(normalizeWorkspaceMode(store.chatWorkspaceMode)),
-                      key: const ValueKey('welcome-workspace-hint'),
-                      style: TextStyle(fontSize: 10, height: 1.3, color: p.ink4),
-                    ),
-                  ],
+                child: Text(
+                  _workspaceHintText(normalizeWorkspaceMode(store.chatWorkspaceMode)),
+                  key: const ValueKey('welcome-workspace-hint'),
+                  style: TextStyle(fontSize: 10, height: 1.3, color: p.ink4),
                 ),
               ),
               const SizedBox(width: 8),
