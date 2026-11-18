@@ -29,6 +29,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'app_paths.dart';
 import 'video_samples.dart';
 
 // ---------------------------------------------------------------------------
@@ -1667,7 +1668,9 @@ class VideoService {
       if (!dir.existsSync()) dir.createSync(recursive: true);
       return dir;
     }
-    final dir = Directory('${_desktopDocumentsRoot()}/NoNDesign/videos');
+    // 与艺术架/作品集同一真源（AppPaths.projectsRoot()/videos）——此前这里
+    // 用 $HOME/NoNDesign/videos，产物根本不会出现在作品集的视频架上。
+    final dir = Directory('${(await AppPaths.projectsRoot()).path}/videos');
     if (!dir.existsSync()) dir.createSync(recursive: true);
     return dir;
   }
