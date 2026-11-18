@@ -661,6 +661,13 @@ class _BoardTabs extends StatelessWidget {
             for (final def in pluginRegistry.where((d) => d.id == 'hotapp'))
               IconAction(icon: def.icon, tooltip: def.tooltip, size: 26, onTap: () => store.setView('plugin:${def.id}')),
             IconAction(
+              key: const ValueKey('design-to-hotapp'),
+              icon: Icons.fact_check_outlined,
+              tooltip: '由原型生成热应用（生成后逐屏逐跳转验证覆盖）',
+              size: 26,
+              onTap: () => store.generateHotAppFromPrototype(),
+            ),
+            IconAction(
               icon: Icons.phone_android_outlined,
               tooltip: '由原型生成热应用',
               size: 26,
