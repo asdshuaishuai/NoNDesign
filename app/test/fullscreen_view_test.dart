@@ -30,9 +30,18 @@ void main() {
     expect(ws.contains('LayoutBuilder'), isTrue, reason: '窄屏断点');
   });
 
-  test('App routes portfolio/plugin views even without hasProject', () {
+  test('App routes only play/portfolio out of the shell; plugin stays in it', () {
     final main = _read('lib/main.dart');
     expect(main.contains("store.view == 'portfolio'"), isTrue);
+    // 2026-11-18：3D / 视频 / 热应用（plugin:*）必须留在响应式壳里，右侧 NaN
+    // 窄栏常驻。main.dart 的全幅路由只剩 play / portfolio 两项。
+    expect(
+      RegExp(r"if \(store\.view == 'portfolio' \|\| store\.view == 'play'\)")
+          .hasMatch(main),
+      isTrue,
+      reason: '全幅路由只允许 play / portfolio',
+    );
+    // Esc 仍覆盖作品集与插件工作台（返回设计面）。
     expect(main.contains("store.view.startsWith('plugin:')"), isTrue);
     // Esc 也覆盖作品集（不只 plugin:）
     expect(
@@ -42,16 +51,21 @@ void main() {
   });
 
   test('All full-screen views expose a visible back control', () {
+    // 2026-11-19 用户裁决：3D / 视频 / 热应用是彼此独立的workspace，不属于
+    // 某个 ddp，所以返回出口是**主页**（不是设计项目）；作品集是设计项目的
+    // 展示态，仍回设计面。
     for (final path in [
       'lib/widgets/hotapp_workspace.dart',
-      'lib/widgets/portfolio_view.dart',
       'lib/widgets/three_workspace.dart',
       'lib/widgets/video_workspace.dart',
     ]) {
       final source = _read(path);
       expect(source.contains('Icons.arrow_back'), isTrue, reason: path);
-      expect(source.contains("setView('design')"), isTrue, reason: path);
+      expect(source.contains("setView('home')"), isTrue, reason: path);
     }
+    final portfolio = _read('lib/widgets/portfolio_view.dart');
+    expect(portfolio.contains('Icons.arrow_back'), isTrue);
+    expect(portfolio.contains("setView('design')"), isTrue);
   });
 
   test('boot reads settings before building runtimes; no Python spawn remains', () {
@@ -118,28 +132,29 @@ void main() {
     expect(store.contains('Platform.isIOS'), isTrue);
   });
 
-  test('Restored dead video job is treated as terminal (no permanent spinner)', () {
-    // 批次 08：任务从「服务端 job 号 + HTTP 轮询」改为进程内本地任务。
-    // 语义不变：查无此任务/进入终态都必须停轮询、清持久化 job，绝不留下
-    // 永真的 spinner。
+  test('Video module is code animation: no render job surface can leave a spinner', () {
+    // 用户裁决 2026-11-18：视频是**代码动画**，逐帧由算式生成、在应用内实时
+    // 播放，不落 mp4；导出成片暂时屏蔽。渲染任务/轮询面整体删除，因此旧
+    // 「死任务停轮询」的契约不再适用——这里锁的是「渲染面不会再回来」。
     final video = _read('lib/widgets/video_workspace.dart');
-    expect(
-      RegExp(r"snapshot == null[\s\S]{0,400}store\.setVideoState\(job: ''\)").hasMatch(video),
-      isTrue,
-      reason: '未知任务（进程重启）必须清持久化 job',
-    );
-    expect(
-      RegExp(r"_service\.job\(id\)[\s\S]{0,400}_poll\?\.cancel\(\)[\s\S]{0,300}_jobId = null")
-          .hasMatch(video),
-      isTrue,
-      reason: '任务消失必须停轮询并清在飞 job',
-    );
-    expect(
-      RegExp(r"if \(snapshot\.isRunning\) return;[\s\S]{0,300}store\.setVideoState\(job: ''\)")
-          .hasMatch(video),
-      isTrue,
-      reason: 'done/failed 也要清持久化 videoJob',
-    );
+    final surface = _read('lib/widgets/video_animation_surface.dart');
+    for (final banned in const [
+      'startRender',
+      '渲染（后台）',
+      '_poll',
+      'VideoRenderJob',
+      'supportsVideoRender',
+    ]) {
+      expect(video.contains(banned), isFalse, reason: '$banned 不得留在视频工作台');
+    }
+    expect(video.contains('VideoAnimationSurface'), isTrue,
+        reason: '视频工作台主面必须是代码动画播放器');
+    expect(surface.contains('frameSvg'), isTrue,
+        reason: '逐帧画面由算式生成（frameSvg），不是解码视频');
+    expect(surface.contains('SvgPicture'), isTrue, reason: '帧用矢量绘制');
+    // 旧存档里残留的渲染任务号没有对应界面：进工作台必须静默清掉。
+    expect(video.contains("store.setVideoState(job: '')"), isTrue,
+        reason: '旧渲染任务号不能继续占着设置');
   });
 
   test('Workspace-level shortcuts are not duplicated at app root', () {

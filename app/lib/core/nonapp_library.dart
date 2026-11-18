@@ -48,6 +48,7 @@ class LibraryApp {
     required this.dir,
     required this.payloadBytes,
     this.brief,
+    this.origin = nonAppOriginApp,
     this.corrupt = false,
   });
 
@@ -71,7 +72,16 @@ class LibraryApp {
   /// 清单/载荷读不出来（目录还在，但内容损坏）。
   final bool corrupt;
 
+  /// `app`（可用应用）| `prototype`（原型验证 demo）。
+  final String origin;
+
   bool get isA2ui => renderer == 'a2ui';
+
+  /// 由设计原型生成、只用于验证逻辑与交互的 demo。
+  bool get isPrototypeDemo => origin == nonAppOriginPrototype;
+
+  /// 类型显示名（用户可见文案）。
+  String get originLabel => isPrototypeDemo ? '原型验证' : '可用应用';
 
   /// 作品集货架条目（kind 与艺术架的 hotapp 类目一致）。
   Map<String, dynamic> toShelfItem() => {
@@ -81,6 +91,8 @@ class LibraryApp {
         'detail': isA2ui ? '可交互应用' : '热应用',
         'path': isA2ui ? dir : '$dir/index.html',
         'renderer': renderer,
+        'origin': origin,
+        'badge': originLabel,
       };
 
   @override
@@ -173,6 +185,7 @@ class NonAppLibrary {
       dir: dir.path,
       payloadBytes: exists ? payload.lengthSync() : 0,
       brief: manifest['brief']?.toString(),
+      origin: manifest['origin'] == nonAppOriginPrototype ? nonAppOriginPrototype : nonAppOriginApp,
       corrupt: !exists,
     );
   }

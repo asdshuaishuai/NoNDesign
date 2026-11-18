@@ -362,7 +362,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    for (final view in const ['play', 'portfolio', 'plugin:three']) {
+    for (final view in const ['play', 'portfolio']) {
       testWidgets('view=$view 全幅无窄栏；Esc 回 design', (tester) async {
         final store = _store(project: true)..view = view;
         await _pumpAt(tester, _rootApp(store), const Size(1440, 900));
@@ -375,6 +375,27 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pump(const Duration(milliseconds: 80));
         expect(store.view, 'design');
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    // 用户裁决 2026-11-18：3D / 视频 / 热应用在桌面壳里也不能丢掉右侧 NaN
+    // 窄栏——左侧是固定工作区，右侧是常驻的 NaN（所有工作都经它下发）。
+    for (final view in const ['plugin:three', 'plugin:video', 'plugin:hotapp']) {
+      testWidgets('view=$view 仍在桌面壳内、右侧 NaN 常驻；Esc 回主页', (tester) async {
+        final store = _store(project: true)..view = view;
+        await _pumpAt(tester, _rootApp(store), const Size(1440, 900));
+
+        expect(find.byType(DesktopShell), findsOneWidget);
+        expect(find.byType(Workspace), findsOneWidget);
+        expect(find.byKey(const ValueKey('desktop-chat-rail')), findsOneWidget);
+        // 工作区切换条常驻（手动切换四个工作区的唯一入口）。
+        expect(find.byKey(const ValueKey('rail-workspace-three')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(store.view, 'home');
         expect(tester.takeException(), isNull);
       });
     }

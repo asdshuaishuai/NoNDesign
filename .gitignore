@@ -27,3 +27,6 @@ engine/ENGINE_LOCAL
 # 参考仓库（只读镜像，不入库）
 reference/
 key.txt
+
+# 本地发布产物（dmg / zip / 安装包，勿入库）
+dist/

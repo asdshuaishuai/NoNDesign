@@ -290,7 +290,7 @@ void main() {
       expect(progress.steps.map((s) => s.label), contains('design_op'),
           reason: 'design_op 工具调用镜像为进度卡步骤');
       // 阶段代号（build/plan/refine）不上屏：起始行是人话阶段 + 模型名。
-      final startStep = progress.steps.firstWhere((s) => s.label == 'NoN 开始');
+      final startStep = progress.steps.firstWhere((s) => s.label == 'NaN 开始');
       expect(startStep.detail, contains('生成原型'));
       expect(startStep.detail, isNot(contains('build')));
       expect(store.chatMessages[2].kind, chatKindAssistant);

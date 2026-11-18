@@ -210,8 +210,20 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     return false;
   }
 
+  /// 上次渲染用到的跨模块状态：由原型生成的在飞标记 + 当前应用名。
+  /// 变了必须重建顶栏（进度/「生成中…」），否则点了按钮界面没有任何反馈。
+  bool _lastFromPrototypeBusy = false;
+  String _lastHotappApp = '';
+
   void _onStoreNotify() {
     if (!mounted) return;
+    final busy = store.hotappFromPrototypeBusy;
+    final app = store.settings.hotappApp;
+    if (busy != _lastFromPrototypeBusy || app != _lastHotappApp) {
+      _lastFromPrototypeBusy = busy;
+      _lastHotappApp = app;
+      setState(() {});
+    }
     // 构建/布局期回调里 setState 会抛「during build」：推到帧末。
     if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -486,6 +498,16 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
 
   // -- 用户动作 -------------------------------------------------------------
 
+  /// 当前设计项目是否已有可转成热应用的原型（画板 ≥ 1）。
+  bool get _prototypeReady =>
+      store.hasProject && store.render.artboards.any((a) => a.id != '__seed');
+
+  bool get _fromPrototypeBusy => store.hotappFromPrototypeBusy;
+
+  Future<void> _generateFromPrototype() async {
+    await store.generateHotAppFromPrototype();
+  }
+
   Future<void> _openApp(String name) async {
     setState(() {
       _app = name;
@@ -496,6 +518,25 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     });
     store.setHotApp(name);
     await _mountSaved(name);
+  }
+
+  /// 热应用类型徽标：可用应用 / 原型验证（颜色取主题令牌，浅色主题也可读）。
+  Widget _originBadge(NonPalette p, String origin) {
+    final prototype = origin == nonAppOriginPrototype;
+    final color = prototype ? p.warn : p.accent;
+    return Container(
+      key: ValueKey('hotapp-origin-badge-${prototype ? 'prototype' : 'app'}'),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Text(
+        prototype ? '原型验证' : '可用应用',
+        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color),
+      ),
+    );
   }
 
   /// 应用列表/切换入口（本地库扫描）；列表里可新建或删除。
@@ -533,25 +574,48 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
           if (apps.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: Text('NaN 热应用', style: TextStyle(fontSize: 12, color: ctx.palette.ink4)),
+              child: Text('还没有热应用：可以直接描述一个可用应用，或由当前原型生成一个验证式 demo。',
+                  style: TextStyle(fontSize: 12, height: 1.5, color: ctx.palette.ink4)),
             ),
-          for (final a in apps)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, a.name),
-              child: Row(children: [
-                Icon(Icons.auto_fix_high_outlined, size: 16, color: ctx.palette.accent),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    a.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+          for (final group in [
+            ('可用应用', apps.where((a) => !a.isPrototypeDemo).toList(), nonAppOriginApp),
+            ('原型验证 demo', apps.where((a) => a.isPrototypeDemo).toList(), nonAppOriginPrototype),
+          ])
+            if (group.$2.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+                child: Text(group.$1,
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.6,
+                        color: ctx.palette.ink4)),
+              ),
+              for (final a in group.$2)
+                SimpleDialogOption(
+                  key: ValueKey('hotapp-list-${a.name}'),
+                  onPressed: () => Navigator.pop(ctx, a.name),
+                  child: Row(children: [
+                    Icon(
+                      a.isPrototypeDemo ? Icons.science_outlined : Icons.widgets_outlined,
+                      size: 16,
+                      color: a.isPrototypeDemo ? ctx.palette.warn : ctx.palette.accent,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        a.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    _originBadge(ctx.palette, a.origin),
+                    const SizedBox(width: 6),
+                    if (a.name == _app)
+                      Icon(Icons.check, size: 15, color: ctx.palette.accent),
+                  ]),
                 ),
-                if (a.name == _app)
-                  Icon(Icons.check, size: 15, color: ctx.palette.accent),
-              ]),
-            ),
+            ],
         ],
       ),
     );
@@ -641,7 +705,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
         final location = await getSaveLocation(
           suggestedName: '$app.nonapp',
           acceptedTypeGroups: const [
-            XTypeGroup(label: 'NoNDesign 应用包', extensions: ['nonapp']),
+            XTypeGroup(label: 'NaN 应用包', extensions: ['nonapp']),
           ],
         );
         if (location == null) return; // 用户取消
@@ -1012,11 +1076,11 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
           // 全屏工作台的可见出口（对齐 3D/视频工作台与 Esc）。
           IconButton(
             icon: const Icon(Icons.arrow_back, size: 18),
-            tooltip: '返回设计 ⌘1',
+            tooltip: '返回主页 ⌘1',
             color: p.ink2,
             visualDensity: VisualDensity.compact,
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            onPressed: () => store.setView('design'),
+            onPressed: () => store.setView('home'),
           ),
           const SizedBox(width: 4),
           Icon(Icons.auto_fix_high_outlined, size: 17, color: p.accent),
@@ -1031,6 +1095,10 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
             ),
           ),
+          if (_entry != null) ...[
+            const SizedBox(width: 6),
+            _originBadge(p, _entry!.origin),
+          ],
           const SizedBox(width: 10),
           if (!narrow)
             Flexible(
@@ -1045,7 +1113,17 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
               ),
             ),
           const Spacer(),
-          if (_busy)
+          // 「由原型生成热应用」的唯一入口（设计工具条上不再重复挂两个一样
+          // 的图标）：有原型才可用；生成中显示进度，避免看起来「点了没反应」。
+          if (_prototypeReady)
+            _TopBtn(
+              key: const ValueKey('hotapp-from-prototype'),
+              icon: Icons.fact_check_outlined,
+              label: _fromPrototypeBusy ? '生成中…' : '由原型生成',
+              tip: _fromPrototypeBusy ? '正在生成，完成会自动切到新应用' : '由当前设计原型生成「原型验证 demo」（逐屏逐跳转验证覆盖）',
+              onTap: (_busy || _fromPrototypeBusy) ? null : _generateFromPrototype,
+            ),
+          if (_busy || _fromPrototypeBusy)
             SizedBox(
                 width: 14,
                 height: 14,
@@ -1333,6 +1411,7 @@ class _EmptyHotApp extends StatelessWidget {
 
 class _TopBtn extends StatelessWidget {
   const _TopBtn({
+    super.key,
     required this.icon,
     required this.label,
     this.onTap,

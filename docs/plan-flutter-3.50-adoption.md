@@ -178,7 +178,7 @@ Silicon）、Linux x64、Windows x64 与 Web；桌面/移动经 Dart FFI 捆绑�
 | `mediapipe_retrieval`（2） | Semantic Retriever、Universal Embedder |
 | `mediapipe_decision`（1） | Decision Maker |
 
-**在 NoNDesign 的候选场景**（按价值排序）：
+**在 NaN 的候选场景**（按价值排序）：
 1. **作品集/资产/文档的离线语义搜索**：Universal/Image/Text Embedder + Semantic Retriever，
    本地 RAG，不上传用户数据；
 2. **设计资产提取**：ImageSegmenter / InteractiveSegmenter 抠图，ObjectDetector 识别截图

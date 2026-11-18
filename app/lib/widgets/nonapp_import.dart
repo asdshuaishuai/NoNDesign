@@ -25,7 +25,7 @@ import 'hotapp_workspace.dart';
 import 'nonapp_viewer.dart';
 
 const XTypeGroup _nonAppTypeGroup =
-    XTypeGroup(label: 'NoNDesign 应用', extensions: ['nonapp']);
+    XTypeGroup(label: 'NaN 应用', extensions: ['nonapp']);
 
 /// 冷启动打开文件时等应用就绪的上限。
 ///
@@ -41,7 +41,7 @@ String nonAppExceptionMessage(NonAppException error) {
     return '应用版本过新，请更新本应用';
   }
   if (code.startsWith('nonapp_requires_app')) {
-    return '这个应用需要更新版本的 NoNDesign 才能打开';
+    return '这个应用需要更新版本的 NaN 才能打开';
   }
   if (code.startsWith('nonapp_too_large')) {
     return '这个应用包太大了，无法打开';

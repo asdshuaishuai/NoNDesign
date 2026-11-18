@@ -1,7 +1,7 @@
-# AGENTS.md — NoNDesign
+# AGENTS.md — NaN
 
 AI 原生创作工作台。**一句话 → 产品需求设计文档 → 完整可交互原型**；同一工作台
-还能做 3D 场景、代码生成视频与带本地数据库的 NoN 热应用。
+还能做 3D 场景、代码动画视频与带本地数据库的 NaN 热应用。
 
 **技术栈（用户决策，2026-11-13 / 2026-11-18）：Flutter 3.50 + 纯 Dart 本地核心。
 没有 Python 服务、没有固定端口、没有端口文件。Python 只保留为开发期同步工具
@@ -55,7 +55,9 @@ plugins/             独立插件资产（视频制作说明）
 | iPad 竖屏（含 768×1024） | `ChatPiPShell`（明确裁决：3:4 太窄，画布+聊天栏会不可用） |
 | iPad 横屏 | `DesktopShell`：Workspace/Welcome + 右侧 320–420 可折叠聊天栏 |
 | macOS / Windows / Linux | `DesktopShell` |
-| play / portfolio / plugin | 整壳全幅 |
+| play / portfolio | 整壳全幅 |
+| 3D / 视频 / 热应用（`plugin:*`） | 留在响应式壳内：桌面壳左侧固定工作区 +
+  右侧常驻 NaN 窄栏；手机/iPad 竖屏由 `ChatPiPShell` 整屏渲染工作区 |
 
 - 断点与判据唯一来源是 `app/lib/core/layout.dart`；`shell_host.dart` 只做路由。
 - 聊天窄栏默认 360、折叠后 44px；窄 PC（<1100）默认折叠，<1024 强制折叠。
@@ -79,7 +81,7 @@ plugins/             独立插件资产（视频制作说明）
 | 内置智能体（Dart 循环） | ✅ | ✅（文档/PLAN 无需引擎；画布 op 需引擎或连接桌面） | ✅ |
 | 3D 工作台 | ✅（应用内 WebView） | 连接桌面后可看；本机预览降级 | 连接桌面；WebView 待验证 |
 | 热应用 / `.nonapp` | ✅ | ✅ 本地库/查看；本地数据库依赖平台绑定 | ✅ 本地库；构建待验证 |
-| 视频工作台 | ✅ 编辑/对照/渲染 | 编辑/对照/播放既有 mp4；不能渲染 | 同左 |
+| 视频工作台 | ✅ 代码动画实时播放 + 编辑/对照 | 同左（纯 Dart 矢量逐帧） | 同左 |
 | 外部智能体（ACP） | ✅ | ❌ 设计禁用 | ❌ |
 | 连接桌面（客户端） | ✅ 可填地址/连接码 | ✅ | ✅ |
 | 连接桌面（桌面宿主） | ✅ 设置卡启停/地址/连接码 | — | — |
@@ -98,7 +100,7 @@ flutter build macos --release
 # 发布包桌面状态（构建后；批次 15 新增）
 cd ..
 dart run scripts/wf/check_desktop_release.dart \
-  --app app/build/macos/Build/Products/Release/NoNDesign.app --home /tmp/nd-home
+  --app app/build/macos/Build/Products/Release/NaN.app --home /tmp/nd-home
 
 # 开发期同步（可选，不参与运行时）
 python3 scripts/sync_engine.py        # 校验/下载 wasm，真机 render 探针
@@ -205,7 +207,9 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
 - `api == null` 仍被若干面板当作"未就绪"的早退条件（`inspector_panel.dart`、
   `left_panel.dart` 等，文件归属批次 11/13）；这些入口在引擎/桌面都不可用时
   仍是静默 return，需要改成 `CapabilityHub` 的显式提示。发布验收把它列为未清项。
-- 桌面视频渲染依赖本机 `resvg`/`ffmpeg`；移动端只能编辑/对照/播放既有 mp4。
+- **视频是代码动画**（用户裁决 2026-11-18）：时间线脚本 + 规范编译成算式，
+  逐帧 `frameSvg(t)` 在应用内实时播放，全平台同一套行为；**成片导出暂时屏蔽**
+  （`VideoService` 渲染代码保留，界面无入口）。既有 mp4 产物仍由艺术架播放。
 - 移动端本地引擎默认关闭；iOS/Android 是否启用取决于真机 wasm spike 证据。
 - Android 构建已可在修复 `MainActivity.kt` 后产出 debug APK；本机无 Android
   设备/AVD，arm64 wasmtime 加载与 `_in` ABI 的真机验收仍未完成。

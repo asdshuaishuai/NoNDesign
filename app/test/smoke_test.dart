@@ -42,7 +42,7 @@ void main() {
       ),
     ));
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('NoNDesign'), findsWidgets);
+    expect(find.text('NaN'), findsWidgets);
     expect(find.textContaining('把想法变成'), findsOneWidget);
     expect(find.text('开始创作'), findsOneWidget);
     expect(tester.takeException(), isNull);

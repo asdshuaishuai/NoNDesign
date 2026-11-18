@@ -82,6 +82,12 @@ class NonAppException implements Exception {
 }
 
 /// manifest.json 的强类型视图（字段校验见 [NonAppPackage.parse]）。
+/// 热应用类型：用户直接描述生成的可用应用。
+const String nonAppOriginApp = 'app';
+
+/// 热应用类型：由设计原型生成的验证式 demo（只验证逻辑与交互可行性）。
+const String nonAppOriginPrototype = 'prototype';
+
 class NonAppManifest {
   const NonAppManifest({
     required this.formatVersion,
@@ -92,6 +98,7 @@ class NonAppManifest {
     required this.createdAt,
     required this.minAppVersion,
     this.brief,
+    this.origin = nonAppOriginApp,
   });
 
   final int formatVersion;
@@ -105,7 +112,14 @@ class NonAppManifest {
   final String minAppVersion;
   final String? brief;
 
+  /// `app` = 用户直接描述生成的可用应用；`prototype` = 由设计原型生成的
+  /// 验证式 demo（只验证逻辑与交互可行性）。缺失按 `app` 处理（旧包兼容）。
+  final String origin;
+
   bool get isA2ui => renderer == 'a2ui';
+
+  /// 是否为「原型验证」类型。
+  bool get isPrototypeDemo => origin == nonAppOriginPrototype;
 
   Map<String, dynamic> toJson() => {
         'formatVersion': formatVersion,
@@ -115,6 +129,7 @@ class NonAppManifest {
         'renderer': renderer,
         'createdAt': createdAt,
         'minAppVersion': minAppVersion,
+        'origin': origin,
         if (brief != null) 'brief': brief,
       };
 }
@@ -402,7 +417,7 @@ NonAppManifest _parseManifest(Uint8List raw, String clientVersion) {
   final minAppVersionStr = minAppVersion;
   if (compareVersions(clientVersion, minAppVersionStr) < 0) {
     throw NonAppException(
-        'nonapp_requires_app:$minAppVersionStr', '这个应用需要 NoNDesign $minAppVersionStr 及以上（当前 $clientVersion）');
+        'nonapp_requires_app:$minAppVersionStr', '这个应用需要 NaN $minAppVersionStr 及以上（当前 $clientVersion）');
   }
 
   final brief = doc['brief'];
@@ -419,6 +434,7 @@ NonAppManifest _parseManifest(Uint8List raw, String clientVersion) {
     createdAt: createdAtInt,
     minAppVersion: minAppVersionStr,
     brief: brief as String?,
+    origin: doc['origin'] == nonAppOriginPrototype ? nonAppOriginPrototype : nonAppOriginApp,
   );
 }
 

@@ -873,11 +873,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
 
   Widget _backButton(NonPalette p) => IconButton(
         icon: const Icon(Icons.arrow_back, size: 18),
-        tooltip: '返回设计 ${modCombo('⌘1')}',
+        tooltip: '返回主页 ${modCombo('⌘1')}',
         color: p.ink2,
         visualDensity: VisualDensity.compact,
         constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-        onPressed: () => store.setView('design'),
+        onPressed: () => store.setView('home'),
       );
 
   List<Widget> _titleBits(NonPalette p, double maxWidth) => [

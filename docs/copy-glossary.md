@@ -37,6 +37,10 @@
   原始错误只能进日志或折叠的「技术详情」。
 - `session_*`、`tool_*`、`mbt_*`、`ddp_*`、`wasm_*`、`agent_*`、`engine_*` 前缀同样禁止。
 - `构建代号`（如 `0.5.0-fix`、`0.2-dev`、`dev@a6af848`）不进用户文案。
+- **品牌只有 NaN**（用户裁决 2026-11-18）：任何用户可见字符串里不得再出现
+  `NoN` / `NoNDesign`（大小写不敏感，`copy_guard_test.dart` 已加规则）。
+  磁盘目录名 `~/Documents/NoNDesign`、标识符 `NoNDesignApi`、JS 桥
+  `window.NoN.db` / `__NoNDbResult` 属于内部标识，不在扫描面内，保持原样。
 - 端口号、`http://127.0.0.1:…`、`listening on …` 一律不出现。
 
 ## 3. 工具名映射（`toolLabel()` 唯一出口）

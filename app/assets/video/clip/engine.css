@@ -1,0 +1,87 @@
+/* 动画短片引擎 · 舞台与排版（每支短片共用）
+ *
+ * 设计画布固定 1280×720，由 JS 按视口等比缩放并居中（letterbox）。
+ * 短片只关心舞台内的画；舞台外由这里统一兜底。 */
+:root {
+  --paper: #f6efe1;
+  --paper-deep: #efe4d0;
+  --ink: #26262b;
+  --ink-soft: rgba(38, 38, 43, 0.62);
+  --ink-faint: rgba(38, 38, 43, 0.34);
+  --accent: #c8442e;
+  --accent-deep: #9e2f1e;
+  --cool: #2e5a88;
+  --gold: #c98a2a;
+  --hand: "Kaiti SC", "STKaiti", "KaiTi", "Kaiti TC", "Noto Serif SC", "Songti SC", serif;
+  --body: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --mono: "SF Mono", ui-monospace, Menlo, Monaco, "PingFang SC", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0d12;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#nd-viewport {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(120% 90% at 50% 42%, #12161e 0%, #0b0d12 58%, #07080c 100%);
+  cursor: default;
+}
+
+#nd-stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1280px;
+  height: 720px;
+  transform-origin: 50% 50%;
+  transform: translate(-50%, -50%) scale(1);
+  overflow: hidden;
+  border-radius: 10px;
+  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.55);
+  will-change: transform;
+}
+
+/* 短片把自己的图层塞进 stage；这些是通用层工具 */
+.nd-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.nd-hand { font-family: var(--hand); }
+.nd-body { font-family: var(--body); }
+.nd-mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.nd-num { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+
+.nd-grain {
+  position: absolute;
+  inset: -10%;
+  opacity: 0.5;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' seed='11'/><feColorMatrix type='saturate' values='0'/></filter><rect width='180' height='180' filter='url(%23n)' opacity='0.16'/></svg>");
+  background-size: 180px 180px;
+  pointer-events: none;
+}
+
+.nd-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(105% 88% at 50% 48%, rgba(0, 0, 0, 0) 58%, rgba(58, 44, 26, 0.16) 100%);
+}

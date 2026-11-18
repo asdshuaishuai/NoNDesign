@@ -68,6 +68,7 @@ class RpcAgentRun {
     this.thinkingLevel = 'auto',
     this.maxSteps = 300,
     this.contextWindow,
+    this.workspaceHint = '',
   });
 
   final int runId;
@@ -82,6 +83,9 @@ class RpcAgentRun {
   final int maxSteps;
   final int? contextWindow;
 
+  /// workspace 模式的目标工作台（`three` / `video` / `hotapp` / `auto`）。
+  final String workspaceHint;
+
   bool get isConfigured => model.isNotEmpty && apiKey.isNotEmpty && baseUrl.isNotEmpty;
 
   DartAgentRequest toRequest() => DartAgentRequest(
@@ -95,6 +99,7 @@ class RpcAgentRun {
     thinkingLevel: thinkingLevel,
     maxSteps: maxSteps,
     contextWindow: contextWindow,
+    workspaceHint: workspaceHint,
   );
 }
 
@@ -154,7 +159,8 @@ class LocalCoreAgentRunner extends RpcAgentRunner {
         });
         return;
       }
-      if (run.mode != 'plan' && !core.engineReady) {
+      // workspace 模式走本地工作区服务（3D/视频/热应用），不需要设计引擎。
+      if (run.mode != 'plan' && run.mode != 'workspace' && !core.engineReady) {
         emit(<String, dynamic>{
           'type': 'failed',
           'error': 'engine_unavailable',
@@ -791,7 +797,8 @@ class RpcMethodTable {
     final mode = _str(params, 'mode', 'build');
     final run = RpcAgentRun(
       runId: runId,
-      mode: mode == 'plan' || mode == 'refine' ? mode : 'build',
+      // workspace 模式必须保留：宿主据此收窄工具面（只给工作区工具）。
+      mode: const <String>['plan', 'refine', 'workspace'].contains(mode) ? mode : 'build',
       instruction: _str(params, 'instruction'),
       mbt: _str(params, 'mbt'),
       docs: _map(params, 'docs'),
@@ -803,6 +810,7 @@ class RpcMethodTable {
       contextWindow: params['context_window'] is num
           ? (params['context_window'] as num).toInt()
           : null,
+      workspaceHint: _str(params, 'workspace_hint'),
     );
 
     final token = CancellationToken();

@@ -157,7 +157,7 @@ void main() {
       expect(strip, findsOneWidget);
       expect(tester.getSize(strip).width, 44);
       expect(find.byKey(const ValueKey('agent-input')), findsNothing,
-          reason: '折叠态 NoN 内容不渲染，点图标才展开');
+          reason: '折叠态 NaN 内容不渲染，点图标才展开');
       expect(tester.takeException(), isNull);
     });
   });
@@ -190,9 +190,9 @@ void main() {
       expect(rail, findsOneWidget);
       expect(tester.getSize(rail).width, 360, reason: '默认 360');
       expect(find.byKey(const ValueKey('agent-input')), findsOneWidget,
-          reason: '窄栏默认落在 NoN tab');
+          reason: '窄栏默认落在 NaN tab');
       expect(find.byKey(const ValueKey('chat-input')), findsNothing,
-          reason: '独立聊天 tab 已并入 NoN');
+          reason: '独立聊天 tab 已并入 NaN');
       expect(tester.takeException(), isNull);
     });
 
@@ -258,19 +258,19 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('窄栏两个 tab：NoN / 检查（聊天已并入 NoN）', (tester) async {
+    testWidgets('窄栏两个 tab：NaN / 检查（聊天已并入 NaN）', (tester) async {
       await _pumpAt(tester, _store(project: true), const Size(1440, 900), os: HostOs.macos);
       for (final id in ['agent', 'inspect']) {
         expect(find.byKey(ValueKey('desktop-chat-rail-tab-$id')), findsOneWidget);
       }
       expect(find.byKey(const ValueKey('desktop-chat-rail-tab-chat')), findsNothing,
-          reason: '独立聊天 tab 与 NoN 重复，已移除');
+          reason: '独立聊天 tab 与 NaN 重复，已移除');
       expect(find.byKey(const ValueKey('agent-input')), findsOneWidget,
-          reason: '默认落在 NoN（聊天 + 任务指令）');
+          reason: '默认落在 NaN（聊天 + 任务指令）');
       await tester.tap(find.byKey(const ValueKey('desktop-chat-rail-tab-inspect')));
       await tester.pump(const Duration(milliseconds: 60));
       expect(find.byKey(const ValueKey('agent-input')), findsNothing,
-          reason: '切到检查后 NoN 内容让位（同一栏，不叠两栏）');
+          reason: '切到检查后 NaN 内容让位（同一栏，不叠两栏）');
       expect(tester.takeException(), isNull);
     });
   });
@@ -389,13 +389,14 @@ void main() {
       await _pumpAt(tester, _store(project: true), const Size(1440, 900), os: HostOs.macos);
       final agentTab = find.byKey(const ValueKey('desktop-chat-rail-tab-agent'));
       expect(find.descendant(of: agentTab, matching: find.text('NaN')), findsOneWidget);
-      expect(find.descendant(of: agentTab, matching: find.text('NoN')), findsNothing);
+      // 独立「聊天」tab 已并入 NaN（用户实测 2026-11-18），不能再出现。
+      expect(find.descendant(of: agentTab, matching: find.text('聊天')), findsNothing);
       expect(tester.takeException(), isNull);
     });
   });
 
   group('整壳全幅视图先于壳路由', () {
-    for (final view in const ['play', 'portfolio', 'plugin:three']) {
+    for (final view in const ['play', 'portfolio']) {
       testWidgets('view=$view：手机与桌面都无右侧窄栏', (tester) async {
         final phone = _store(project: true)..view = view;
         await _pumpAt(tester, phone, const Size(390, 844));
@@ -412,6 +413,22 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+
+    // 插件工作台不是全幅：桌面壳里左侧工作区 + 右侧 NaN 常驻（用户裁决
+    // 2026-11-18）；手机聊天优先壳里是整屏工作区（壳内 classic face）。
+    testWidgets('plugin:three：手机整屏，桌面带 NaN 窄栏', (tester) async {
+      await _pumpAt(tester, _store(project: true)..view = 'plugin:three', const Size(390, 844));
+      expect(find.byType(ChatPiPShell), findsOneWidget);
+      expect(find.byType(Workspace), findsOneWidget);
+      expect(find.byType(ChatRail), findsNothing);
+
+      await _pumpAt(tester, _store(project: true)..view = 'plugin:three',
+          const Size(1440, 900), os: HostOs.macos);
+      expect(find.byType(DesktopShell), findsOneWidget);
+      expect(find.byType(Workspace), findsOneWidget);
+      expect(find.byKey(const ValueKey('desktop-chat-rail')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 
   testWidgets('四个面不统一：同一 store 在手机与桌面落不同壳', (tester) async {

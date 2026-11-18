@@ -137,6 +137,10 @@ class _CommandPaletteState extends State<_CommandPalette> {
         store.setView('design');
         store.bumpFit();
       }),
+      _Action('自动修复当前画板', '画板', Icons.auto_fix_high_outlined, modCombo('⇧⌘F'), () {
+        Navigator.pop(context);
+        store.autoFix();
+      }),
       _Action('新建空白画板', '画板', Icons.crop_square, '', () {
         Navigator.pop(context);
         store.createBoard();
@@ -287,7 +291,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
                   ),
                   const SizedBox(width: 8),
                   Flexible(
-                    child: Text('NoNDesign Command',
+                    child: Text('NaN Command',
                         maxLines: 1, overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 10, color: p.ink4)),
                   ),

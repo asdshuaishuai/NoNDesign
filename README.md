@@ -1,7 +1,7 @@
-# NoNDesign
+# NaN
 
 AI-native 创作工作台：**一句话 → 产品需求设计文档 → 完整可交互原型**，同一工作台
-还能做 3D 场景、代码生成视频与带本地数据库的 NoN 热应用。
+还能做 3D 场景、代码生成视频与带本地数据库的 NaN 热应用。
 
 - **桌面端**：Flutter 3.50（macOS 主目标；iOS/Android/Linux/Windows 平台壳已就位）
 - **本地核心**：Dart 进程内跑 MoonViz classic wasm 引擎（`wasm_run` FFI 宿主）、
@@ -111,7 +111,7 @@ cd app && flutter analyze --no-pub && flutter test
 ```bash
 cd app && flutter build macos --release
 cd .. && dart run scripts/wf/check_desktop_release.dart \
-  --app app/build/macos/Build/Products/Release/NoNDesign.app --home /tmp/nd-home
+  --app app/build/macos/Build/Products/Release/NaN.app --home /tmp/nd-home
 ```
 
 它会断言：发布包内无 `.py` / `server/` / `.venv`；默认启动无监听端口、无 Python

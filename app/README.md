@@ -1,4 +1,4 @@
-# NoNDesign Flutter App
+# NaN Flutter App
 
 macOS desktop UI. See the repository root [README](../README.md) for architecture and
 quick start.

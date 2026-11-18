@@ -98,7 +98,7 @@ ModelSettings`）。把「agent SDK」与「服务运行时」两层分开看：
 
 - 1.0 稳定；`LlmChatView` + provider 抽象（自定义 provider 即插）+ tool calling + 流式 + 序列化。
 - 判定：**可选引入**。我们的 Agent 时间线（op 流/轨迹卡）不是聊天流，整体替换不合适；
-  未来若做「NoN 助手」闲聊/答疑面板，直接用它 + 自定义 provider（指向桌面服务或直连）。
+  未来若做「NaN 助手」闲聊/答疑面板，直接用它 + 自定义 provider（指向桌面服务或直连）。
 
 ### 3.4 genUI → `a2ui_flutter` —— 采纳为第二渲染后端（2026-11-17 更新）
 

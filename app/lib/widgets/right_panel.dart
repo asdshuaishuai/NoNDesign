@@ -18,7 +18,22 @@ part 'agent_panel.dart';
 part 'inspector_panel.dart';
 
 class RightPanel extends StatelessWidget {
-  const RightPanel({super.key});
+  /// 检查 tab 的正文；缺省是设计检查器（单独使用时行为不变）。
+  ///
+  /// `Workspace` 通过 [WorkspaceRightPanel]（`workspace_inspector.dart`）传入
+  /// 按工作区分派的检查器——设计画板 / 3D / 视频 / 热应用各看各的。
+  final Widget? inspectBody;
+
+  /// 检查 tab 的文案/图标（随工作区变；tab id 仍是 `inspect`，持久化值不变）。
+  final String inspectLabel;
+  final IconData inspectIcon;
+
+  const RightPanel({
+    super.key,
+    this.inspectBody,
+    this.inspectLabel = '检查',
+    this.inspectIcon = Icons.center_focus_strong_outlined,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +54,7 @@ class RightPanel extends StatelessWidget {
             child: Row(
               children: [
                 _tab(context, 'agent', Icons.auto_awesome, 'NaN'),
-                _tab(context, 'inspect', Icons.center_focus_strong_outlined, '检查'),
+                _tab(context, 'inspect', inspectIcon, inspectLabel),
                 const Spacer(),
                 if (store.usage['totalTokens'] != null)
                   Pill(
@@ -51,7 +66,9 @@ class RightPanel extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: store.rightTab == 'agent' ? const AgentPanel() : const Inspector(),
+            child: store.rightTab == 'agent'
+                ? const AgentPanel()
+                : (inspectBody ?? const Inspector()),
           ),
         ],
       ),

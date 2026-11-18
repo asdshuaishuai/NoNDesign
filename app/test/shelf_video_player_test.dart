@@ -8,7 +8,7 @@
 //    mediaTypesRequiringUserAction={audio,video} + allowsInlineMediaPlayback=false，
 //    不开这两个参数视频会被自动播放策略静默拦住（真机黑屏的根因）；
 //  ④ 主帧加载失败 → 覆盖层「无法播放」+ 复制路径（失败不是死端）；
-//  ⑤ 默认渲染台模式不创建 WebView（工作台测试无需平台桩）。
+//  ⑤ 默认创作面（代码动画）不创建 WebView（工作台测试无需平台桩）。
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -148,9 +148,9 @@ void main() {
       ),
     );
 
-    // 产物模式：标题/返回渲染台/播放面/信息行。
+    // 产物模式：标题/返回创作台/播放面/信息行。
     expect(find.textContaining('视频产物'), findsOneWidget);
-    expect(find.text('返回渲染台'), findsOneWidget);
+    expect(find.text('返回创作台'), findsOneWidget);
     expect(find.byType(VideoPlayerSurface), findsOneWidget);
     expect(find.text('复制路径'), findsOneWidget);
     final pathText = tester.widget<SelectableText>(find.byType(SelectableText));
@@ -168,7 +168,7 @@ void main() {
     expect(wk.mediaTypesRequiringUserAction, isEmpty);
   });
 
-  testWidgets('产物模式在手机宽度 390 下不溢出（标题 + 返回渲染台 + 信息行）', (tester) async {
+  testWidgets('产物模式在手机宽度 390 下不溢出（标题 + 返回创作台 + 信息行）', (tester) async {
     final fake = await _installFake();
     videoLoadOnOpen = _mp4;
     final store = _store();
@@ -184,11 +184,11 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.textContaining('视频产物'), findsOneWidget);
-    expect(find.text('返回渲染台'), findsOneWidget);
+    expect(find.text('返回创作台'), findsOneWidget);
     expect(fake.lastController!.loadedFiles, [_mp4]);
   });
 
-  testWidgets('默认渲染台：文案不变且不创建 WebView', (tester) async {
+  testWidgets('默认创作面：代码动画就绪且不创建 WebView', (tester) async {
     final fake = await _installFake();
     final store = _store();
     await _pump(
@@ -201,7 +201,9 @@ void main() {
 
     expect(find.text('视频工作台'), findsOneWidget);
     expect(find.text('标杆示例'), findsOneWidget);
-    expect(find.text('点「渲染（后台）」开始出片'), findsOneWidget);
+    // 主区是代码动画的第一帧，不是「点渲染出片」的空态。
+    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(find.text('渲染（后台）'), findsNothing);
     expect(find.byType(VideoPlayerSurface), findsNothing);
     // 「默认模式不构造播放面」是可测事实：fake 平台一次控制器都没创建。
     expect(fake.lastController, isNull);

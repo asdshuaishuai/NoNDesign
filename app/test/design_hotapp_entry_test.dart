@@ -1,5 +1,7 @@
-// 设计 → 热应用（唯一允许的模块间关联）：设计画布工具条上必须有
-// 「由原型生成热应用（可验证）」入口；未配模型/无原型时诚实早退，不崩溃。
+// 设计 → 热应用（唯一允许的模块间关联）：
+//  - 生成入口**只保留一个**，放在热应用工作台顶栏（「由原型生成」），带进度与
+//    结果反馈；设计画布工具条上不再叠两个看起来一样、点了没动静的图标。
+//  - 未配模型 / 没有原型时诚实早退：不崩溃、不换视图。
 import 'package:flutter/material.dart' hide Flow;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -12,13 +14,13 @@ import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/core/toast_service.dart';
 import 'package:nondesign/widgets/shell_host.dart';
 
-AppStore _storeWithPrototype() {
+AppStore _storeWithPrototype({String view = 'plugin:hotapp'}) {
   final store = AppStore(toasts: ToastService(autoDismiss: false));
   store.ready = true;
   store.settings = AppSettings(providerId: 'deepseek', modelId: 'deepseek-v4.1-flash');
   store.hasProject = true;
   store.projectName = '演示项目';
-  store.view = 'design';
+  store.view = view;
   store.mbt = '---\nmoonviz:\n  format: visual-document\n  revision: 1\n  entry: home\n---\n';
   store.render = RenderEnvelope(
     ok: true,
@@ -51,22 +53,33 @@ Future<void> _pump(WidgetTester tester, AppStore store) async {
   SharedPreferences.setMockInitialValues({});
   await tester.pumpWidget(_wrap(store));
   await tester.pump(const Duration(milliseconds: 60));
+  await tester.pump(const Duration(milliseconds: 60));
 }
 
 void main() {
-  testWidgets('设计工具条有「由原型生成热应用」入口', (tester) async {
+  testWidgets('设计工具条不再重复挂「生成热应用」图标（入口只有一个）', (tester) async {
+    final store = _storeWithPrototype(view: 'design');
+    await _pump(tester, store);
+    expect(find.byKey(const ValueKey('design-to-hotapp')), findsNothing,
+        reason: '生成入口已收进热应用工作台顶栏，设计工具条不再重复');
+    expect(find.byKey(const ValueKey('hotapp-from-prototype')), findsNothing,
+        reason: '设计视图里不应出现热应用工作台的动作');
+  });
+
+  testWidgets('热应用工作台有唯一的「由原型生成」入口', (tester) async {
     final store = _storeWithPrototype();
     await _pump(tester, store);
-    expect(find.byKey(const ValueKey('design-to-hotapp')), findsOneWidget,
-        reason: '设计 → 热应用是唯一允许的模块间关联，入口必须在设计工具条上');
+    expect(find.byKey(const ValueKey('hotapp-from-prototype')), findsOneWidget,
+        reason: '设计 → 热应用是唯一允许的模块间关联，入口必须在热应用工作台');
+    expect(find.text('由原型生成'), findsOneWidget);
   });
 
   testWidgets('点击入口：未配模型时诚实早退，不崩溃、不换视图', (tester) async {
     final store = _storeWithPrototype();
     await _pump(tester, store);
-    await tester.tap(find.byKey(const ValueKey('design-to-hotapp')));
+    await tester.tap(find.byKey(const ValueKey('hotapp-from-prototype')));
     await tester.pump(const Duration(milliseconds: 200));
-    expect(store.view, 'design', reason: '早退不换视图');
+    expect(store.view, 'plugin:hotapp', reason: '早退不换视图');
     expect(tester.takeException(), isNull);
   });
 }

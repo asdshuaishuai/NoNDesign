@@ -16,7 +16,7 @@ import 'docs_view.dart';
 import 'left_panel.dart';
 import 'play_view.dart';
 import 'rail.dart';
-import 'right_panel.dart';
+import 'workspace_inspector.dart';
 import 'settings_dialog.dart';
 import 'status_bar.dart';
 import 'title_bar.dart';
@@ -96,8 +96,10 @@ class _WorkspaceState extends State<Workspace> {
     final store = context.watch<AppStore>();
     final p = context.palette;
     // 全屏视图早退只在完整壳里生效：嵌入式宿主（聊天流分栏 / 画中画）里
-    // store.view 恒为 'chat'，这些分支不适用；portfolio/plugin 是整壳视图，
-    // main.dart 会先路由到全屏 Workspace（embedded=false）。
+    // store.view 恒为 'chat'，这些分支不适用。portfolio / play 由 main.dart
+    // 先路由到全屏 Workspace（embedded=false）；plugin:* 不再离开壳——桌面壳
+    // 里它是左侧固定工作区、右侧 NaN 常驻（用户裁决 2026-11-18），手机聊天
+    // 优先壳里由 ChatPiPShell 的 classic face 整屏渲染。
     if (!widget.embedded) {
       if (store.view == 'play') {
         return Scaffold(backgroundColor: p.bg, body: const SafeArea(child: PlayView()));
@@ -125,6 +127,11 @@ class _WorkspaceState extends State<Workspace> {
       // ⌘N/⌘O/⌘S/⌘Z/⌘K 已上移 main.dart 根级 bindings：插件/作品集视图
       // 不挂载本 CallbackShortcuts，workspace 级绑定在全屏视图不可达。
       // 保留的项是设计壳内部动作（设置/快捷键/文档直达原型/导出）。
+      // ⇧⌘F：自动修复当前画板（规范/叠放/可读性一次清偿）——deepDesign 的
+      // 常驻能力，迁移后一度只剩检查器里的两个小按钮，用户找不到入口。
+      modKey(LogicalKeyboardKey.keyF, shift: true): () {
+        if (store.hasProject) store.autoFix();
+      },
       modKey(LogicalKeyboardKey.keyH, shift: true): () {
         // ⇧⌘H：导出 HTML 原型——标题栏菜单同项标注的快捷键，无项目时忽略。
         if (store.hasProject) store.exportHtml();
@@ -193,7 +200,7 @@ class _WorkspaceState extends State<Workspace> {
                                 ),
                         if (showLeft && leftPaneSafe) const LeftPanel(),
                         Expanded(child: _center(store)),
-                        if (wide && widget.showRightPanel) const RightPanel(),
+                        if (wide && widget.showRightPanel) const WorkspaceRightPanel(),
                       ],
                     ),
                   ),
@@ -264,7 +271,7 @@ class _WorkspaceState extends State<Workspace> {
               context: context,
               backgroundColor: p.panel,
               isScrollControlled: true,
-              builder: (_) => sheet(const RightPanel()),
+              builder: (_) => sheet(const WorkspaceRightPanel()),
             ),
             icon: const Icon(Icons.auto_awesome, size: 16),
             label: const Text('NaN 面板', style: TextStyle(fontSize: 12)),
@@ -417,7 +424,7 @@ Future<void> openProjectFlow(BuildContext context, String path) async {
     final picked = await showOpenProjectSheet(context);
     if (picked == null || !context.mounted) return;
     if (picked == '__file__') {
-      const group = XTypeGroup(label: 'NoNDesign 项目', extensions: ['ddp']);
+      const group = XTypeGroup(label: 'NaN 项目', extensions: ['ddp']);
       final file = await openFile(acceptedTypeGroups: const [group]);
       if (file == null) return;
       target = file.path;
@@ -654,25 +661,22 @@ class _BoardTabs extends StatelessWidget {
           ),
           if (!embedded) ...[
             IconAction(icon: Icons.code, tooltip: '源码 ${modCombo('⌘3')}', size: 26, onTap: () => store.setView('source')),
+            IconAction(
+              key: const ValueKey('design-auto-fix'),
+              icon: Icons.auto_fix_high_outlined,
+              tooltip: '自动修复当前画板 ${modCombo('⇧⌘F')}',
+              size: 26,
+              onTap: () => store.autoFix(),
+            ),
             IconAction(icon: Icons.play_arrow_outlined, tooltip: '演示模式 ${modCombo('⌘4')}', size: 26, onTap: () => store.setView('play')),
             IconAction(icon: Icons.collections_bookmark_outlined, tooltip: '作品集', size: 26, onTap: () => store.setView('portfolio')),
             // 架构裁决：设计只与热应用相关（设计可生成热应用）；
             // 3D / 视频是独立模块，入口在主页工作台，不挂在设计工具条上。
             for (final def in pluginRegistry.where((d) => d.id == 'hotapp'))
               IconAction(icon: def.icon, tooltip: def.tooltip, size: 26, onTap: () => store.setView('plugin:${def.id}')),
-            IconAction(
-              key: const ValueKey('design-to-hotapp'),
-              icon: Icons.fact_check_outlined,
-              tooltip: '由原型生成热应用（生成后逐屏逐跳转验证覆盖）',
-              size: 26,
-              onTap: () => store.generateHotAppFromPrototype(),
-            ),
-            IconAction(
-              icon: Icons.phone_android_outlined,
-              tooltip: '由原型生成热应用',
-              size: 26,
-              onTap: () => store.generateHotAppFromPrototype(),
-            ),
+            // 「由原型生成热应用」只有一个入口，放在热应用工作台顶栏（带进度与
+            // 结果反馈）。设计工具条这里只保留进入热应用工作台的按钮，避免出现
+            // 三个看起来一样、点了没动静的生成入口。
             const SizedBox(width: 4),
             TextButton.icon(
               onPressed: () => store.setView('docs'),

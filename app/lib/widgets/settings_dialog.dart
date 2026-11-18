@@ -1576,7 +1576,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('NoNDesign', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
+                Text('NaN', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
                 Text('AI-native product design studio', style: TextStyle(fontSize: 11, color: p.ink3)),
               ],
             ),
@@ -1847,7 +1847,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             id: 'about',
             icon: Icons.info_outline,
             title: '关于',
-            subtitle: 'NoNDesign v0.1 · 本地优先',
+            subtitle: 'NaN v0.1 · 本地优先',
             onTap: () => setState(() => _mobileSection = 'about')),
         const SizedBox(height: 10),
         Text('设置即时生效并保存在本机；模型清单来自内置快照，可随时更新。',
@@ -2334,7 +2334,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('NoNDesign',
+                    Text('NaN',
                         style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.ink)),
                     Text('AI-native product design studio',
                         style: TextStyle(fontSize: 12, color: p.ink3)),

@@ -87,7 +87,7 @@ Future<MobilePlanResult> runMobilePlan({
       abortSignal: abortSignal,
       timeout: timeout == null ? null : TimeoutConfiguration(total: timeout),
       prompt:
-          '你是 NoNDesign 的产品设计师。根据用户需求依次完成两份文档：\n'
+          '你是 NaN 的产品设计师。根据用户需求依次完成两份文档：\n'
           '1) write_doc(kind="prd")：产品需求文档（Markdown：目标用户、核心流程、功能列表、非目标）。\n'
           '2) write_doc(kind="ui")：UI 说明（每屏一句话职责 + 关键元素列表）。\n'
           '两份都写完即结束，不要输出多余散文。\n\n用户需求：$instruction',

@@ -96,7 +96,7 @@ def _trim(raw: dict) -> dict:
 def main() -> None:
     print(f"[sync_models] fetching {SOURCE} …")
     request = urllib.request.Request(
-        SOURCE, headers={"User-Agent": "NoNDesign/0.1 (+models.dev snapshot)"}
+        SOURCE, headers={"User-Agent": "NaN/0.1 (+models.dev snapshot)"}
     )
     with urllib.request.urlopen(request, timeout=60) as response:
         raw = json.loads(response.read().decode("utf-8"))

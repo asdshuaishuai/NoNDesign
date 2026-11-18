@@ -87,13 +87,36 @@ void main() {
     expect(find.text('NaN 面板'), findsNothing);
   });
 
-  testWidgets('video workspace uses the side-by-side layout on iPad', (tester) async {
+  testWidgets('video workspace is a full-bleed player on iPad', (tester) async {
     await _pumpAt(tester, const Scaffold(body: VideoWorkspace()), _tabletPortrait);
-    expect(find.text('标杆示例'), findsOneWidget);
-    // iPad 属于移动端：配置列与预览面并排，但预览面明确说不能出片
-    //（移动端不能 spawn 渲染组件），不是静默空着。
-    expect(find.text('渲染（后台）'), findsOneWidget);
-    expect(find.text('手机上不能出片，可以从艺术架打开已有的视频'), findsOneWidget);
+    // 代码动画版：播放面铺满主区，编辑类动作收进 46px 工具条（不再有常驻侧栏）。
+    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-sample-picker')), findsOneWidget);
+    final playerRect = tester.getRect(find.byKey(const ValueKey('video-animation-surface')));
+    expect(playerRect.width, greaterThan(_tabletPortrait.width * 0.9),
+        reason: '播放器应当铺满工作台主区，而不是被右侧栏挤窄');
+    expect(playerRect.height, greaterThan(_tabletPortrait.height * 0.8),
+        reason: '播放器应当占满主区高度');
+    // 帧率是工具条弹层：同一时刻只有播放器自己那根时间滑条。
+    expect(find.byType(Slider), findsOneWidget);
+    // iPad 竖屏宽度放不下全部文字标签：低频动作在 ⋯ 菜单里，仍然可达。
+    expect(find.byKey(const ValueKey('video-more-menu')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('video-more-menu')));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('编辑脚本'), findsOneWidget, reason: '⋯ 菜单里仍能编辑脚本');
+    expect(find.textContaining('帧率'), findsWidgets, reason: '⋯ 菜单里仍能改帧率');
+    // 没有任何渲染/导出入口。
+    expect(find.text('渲染（后台）'), findsNothing);
+    expect(find.textContaining('手机上不能出片'), findsNothing);
+  });
+
+  testWidgets('video workspace shows full labels on iPad landscape', (tester) async {
+    await _pumpAt(tester, const Scaffold(body: VideoWorkspace()), _tabletLandscape);
+    // 横屏宽度够：示例 / 帧率 / 编辑脚本 / 对照 / 加载示例 全部在工具条上露面。
+    expect(find.text('编辑脚本'), findsOneWidget);
+    expect(find.text('规范对照'), findsOneWidget);
+    expect(find.text('加载示例'), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-more-menu')), findsNothing);
   });
 
   testWidgets('热应用 and portfolio fit iPad portrait', (tester) async {

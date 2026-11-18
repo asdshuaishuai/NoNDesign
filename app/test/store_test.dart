@@ -409,7 +409,7 @@ void main() {
 
       expect(ok, isFalse);
       expect(h.engine.appliedOps, isEmpty);
-      expect(h.toasts.history.first.title, contains('NoN 正在工作'));
+      expect(h.toasts.history.first.title, contains('NaN 正在工作'));
     });
 
     test('two in-flight applyOps are serialized — the second reads the refreshed mbt', () async {
@@ -624,7 +624,7 @@ void main() {
       expect(((requests.single['params'] as Map)['mode']), 'plan');
       expect(h.store.mbt, 'REMOTE_MBT', reason: 'done canonical is re-rendered and committed');
       expect(h.store.agentBusy, isFalse);
-      expect(h.store.timeline.any((t) => t.kind == 'finish' && t.ok && t.title == 'NoN 完成'),
+      expect(h.store.timeline.any((t) => t.kind == 'finish' && t.ok && t.title == 'NaN 完成'),
           isTrue);
     });
 
@@ -699,7 +699,7 @@ void main() {
       RemoteDesktopClient.sseIdleTimeout = const Duration(milliseconds: 250);
       addTearDown(() => RemoteDesktopClient.sseIdleTimeout = const Duration(seconds: 660));
       final (base, close) = await _sseDesktop((send) async {
-        await send({'type': 'note', 'label': 'NoN 开始'});
+        await send({'type': 'note', 'label': 'NaN 开始'});
         await Completer<void>().future;
       });
       addTearDown(close);
@@ -851,7 +851,7 @@ void main() {
       expect(h.store.agentBusy, isFalse);
       expect(h.store.runId, isNull);
       expect(h.store.timeline.any((t) => t.kind == 'tool' && t.tool == 'design_op'), isTrue);
-      expect(h.store.timeline.any((t) => t.kind == 'finish' && t.ok && t.title == 'NoN 完成'),
+      expect(h.store.timeline.any((t) => t.kind == 'finish' && t.ok && t.title == 'NaN 完成'),
           isTrue);
     });
 
@@ -1133,6 +1133,67 @@ void main() {
       expect(phase.text.contains('claude-code'), isFalse);
       final finish = h.store.timeline.where((t) => t.kind == 'finish').toList().last;
       expect(finish.text.contains('claude-code'), isFalse);
+    });
+
+    test('工作区切换映射：工具 → 工作台，视图 → 模式', () {
+      expect(AppStore.workspaceViewForTool('three_create'), 'plugin:three');
+      expect(AppStore.workspaceViewForTool('three_pass'), 'plugin:three');
+      expect(AppStore.workspaceViewForTool('hotapp_generate'), 'plugin:hotapp');
+      expect(AppStore.workspaceViewForTool('video_review'), 'plugin:video');
+      expect(AppStore.workspaceViewForTool('design_op'), 'design');
+      expect(AppStore.workspaceViewForTool('generate_page'), 'design');
+      expect(AppStore.workspaceViewForTool('ask_user'), isNull);
+
+      expect(AppStore.workspaceModeForView('plugin:three'), workspaceModeThree);
+      expect(AppStore.workspaceModeForView('plugin:video'), workspaceModeVideo);
+      expect(AppStore.workspaceModeForView('plugin:hotapp'), workspaceModeHotapp);
+      expect(AppStore.workspaceModeForView('design'), workspaceModeDesign);
+      expect(AppStore.workspaceModeForView('docs'), workspaceModeDesign);
+    });
+
+    test('工作区模式归一：未知值回落自动，持久化进设置', () async {
+      final h = _localStore();
+      expect(h.store.chatWorkspaceMode, workspaceModeAuto);
+
+      await h.store.setChatWorkspaceMode('video');
+      expect(h.store.chatWorkspaceMode, workspaceModeVideo);
+      expect(h.store.settings.chatWorkspaceMode, workspaceModeVideo);
+
+      await h.store.setChatWorkspaceMode('nope');
+      expect(h.store.chatWorkspaceMode, workspaceModeAuto);
+
+      // 旧存档没有这个键 → 自动。
+      expect(AppSettings.fromJson(const <String, dynamic>{}).chatWorkspaceMode,
+          workspaceModeAuto);
+    });
+
+    test('工作区彼此独立：agent 的插件工具不再把主面拽去别的工区', () {
+      // 2026-11-19 用户裁决：3D / 视频 / 热应用是独立工作区，不互相挂靠、
+      // 也不主动关联设计项目。NaN 在某个面调用它们的工具时，只更新数据，
+      // 不替用户切主面；设计工具仍可把主面带回设计画布（用户看着画布时
+      // 生成/改稿要能看到结果）。
+      final h = _localStore();
+      h.store.hasProject = true;
+      h.store.setView('design');
+
+      h.store.followAgentWorkspace('three_create');
+      expect(h.store.view, 'design', reason: '3D 工具不得把设计面拽走');
+
+      h.store.followAgentWorkspace('hotapp_generate');
+      expect(h.store.view, 'design');
+
+      h.store.followAgentWorkspace('video_review');
+      expect(h.store.view, 'design');
+
+      // 设计工具仍回设计画布（从文档/源码面回设计）。
+      h.store.setView('docs');
+      h.store.followAgentWorkspace('design_op');
+      expect(h.store.view, 'design');
+
+      // 演示是显式的「只看不跑」：任何工具都不拽走。
+      h.store.setView('play');
+      h.store.followAgentWorkspace('video_review');
+      expect(h.store.view, 'play');
     });
   });
 }

@@ -9,8 +9,10 @@
 /// | iPad 横屏                    | [DesktopShell]：工作区/Welcome + 聊天窄栏  |
 /// | macOS / Windows / Linux      | [DesktopShell]                            |
 ///
-/// `play` / `portfolio` / `plugin:*` 是整壳全幅视图，由 `main.dart` 先于本
-/// 宿主路由（这里只做兜底，方便单测直接泵 [ShellHost]）。
+/// `play` / `portfolio` 是整壳全幅视图，由 `main.dart` 先于本宿主路由；
+/// `plugin:*`（3D / 视频 / 热应用）**留在壳里**：桌面壳右侧常驻 NaN 窄栏，
+/// 左侧是固定工作区（用户裁决 2026-11-18）。这里保留兜底，方便单测直接
+/// 泵 [ShellHost]。
 library;
 
 import 'package:flutter/material.dart';
@@ -146,9 +148,8 @@ class ShellHost extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     // 整壳全幅视图：先于壳路由（与 main.dart 同序；这里是单测/防御兜底）。
-    if (store.view == 'play' ||
-        store.view == 'portfolio' ||
-        store.view.startsWith('plugin:')) {
+    // plugin:* 不在这里早退——它们要带着右侧 NaN 窄栏进壳。
+    if (store.view == 'play' || store.view == 'portfolio') {
       return const Workspace();
     }
     final caps = capabilities ?? PlatformCapabilities.current();

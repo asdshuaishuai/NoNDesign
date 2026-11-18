@@ -123,7 +123,11 @@ class _ChatPiPShellState extends State<ChatPiPShell> {
             // 隐藏状态、界面还停在经典工作区，看起来像失灵。这里让
             // view=='chat' 与 chatStreamHome 同等地落聊天主面，但不改写用户
             // 显式选择的「启动主面」偏好。
-            final chatHome = store.settings.chatStreamHome || store.view == 'chat';
+            // 插件工作台（3D / 视频 / 热应用）在聊天优先壳里是整屏工作区：
+            // 它们不是聊天流的一部分，塞进画中画会把工作台压成指甲盖。
+            final fullBleedWorkspace = store.view.startsWith('plugin:');
+            final chatHome = (store.settings.chatStreamHome || store.view == 'chat') &&
+                !fullBleedWorkspace;
             if (!chatHome) {
               return _classicFace(store);
             }
@@ -173,7 +177,9 @@ class _ChatPiPShellState extends State<ChatPiPShell> {
     return Stack(
       children: [
         Positioned.fill(
-          child: store.hasProject
+          // 插件工作台不依赖项目：NaN 在聊天面接下的 3D / 视频 / 热应用任务
+          // 会把它切到主面，此时哪怕还没有项目也必须渲染出工作区。
+          child: (store.hasProject || store.view.startsWith('plugin:')) && store.view != 'home'
               ? const Workspace()
               : Welcome(
                   onNewProject: () => showNewProjectFlow(context),

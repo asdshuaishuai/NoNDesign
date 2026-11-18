@@ -432,6 +432,51 @@ class ModelRegistry {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 工作区模式（主页输入框选择的目标工作台）
+// ---------------------------------------------------------------------------
+
+/// 主页一句话输入的目标工作台：`auto` = 由 NaN 按任务自行决定。
+///
+/// 四个工作区互相独立（用户裁决 2026-11-18），但共用同一个 NaN：
+/// 用户在主页选中某个工作区，就是「这次任务先落在那里」；选 auto 则交给
+/// 智能体按任务状态与它调用的工具自己切（`store.followAgentWorkspace`）。
+const String workspaceModeAuto = 'auto';
+const String workspaceModeDesign = 'design';
+const String workspaceModeThree = 'three';
+const String workspaceModeVideo = 'video';
+const String workspaceModeHotapp = 'hotapp';
+
+const List<String> kWorkspaceModes = <String>[
+  workspaceModeAuto,
+  workspaceModeDesign,
+  workspaceModeThree,
+  workspaceModeVideo,
+  workspaceModeHotapp,
+];
+
+/// 主页工作区选择器的用户可见标签（唯一出口，别处只读这里）。
+String workspaceModeLabel(String mode) {
+  switch (normalizeWorkspaceMode(mode)) {
+    case workspaceModeDesign:
+      return '设计';
+    case workspaceModeThree:
+      return '3D';
+    case workspaceModeVideo:
+      return '视频';
+    case workspaceModeHotapp:
+      return '热应用';
+    default:
+      return '自动';
+  }
+}
+
+/// 归一：未知值一律回落 `auto`（旧存档没有这个键）。
+String normalizeWorkspaceMode(String? raw) {
+  final value = (raw ?? '').trim();
+  return kWorkspaceModes.contains(value) ? value : workspaceModeAuto;
+}
+
 /// Agent 循环运行时（设置界面「运行方式」）：
 /// - `local`（默认）：内置循环在本机执行，桌面与移动一致；Build 的
 ///   design_op 仍经设计校验（绝不绕过引擎门）。
@@ -481,14 +526,14 @@ class AppSettings {
   String thinkingLevel;
   int maxSteps;
   String theme;
-  /// 外部智能体（ACP）：null 或空 = NoN 内置管线；否则发给该 ACP agent。
+  /// 外部智能体（ACP）：null 或空 = NaN 内置管线；否则发给该 ACP agent。
   String? acpAgentId;
   /// 选中 agent 的显示名（选定时随 id 一起持久化，输入框 pill 用）。
   String? acpAgentName;
   /// 3D 工作台当前项目名（'' = 无）。工作台视图切换会 dispose 状态，
   /// 项目名持久化让「切走再回来」续接同一项目（跨会话亦然）。
   String threeProjectName;
-  /// NoN 热应用工作台当前应用名（'' = 无）：工作台 dispose 后回来仍停在原应用。
+  /// NaN 热应用工作台当前应用名（'' = 无）：工作台 dispose 后回来仍停在原应用。
   String hotappApp;
   /// 视频工作台：当前示例下标 + 在飞/最近的渲染 job（回来可接回轮询）。
   int videoSampleIdx;
@@ -512,6 +557,9 @@ class AppSettings {
   bool desktopHostEnabled;
   /// 连接宿主是否允许局域网访问（默认只监听 127.0.0.1）。
   bool desktopHostAllowLan;
+  /// 主页一句话输入的目标工作台（见 `workspaceModeAuto` 一族）。
+  /// 只决定「这次任务先落到哪个工作台」，不影响四个模块互相独立。
+  String chatWorkspaceMode;
 
   AppSettings({
     this.providerId = 'deepseek',
@@ -533,7 +581,9 @@ class AppSettings {
     this.chatStreamHome = true,
     this.desktopHostEnabled = false,
     this.desktopHostAllowLan = false,
+    String? chatWorkspaceMode,
   })  : threeSpecDrafts = threeSpecDrafts ?? {},
+        chatWorkspaceMode = normalizeWorkspaceMode(chatWorkspaceMode),
         // 默认内置；旧存档的 `dart`/未知值归一 local，显式 `server` 保留。
         _agentRuntime = normalizeAgentRuntime(agentRuntime);
 
@@ -557,6 +607,7 @@ class AppSettings {
         'chatStreamHome': chatStreamHome,
         'desktopHostEnabled': desktopHostEnabled,
         'desktopHostAllowLan': desktopHostAllowLan,
+        'chatWorkspaceMode': chatWorkspaceMode,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> m) => AppSettings(
@@ -585,6 +636,8 @@ class AppSettings {
         chatStreamHome: m['chatStreamHome'] is bool ? m['chatStreamHome'] as bool : true,
         desktopHostEnabled: m['desktopHostEnabled'] == true,
         desktopHostAllowLan: m['desktopHostAllowLan'] == true,
+        // 旧存档无此键：默认自动（交给 NaN 判断）。
+        chatWorkspaceMode: (m['chatWorkspaceMode'] ?? workspaceModeAuto).toString(),
       );
 }
 

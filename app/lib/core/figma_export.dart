@@ -224,7 +224,7 @@ class FigmaExporter {
   }
 
   /// README 正文（三条路径：插件 / SVG 拖入 / 说明）。
-  String readmeText() => 'NoN → Figma 导出包\n'
+  String readmeText() => 'NaN → Figma 导出包\n'
       '==================\n'
       '方式一（插件，可编辑图层）：Figma → Plugins → Development → Import plugin from manifest\n'
       '  选择本仓库 figma-plugin/manifest.json，运行插件导入本目录 nondesign.json。\n'

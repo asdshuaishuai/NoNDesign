@@ -1,6 +1,6 @@
 # 上下文与缓存策略
 
-NoNDesign 的 Agent 上下文按 **稳定 → 易变** 排序，目标不是"塞更多"，而是让同一项目
+NaN 的 Agent 上下文按 **稳定 → 易变** 排序，目标不是"塞更多"，而是让同一项目
 跨 run 命中尽可能长的 provider 前缀缓存，同时让模型在最新 token 位置看到最新真相。
 
 ## 分层
@@ -46,7 +46,7 @@ NoNDesign 的 Agent 上下文按 **稳定 → 易变** 排序，目标不是"塞
 
 - 聚合 `raw_responses[].usage`：requests / input / output / total；
 - 从 `input_tokens_details.cached_tokens` 读取缓存命中 token；
-- SSE 末尾发 `usage` 事件；Flutter 状态栏 / NoN 头部 / 设置页展示
+- SSE 末尾发 `usage` 事件；Flutter 状态栏 / NaN 头部 / 设置页展示
   `ctx` 与 `⚡命中率`。
 
 ## 测量方式

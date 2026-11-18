@@ -16,7 +16,7 @@
 - 服务端 `/project/export/figma`：每板引擎自渲染 SVG + nondesign.json
   manifest + README，落 `~/Documents/NoNDesign/NoNDesign-figma-<ts>/`。
 - figma-plugin/（manifest.json + code.js + ui.html）：Import nondesign.json
-  → Frame/Text/Rectangle 真实可编辑图层；Export 选区 → NoNDesign JSON。
+  → Frame/Text/Rectangle 真实可编辑图层；Export 选区 → NaN JSON。
 - 客户端：项目菜单「导出 Figma 包」。
 - **两处真机实证修复**（72491c6）：
   ① 路由错挂 `/acp/prompt`（FastAPI 同路径先注册者胜出 → ACP 对话全部

@@ -624,7 +624,7 @@ void main() {
     test('规范缺失的对照不抛异常，给一句人话', () {
       final review = reviewVideoScript(timeline: _timeline(), spec: null);
       expect(review.ok, isFalse);
-      expect(review.problems.single, '这份脚本还缺一份说明规范，先补齐规范再渲染');
+      expect(review.problems.single, '这份脚本还缺一份说明规范，先补齐规范再看画面');
       expect(review.output, isNot(contains('spec_missing')));
     });
   });
@@ -679,6 +679,39 @@ void main() {
         expect(message.trim(), isNotEmpty, reason: code);
         expect(bareCode.hasMatch(message), isFalse, reason: code);
         expect(message, isNot(contains(code)), reason: code);
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 播放读数（代码动画播放器）
+  // -------------------------------------------------------------------------
+
+  group('播放读数', () {
+    test('mm:ss.SSS：分/秒/毫秒都补零，够长能对上脚本节拍', () {
+      expect(formatVideoTime(0), '00:00.000');
+      expect(formatVideoTime(1.5), '00:01.500');
+      expect(formatVideoTime(0.032), '00:00.032');
+      expect(formatVideoTime(8.0), '00:08.000');
+      expect(formatVideoTime(61.25), '01:01.250');
+    });
+
+    test('非法/非有限值按 0 处理；超过一小时分钟位继续累加', () {
+      expect(formatVideoTime(-3), '00:00.000');
+      expect(formatVideoTime(double.nan), '00:00.000');
+      expect(formatVideoTime(double.infinity), '00:00.000');
+      expect(formatVideoTime(3723.456), '62:03.456');
+    });
+
+    test('内置示例的片长读数与文档一致（播放器读数与脚本同源）', () {
+      final service = VideoService(host: VideoHost.macos);
+      for (var i = 0; i < service.samples.length; i++) {
+        final doc = service.loadSample(i);
+        final readout = formatVideoTime(doc.totalSeconds);
+        expect(readout, matches(RegExp(r'^\d{2,}:\d{2}\.\d{3}$')), reason: '示例 $i');
+        final parts = readout.split(RegExp(r'[:.]'));
+        final seconds = int.parse(parts[0]) * 60 + int.parse(parts[1]);
+        expect(seconds, doc.totalSeconds.round(), reason: '示例 $i');
       }
     });
   });

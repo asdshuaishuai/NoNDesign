@@ -17,9 +17,9 @@
 ## 0. 结论先行
 
 1. **渲染层判定**：HTML 热应用与 A2UI（`a2ui_flutter`，genui 的官方继任者）**并存、自适应分派**，
-   不是互相替代。两者**都只在 NoNDesign 平台内运行**、都是一等小应用：HTML = 自包含单文件载荷
+   不是互相替代。两者**都只在 NaN 平台内运行**、都是一等小应用：HTML = 自包含单文件载荷
    （零外链，包内即开）；a2ui = 原生富交互层（表单/输入/滑杆/日期 + DataModel 绑定 + 动作回流）。
-   **「文件即应用」= 把小应用打包成 `.nonapp` 单文件压缩包，分享给其他 NoNDesign 用户，对方用我们
+   **「文件即应用」= 把小应用打包成 `.nonapp` 单文件压缩包，分享给其他 NaN 用户，对方用我们
    的应用打开即可用**（格式定义见 §1.1）。
 2. **信息架构**：主交互面从 Welcome 升级为 **chat stream**（聊天流）；生成物不再只有「进工作区」
    一条路，而是以卡片落在聊天流里；**艺术架**（Art Shelf）是产物的常驻货架面（热应用 / 原型交互
@@ -36,7 +36,7 @@ A2UI 是 a2ui_flutter 实现的那套。下文 A2UI 均指协议/包。）
 
 | 维度 | HTML 热应用（现状） | A2UI surface（a2ui_flutter 0.3.0） |
 | --- | --- | --- |
-| 运行平台 | NoNDesign 平台内（WebView 载体） | NoNDesign 平台内（原生 surface 载体）——两者相同 |
+| 运行平台 | NaN 平台内（WebView 载体） | NaN 平台内（原生 surface 载体）——两者相同 |
 | 打包分享 | 单 HTML 即应用本体；`.nonapp` 包内 `payload/index.html` | `.nonapp` 包内 `payload/surface.json`（A2UI 消息序列）+ 初始 DataModel |
 | 组件复杂度 | LLM 手写全部 UI 逻辑，复杂有状态件（表单校验/日期/滑杆联动）质量方差大 | 原生 Material 件：TextField/CheckBox/ChoicePicker/Slider/DateTimeInput，**校验（props.isValid）与路径绑定（DataModel）内置** |
 | 交互回流 | 无结构化回流（app 内逻辑自洽） | 动作自动打包当前状态回 agent，**交互循环免费** |
@@ -52,8 +52,8 @@ A2UI 是 a2ui_flutter 实现的那套。下文 A2UI 均指协议/包。）
 
 ### 1.1 文件即应用 v2：`.nonapp` 单文件包（用户澄清 2026-11-17）
 
-**定义修正**：文件即应用 ≠ 跨出平台可移植。两种渲染器的小应用**都只在 NoNDesign 平台内运行**；
-「文件即应用」= 把小应用**打包成 `.nonapp` 单文件（单文件压缩包）**，分享给其他 NoNDesign 用户，
+**定义修正**：文件即应用 ≠ 跨出平台可移植。两种渲染器的小应用**都只在 NaN 平台内运行**；
+「文件即应用」= 把小应用**打包成 `.nonapp` 单文件（单文件压缩包）**，分享给其他 NaN 用户，
 对方用我们的应用打开即用。
 
 - **容器**：`.nonapp` = zip 单文件，内含——

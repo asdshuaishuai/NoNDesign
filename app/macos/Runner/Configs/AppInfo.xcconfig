@@ -5,13 +5,13 @@
 // 'flutter create' template.
 
 // The application's name. By default this is also the title of the Flutter window.
-PRODUCT_NAME = NoNDesign
+PRODUCT_NAME = NaN
 
 // The application's bundle identifier
 PRODUCT_BUNDLE_IDENTIFIER = com.nondesign.nondesign
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.nondesign. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 NaN. All rights reserved.
 
 // Apple Silicon only（2026-11-17，MediaPipe 集成硬约束）：
 // MediaPipe 只提供 macOS arm64 运行时（macos/x64 无切片），而 Flutter 的

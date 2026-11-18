@@ -54,7 +54,7 @@ class NonApp extends StatelessWidget {
     final store = context.watch<AppStore>();
     final dark = store.settings.theme != 'light';
     return MaterialApp(
-      title: 'NoNDesign',
+      title: 'NaN',
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: rootMessengerKey,
       navigatorKey: rootNavigatorKey,
@@ -124,7 +124,10 @@ class NonApp extends StatelessWidget {
                     final fctx = FocusManager.instance.primaryFocus?.context;
                     final route = fctx == null ? null : ModalRoute.of(fctx);
                     if (route == null || !route.isCurrent || route is PopupRoute) return;
-                    store.setView(fromShell ? 'design' : 'chat');
+                    // 插件工作区彼此独立：Esc 回**主页**（不是回某个设计项目）；
+                    // 作品集/演示仍回设计面（它们是设计项目的展示态）。
+                    store.setView(
+                        store.view.startsWith('plugin:') ? 'home' : (fromShell ? 'design' : 'chat'));
                   },
                 },
                 child: child ?? const SizedBox.shrink(),
@@ -157,13 +160,14 @@ class NonApp extends StatelessWidget {
     );
   }
 
-  /// 整壳全幅视图先于响应式壳：play / portfolio / plugin:* 不吃右侧窄栏。
-  /// 其余交给 [ShellHost]（两个壳各自裁决主面）。`store.hasProject` 不再是
-  /// 硬条件——无项目时桌面主面是经典 Welcome（壳内处理）。
+  /// 整壳全幅视图先于响应式壳：只有 play / portfolio 不吃右侧窄栏。
+  ///
+  /// 四个工作区里的三个（3D / 视频 / 热应用）都走 `plugin:*`，它们**必须**
+  /// 留在响应式壳里：桌面壳左侧是固定工作区、右侧是常驻 NaN 窄栏（用户
+  /// 裁决 2026-11-18：所有内容都通过 NaN 交互，工作区里不能没有它）。
+  /// 手机/iPad 聊天优先壳由 [ChatPiPShell] 自己把 plugin 视图渲染成整屏。
   Widget _routeFor(AppStore store) {
-    if (store.view == 'portfolio' ||
-        store.view.startsWith('plugin:') ||
-        store.view == 'play') {
+    if (store.view == 'portfolio' || store.view == 'play') {
       // 无项目也必须可路由（Welcome 卡片 / ⌘5–⌘7 曾点了不换屏）。
       return const Workspace();
     }
@@ -348,7 +352,7 @@ class _BootScreenState extends State<_BootScreen> with SingleTickerProviderState
               },
             ),
             const SizedBox(height: 18),
-            Text('NoNDesign', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3)),
+            Text('NaN', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3)),
             const SizedBox(height: 16),
             SizedBox(
               width: 168,

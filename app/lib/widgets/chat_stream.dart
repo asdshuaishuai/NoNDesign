@@ -1,13 +1,16 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:markdown/markdown.dart' as md;
 import 'package:provider/provider.dart';
 
 import '../core/dart_agent.dart' show toolLabel;
 import '../core/models.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import '../core/toast_service.dart';
 import 'a2ui_card.dart';
 import 'common.dart';
 import 'settings_dialog.dart';
@@ -71,6 +74,13 @@ class _ChatStreamViewState extends State<ChatStreamView> {
     store.sendChat(text);
   }
 
+  /// 建议 chip / 消息操作条的统一发送出口（与输入框同一条 store 路径）。
+  void _sendText(AppStore store, String text) {
+    final clean = text.trim();
+    if (clean.isEmpty || store.agentBusy) return;
+    store.sendChat(clean);
+  }
+
   void _scheduleScrollToBottom(int count) {
     if (count == _lastCount) return;
     _lastCount = count;
@@ -123,8 +133,8 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                       controller: _scroll,
                       padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
                       itemCount: messages.length,
-                      itemBuilder: (context, i) =>
-                          _buildCard(context, store, messages[i], i),
+                      itemBuilder: (context, i) => _buildCard(
+                          context, store, messages[i], i, isLast: i == messages.length - 1),
                     ),
             ),
             _composer(context, store, p),
@@ -148,7 +158,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('NoNDesign',
+                Text('NaN',
                     maxLines: 1, overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
                 if (!widget.railMode)
@@ -233,14 +243,15 @@ class _ChatStreamViewState extends State<ChatStreamView> {
     );
   }
 
-  Widget _buildCard(BuildContext context, AppStore store, ChatMessage m, int index) {
+  Widget _buildCard(BuildContext context, AppStore store, ChatMessage m, int index,
+      {bool isLast = false}) {
     switch (m.kind) {
       case chatKindUser:
         return _userBubble(m, context.palette);
       case chatKindAssistant:
-        return _assistantCard(m, context.palette);
+        return _assistantCard(store, m, context.palette, isLast: isLast);
       case chatKindProgress:
-        return _progressCard(m, context.palette);
+        return _progressCard(store, m, context.palette);
       case chatKindA2ui:
         return _a2uiCard(store, m, index, context.palette);
       case chatKindArtifact:
@@ -273,24 +284,19 @@ class _ChatStreamViewState extends State<ChatStreamView> {
     );
   }
 
-  Widget _assistantCard(ChatMessage m, NonPalette p) {
-    return Container(
-      margin: const EdgeInsets.only(right: 64, bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: MarkdownBody(
-        data: m.text,
-        softLineBreak: true,
-        styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-          p: TextStyle(fontSize: 12.5, height: 1.6, color: p.ink2),
-          h1: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: p.ink),
-          h2: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: p.ink),
-          code: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink2, backgroundColor: p.panel2),
-        ),
-      ),
+  Widget _assistantCard(AppStore store, ChatMessage m, NonPalette p, {bool isLast = false}) {
+    return _AssistantBlock(
+      key: ValueKey('chat-assistant-${m.ts.microsecondsSinceEpoch}'),
+      message: m,
+      busy: store.agentBusy,
+      showSuggestions: isLast && !store.agentBusy,
+      onSend: (text) => _sendText(store, text),
     );
   }
 
-  Widget _progressCard(ChatMessage m, NonPalette p) {
+  /// 进度卡：失败收尾（`ok == false` 且有人话原因）时除错误文案外给一个
+  /// 「重试」按钮——续跑走与输入框/建议 chip 同一条 [_sendText] 出口。
+  Widget _progressCard(AppStore store, ChatMessage m, NonPalette p) {
     return Container(
       margin: const EdgeInsets.only(right: 40, bottom: 10),
       padding: const EdgeInsets.all(11),
@@ -360,8 +366,29 @@ class _ChatStreamViewState extends State<ChatStreamView> {
           if (!m.running && !m.ok && m.detail != null && m.detail!.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Text(m.detail!,
-                  style: TextStyle(fontSize: 11, height: 1.5, color: p.danger)),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(m.detail!,
+                        style: TextStyle(fontSize: 11, height: 1.5, color: p.danger)),
+                  ),
+                  const SizedBox(width: 8),
+                  // 一步失败后不必重新描述需求：原样再发一次「重试上一步」，
+                  // 由同一条 store.sendChat 路径续跑（与建议 chip 同出口）。
+                  TextButton(
+                    key: const ValueKey('chat-retry-step'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: p.danger,
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      minimumSize: const Size(0, 26),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () => _sendText(store, '重试上一步'),
+                    child: const Text('重试', style: TextStyle(fontSize: 11)),
+                  ),
+                ],
+              ),
             ),
         ],
       ),
@@ -394,6 +421,15 @@ class _ChatStreamViewState extends State<ChatStreamView> {
       artifactVideo => (Icons.movie_outlined, '视频'),
       artifactThree => (Icons.view_in_ar_outlined, '3D'),
       _ => (Icons.collections_bookmark_outlined, '作品'),
+    };
+    // 卡片右侧的显式动作：整卡可点这件事没有可见提示（触屏尤其不明显），
+    // 文案按产物种类说清楚点开去哪，动作沿用 [_openArtifact] 同一出口。
+    final openLabel = switch (m.artifactKind) {
+      artifactPrototype => '打开设计',
+      artifactHotapp => '打开应用',
+      artifactVideo => '看视频',
+      artifactThree => '看 3D',
+      _ => '打开作品集',
     };
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -454,7 +490,17 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                 ),
               ),
               const SizedBox(width: 8),
-              Icon(Icons.chevron_right, size: 16, color: p.ink4),
+              TextButton(
+                key: const ValueKey('chat-artifact-open'),
+                style: TextButton.styleFrom(
+                  foregroundColor: p.accent,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  minimumSize: const Size(0, 28),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: () => _openArtifact(store, m),
+                child: Text(openLabel, style: const TextStyle(fontSize: 11)),
+              ),
             ],
           ),
         ),
@@ -500,22 +546,30 @@ class _ChatStreamViewState extends State<ChatStreamView> {
             ),
           ),
           const SizedBox(width: 8),
-          IconButton(
-            key: const ValueKey('chat-send'),
-            tooltip: '发送',
-            style: IconButton.styleFrom(
-              backgroundColor: p.accent,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.all(11),
+          if (busy)
+            IconButton(
+              key: const ValueKey('chat-stop-button'),
+              tooltip: '停止本轮',
+              style: IconButton.styleFrom(
+                backgroundColor: p.panel2,
+                foregroundColor: p.ink2,
+                padding: const EdgeInsets.all(11),
+              ),
+              onPressed: () => store.cancelAgent(),
+              icon: const Icon(Icons.stop_rounded, size: 18),
+            )
+          else
+            IconButton(
+              key: const ValueKey('chat-send'),
+              tooltip: '发送',
+              style: IconButton.styleFrom(
+                backgroundColor: p.accent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.all(11),
+              ),
+              onPressed: () => _send(store),
+              icon: const Icon(Icons.arrow_upward, size: 18),
             ),
-            onPressed: busy ? null : () => _send(store),
-            icon: busy
-                ? SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Icon(Icons.arrow_upward, size: 18),
-          ),
         ],
       ),
     );
@@ -768,5 +822,292 @@ class _SaveAsDialogState extends State<_SaveAsDialog> {
         FilledButton(onPressed: _submit, child: const Text('保存')),
       ],
     );
+  }
+}
+
+/// 助手消息块：正文 + hover 操作条（复制）+ 最后一条消息的建议 chips。
+///
+/// ChatGPT 式交互的最小闭环：消息可复制、可一键追问；建议只出现在**最后
+/// 一条**助手消息上，历史消息保持干净（否则整屏都是重复建议）。
+class _AssistantBlock extends StatefulWidget {
+  final ChatMessage message;
+  final bool showSuggestions;
+  final bool busy;
+  final ValueChanged<String> onSend;
+
+  const _AssistantBlock({
+    super.key,
+    required this.message,
+    required this.showSuggestions,
+    required this.busy,
+    required this.onSend,
+  });
+
+  @override
+  State<_AssistantBlock> createState() => _AssistantBlockState();
+}
+
+class _AssistantBlockState extends State<_AssistantBlock> {
+  bool _hover = false;
+  bool _copied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.message.text));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    ToastService.instance.success('已复制这段回复', null);
+    Future<void>.delayed(const Duration(milliseconds: 1600), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: Container(
+        margin: const EdgeInsets.only(right: 64, bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            MarkdownBody(
+              data: widget.message.text,
+              softLineBreak: true,
+              builders: {
+                'pre': _PreBuilder(),
+                'code': _InlineCodeBuilder(),
+              },
+              styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                p: TextStyle(fontSize: 12.5, height: 1.6, color: p.ink2),
+                h1: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: p.ink),
+                h2: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: p.ink),
+                code: TextStyle(
+                    fontSize: 11, fontFamily: 'Menlo', color: p.ink2, backgroundColor: p.panel2),
+                codeblockDecoration: BoxDecoration(
+                  color: p.panel2,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: p.line),
+                ),
+              ),
+            ),
+            if (_hover)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _MiniAction(
+                      key: const ValueKey('chat-msg-copy'),
+                      icon: _copied ? Icons.check_rounded : Icons.copy_rounded,
+                      label: _copied ? '已复制' : '复制',
+                      onTap: _copy,
+                    ),
+                  ],
+                ),
+              ),
+            if (widget.showSuggestions && widget.message.text.trim().isNotEmpty)
+              _SuggestionChips(onSend: widget.onSend),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 消息操作条上的小动作（hover 才出现，弱化视觉权重）。
+class _MiniAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _MiniAction({super.key, required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: p.ink4),
+            const SizedBox(width: 4),
+            Text(label, style: TextStyle(fontSize: 10.5, color: p.ink4)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 建议 chips：点一下 = 把这句话作为下一条用户消息发出去。
+class _SuggestionChips extends StatelessWidget {
+  final ValueChanged<String> onSend;
+
+  const _SuggestionChips({required this.onSend});
+
+  static const _suggestions = [
+    '继续完善细节',
+    '换一版布局看看',
+    '把这一页改成深色主题',
+    '补上空状态和错误态',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 2),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final s in _suggestions)
+            InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: () => onSend(s),
+              // key 放在 chip 自己的容器上而不是 InkWell 上：Wrap 的四个 chip
+              // 是同一 MultiChildRenderObjectWidget 的兄弟，兄弟间重复 key 会
+              // 直接触发 Flutter 的 "Duplicate keys found" 断言（debug 下整块
+              // 渲染失败）。放在各自子树里既保住外部 find.byKey 契约，也合法。
+              child: Container(
+                key: const ValueKey('chat-suggestion-chip'),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: p.panel.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: p.line),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.auto_awesome, size: 11, color: p.accent),
+                    const SizedBox(width: 5),
+                    Text(s, style: TextStyle(fontSize: 11, color: p.ink2)),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 围栏代码块：语言标签 + 右上角复制按钮（长内容可横向滚动，不撑破窄栏）。
+class _CodeBlock extends StatelessWidget {
+  final String code;
+  final String? language;
+
+  const _CodeBlock({required this.code, this.language});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Container(
+      // 一条消息可能含多个围栏块：key 必须随内容唯一，否则兄弟节点重复 key
+      // 会直接抛 Duplicate keys（整条消息渲染失败）。
+      key: ValueKey('chat-code-block-${code.hashCode}'),
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(
+        color: p.panel2,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: p.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
+            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+            child: Row(
+              children: [
+                Text((language ?? '代码').toUpperCase(),
+                    style: TextStyle(
+                        fontSize: 9.5, letterSpacing: 0.6, fontWeight: FontWeight.w600, color: p.ink4)),
+                const Spacer(),
+                InkWell(
+                  key: const ValueKey('chat-copy-code'),
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () async {
+                    await Clipboard.setData(ClipboardData(text: code));
+                    ToastService.instance.success('已复制代码', null);
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.copy_rounded, size: 11, color: p.ink4),
+                      const SizedBox(width: 4),
+                      Text('复制', style: TextStyle(fontSize: 10, color: p.ink4)),
+                    ]),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.all(10),
+            child: Text(code,
+                style: TextStyle(fontSize: 11, height: 1.55, fontFamily: 'Menlo', color: p.ink2)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// `pre` 元素 → 带复制按钮的代码块。
+class _PreBuilder extends MarkdownElementBuilder {
+  @override
+  bool isBlockElement() => true;
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final code = element.textContent.trimRight();
+    if (code.isEmpty) return const SizedBox.shrink();
+    String? language;
+    for (final child in element.children ?? const <md.Node>[]) {
+      if (child is md.Element) {
+        final cls = child.attributes['class'] ?? '';
+        if (cls.startsWith('language-')) language = cls.substring('language-'.length);
+      }
+    }
+    return _CodeBlock(code: code, language: language);
+  }
+}
+
+/// 行内 `code` 元素：保持等宽小底纹（复制交给代码块/整条消息）。
+class _InlineCodeBuilder extends MarkdownElementBuilder {
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final p = context.palette;
+    final text = element.textContent;
+    if (text.isEmpty) return null;
+    return Text(text,
+        style: TextStyle(
+          fontSize: 11,
+          fontFamily: 'Menlo',
+          color: p.ink2,
+          backgroundColor: p.panel2,
+        ));
   }
 }

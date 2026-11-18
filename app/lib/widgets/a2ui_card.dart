@@ -157,7 +157,7 @@ class A2uiCard extends StatefulWidget {
 
   /// 宿主未给前置时的默认角色说明（拼在 promptSnippet 之前）。
   static const String defaultPreamble =
-      '你是 NoNDesign 聊天流中的设计助手。回答用一两句话；表单、清单、卡片、'
+      '你是 NaN 聊天流中的设计助手。回答用一两句话；表单、清单、卡片、'
       '参数选择这类数据交互界面用 A2UI surface 呈现。每个新 surface 用新的 '
       'surfaceId；带输入控件的 surface 设 "sendDataModel": true，把输入绑定'
       '到数据模型路径，提交按钮的事件在 context 里带回这些路径的值。';

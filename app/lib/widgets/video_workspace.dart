@@ -1,27 +1,25 @@
-/// 视频工作区（批次 08：全本地）。
+/// 视频工作区（代码动画版）。
 ///
-/// 一次完整的视频制作只有四步，全部在本机完成：
+/// 视频模块**不是**「渲染成片再看」，而是代码动画：时间线脚本 + 规范在
+/// [VideoDocument] 里编译成算式，每一帧都由 [VideoDocument.frameSvg] 现算。
+/// 工作台只有一整块播放面：
 ///
-///  1. **选脚本**：内置标杆示例，或在「编辑脚本」里粘贴自己的时间线脚本与规范；
-///  2. **规范对照**：规范硬门 + 算式符号闭包 + 节拍覆盖，失败原因当场列在
-///     按钮旁边（不是等点了渲染才报错）；
-///  3. **渲染**：桌面调本机渲染组件出逐帧画面并编码成片；手机/平板不渲染，
-///     点渲染会明确告诉你「只在电脑上可用」，而不是点了没反应；
-///  4. **播放**：成片与艺术架里的既有视频都能在工作台内播放。
+///  * 主区铺满 [VideoAnimationSurface]（圆角 + 内边距），播放/暂停、回片头、
+///    循环、时间条与时间读数都在播放器自己的控制栏里；
+///  * 编辑类动作不占画面，全部收进同一条 46px 顶部工具条：示例选择、
+///    帧率、编辑脚本、规范对照状态（点开是一张 result sheet）；
+///  * 只读/低频入口（「加载示例」与「代码动画直接播放，暂不导出成片」）放在
+///    工具条尾部与播放器底部一行，不抢画面。
 ///
-/// 数据面全部在 [VideoService]（纯 Dart）：校验、逐帧画面、对照检查、渲染
-/// 任务与进度都在进程内，不经过任何端口或内部路由。界面只做三件事：把状态
-/// 画出来、把用户动作翻译成一次服务调用、把失败翻成一句人话（原始诊断进
-/// 折叠的「技术详情」）。
+/// 成片导出（mp4）暂时不做：界面上没有任何渲染/导出按钮，也不再有渲染任务、
+/// 进度轮询与产物文件夹入口。艺术架里**已有的** mp4 仍可点开播放（走的还是
+/// [VideoPlayerSurface]），那是「播放既有产物」，不是本模块的生成路径。
 ///
-/// 平台矩阵的唯一判据是 [PlatformCapabilities]（能力中心）：
-///  * 渲染 = 桌面三平台（[PlatformCapabilities.supportsVideoRender]）；
-///  * 「在文件夹中显示」= 桌面三平台（[PlatformCapabilities.supportsRevealInFolder]）。
+/// 数据面全部在 [VideoService]（纯 Dart）：校验、逐帧画面、对照检查都在进程
+/// 内，不经过任何端口、不 spawn 外部程序，手机/平板与桌面行为一致。
 library;
 
-import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -29,18 +27,18 @@ import 'package:provider/provider.dart';
 
 import '../core/capability.dart';
 import '../core/keys.dart';
-import '../core/platform_capabilities.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/toast_service.dart';
 import '../core/video_service.dart';
+import 'video_animation_surface.dart';
 import 'video_player_surface.dart';
 
 /// 视频工作区。
 class VideoWorkspace extends StatefulWidget {
   const VideoWorkspace({super.key, this.service});
 
-  /// 测试注入（生产用 [VideoService.instance]，任务与产物活过视图切换）。
+  /// 测试注入（生产用 [VideoService.instance]，示例与文档在进程内）。
   final VideoService? service;
 
   @override
@@ -52,23 +50,13 @@ class VideoWorkspace extends StatefulWidget {
 String? videoLoadOnOpen;
 
 class _VideoWorkspaceState extends State<VideoWorkspace> {
-  static const int _pollMillis = 350;
-
   int _sampleIdx = 0;
-  double _fps = 10;
-  bool _busy = false;
+  int _fps = 10;
   VideoDocument? _doc;
   VideoReviewResult? _review;
-  String? _jobId;
-  VideoRenderJob? _job;
-  Timer? _poll;
 
   /// 产物模式：艺术架点开的某个 mp4（非 null 即整个工作台切到播放面）。
   String? _artifactPath;
-
-  /// 渲染启动失败 / 任务失败的人话与原始诊断（诊断只进折叠详情）。
-  String _renderError = '';
-  String _renderTechnical = '';
 
   /// 脚本编辑器最近一次输入（切示例后仍保留，方便改回去）。
   String _scriptTimeline = '';
@@ -77,13 +65,12 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   AppStore get store => context.read<AppStore>();
   VideoService get _service => widget.service ?? VideoService.instance;
   ToastService get _toasts => store.toasts;
-  PlatformCapabilities get _host => store.capabilities.platform;
 
   @override
   void initState() {
     super.initState();
     // 艺术架产物直载优先于一切恢复路径：用户点开的是某个产物，不是
-    // 「上次渲染态」。消费即清（跨实例通道）。
+    // 「上次编辑态」。消费即清（跨实例通道）。
     final pendingArtifact = videoLoadOnOpen;
     videoLoadOnOpen = null;
     if (pendingArtifact != null && pendingArtifact.isNotEmpty) {
@@ -95,35 +82,12 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     _sampleIdx = settings.videoSampleIdx.clamp(0, _service.samples.length - 1);
     _applySample(_sampleIdx);
 
-    // 视图切换即 dispose：在飞任务从共享服务接回轮询（任务活在进程里，
-    // 不随视图销毁）。进程重启后旧任务号查无此项——清掉并轻提示。
-    final restoredId = settings.videoJob;
-    if (restoredId.isNotEmpty) {
-      final snapshot = _service.job(restoredId);
-      if (snapshot == null) {
-        // initState 里不能同步改 store（notifyListeners 会撞 build），
-        // 放到首帧之后：清持久化 + 轻提示，不空转轮询。
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          store.setVideoState(job: '');
-          _toasts.info('上次的渲染任务已经不在了', '重新渲染一次就好。');
-        });
-      } else {
-        _jobId = restoredId;
-        _job = snapshot;
-        if (snapshot.isRunning) _startPolling();
-        if (snapshot.isFailed) {
-          _renderError = videoFailureMessage(snapshot.failureCode);
-          _renderTechnical = snapshot.log;
-        }
-      }
+    // 旧版本的渲染任务号已经没有对应界面：静默清掉，别让它继续占着设置。
+    if (settings.videoJob.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) store.setVideoState(job: '');
+      });
     }
-  }
-
-  @override
-  void dispose() {
-    _poll?.cancel();
-    super.dispose();
   }
 
   // ------------------------------------------------------------------ 脚本
@@ -132,14 +96,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     try {
       final doc = _service.loadSample(index);
       _doc = doc;
+      _fps = doc.fps.clamp(1, 30);
       _scriptTimeline = const JsonEncoder.withIndent('  ').convert(doc.timeline);
       _scriptSpec = const JsonEncoder.withIndent('  ').convert(doc.spec.raw);
       _review = _service.review(timeline: doc.timeline, spec: doc.spec.raw);
-      _renderError = '';
-      _renderTechnical = '';
-      _jobId = null;
-      _job = null;
-      _poll?.cancel();
     } on VideoRejected catch (error) {
       _doc = null;
       _review = VideoReviewResult(
@@ -166,12 +126,11 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       _sampleIdx = index;
       _applySample(index);
     });
-    store.setVideoState(sampleIdx: index, job: '');
+    store.setVideoState(sampleIdx: index);
   }
 
   void _reloadSelectedSample() {
     setState(() => _applySample(_sampleIdx));
-    store.setVideoState(job: '');
   }
 
   Future<void> _editScript() async {
@@ -192,12 +151,8 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           specJson: result.spec,
         );
         _doc = doc;
+        _fps = doc.fps.clamp(1, 30);
         _review = _service.review(timeline: doc.timeline, spec: doc.spec.raw);
-        _renderError = '';
-        _renderTechnical = '';
-        _jobId = null;
-        _job = null;
-        _poll?.cancel();
       } on VideoRejected catch (error) {
         _doc = null;
         _review = VideoReviewResult(
@@ -209,97 +164,66 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         );
       }
     });
-    store.setVideoState(job: '');
   }
 
-  // ------------------------------------------------------------------ 渲染
+  // ------------------------------------------------------------------ 帧率
 
-  bool get _running => _job?.isRunning ?? false;
+  Future<void> _pickFps() async {
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (context) => _FpsDialog(initial: _fps),
+    );
+    if (selected == null || !mounted) return;
+    setState(() => _fps = selected.clamp(1, 30));
+  }
 
-  Future<void> _render() async {
-    if (!_host.supportsVideoRender) {
-      _toasts.warn(
-        store.capabilities.message(CapabilityId.videoRender),
-        '手机上可以编辑脚本、做对照检查，并播放已有的视频。',
-      );
-      return;
-    }
-    final doc = _doc;
-    if (doc == null) return;
-    setState(() {
-      _busy = true;
-      _renderError = '';
-      _renderTechnical = '';
-    });
-    try {
-      final job = await _service.startRender(doc, fps: _fps.round());
-      if (!mounted) return;
-      setState(() {
-        _jobId = job.id;
-        _job = job;
-        _busy = false;
-      });
-      store.setVideoState(job: job.id);
-      _startPolling();
-    } on VideoRejected catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _renderError = videoFailureMessage(error);
-        _renderTechnical = error.technical;
-      });
-      _toasts.error(videoFailureMessage(error));
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _renderError = videoFailureMessage(null);
-        _renderTechnical = '$error';
-      });
-      _toasts.error(videoFailureMessage(null));
+  Future<void> _onMoreAction(String action) async {
+    switch (action) {
+      case 'fps':
+        await _pickFps();
+      case 'script':
+        await _editScript();
     }
   }
 
-  void _startPolling() {
-    _poll?.cancel();
-    _poll = Timer.periodic(const Duration(milliseconds: _pollMillis), (_) => _pollOnce());
+  // ------------------------------------------------------------------ 对照
+
+  /// 对照结论三档 + 未知：通过 / 有问题 / 未通过 / 待检查。
+  ({String label, Color color, IconData icon}) _reviewStatus(NonPalette p) {
+    final review = _review;
+    if (review == null) return (label: '待检查', color: p.ink4, icon: Icons.rule_outlined);
+    if (!review.ok) return (label: '未通过', color: p.danger, icon: Icons.error_outline);
+    if (review.notes.isNotEmpty) return (label: '有问题', color: p.warn, icon: Icons.info_outline);
+    return (label: '通过', color: p.accent, icon: Icons.check_circle_outline);
   }
 
-  void _pollOnce() {
-    final id = _jobId;
-    if (id == null) return;
-    final snapshot = _service.job(id);
-    if (!mounted) return;
-    if (snapshot == null) {
-      // 任务不在了（进程重启 / 服务被替换）：停轮询、清持久化，不空转。
-      _poll?.cancel();
-      setState(() {
-        _jobId = null;
-        _job = null;
-      });
-      store.setVideoState(job: '');
-      _toasts.info('渲染任务已经不在了', '重新渲染一次就好。');
-      return;
-    }
-    setState(() => _job = snapshot);
-    if (snapshot.isRunning) return;
-    _poll?.cancel();
-    store.setVideoState(job: '');
-    if (snapshot.isDone) {
-      _toasts.success(
-        '渲染完成（${snapshot.totalFrames} 帧）',
-        '成片已经放进艺术架，可以在工作台里播放。',
-      );
-    } else if (snapshot.isFailed) {
-      setState(() {
-        _renderError = videoFailureMessage(snapshot.failureCode);
-        _renderTechnical = snapshot.log;
-      });
-      _toasts.error(videoFailureMessage(snapshot.failureCode));
-    }
+  Future<void> _showReviewSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 680),
+      builder: (sheetContext) => _ReviewSheet(
+        review: _review,
+        hasDocument: _doc != null,
+        onEditScript: () {
+          Navigator.of(sheetContext).pop();
+          _editScript();
+        },
+      ),
+    );
   }
 
   // ------------------------------------------------------------------ 播放面
+
+  /// 从「播放既有产物」回到创作面：产物模式在 initState 里直接返回，没有载入
+  /// 任何示例文档，回来时补上一次（否则主区会是空态）。
+  void _leaveArtifact() {
+    setState(() {
+      _artifactPath = null;
+      if (_doc == null) _applySample(_sampleIdx);
+    });
+  }
 
   Future<void> _copyArtifactPath() async {
     final path = _artifactPath;
@@ -323,7 +247,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
 
   static String _artifactName(String path) {
     final parts = path.split(RegExp(r'[/\\]'));
-    // 产物固定是 <job>/frames.mp4：父目录名才是「第几个渲染」，帧名没有信息量。
+    // 产物固定是 <job>/frames.mp4：父目录名才是「第几个产物」，帧名没有信息量。
     return parts.length >= 2 ? parts[parts.length - 2] : path;
   }
 
@@ -331,97 +255,303 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
     final artifact = _artifactPath;
     return Column(
       children: [
-        Container(
-          height: 46,
-          decoration: BoxDecoration(
-            color: p.bgElevated,
-            border: Border(bottom: BorderSide(color: p.line)),
+        _header(context, artifact: artifact),
+        Expanded(
+          child: artifact != null
+              ? _artifactPane(context, artifact)
+              : _authoringBody(context),
+        ),
+      ],
+    );
+  }
+
+  /// 一块播放面铺满主区 + 底部一行不抢画面的提示。
+  Widget _authoringBody(BuildContext context) {
+    return Column(children: [
+      Expanded(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
+          child: _previewPane(context),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(Icons.play_circle_outline, size: 12, color: context.palette.ink4),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              '代码动画直接播放，暂不导出成片',
+              key: const ValueKey('video-player-hint'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10, color: context.palette.ink4),
+            ),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          // 窄屏断点：副标题隐藏、标题省略号；390 宽曾溢出 241px。
-          child: LayoutBuilder(builder: (context, constraints) {
-            final narrow = constraints.maxWidth < 700;
-            return Row(children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back, size: 18),
-                tooltip: '返回设计 ${modCombo('⌘1')}',
-                color: p.ink2,
-                visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                onPressed: () => store.setView('design'),
+        ]),
+      ),
+    ]);
+  }
+
+  /// 46px 工具条：返回主页 / 标题 / 示例 / 帧率 / 编辑脚本 / 对照状态 / 加载示例。
+  ///
+  /// 宽度不够时（手机），低频动作进 ⋯ 菜单；示例与对照状态始终可见。
+  Widget _header(BuildContext context, {required String? artifact}) {
+    final p = context.palette;
+    return Container(
+      height: 46,
+      decoration: BoxDecoration(
+        color: p.bgElevated,
+        border: Border(bottom: BorderSide(color: p.line)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: LayoutBuilder(builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final labels = width >= 760;
+        final showTitle = width >= 560;
+        return Row(children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back, size: 18),
+            tooltip: '返回主页 ${modCombo('⌘1')}',
+            color: p.ink2,
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            // 视频是独立工作区：返回的是主页（模块入口），不是某个设计项目
+            // 的画布——工作区之间不互相挂靠。
+            onPressed: () => store.setView('home'),
+          ),
+          if (artifact != null) ...[
+            const SizedBox(width: 2),
+            Icon(Icons.movie_outlined, size: 17, color: p.accent),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                '视频产物 · ${_artifactName(artifact)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink),
               ),
-              const SizedBox(width: 4),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: _leaveArtifact,
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 28),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+              child: const Text('返回创作台', style: TextStyle(fontSize: 11)),
+            ),
+            const Spacer(),
+          ] else ...[
+            if (width >= 520) ...[
+              const SizedBox(width: 2),
               Icon(Icons.movie_outlined, size: 17, color: p.accent),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
+            ],
+            if (showTitle)
               ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: narrow ? 150 : 400),
+                constraints: const BoxConstraints(maxWidth: 180),
                 child: Text(
-                  artifact != null ? '视频产物 · ${_artifactName(artifact)}' : '视频工作台',
+                  '视频工作台',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink),
                 ),
               ),
-              if (artifact != null)
-                TextButton(
-                  onPressed: () => setState(() => _artifactPath = null),
-                  style: TextButton.styleFrom(
-                    minimumSize: const Size(0, 28),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+            if (labels) const Spacer() else const SizedBox(width: 6),
+            if (labels) ...[
+              _samplePicker(context, maxWidth: 240),
+              const SizedBox(width: 8),
+              _fpsControl(context),
+              const SizedBox(width: 4),
+              TextButton.icon(
+                key: const ValueKey('video-edit-script'),
+                onPressed: _editScript,
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 28),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                icon: const Icon(Icons.edit_note_outlined, size: 16),
+                label: const Text('编辑脚本', style: TextStyle(fontSize: 11)),
+              ),
+              const SizedBox(width: 4),
+              _reviewChip(context, showLabel: true),
+              const SizedBox(width: 4),
+              _loadSampleButton(context),
+            ] else ...[
+              Flexible(child: _samplePicker(context, maxWidth: 140)),
+              const SizedBox(width: 2),
+              _reviewChip(context, showLabel: false),
+              const SizedBox(width: 2),
+              _loadSampleButton(context),
+              const SizedBox(width: 2),
+              PopupMenuButton<String>(
+                key: const ValueKey('video-more-menu'),
+                tooltip: '更多',
+                iconSize: 18,
+                padding: EdgeInsets.zero,
+                iconColor: p.ink2,
+                position: PopupMenuPosition.under,
+                onSelected: _onMoreAction,
+                itemBuilder: (context) => <PopupMenuEntry<String>>[
+                  PopupMenuItem<String>(
+                    value: 'fps',
+                    height: 40,
+                    child: Text('帧率 $_fps', style: TextStyle(fontSize: 12, color: p.ink2)),
                   ),
-                  child: const Text('返回渲染台', style: TextStyle(fontSize: 11)),
+                  PopupMenuItem<String>(
+                    value: 'script',
+                    height: 40,
+                    child: Text('编辑脚本', style: TextStyle(fontSize: 12, color: p.ink2)),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ]);
+      }),
+    );
+  }
+
+  /// 示例选择：显示当前示例名，点开是三个标杆示例（带一行说明）。
+  Widget _samplePicker(BuildContext context, {required double maxWidth}) {
+    final p = context.palette;
+    final samples = _service.samples;
+    return PopupMenuButton<int>(
+      key: const ValueKey('video-sample-picker'),
+      tooltip: '选择示例',
+      position: PopupMenuPosition.under,
+      onSelected: _selectSample,
+      color: p.panel2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: p.line),
+      ),
+      itemBuilder: (context) => <PopupMenuEntry<int>>[
+        for (var i = 0; i < samples.length; i++)
+          PopupMenuItem<int>(
+            value: i,
+            height: 54,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                samples[i].label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: i == _sampleIdx ? p.accent : p.ink2,
+                  fontWeight: FontWeight.w600,
                 ),
-              const SizedBox(width: 14),
-              if (!narrow && artifact == null)
-                Text('无声视频 · 本机渲染 + 规范对照',
-                    style: TextStyle(fontSize: 11, color: p.ink4)),
-              const Spacer(),
-              if (_running || _busy)
-                SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 1.8, color: p.accent),
-                ),
-            ]);
-          }),
-        ),
-        Expanded(
-          child: artifact != null
-              ? _artifactPane(context, artifact)
-              : LayoutBuilder(builder: (context, constraints) {
-                  // 窄屏：单列滚动（固定 300px 配置列会把预览压到不可用）。
-                  final narrow = constraints.maxWidth < 700;
-                  if (narrow) {
-                    return SingleChildScrollView(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _configColumn(context, narrow: true),
-                          const SizedBox(height: 8),
-                          SizedBox(height: 300, child: _previewPane(context)),
-                        ],
-                      ),
-                    );
-                  }
-                  return Row(children: [
-                    SizedBox(width: 320, child: _configColumn(context, narrow: false)),
-                    Expanded(child: _previewPane(context)),
-                  ]);
-                }),
-        ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                samples[i].note,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10, color: p.ink4),
+              ),
+            ]),
+          ),
       ],
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: Container(
+          height: 28,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: p.panel2,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: p.line),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('标杆示例', style: TextStyle(fontSize: 9, color: p.ink4)),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                samples.isEmpty ? '' : samples[_sampleIdx.clamp(0, samples.length - 1)].label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, color: p.ink2),
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(Icons.expand_more, size: 14, color: p.ink4),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _fpsControl(BuildContext context) {
+    final p = context.palette;
+    return TextButton(
+      key: const ValueKey('video-fps-control'),
+      onPressed: _pickFps,
+      style: TextButton.styleFrom(
+        minimumSize: const Size(0, 28),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.speed_outlined, size: 14, color: p.ink3),
+        const SizedBox(width: 5),
+        Text('帧率 $_fps', style: TextStyle(fontSize: 11, color: p.ink2)),
+      ]),
+    );
+  }
+
+  Widget _reviewChip(BuildContext context, {required bool showLabel}) {
+    final p = context.palette;
+    final status = _reviewStatus(p);
+    return InkWell(
+      key: const ValueKey('video-review-chip'),
+      onTap: _showReviewSheet,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        height: 28,
+        padding: EdgeInsets.symmetric(horizontal: showLabel ? 10 : 6),
+        decoration: BoxDecoration(
+          color: status.color.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: status.color.withValues(alpha: 0.5)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(status.icon, size: 13, color: status.color),
+          if (showLabel) ...[
+            const SizedBox(width: 5),
+            Text('规范对照', style: TextStyle(fontSize: 11, color: p.ink2)),
+          ],
+          const SizedBox(width: 5),
+          Text(
+            status.label,
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: status.color),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _loadSampleButton(BuildContext context) {
+    return TextButton(
+      key: const ValueKey('video-load-sample'),
+      onPressed: _reloadSelectedSample,
+      style: TextButton.styleFrom(
+        minimumSize: const Size(0, 28),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+      ),
+      child: const Text('加载示例', style: TextStyle(fontSize: 11)),
     );
   }
 
   /// 产物模式：播放面 + 信息行（路径 / 复制 / 桌面端在文件夹中显示）。
   Widget _artifactPane(BuildContext context, String path) {
     final p = context.palette;
+    final host = store.capabilities.platform;
     return Column(children: [
       Expanded(
         child: Padding(
@@ -459,7 +589,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
             icon: const Icon(Icons.copy_all_outlined, size: 14),
             label: const Text('复制路径', style: TextStyle(fontSize: 11)),
           ),
-          if (_host.supportsRevealInFolder)
+          if (host.supportsRevealInFolder)
             TextButton.icon(
               onPressed: _revealArtifact,
               style: TextButton.styleFrom(
@@ -475,376 +605,220 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     ]);
   }
 
-  /// 配置列（宽屏固定 320 / 窄屏整宽，内部整体滚动）。
-  Widget _configColumn(BuildContext context, {required bool narrow}) {
+  /// 主区：选中的文档直接可播；没有文档时是空态。
+  Widget _previewPane(BuildContext context) {
     final p = context.palette;
     final doc = _doc;
-    final review = _review;
-    final reviewOk = review?.ok ?? false;
-    final canRender = doc != null && reviewOk && !_busy && !_running;
+    if (doc == null) {
+      final problems = _review?.problems ?? const <String>[];
+      final problem = problems.isEmpty ? '' : problems.first;
+      return Container(
+        decoration: BoxDecoration(
+          color: p.panel2,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: p.line),
+        ),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.all(20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.movie_outlined, size: 38, color: p.ink4),
+          const SizedBox(height: 10),
+          Text(
+            '还没有视频',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink2),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            problem.isEmpty ? '选一个例子，点播放就能看到代码动画' : problem,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5),
+          ),
+        ]),
+      );
+    }
+    return VideoAnimationSurface(
+      // 换文档即换实例：时间回到片头、旧计时器彻底停掉。
+      key: ObjectKey(doc),
+      document: doc,
+      fps: _fps,
+    );
+  }
+}
 
-    return Container(
-      width: narrow ? double.infinity : 320,
-      decoration: BoxDecoration(
-        border: narrow ? null : Border(right: BorderSide(color: p.line)),
+/// 帧率小面板：滑块 + 数值，确认后只影响播放（不改脚本本身）。
+class _FpsDialog extends StatefulWidget {
+  const _FpsDialog({required this.initial});
+
+  final int initial;
+
+  @override
+  State<_FpsDialog> createState() => _FpsDialogState();
+}
+
+class _FpsDialogState extends State<_FpsDialog> {
+  late int _value = widget.initial.clamp(1, 30);
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return AlertDialog(
+      title: const Text('播放帧率', style: TextStyle(fontSize: 15)),
+      content: SizedBox(
+        width: 300,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Text('$_value 帧/秒', style: TextStyle(fontSize: 12, color: p.ink2)),
+            const Spacer(),
+            Text('1–30', style: TextStyle(fontSize: 10, color: p.ink4)),
+          ]),
+          Slider(
+            key: const ValueKey('video-fps-slider'),
+            value: _value.toDouble(),
+            min: 1,
+            max: 30,
+            divisions: 29,
+            label: '$_value',
+            activeColor: p.accent,
+            onChanged: (value) => setState(() => _value = value.round().clamp(1, 30)),
+          ),
+          Text('越高画面越连贯；改动只影响播放，不改脚本本身。',
+              style: TextStyle(fontSize: 10, color: p.ink4)),
+        ]),
       ),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('标杆示例',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.ink2)),
-            const SizedBox(height: 8),
-            for (var i = 0; i < _service.samples.length; i++)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: InkWell(
-                  onTap: _busy || _running ? null : () => _selectSample(i),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: i == _sampleIdx ? p.accentSoft : p.panel2,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: i == _sampleIdx ? p.accent : p.line),
-                    ),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(
-                        _service.samples[i].label,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: i == _sampleIdx ? p.accent : p.ink2,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _service.samples[i].note,
-                        style: TextStyle(fontSize: 10, color: p.ink4),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ]),
-                  ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_value),
+          child: const Text('完成'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 对照结果 sheet：problems / notes / 折叠的原始诊断。
+class _ReviewSheet extends StatelessWidget {
+  const _ReviewSheet({
+    required this.review,
+    required this.hasDocument,
+    required this.onEditScript,
+  });
+
+  final VideoReviewResult? review;
+  final bool hasDocument;
+  final VoidCallback onEditScript;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final review = this.review;
+    final problems = review?.problems ?? const <String>[];
+    final notes = review?.notes ?? const <String>[];
+    final ok = review?.ok ?? false;
+    final statusLabel = review == null ? '待检查' : (ok ? (notes.isEmpty ? '通过' : '有问题') : '未通过');
+    final color = review == null ? p.ink4 : (ok ? (notes.isEmpty ? p.accent : p.warn) : p.danger);
+    return Material(
+      key: const ValueKey('video-review-sheet'),
+      color: p.bgElevated,
+      clipBehavior: Clip.antiAlias,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              Icon(Icons.rule_outlined, size: 16, color: color),
+              const SizedBox(width: 6),
+              Text('规范对照',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: color.withValues(alpha: 0.5)),
+                ),
+                child: Text(
+                  statusLabel,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color),
                 ),
               ),
+            ]),
             const SizedBox(height: 6),
+            Text(review?.summary ?? '还没有对照结果',
+                style: TextStyle(fontSize: 11, color: p.ink3)),
+            if (!hasDocument) ...[
+              const SizedBox(height: 8),
+              Text('选一个例子，点播放就能看到代码动画',
+                  style: TextStyle(fontSize: 11, color: p.ink4)),
+            ],
+            if (problems.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text('需要修正',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: p.danger)),
+              for (final problem in problems)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Icon(Icons.error_outline, size: 13, color: p.danger),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(problem,
+                          style: TextStyle(fontSize: 11, color: p.ink2, height: 1.5)),
+                    ),
+                  ]),
+                ),
+            ],
+            if (notes.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text('值得留意',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: p.warn)),
+              for (final note in notes)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Icon(Icons.info_outline, size: 13, color: p.warn),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(note,
+                          style: TextStyle(fontSize: 11, color: p.ink2, height: 1.5)),
+                    ),
+                  ]),
+                ),
+            ],
+            if (review != null && review.technical.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _TechnicalDetails(text: review.technical.join('\n')),
+            ],
+            const SizedBox(height: 12),
             Row(children: [
+              Icon(Icons.play_circle_outline, size: 12, color: p.ink4),
+              const SizedBox(width: 6),
               Expanded(
-                child: Text('脚本',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.ink2)),
+                child: Text(
+                  '代码动画直接播放，暂不导出成片',
+                  style: TextStyle(fontSize: 10, color: p.ink4),
+                ),
               ),
               TextButton.icon(
-                onPressed: _busy || _running ? null : _editScript,
+                onPressed: onEditScript,
                 style: TextButton.styleFrom(
                   minimumSize: const Size(0, 28),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                 ),
-                icon: const Icon(Icons.edit_note_outlined, size: 16),
+                icon: const Icon(Icons.edit_note_outlined, size: 15),
                 label: const Text('编辑脚本', style: TextStyle(fontSize: 11)),
               ),
             ]),
-            if (doc != null)
-              Text(
-                '${doc.spec.kind == VideoSpecKind.science ? '科学说明' : '剧本'} · '
-                '${doc.width}×${doc.height} · 片长 ${doc.totalSeconds.toStringAsFixed(1)} 秒',
-                style: TextStyle(fontSize: 10, color: p.ink4),
-              ),
-            const SizedBox(height: 6),
-            Row(children: [
-              Text('帧率 ${_fps.round()}', style: TextStyle(fontSize: 12, color: p.ink2)),
-              Expanded(
-                child: Slider(
-                  value: _fps,
-                  min: 6,
-                  max: 30,
-                  divisions: 12,
-                  label: '${_fps.round()}',
-                  activeColor: p.accent,
-                  onChanged: _busy || _running ? null : (value) => setState(() => _fps = value),
-                ),
-              ),
-            ]),
-            Text('预览用较低帧率更快出片，成片可用 30 帧/秒',
-                style: TextStyle(fontSize: 10, color: p.ink4)),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _busy || _running ? null : _reloadSelectedSample,
-              icon: const Icon(Icons.upload_file, size: 15),
-              label: const Text('加载示例'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              // 对照不通过时禁渲染：原因当场就近可见，不滞后到渲染失败。
-              onPressed: canRender ? _render : null,
-              icon: const Icon(Icons.play_circle_outlined, size: 15),
-              label: const Text('渲染（后台）'),
-            ),
-            if (!_host.supportsVideoRender) ...[
-              const SizedBox(height: 8),
-              _NoticeBox(
-                icon: Icons.computer_outlined,
-                color: p.ink3,
-                title: store.capabilities.message(CapabilityId.videoRender),
-                body: '手机上可以编辑脚本、做对照检查，并播放已有的视频。',
-              ),
-            ],
-            if (review != null && !review.ok) ...[
-              const SizedBox(height: 8),
-              _NoticeBox(
-                icon: Icons.block_outlined,
-                color: p.danger,
-                title: review.problems.isEmpty ? review.summary : review.problems.first,
-                body: review.problems.length > 1
-                    ? review.problems.skip(1).join('\n')
-                    : null,
-              ),
-            ],
-            if (_renderError.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              _NoticeBox(
-                icon: Icons.error_outline,
-                color: p.danger,
-                title: _renderError,
-                body: null,
-              ),
-            ],
-            if (review != null) ...[
-              const SizedBox(height: 14),
-              Row(children: [
-                Icon(Icons.rule_outlined, size: 14, color: review.ok ? p.accent : p.danger),
-                const SizedBox(width: 5),
-                Expanded(
-                  child: Text(
-                    '规范对照',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.ink2),
-                  ),
-                ),
-                Text(
-                  review.ok ? '通过' : '待修正',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: review.ok ? p.accent : p.danger,
-                  ),
-                ),
-              ]),
-              const SizedBox(height: 2),
-              Text(review.summary, style: TextStyle(fontSize: 10, color: p.ink4)),
-              const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: p.panel2,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: SelectableText(
-                  review.output,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    color: p.ink3,
-                    height: 1.5,
-                  ),
-                ),
-              ),
-              if (review.technical.isNotEmpty || _renderTechnical.isNotEmpty)
-                _TechnicalDetails(
-                  text: <String>[
-                    ...review.technical,
-                    if (_renderTechnical.isNotEmpty) _renderTechnical,
-                  ].join('\n'),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 预览面：渲染进度 / 帧条带 / 空态。
-  Widget _previewPane(BuildContext context) {
-    final p = context.palette;
-    final job = _job;
-    if (job != null && job.isRunning) {
-      final total = job.totalFrames <= 0 ? 1 : job.totalFrames;
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            SizedBox(
-              width: 320,
-              child: LinearProgressIndicator(
-                value: job.frames / total,
-                minHeight: 4,
-                color: p.accent,
-                backgroundColor: p.panel2,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '渲染中…（第 ${job.frames}/${job.totalFrames} 帧）',
-              style: TextStyle(fontSize: 12, color: p.ink3),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '在后台进行，可以切到别的视图再回来。',
-              style: TextStyle(fontSize: 10, color: p.ink4),
-            ),
           ]),
         ),
-      );
-    }
-    if (job != null && job.frames > 0 && job.directory != null) {
-      return _FrameStrip(
-        directory: job.directory!,
-        count: job.frames,
-        mp4Path: job.mp4Path,
-        onPlay: job.mp4Path == null
-            ? null
-            : () => setState(() => _artifactPath = job.mp4Path),
-      );
-    }
-    return Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.movie_outlined, size: 42, color: p.ink4),
-        const SizedBox(height: 12),
-        Text(
-          _doc == null
-              ? '还没有视频'
-              : _host.supportsVideoRender
-                  ? '点「渲染（后台）」开始出片'
-                  : '手机上不能出片，可以从艺术架打开已有的视频',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 12, color: p.ink3),
-        ),
-        if (_doc != null && _host.supportsVideoRender) ...[
-          const SizedBox(height: 6),
-          Text(
-            '预计 ${_doc!.frameCount(_fps.round())} 帧 · '
-            '${_doc!.totalSeconds.toStringAsFixed(1)} 秒',
-            style: TextStyle(fontSize: 10, color: p.ink4),
-          ),
-        ],
-      ]),
-    );
-  }
-}
-
-/// 帧条带预览：均匀抽 24 帧直接读本机文件（不再经任何服务端取图）。
-class _FrameStrip extends StatelessWidget {
-  const _FrameStrip({
-    required this.directory,
-    required this.count,
-    this.mp4Path,
-    this.onPlay,
-  });
-
-  final String directory;
-  final int count;
-  final String? mp4Path;
-  final VoidCallback? onPlay;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    final shown = count < 24 ? count : 24;
-    return Column(children: [
-      if (mp4Path != null)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-          child: Row(children: [
-            Expanded(
-              child: Text(
-                '成片已就绪',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink2),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: onPlay,
-              icon: const Icon(Icons.play_arrow_outlined, size: 16),
-              label: const Text('播放成片', style: TextStyle(fontSize: 11)),
-            ),
-          ]),
-        ),
-      Expanded(
-        child: GridView.builder(
-          padding: const EdgeInsets.all(14),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 4,
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 8,
-            childAspectRatio: 16 / 9,
-          ),
-          itemCount: shown,
-          itemBuilder: (context, index) {
-            final frame = count <= 24 ? index : (index * (count - 1) / 23).round();
-            final file = File('$directory/frame_${frame.toString().padLeft(5, '0')}.png');
-            return Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: p.line),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Image.file(
-                file,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) =>
-                    Center(child: Icon(Icons.broken_image_outlined, size: 18, color: p.ink4)),
-              ),
-            );
-          },
-        ),
       ),
-      Padding(
-        padding: const EdgeInsets.all(10),
-        child: Text('显示 $shown/$count 帧（均匀抽样）',
-            style: TextStyle(fontSize: 11, color: p.ink4)),
-      ),
-    ]);
-  }
-}
-
-/// 一行的提示条（图标 + 一句主句 + 可选补充）。
-class _NoticeBox extends StatelessWidget {
-  const _NoticeBox({
-    required this.icon,
-    required this.color,
-    required this.title,
-    this.body,
-  });
-
-  final IconData icon;
-  final Color color;
-  final String title;
-  final String? body;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.55)),
-      ),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(icon, size: 14, color: color),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: TextStyle(fontSize: 11, color: color, height: 1.4)),
-            if (body != null && body!.trim().isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(body!, style: TextStyle(fontSize: 10, color: p.ink3, height: 1.4)),
-            ],
-          ]),
-        ),
-      ]),
     );
   }
 }

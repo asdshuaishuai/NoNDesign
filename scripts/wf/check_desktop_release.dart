@@ -2,7 +2,7 @@
 //
 // 用法（在仓库根）：
 //   dart run scripts/wf/check_desktop_release.dart \
-//     --app app/build/macos/Build/Products/Release/NoNDesign.app --home /tmp/nd-home
+//     --app app/build/macos/Build/Products/Release/NaN.app --home /tmp/nd-home
 //
 // 它回答三个问题：
 //
@@ -27,7 +27,7 @@ import 'dart:convert';
 import 'dart:io';
 
 const String _defaultApp =
-    'app/build/macos/Build/Products/Release/NoNDesign.app';
+    'app/build/macos/Build/Products/Release/NaN.app';
 
 /// One check's outcome.
 class CheckResult {
@@ -106,7 +106,7 @@ class Options {
           stdout.writeln('''
 用法: dart run scripts/wf/check_desktop_release.dart [选项]
 
-  --app <NoNDesign.app>     发布包路径（默认 $_defaultApp）
+  --app <NaN.app>            发布包路径（默认 $_defaultApp）
   --home <dir>              启动时使用的 HOME（默认临时目录）
   --wait <seconds>          启动后等待时间（默认 15）
   --bundle-only             只做 bundle 检查，不启动
@@ -382,7 +382,7 @@ Future<List<CheckResult>> _auditRuntime(
 
 Future<String?> _bundleExecutable(Directory appDir) async {
   final infoPlist = File('${appDir.path}/Contents/Info.plist');
-  var name = 'NoNDesign';
+  var name = 'NaN';
   if (infoPlist.existsSync()) {
     try {
       final result = await Process.run(

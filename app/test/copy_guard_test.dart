@@ -331,6 +331,10 @@ final List<(RegExp, String)> _banned = [
   (RegExp(r'\bddp_[a-z]'), 'ddp_* error code'),
   (RegExp(r'\bwasm_[a-z]'), 'wasm_* error code'),
   (RegExp(r'\bagent_[a-z]'), 'agent_* internal name'),
+  // 品牌只有 NaN（用户裁决 2026-11-18）：旧名 NoN / NoNDesign 不得出现在
+  // 用户可见文案里（磁盘目录名、标识符、JS 桥不在扫描面内，见文案词表）。
+  (RegExp(r'\bnon\b', caseSensitive: false), 'NoN 旧品牌（用 NaN）'),
+  (RegExp(r'\bNoNDesign\b'), 'NoNDesign 旧品牌（用 NaN）'),
 ];
 
 final RegExp _bareCode = RegExp(r'^[a-z0-9]+(_[a-z0-9]+)+$');

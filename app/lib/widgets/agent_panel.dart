@@ -82,6 +82,12 @@ class _AgentPanelState extends State<AgentPanel> {
       await store.runAcp(text);
       return;
     }
+    // 常驻的 NaN 面板在插件工作区里发起的任务属于那个工作台：3D / 视频 /
+    // 热应用的指令不能落成设计画布的 BUILD（用户裁决 2026-11-18）。
+    if (store.view.startsWith('plugin:')) {
+      await store.runWorkspace(text);
+      return;
+    }
     if (_mode == 'plan') {
       await store.runPlan(text);
     } else if (_mode == 'build') {
@@ -168,6 +174,10 @@ class _AgentPanelState extends State<AgentPanel> {
         ? (store.settings.acpAgentName ?? store.settings.acpAgentId!)
         : 'NaN 内置';
     if (!external && !_modeTouched) _mode = store.render.artboards.isEmpty ? 'build' : 'refine';
+    // 常驻面板当前挂在哪个工作台（3D / 视频 / 热应用）：模式芯片换成工作台标识，
+    // 输入直达该工作台的任务（见 _send 的 runWorkspace 分支）。
+    final inWorkspace = store.view.startsWith('plugin:');
+    final workspaceLabel = workspaceModeLabel(AppStore.workspaceModeForView(store.view));
     // 聊天 A2UI 卡（ask_user 的确认/选项 surface）：a2ui 事件只追加到
     // store.chatMessages，时间线里没有对应行。手机聊天流由 ChatStreamView
     // 渲染；桌面/iPad 横屏的 NaN 窄栏（本面板）必须同样渲染，否则问题只剩
@@ -314,11 +324,13 @@ class _AgentPanelState extends State<AgentPanel> {
                       maxLines: 5,
                       style: TextStyle(fontSize: 13, height: 1.5, color: p.ink),
                       decoration: InputDecoration(
-                        hintText: _mode == 'plan'
-                            ? '描述产品目标，NaN 会写 PRD / UI 说明 / 设计规范…'
-                            : _mode == 'build'
-                                ? '描述要生成的原型，NaN 会先规划页面再逐屏生成…'
-                                : '描述要改的地方，例如「把主按钮改成品牌色，圆角 10」…',
+                        hintText: inWorkspace
+                            ? '描述要在$workspaceLabel工作台做的事，NaN 会直接调用它的工具…'
+                            : _mode == 'plan'
+                                ? '描述产品目标，NaN 会写 PRD / UI 说明 / 设计规范…'
+                                : _mode == 'build'
+                                    ? '描述要生成的原型，NaN 会先规划页面再逐屏生成…'
+                                    : '描述要改的地方，例如「把主按钮改成品牌色，圆角 10」…',
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
                         focusedBorder: InputBorder.none,
@@ -355,7 +367,25 @@ class _AgentPanelState extends State<AgentPanel> {
                             ]),
                           ),
                         ),
-                        if (!external) ...[
+                        if (!external && inWorkspace) ...[
+                          const SizedBox(width: 3),
+                          Container(
+                            key: const ValueKey('agent-workspace-chip'),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: p.accentSoft,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: p.accent.withValues(alpha: 0.45)),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(Icons.dashboard_customize_outlined, size: 10, color: p.accent),
+                              const SizedBox(width: 4),
+                              Text('$workspaceLabel工作台',
+                                  style: TextStyle(
+                                      fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
+                            ]),
+                          ),
+                        ] else if (!external) ...[
                           const SizedBox(width: 3),
                           _ModeChip(
                             mode: 'build',
@@ -492,14 +522,16 @@ class _AgentIntro extends StatelessWidget {
           const SizedBox(height: 12),
           Text('嗨，我是 NaN', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
           const SizedBox(height: 4),
-          Text('描述目标，我会先规划页面与交互，再把它们画到画布上。也可以让我修改选中节点。',
+          Text('描述目标，我先想清楚页面结构与交互，再画到工作台上；也能直接改选中的节点。'
+              '做 3D 场景、代码动画视频或热应用时，切到对应工作台告诉我目标即可。',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11, height: 1.55, color: p.ink3)),
           const SizedBox(height: 16),
           for (final item in [
-            ('一套登录 + 首页 + 设置', 'build'),
+            ('一套登录 + 首页 + 设置的原型', 'build'),
             ('把当前页面改成深色主题', 'refine'),
             ('补一个空状态和错误态', 'refine'),
+            ('给列表补上分割线和更稳的间距', 'refine'),
           ])
             Padding(
               padding: const EdgeInsets.only(bottom: 5),

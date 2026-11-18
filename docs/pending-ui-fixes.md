@@ -15,7 +15,7 @@
 ## UI-2 右侧栏「聊天」与「NaN」重复
 
 - 位置：`app/lib/widgets/chat_rail.dart:19-28`（`kRailTabs`）、`:150-160`（`_body`）
-- 现象：右侧栏有三个 tab：聊天 / NoN（界面显示为 NaN）/ 检查。聊天与 NaN 都是聊天与
+- 现象：右侧栏有三个 tab：聊天 / NaN（界面显示为 NaN）/ 检查。聊天与 NaN 都是聊天与
   任务指令入口，功能重复。
 - 期望：右侧栏收为两个 tab：**NaN** 与 **检查**。NaN 就是聊天 + 任务指令执行的窗口
   （承载 `ChatStreamView`，含进度卡/产物卡）；不再保留独立的「聊天」tab。
@@ -23,7 +23,7 @@
 - 连带：`kRailTabChat` / `kRailTabAgent` 常量与 `_openWithTab` / `_setTab` /
   `_observeRightTab` / `ShellStorage` 的 tab 归一化要一起收口；旧存档里的 `chat` 值
   迁移到 `agent`，不得出现空面板。
-- 普通 Workspace 的 348 右栏（`right_panel.dart`）本来就只有 NoN + 检查，与本次裁决一致；
+- 普通 Workspace 的 348 右栏（`right_panel.dart`）本来就只有 NaN + 检查，与本次裁决一致；
   不要把「聊天」tab 又加回 Workspace。
 
 ## 验收

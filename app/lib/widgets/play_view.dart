@@ -65,6 +65,9 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
   Map<String, List<List<Offset>>> get _inks => context.read<AppStore>().demoInks;
   /// 热区常亮开关（给干系人演示时切真实成品观感，交互不受影响）。
   bool _hotspotsVisible = true;
+  /// hover 热区标签：画板外底部浮动提示条的唯一数据源（null = 无）。
+  /// 用 ValueNotifier 而非 setState：鼠标掠过时只重建提示条，不重建内容层 SVG。
+  final ValueNotifier<String?> _hoverLabel = ValueNotifier<String?>(null);
   /// boardId → session_interactions 结果（null = 加载中/失败，走正则兜底）。
   final Map<String, List<_EngineInteraction>?> _interactions = {};
 
@@ -154,6 +157,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
     _badgeTimer?.cancel();
     _longPressTimer?.cancel();
     _guideTimer?.cancel();
+    _hoverLabel.dispose();
     _entranceCtl.dispose();
     super.dispose();
   }
@@ -176,6 +180,12 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
       );
     }
     final hotzones = _hotzonesFor(board);
+    // 每个热区的展示数据：标签只进画板外提示条；嵌套热区只画最外层外框
+    // （内层点击语义不变），避免一叠色框糊住内容。
+    final zoneViews = [
+      for (final zone in hotzones)
+        (zone: zone, label: _zoneLabel(zone), frame: _isOuterFrame(zone, hotzones)),
+    ];
     _ensureInteractions(board);
 
     return CallbackShortcuts(
@@ -362,16 +372,17 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                                           ),
                                         ),
                                 ),
-                                for (final zone in hotzones)
+                                for (final view in zoneViews)
                                   Positioned(
-                                    left: zone.node.x * scale,
-                                    top: zone.node.y * scale,
-                                    width: math.max(4, zone.node.w * scale),
-                                    height: math.max(4, zone.node.h * scale),
+                                    left: view.zone.node.x * scale,
+                                    top: view.zone.node.y * scale,
+                                    width: math.max(4, view.zone.node.w * scale),
+                                    height: math.max(4, view.zone.node.h * scale),
                                     child: _Hotspot(
-                                      label: _zoneLabel(zone),
                                       visible: _hotspotsVisible,
-                                      onTap: () => _onZoneTap(zone, board.id),
+                                      showFrame: view.frame,
+                                      onHover: (hovering) => _onHotspotHover(view.label, hovering),
+                                      onTap: () => _onZoneTap(view.zone, board.id),
                                     ),
                                   ),
                                 // toast：淡入 + 上滑入场，切换文案平滑过渡。
@@ -455,6 +466,44 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                                 ),
                               ],
                             ),
+                            ),
+                          ),
+                        ),
+                        // 热区 hover 提示条：画板**外**的浮动黑 pill（底部留白区），
+                        // 不再贴在热区里压住文字/图标；文案仍是 _zoneLabel。
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 8,
+                          child: IgnorePointer(
+                            child: ValueListenableBuilder<String?>(
+                              valueListenable: _hoverLabel,
+                              builder: (context, label, _) {
+                                return AnimatedSwitcher(
+                                  duration: NonMotion.fast,
+                                  switchInCurve: NonMotion.curve,
+                                  switchOutCurve: NonMotion.curve.flipped,
+                                  child: (label == null || label.isEmpty)
+                                      ? const SizedBox(height: 0)
+                                      : Center(
+                                          child: Container(
+                                            key: ValueKey(label),
+                                            constraints: const BoxConstraints(maxWidth: 360),
+                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(alpha: 0.82),
+                                              borderRadius: BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              label,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(fontSize: 10, color: Colors.white),
+                                            ),
+                                          ),
+                                        ),
+                                );
+                              },
                             ),
                           ),
                         ),
@@ -597,6 +646,40 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
         final target = action == 'navigate_to' ? ' → ${zone.target ?? ''}' : '';
         return '${_triggerLabel(trigger ?? 'tap')}$target';
     }
+  }
+
+  /// 热区 hover → 画板外浮动提示条。退场只清自己那条标签，避免相邻热区
+  /// 交错进出时把别人的提示误清（同名标签天然共享一条）。
+  void _onHotspotHover(String label, bool hovering) {
+    if (hovering) {
+      _hoverLabel.value = label;
+    } else if (_hoverLabel.value == label) {
+      _hoverLabel.value = null;
+    }
+  }
+
+  /// 嵌套热区只画最外层外框：某个热区被另一个热区完全包含时，内层不画
+  /// 默认外框/角标（悬停高亮与点击语义保留），避免一叠色框压住内容。
+  /// 完全同形的重叠取清单里第一个（来源顺序：flow → marker）。
+  static bool _isOuterFrame(_Hotzone zone, List<_Hotzone> all) {
+    final n = zone.node;
+    final index = all.indexOf(zone);
+    for (var i = 0; i < all.length; i++) {
+      if (i == index) continue;
+      final o = all[i].node;
+      final contains = o.x <= n.x + 0.5 &&
+          o.y <= n.y + 0.5 &&
+          o.x + o.w >= n.x + n.w - 0.5 &&
+          o.y + o.h >= n.y + n.h - 0.5;
+      if (!contains) continue;
+      final same = (o.x - n.x).abs() < 0.5 &&
+          (o.y - n.y).abs() < 0.5 &&
+          (o.w - n.w).abs() < 0.5 &&
+          (o.h - n.h).abs() < 0.5;
+      if (same && i > index) continue; // 同形重叠：保留第一个
+      return false;
+    }
+    return true;
   }
 
   void _onZoneTap(_Hotzone zone, String boardId) {
@@ -1133,12 +1216,22 @@ class _Hotzone {
 }
 
 class _Hotspot extends StatefulWidget {
-  final String label;
   final VoidCallback onTap;
-  const _Hotspot({required this.label, required this.onTap, this.visible = true});
+  const _Hotspot({
+    required this.onTap,
+    this.visible = true,
+    this.showFrame = true,
+    this.onHover,
+  });
 
   /// false = 隐藏热区视觉（真实成品观感），点击交互保留（原版 toggleHotZones 语义）。
   final bool visible;
+
+  /// 嵌套热区只画最外层外框：内层不画默认框/角标，但点击与悬停反馈保留。
+  final bool showFrame;
+
+  /// hover 起落交给画板外的浮动提示条（标签不再压在内容上）。
+  final ValueChanged<bool>? onHover;
 
   @override
   State<_Hotspot> createState() => _HotspotState();
@@ -1147,41 +1240,66 @@ class _Hotspot extends StatefulWidget {
 class _HotspotState extends State<_Hotspot> {
   bool _hover = false;
 
+  void _setHover(bool value) {
+    if (_hover == value) return;
+    setState(() => _hover = value);
+    widget.onHover?.call(value);
+  }
+
+  @override
+  void dispose() {
+    // 换板/隐藏热区时热区被重建：清掉画板外提示条，避免残留上一块板的旧标签。
+    if (_hover) widget.onHover?.call(false);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    // 默认态**不铺色块**（旧版 0.07 填充 + 1.4px 0.38 边框整片糊住头像/文字/
+    // 图标）：只留 1px ≤0.22 alpha 的轻外框 + 右上角 5px 可点小圆点；hover 才
+    // 增强外框并给 ≤0.06 alpha 的极浅填充。visible=false 时默认完全无视觉
+    // （真实成品观感），悬停仍有提示（可发现性），点击语义全程不变。
+    final showOutline = widget.visible && widget.showFrame;
+    final showDot = widget.visible && widget.showFrame && !_hover;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
+      onEnter: (_) => _setHover(true),
+      onExit: (_) => _setHover(false),
       child: GestureDetector(
         onTap: widget.onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            // 常亮高亮（deepDesign 演示语义：热区始终可见，hover 强化）；
-            // visible=false（热区开关关闭）时边框/填充归零——真实成品观感，
-            // 点击交互保留；hover 时复现提示（可发现性）。
-            border: (widget.visible || _hover)
-                ? Border.all(
-                    color: _hover ? p.accent.withValues(alpha: 0.85) : p.accent.withValues(alpha: 0.38),
-                    width: _hover ? 2 : 1.4)
-                : Border.all(color: Colors.transparent),
-            borderRadius: BorderRadius.circular(4),
-            color: _hover
-                ? p.accent.withValues(alpha: 0.16)
-                : (widget.visible ? p.accent.withValues(alpha: 0.07) : Colors.transparent),
-          ),
-          child: _hover
-              ? Align(
-                  alignment: Alignment.bottomCenter,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(4),
+                  border: (_hover || showOutline)
+                      ? Border.all(
+                          color: p.accent.withValues(alpha: _hover ? 0.70 : 0.22),
+                          width: _hover ? 1.5 : 1,
+                        )
+                      : null,
+                  color: _hover ? p.accent.withValues(alpha: 0.06) : Colors.transparent,
+                ),
+              ),
+            ),
+            if (showDot)
+              Positioned(
+                right: 2,
+                top: 2,
+                child: IgnorePointer(
                   child: Container(
-                    margin: const EdgeInsets.only(bottom: 2),
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                    decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(4)),
-                    child: Text(widget.label, style: const TextStyle(fontSize: 10, color: Colors.white)),
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: p.accent.withValues(alpha: 0.55),
+                      shape: BoxShape.circle,
+                    ),
                   ),
-                )
-              : null,
+                ),
+              ),
+          ],
         ),
       ),
     );

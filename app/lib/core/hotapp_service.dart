@@ -225,7 +225,13 @@ class HotAppService {
     final brief = '原型生成（${screens.length} 屏 / ${flows.length} 条跳转）';
     final htmlBytes = normalizeHotAppHtml(raw, brief: brief);
     final html = utf8.decode(htmlBytes);
-    final app = await _install(name: cleanName, title: brief, html: htmlBytes, brief: brief);
+    final app = await _install(
+      name: cleanName,
+      title: brief,
+      html: htmlBytes,
+      brief: brief,
+      origin: nonAppOriginPrototype,
+    );
     final checks = _verifyPrototypeCoverage(html, screens, flows);
     return HotAppFromPrototypeResult(
       app: app,
@@ -293,6 +299,7 @@ class HotAppService {
     required Uint8List html,
     String? brief,
     int? createdAt,
+    String origin = nonAppOriginApp,
   }) async {
     final pkg = NonAppPackage(
       manifest: NonAppManifest(
@@ -304,6 +311,7 @@ class HotAppService {
         createdAt: createdAt ?? DateTime.now().millisecondsSinceEpoch ~/ 1000,
         minAppVersion: nonAppClientVersion,
         brief: brief,
+        origin: origin,
       ),
       htmlBytes: html,
     );

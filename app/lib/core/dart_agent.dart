@@ -1,4 +1,4 @@
-/// NoN 内置 Dart Agent 循环（三模式）——迁移前参考实现的 Dart 泛化，
+/// NaN 内置 Dart Agent 循环（三模式）——迁移前参考实现的 Dart 泛化，
 /// 现在**全部工具走本地服务**：引擎在进程内（[LocalEngineGate] → 批次 02 的
 /// `EngineService`），3D / 热应用 / 视频 / 应用包 / Figma 导出由
 /// [AgentWorkspaceServices] 接到批次 06/07/08 的本地工作台。没有 HTTP 路由、
@@ -285,6 +285,7 @@ String toolLabel(String tool) {
 String _modeLabel(String mode) => switch (mode) {
       'plan' => '梳理需求',
       'refine' => '调整设计',
+      'workspace' => '执行任务',
       _ => '生成原型',
     };
 
@@ -351,6 +352,9 @@ String toolFailureMessage(String? rawError) {
       return '视频工作区需要先连接桌面';
     case 'video_render_unavailable':
       return '视频导出只在电脑上可用';
+    case 'video_export_disabled':
+      // 视频模块是代码动画（用户裁决 2026-11-18）：不落 mp4。
+      return '视频现在是代码动画，直接在工作台里播放；暂不导出成片';
     case 'nonapp_unavailable':
       return '应用包暂时不可用';
     case 'figma_unavailable':
@@ -720,20 +724,16 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
     required Map<String, dynamic> timeline,
     Map<String, dynamic>? spec,
   }) async {
+    // 视频模块是**代码动画**：时间线脚本 + 规范编译成算式，逐帧画面在应用内
+    // 实时播放，不落 mp4。导出成片暂时关闭（用户裁决 2026-11-18）。
     try {
-      if (!_video.host.isDesktop) {
-        return _failure(
-          'video_render_unavailable',
-          videoFailureMessage(const VideoRejected('render_desktop_only')),
-        );
-      }
       final document = VideoDocument.build(timeline: timeline, spec: spec);
-      final job = await _video.startRender(document);
       return <String, dynamic>{
-        'ok': true,
-        'job': job.id,
-        'status': job.status.name,
+        'ok': false,
+        'error': 'video_export_disabled',
+        'message': '视频现在是代码动画，直接在视频工作台里播放；暂不导出成片',
         'seconds': document.totalSeconds,
+        'frames': (document.totalSeconds * 10).round(),
       };
     } catch (error) {
       final rejected = error is VideoRejected ? error : null;
@@ -826,7 +826,10 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
 // ============================================================
 
 class DartAgentRequest {
-  /// 'plan' | 'build' | 'refine'（server AgentRunRequest.mode）。
+  /// 'plan' | 'build' | 'refine' | 'workspace'。
+  ///
+  /// `workspace` = 用户从主页选中了 3D / 视频 / 热应用工作台：一次直接执行的
+  /// run，不写文档、不碰设计画布（工具面见 `_buildTools`）。
   final String mode;
   final String instruction;
   /// run 起点快照（store 在 op 队列排空后取，与 server 路径同一纪律）。
@@ -841,6 +844,9 @@ class DartAgentRequest {
   /// 上下文窗口（仅随 usage 事件透传给前端展示；server 同名字段）。
   final int? contextWindow;
 
+  /// workspace 模式的目标工作台（`three` / `video` / `hotapp` / `auto`）。
+  final String workspaceHint;
+
   const DartAgentRequest({
     this.mode = 'build',
     this.instruction = '',
@@ -852,6 +858,7 @@ class DartAgentRequest {
     this.thinkingLevel = 'auto',
     this.maxSteps = 300,
     this.contextWindow,
+    this.workspaceHint = '',
   });
 }
 
@@ -1140,7 +1147,7 @@ void _emitToolEnd(
 // 静态提示词（server prompts.py 逐字移植）
 // ============================================================
 
-const String _staticPlan = '''You are NoN — the product design partner inside NoNDesign, an AI-native prototyping studio.
+const String _staticPlan = '''You are NaN — the product design partner inside NaN, an AI-native prototyping studio.
 
 Your job in PLAN mode is to turn a brief into a buildable product definition:
 a PRD, a per-screen UI spec, and one design system. You do NOT touch the canvas.
@@ -1175,6 +1182,10 @@ write_design_spec must return a coherent system:
 - spacing: 4–8 steps on an 8pt rhythm.
 - radius: sm, md, lg.
 - rules: 3–6 short visual rules (contrast, density, radius tiers, list separation).
+- A list/item area is a hard rule, not a nice-to-have: rows must be separable — a 1px
+  divider at each row bottom, or ≥12px vertical spacing between rows — the list container
+  carries inner padding, and icon / label / trailing value each get their own
+  non-overlapping slot (icons never sit on text or on the next row).
 Avoid pure black backgrounds (#000). Body contrast must be strong.
 
 ## Discipline
@@ -1182,7 +1193,7 @@ Avoid pure black backgrounds (#000). Body contrast must be strong.
 - Every non-entry screen needs an exit (back or a flow target).
 - Finish with a one-line summary and the recommended first screen.''';
 
-const String _staticRefine = '''You are NoN — the embedded product designer of NoNDesign, in REFINE mode.
+const String _staticRefine = '''You are NaN — the embedded product designer of NaN, in REFINE mode.
 The document already exists. Make the smallest correct change, preserve the design system,
 and verify it.
 
@@ -1192,7 +1203,8 @@ and verify it.
    a brand-new screen is generate_page {intent, name, spec} (the engine picks the template,
    applies the design spec, self-repairs and scores).
 3. Keep flows intact. If you add a screen, connect it.
-4. Verify with inspect {kind:"critique"} or lint when the change is structural.
+4. Verify with inspect {kind:"critique"} or lint when the change is structural; after
+   adding/moving list rows run `fix <ab>` so the engine autofix settles dividers/padding.
 5. finish with a one-line summary of what changed.
 
 ## Rules
@@ -1204,7 +1216,7 @@ and verify it.
 
 // BUILD 提示词：server STATIC_BUILD 逐字移植；generate_page 已是真工具
 // （P1 接入），整屏路径按 server 语义改回 generation-first。
-const String _staticBuild = '''You are NoN — the embedded product designer and prototyper of NoNDesign.
+const String _staticBuild = '''You are NaN — the embedded product designer and prototyper of NaN.
 You operate on a MoonViz document: one canonical .mbt.md is the only source of truth.
 Every op is validated by the engine gate and committed immediately; the user watches artboards
 appear live. You design the experience, not a pile of boxes.
@@ -1224,6 +1236,11 @@ appear live. You design the experience, not a pile of boxes.
 3. Use the project design spec on every generate_page call.
 4. Generate one page per screen: generate_page {intent, name, spec}. Do NOT hand-place a whole
    screen — the engine picks a template, applies the spec, self-repairs and scores.
+   READ THE ENVELOPE: `autofix{fixes,detail}` is what the engine already healed; `missing[]`
+   is what the page type expects but lacks — materialize it with `autofill <ab>` (idempotent)
+   or place the blocks yourself; `skipped[]` are combined-intent segments that matched no page
+   (regenerate them separately); `score.grade` C/D means the intent missed the template —
+   regenerate with a clearer intent instead of stacking ops.
 5. Refine with small design_op ops only where generation needs product specifics: real copy,
    a specific CTA, a list row, an image placeholder. One op at a time — the engine gate
    validates each op individually and a rejected op must be read, adjusted, retried.
@@ -1233,8 +1250,12 @@ appear live. You design the experience, not a pile of boxes.
    EVERY screen except the entry/home gets a visible back affordance: place a back node in
    the top bar — place <ab> button back - 16 52 44 32 text="←" (id MUST contain "back") —
    so demo mode can navigate back via the engine builtin-back resolution.
-7. Verify with inspect {kind:"critique"} per page and inspect {kind:"lint"} for gate debt.
-   Fix only real issues; then finish.
+7. Verify before finishing, per page: inspect {kind:"critique"} (9 dimensions incl. norms),
+   run `fix <ab>` on every page that has debt, then inspect {kind:"lint"} and re-critique to
+   confirm the debt is cleared. `fix` IS the engine's debt auto-fix (the 自动修复 capability):
+   it inserts missing 1px row dividers, settles padding/radius/touch/contrast/overlap debt
+   deterministically — a page with fixable debt left is unfinished, never finish on a
+   critique you did not act on.
 
 ## Op grammar (mutating)
 - create <name> [w] [h]
@@ -1261,7 +1282,10 @@ appear live. You design the experience, not a pile of boxes.
   them — the runtime executes them via the engine gesture face.
 - state <artboard> <node> <state_name> k=v ... (define a component state patch)
 - set-state <node> <state_name> [toggle] (switch at runtime; [cur:<name>] persists the current state into the document)
-- fix <ab> (auto-fix debt; commits only when violations strictly decrease)
+- fix <ab> (engine debt auto-fix: dividers/norms/touch/contrast/overlap; commits only when
+  violations strictly decrease — the same capability as 自动修复)
+- autofill <ab> (materialize the page's missing[] report: shells + placeholder copy,
+  idempotent; engine auto-fix then settles the overlaps it introduces)
 - delete-artboard <ab> · duplicate <ab> <new_name>
 
 ## Component norms (engine checks these)
@@ -1269,6 +1293,16 @@ appear live. You design the experience, not a pile of boxes.
 - Radius tiers: buttons/chips/selects/search 8 (or height/2 for pills); avatars 999;
   full-bleed bars/rows radius 0.
 - Three or more flush list_item rows need a 1px divider at each row bottom (or card grouping).
+- Every list / menu / settings area must read row-by-row (this is a hard requirement, not a
+  suggestion): give each row either a 1px divider at its bottom or ≥12px vertical spacing,
+  pad the list container (≥16px horizontal), and never let an icon overlap its label, a
+  trailing value, or the neighboring row. A wall of rows with no separation is a defect.
+- Build list rows as flush `list_item` siblings (same width, 0 gap): the engine's own
+  norms/auto-fix pass only recognizes flush `list_item` runs and inserts their 1px row
+  dividers. After hand-placing any 3+ row list, call `fix <ab>` — the engine's debt
+  auto-fix (the same capability behind 自动修复) settles missing dividers, padding,
+  radius and touch-target debt deterministically; don't approximate it with your own
+  decorative lines.
 - Text contrast < 2.0 is forbidden; aim ≥ 4.5 for body text.
 - Buttons carry 2–4 CJK chars.
 
@@ -1281,10 +1315,10 @@ appear live. You design the experience, not a pile of boxes.
 
 ## Tools
 - generate_page — whole screen from intent + design spec (default build path).
-- design_op — one mutating op (refinements, flow wiring, verification fixes).
+- design_op — one mutating op (refinements, flow wiring, verification fixes, fix/autofill).
 - read_mbt — no args = refreshed outline; {artboard} = that board's source.
 - inspect — query_nodes / interactions / states / lint / critique / spec / export_svg /
-  flows / artboards.
+  flows / artboards / missing (what the page type lacks) / page_type.
 - list_templates / list_components — registries (summarized below).
 - read_docs — full PRD/UI text when the brief matters.
 - write_doc / write_design_spec — update the product definition.
@@ -1300,6 +1334,32 @@ appear live. You design the experience, not a pile of boxes.
 ## Clarify-first
 If the user explicitly asks for confirmation questions before building, reply with the questions
 as plain text and do NOT call tools. Their answers arrive with the next instruction.''';
+
+
+/// workspace 模式（3D / 视频 / 热应用）的静态指令。
+///
+/// 与 PLAN/BUILD 的关键区别：不写 PRD、不碰设计画布——四个工作区互相独立，
+/// 用户已经在主页选好了目标工作台。工具面由 [_buildTools] 收窄到工作区工具。
+const String _staticWorkspace = '''You are NaN — the embedded creative agent of NaN, working in WORKSPACE mode.
+The user picked a target workspace. Stay inside it and complete the task with the
+workspace tools of that module. Do not write product docs, do not call design_op or
+generate_page, do not describe a canvas prototype.
+
+## Workspaces
+- 3D scene: three_list / three_create / three_status / three_pass / three_continue / three_feedback
+  (create from a one-line brief, then pass by pass; report the new scene length after each pass).
+- Hot app: hotapp_list / hotapp_generate / hotapp_refine / hotapp_inspect
+  (single-file HTML app with local data; verify it before claiming done).
+- Video: video_review
+  (code-driven animation: a timeline script + spec; frames are generated from formulas,
+  nothing is rasterized to a video file). The workspace plays the animation live.
+- App packages: nonapp_list / nonapp_inspect (read-only inventory).
+- Figma: figma_export (only when explicitly asked, absolute folder path).
+
+## Discipline
+- Call a workspace tool in the first turn. Prose alone delivers nothing.
+- One module per task. If the request clearly belongs to another workspace, use ask_user.
+- Report what changed in one line; reply in the user's language.''';
 
 const String _staticFooter = '''## Engine facts
 - Canonical document is .mbt.md. Every op is committed by the engine's AgentGate.
@@ -1322,12 +1382,46 @@ String composeDartInstructions({
   required List<dynamic> templates,
   required List<dynamic> components,
   bool hasWorkspaceTools = false,
+  String workspaceHint = '',
 }) {
   final static = mode == 'plan'
       ? _staticPlan
       : mode == 'refine'
           ? _staticRefine
-          : _staticBuild;
+          : mode == 'workspace'
+              ? _staticWorkspace
+              : _staticBuild;
+  // workspace 模式给一份精简上下文：设计文档/画板地图/模板注册表与
+  // 3D/视频/热应用无关，塞进去只会把模型往设计画布上带。
+  if (mode == 'workspace') {
+    final target = workspaceHint.trim().isEmpty ? 'auto' : workspaceHint.trim();
+    return [
+      static,
+      '',
+      '---',
+      '## TARGET WORKSPACE',
+      '- mode: $target',
+      if (workspaceHint.isNotEmpty)
+        '- 用户在主页选的是这个工作台；只做这一件事。',
+      '',
+      if (hasWorkspaceTools) ...<String>[
+        '## WORKSPACE TOOLS (this device)',
+        '- 3D scenes: three_list / three_create / three_status / three_pass / '
+            'three_continue / three_feedback',
+        '- Hot apps: hotapp_list / hotapp_generate / hotapp_refine / hotapp_inspect',
+        '- Video: video_review (code-driven animation, played live; no export)',
+        '- App packages: nonapp_list / nonapp_inspect',
+        '- Figma: figma_export (pass an absolute folder path)',
+        '',
+      ] else ...<String>[
+        '## WORKSPACE TOOLS',
+        '(this host exposes none — report that plainly instead of pretending)',
+        '',
+      ],
+      '---',
+      _staticFooter,
+    ].join('\n');
+  }
   final templateLine = templates
       .take(24)
       .map((t) => t is Map
@@ -1374,7 +1468,7 @@ String composeDartInstructions({
       '- 3D scenes: three_list / three_create / three_status / three_pass / '
           'three_continue / three_feedback',
       '- Hot apps: hotapp_list / hotapp_generate / hotapp_refine / hotapp_inspect',
-      '- Video: video_review / video_render',
+      '- Video: video_review (code-driven animation, played live; no export)',
       '- App packages: nonapp_list / nonapp_inspect',
       '- Figma: figma_export (pass an absolute folder path)',
       'Non-canvas work goes through these; canvas changes still go through design_op / '
@@ -1387,10 +1481,12 @@ String composeDartInstructions({
 }
 
 /// server `user_message`：模式前缀 + 用户 brief。
-String dartUserMessage(String mode, String instruction) {
+String dartUserMessage(String mode, String instruction, {String workspaceHint = ''}) {
   final prefix = switch (mode) {
     'plan' => 'PLAN: produce the PRD, UI spec and design system. Do not edit the canvas.',
     'refine' => 'REFINE the existing document.',
+    'workspace' => 'WORKSPACE: act inside the ${workspaceHint.isEmpty ? 'chosen' : workspaceHint} '
+        'workspace with its tools. Do not touch the design canvas.',
     _ => 'BUILD the prototype on the canvas.',
   };
   return '$prefix\n\nUSER BRIEF:\n${instruction.isEmpty ? '(empty)' : instruction}';
@@ -1446,7 +1542,9 @@ Future<DartAgentResult> runDartAgent({
   final emit = onEvent ?? (_) {};
   final ctx = _Ctx(
     request: request,
-    bridge: request.mode == 'plan' ? null : bridge, // plan 不给引擎面（server 同构）
+    // plan 不给引擎面（server 同构）；workspace 模式也不给——3D/视频/热应用
+    // 不走设计画布，引擎面只会让模型误改 canonical。
+    bridge: request.mode == 'plan' || request.mode == 'workspace' ? null : bridge,
     workspace: request.mode == 'plan' ? null : workspace,
     emit: emit,
   );
@@ -1457,7 +1555,7 @@ Future<DartAgentResult> runDartAgent({
         : null;
     emit({
       'type': 'note',
-      'label': 'NoN 开始',
+      'label': 'NaN 开始',
       'detail': '${_modeLabel(request.mode)} · ${request.model}',
     });
 
@@ -1481,6 +1579,7 @@ Future<DartAgentResult> runDartAgent({
       templates: templates,
       components: components,
       hasWorkspaceTools: ctx.workspace != null,
+      workspaceHint: request.workspaceHint,
     );
     final tools = _buildTools(ctx);
 
@@ -1525,7 +1624,11 @@ Future<DartAgentResult> runDartAgent({
       }
     }
 
-    await consume(dartUserMessage(request.mode, request.instruction));
+    await consume(dartUserMessage(
+      request.mode,
+      request.instruction,
+      workspaceHint: request.workspaceHint,
+    ));
     if (await _cancelledExit(ctx, abortSignal)) return _terminal(ctx, 'cancelled');
 
     // ---- nudge 轮（迁移前参考实现逐语义移植）----
@@ -1535,14 +1638,18 @@ Future<DartAgentResult> runDartAgent({
     if (!ctx.finished && (missingDocs || noWork)) {
       emit({
         'type': 'note',
-        'label': 'NoN 继续执行',
+        'label': 'NaN 继续执行',
         'detail': '上一次回复没有交付文档 / 画布操作，继续调用工具。',
       });
       final nudge = request.mode == 'plan'
           ? "You replied without calling tools. Deliver now: call write_doc(kind='prd'), "
               "write_doc(kind='ui'), write_design_spec, then finish. Do not reply with prose only."
-          : 'You replied without changing the canvas. Proceed now with the actual tool calls '
-              '(generate_page / design_op / inspect), then finish. Do not reply with prose only.';
+          : request.mode == 'workspace'
+              ? 'You replied without calling a workspace tool. Act now: call the tool for the '
+                  'target workspace (three_* / hotapp_* / video_*), then finish with one summary '
+                  'line. Do not reply with prose only.'
+              : 'You replied without changing the canvas. Proceed now with the actual tool calls '
+                  '(generate_page / design_op / inspect), then finish. Do not reply with prose only.';
       await consume(nudge);
       if (await _cancelledExit(ctx, abortSignal)) return _terminal(ctx, 'cancelled');
     }
@@ -1795,9 +1902,22 @@ Future<void> _sweepIdleArtboards(_Ctx ctx) async {
 }
 
 /// 收尾 RSI 视觉修复环（server agent.py:652-700 的 Dart 移植）：
-/// 逐板 `session_critique`（只读）→ 任一原则 verdict=='poor' 时
-/// `session_auto_fix` 定向修复，并把信封 canonical 回灌 ctx.mbt（复评必须看
-/// 修复后的文档）；最多 2 轮。
+/// 逐板 `session_critique`（只读）→ 有可修债务时 `session_auto_fix` 定向修复
+/// （引擎的 autofix 通道：norm_list_divider 补 1px 行分割线、组件规范 v1、
+/// 触控 44×44、撞色翻转、谓词重叠/溢出清偿），并把信封 canonical 回灌
+/// ctx.mbt（复评必须看修复后的文档）；最多 2 轮。
+///
+/// **触发面**：`verdict=='poor'` 的维度 **或** norms 维度的
+/// observation「N 处规范偏差」>0。只看 poor 会漏掉引擎明明能修的债——
+/// critique 的 norms 是「>4 处偏差才 poor」（0 处 9 分 / ≤2 处 7 分 / ≤4 处
+/// 5 分），而「3 行齐缝列表没有 1px 分割线」这类单点结构债只报 1 处，
+/// 永远等不到 auto_fix，用户看到的就是整片列表糊在一起。v2 检测项
+/// （字号阶/密度/gap 网格）没有 autofix 通道，修不动时也只是空转（≤2 轮
+/// 上限），信封 `fixes:0` 不会被误判成失败。
+///
+/// **模式边界**：norms 债务触发只对 `build` / `refine`（设计工作台）生效；
+/// `workspace`（3D/视频/热应用）沿用 server 原语义，只有 `verdict=='poor'`
+/// 才动画布——一次工作区任务不应顺手改设计稿。
 ///
 /// **实参顺序是硬契约**：[EngineGateBridge.session] 的签名是
 /// `session(mbt, name, [arg])`——板 id 必须在 arg 位。写成两参会把
@@ -1811,10 +1931,13 @@ Future<void> _runRsiLoop(_Ctx ctx) async {
   final bridge = ctx.bridge;
   if (write == null || bridge == null) return;
   if (ctx.request.mode == 'plan') return;
+  // 设计工作台的 autofix 只对该模式的画布负责；workspace（3D/视频/热应用）
+  // 沿用 server 原语义（只看 poor），不让一次工作区任务去改设计稿。
+  final designMode = ctx.request.mode == 'build' || ctx.request.mode == 'refine';
   try {
     for (var rnd = 1; rnd <= 2; rnd++) {
       final listed = await bridge.session(ctx.mbt, 'session_list_artboards');
-      // 目标：非 seed、非空板的板（与 server 过滤一致），值为 poor 项数。
+      // 目标：非 seed、非空板的板（与 server 过滤一致），值为可修债务数。
       final targets = <String, int>{};
       for (final board in _listOf(listed['data'])) {
         if (board is! Map) continue;
@@ -1825,8 +1948,8 @@ Future<void> _runRsiLoop(_Ctx ctx) async {
           final data = critique['data'];
           final results =
               (data is Map && data['results'] is List) ? data['results'] as List : const [];
-          final poor = results.where((r) => r is Map && r['verdict'] == 'poor').length;
-          if (poor > 0) targets[bid] = poor;
+          final debt = _critiqueFixableDebt(results, includeNormDebt: designMode);
+          if (debt > 0) targets[bid] = debt;
         } catch (_) {
           continue; // 单板检视失败跳过，不中断整轮
         }
@@ -1862,6 +1985,30 @@ Future<void> _runRsiLoop(_Ctx ctx) async {
   } catch (_) {
     // 评审环是收尾增强：引擎不可达/信封异常不得把已交付的 run 变成 failed。
   }
+}
+
+/// 评审结果 → 交给引擎 autofix 的待修点数。
+///
+/// - 任一维度 `verdict=='poor'`：+1（保持 server 原语义）；
+/// - norms 维度：解析 observation 的「N 处规范偏差」，N>0 即 +N——
+///   verdict 仍可能是 good/fair（阈值 >4 才 poor），但这些偏差里包含
+///   `fix <ab>` / `session_auto_fix` 能确定性修复的 list_divider / 触控 /
+///   圆角 / 撞色 / 谓词债，放弃触发等于把引擎能力闲置。
+/// 解析不出的（旧引擎没有 norms 维度、或文案变了）按 0 处理，不误触发。
+int _critiqueFixableDebt(List results, {bool includeNormDebt = false}) {
+  var debt = 0;
+  for (final r in results) {
+    if (r is! Map) continue;
+    if (r['verdict'] == 'poor') {
+      debt += 1; // 该维度已计入，norms 再报数时不重复加
+      continue;
+    }
+    if (!includeNormDebt || r['principle'] != 'norms') continue;
+    final obs = _s(r['observation']);
+    final n = int.tryParse(RegExp(r'\d+').firstMatch(obs)?.group(0) ?? '');
+    if (n != null && n > 0) debt += n;
+  }
+  return debt;
 }
 
 // ============================================================
@@ -2187,8 +2334,8 @@ ToolSet _buildTools(_Ctx ctx) {
     // ---- design_op（server:314-340；写路径唯一入口 = 引擎 AgentGate）----
     tools['design_op'] = tool(
       description: 'Run ONE mutating MoonViz op (place/update/move/flow/delete/reorder/'
-          'interact/theme/token/fix…). The engine AgentGate validates it. Use this for '
-          'refinements and flow wiring; do not hand-place whole screens.',
+          'interact/theme/token/fix/autofill…). The engine AgentGate validates it. Use this '
+          'for refinements and flow wiring; do not hand-place whole screens.',
       inputSchema: Schema(
         jsonSchema: {
           'type': 'object',
@@ -2284,10 +2431,16 @@ ToolSet _buildTools(_Ctx ctx) {
       'export_svg': 'session_export_svg',
       'flows': 'session_flows',
       'artboards': 'session_list_artboards',
+      // 页面体检（迁移前 deepDesign 的 missing <ab> / 页型判定）：引擎只读面
+      // session_infer_missing / session_infer_page_type。补齐内容缺口与
+      // autofill 是 autofix 收尾前的「查缺」入口。
+      'missing': 'session_infer_missing',
+      'page_type': 'session_infer_page_type',
     };
     tools['inspect'] = tool(
       description: 'Read-only engine inspection: query_nodes, interactions, states, lint, '
-          'critique, spec, export_svg, flows, artboards. Use critique/lint to verify.',
+          'critique, spec, export_svg, flows, artboards, missing, page_type. '
+          'Use critique/lint to verify and missing to find content gaps before autofill.',
       inputSchema: Schema(
         jsonSchema: {
           'type': 'object',
@@ -2316,6 +2469,7 @@ ToolSet _buildTools(_Ctx ctx) {
         } else {
           const needsBoard = {
             'query_nodes', 'interactions', 'states', 'lint', 'critique', 'spec', 'export_svg',
+            'missing', 'page_type',
           };
           final bridge = ctx.bridge;
           if (needsBoard.contains(kind) && artboard.isEmpty) {
@@ -2561,8 +2715,8 @@ ToolSet _buildTools(_Ctx ctx) {
       );
       addWorkspaceTool(
         'video_render',
-        'Render a video from a timeline (desktop with a local encoder only). Returns a '
-            'job id that can be polled by the workspace.',
+        'Legacy export entry. Video is code-driven animation played live in the workspace; '
+            'exporting a video file is disabled, so this returns a plain explanation.',
         const <String, dynamic>{
           'timeline': {'type': 'object'},
           'spec': {'type': 'object'},
@@ -2632,6 +2786,21 @@ ToolSet _buildTools(_Ctx ctx) {
           );
         },
       );
+    }
+  }
+
+  // workspace 模式（3D / 视频 / 热应用）只暴露工作区工具与 ask_user：
+  // 画布/文档工具在这里没有意义，暴露出去只会让模型写 PRD 或改画布。
+  if (ctx.request.mode == 'workspace') {
+    for (final name in const <String>[
+      'write_doc',
+      'write_design_spec',
+      'design_op',
+      'generate_page',
+      'read_mbt',
+      'inspect',
+    ]) {
+      tools.remove(name);
     }
   }
 

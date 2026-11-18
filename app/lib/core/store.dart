@@ -796,6 +796,95 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---------------------------------------------------------------------------
+  // 工作区模式（主页输入框 → 目标工作台）
+  // ---------------------------------------------------------------------------
+
+  /// 主页一句话输入的目标工作台（见 [workspaceModeAuto] 一族）。
+  String get chatWorkspaceMode => settings.chatWorkspaceMode;
+
+  /// 选择这次任务先落到哪个工作台；`auto` 交给 NaN 自己判断。
+  Future<void> setChatWorkspaceMode(String mode) async {
+    final next = normalizeWorkspaceMode(mode);
+    if (settings.chatWorkspaceMode == next) return;
+    settings.chatWorkspaceMode = next;
+    notifyListeners();
+    await saveSettings();
+  }
+
+  /// 工作台模式 → 视图名（`auto`/`design` 没有独立工作台视图）。
+  static String? workspaceViewForMode(String mode) {
+    switch (normalizeWorkspaceMode(mode)) {
+      case workspaceModeThree:
+        return 'plugin:three';
+      case workspaceModeVideo:
+        return 'plugin:video';
+      case workspaceModeHotapp:
+        return 'plugin:hotapp';
+      default:
+        return null;
+    }
+  }
+
+  /// 工具名 → 该工具所属工作台的视图名。
+  ///
+  /// 这是「任务状态驱动工作区切换」的唯一映射表：工具属于哪个工作台，
+  /// NaN 调用它时主面就跟着到哪个工作台（设计工具回设计画布）。
+  static String? workspaceViewForTool(String tool) {
+    if (tool.startsWith('three_')) return 'plugin:three';
+    if (tool.startsWith('hotapp_')) return 'plugin:hotapp';
+    if (tool.startsWith('video_')) return 'plugin:video';
+    switch (tool) {
+      case 'design_op':
+      case 'generate_page':
+      case 'inspect':
+      case 'read_mbt':
+      case 'write_doc':
+      case 'write_design_spec':
+        return 'design';
+      default:
+        return null;
+    }
+  }
+
+  /// 视图名 → 工作台模式（手动切换时把「这次先落哪」一并记下来）。
+  static String workspaceModeForView(String view) {
+    switch (view) {
+      case 'plugin:three':
+        return workspaceModeThree;
+      case 'plugin:video':
+        return workspaceModeVideo;
+      case 'plugin:hotapp':
+        return workspaceModeHotapp;
+      default:
+        return workspaceModeDesign;
+    }
+  }
+
+  /// NaN 的任务状态可以带走主面（用户裁决：除手动切换外，四个工作区的
+  /// 切换完全取决于 NaN 的任务状态与它载入的工具）。
+  ///
+  /// 四条边界：
+  ///  * 聊天流驱动 / 嵌入宿主内的 run 不换主面（与 `_keepChatView` 同纪律）：
+  ///    手机聊天优先壳里聊天就是主面，跑到一半被拽进工作区就回不来；
+  ///  * 演示视图不被拽走（进入演示是显式的「只看不跑」状态）；
+  ///  * 已经在该工作台时不重复 setView（避免每轮工具都 notifyListeners）；
+  ///  * 桌面主页选好的工作台由 `_runChatTurn` 开工前落视图，不靠本方法。
+  void followAgentWorkspace(String tool) {
+    // 聊天流驱动 / 嵌入宿主内的 run 不换主面（`_keepChatView` 同款纪律）：
+    // 手机聊天优先壳里聊天就是主面，跑着跑着被拽进设计画布就回不来了。
+    // 桌面主页发起的工作台任务由 `_runChatTurn` 在开工前显式落视图。
+    if (_keepChatView) return;
+    if (view == 'play') return;
+    final target = workspaceViewForTool(tool);
+    if (target == null || view == target) return;
+    // 工作区彼此独立（用户裁决 2026-11-19）：3D / 视频 / 热应用是各自独立的
+    // 工作区，不是一个 ddp 的附属面板。NaN 在某个工作区里调用它的工具时，
+    // 绝不把用户从当前主面拽到另一个工作区；设计工具仍可把主面带回设计画布。
+    if (target.startsWith('plugin:')) return;
+    setView(target);
+  }
+
   /// 3D 工作台当前项目名（'' = 无）：跨视图/跨会话续接同一项目
   /// （工作台视图切换即 dispose，内存态不保活）。
   void setThreeProjectName(String name) {
@@ -804,7 +893,7 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// NoN 热应用工作台当前应用名（'' = 无）：同 threeProjectName，切走后回来
+  /// NaN 热应用工作台当前应用名（'' = 无）：同 threeProjectName，切走后回来
   /// 仍停在原应用并自动重挂载。
   void setHotApp(String name) {
     settings.hotappApp = name;
@@ -1322,7 +1411,7 @@ class AppStore extends ChangeNotifier {
     // 事件随后会把旧项目的 canonical mbt 提交进新项目（静默覆盖新项目
     // 内容）；此前这里还硬置 agentBusy=false，把在飞 run 的状态位也拆了。
     if (agentBusy) {
-      _toastWarn('NoN 正在工作，等这一轮结束再新建项目。');
+      _toastWarn('NaN 正在工作，等这一轮结束再新建项目。');
       return false;
     }
     // 未保存改动门（nav-2）：所有入口共用 store 主路径——工作区、左栏最近
@@ -1395,7 +1484,7 @@ class AppStore extends ChangeNotifier {
       // 会把 run 的终态 canonical 提交进新项目——放弃交换（apply
       // 对空 mbt 无需回滚）。
       if (agentBusy) {
-        _toastWarn('NoN 正在工作，等这一轮结束再新建项目。');
+        _toastWarn('NaN 正在工作，等这一轮结束再新建项目。');
         return false;
       }
       if (res['ok'] != true) {
@@ -1467,7 +1556,7 @@ class AppStore extends ChangeNotifier {
     // agentBusy 门（core-1）：与 newProject 同根——run 在飞时切项目，
     // 在飞 run 的终态 canonical 会覆盖刚打开的项目。
     if (agentBusy) {
-      _toastWarn('NoN 正在工作，等这一轮结束再打开项目。');
+      _toastWarn('NaN 正在工作，等这一轮结束再打开项目。');
       return OpenResult.failed;
     }
     // 未保存改动门（nav-2）：作品集直达、左栏/Welcome 最近项目、命令面板、
@@ -1510,7 +1599,7 @@ class AppStore extends ChangeNotifier {
       // 往返期间有 run 启动：放弃交换（open 只读解密，无副作用可弃），
       // 避免在飞 run 的终态 canonical 覆盖新项目。
       if (agentBusy) {
-        _toastWarn('NoN 正在工作，等这一轮结束再打开项目。');
+        _toastWarn('NaN 正在工作，等这一轮结束再打开项目。');
         return OpenResult.failed;
       }
       hasProject = true;
@@ -1563,7 +1652,7 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<OpenResult> pickAndOpenProject({String password = ''}) async {
-    const group = XTypeGroup(label: 'NoNDesign 项目', extensions: ['ddp']);
+    const group = XTypeGroup(label: 'NaN 项目', extensions: ['ddp']);
     final file = await openFile(acceptedTypeGroups: const [group]);
     if (file == null) return OpenResult.cancelled;
     return openProjectPath(file.path, password: password);
@@ -1609,7 +1698,7 @@ class AppStore extends ChangeNotifier {
       try {
         final location = await getSaveLocation(
           suggestedName: '${projectName.isEmpty ? 'untitled' : projectName}.ddp',
-          acceptedTypeGroups: const [XTypeGroup(label: 'NoNDesign 项目', extensions: ['ddp'])],
+          acceptedTypeGroups: const [XTypeGroup(label: 'NaN 项目', extensions: ['ddp'])],
         );
         if (location == null) return false;
         target = location.path;
@@ -1810,7 +1899,7 @@ class AppStore extends ChangeNotifier {
 
   Future<bool> _applyOpNow(String op, {bool silent = false}) async {
     if (agentBusy) {
-      _toastWarn('NoN 正在工作，等这一轮结束再改画布。');
+      _toastWarn('NaN 正在工作，等这一轮结束再改画布。');
       return false;
     }
     if (!engineReady) {
@@ -2001,15 +2090,24 @@ class AppStore extends ChangeNotifier {
 
   Future<bool> _autoFixNow() async {
     if (!engineReady || activeBoard == null) return false;
+    final before = mbt;
     try {
       final res = await api!.session(mbt, 'session_auto_fix', activeBoard);
       if (res['ok'] != true) {
         _toastWarn(failureMessage(res['error']), res['error']);
         return false;
       }
-      return _commit(res);
+      final after = res['mbt'] is String ? res['mbt'] as String : '';
+      if (after.isEmpty || after.trim() == before.trim()) {
+        // 文档没变 = 这页本来没有可修的视觉债：必须明说，不能让按钮看起来没反应。
+        _toast('这页没有需要修复的问题', '规范、叠放、可读性都已经是干净的。');
+        return true;
+      }
+      final ok = await _commit(res);
+      if (ok) _toastSuccess('已修复这页的视觉问题', '列表分割线、间距、触控目标、对比度一次补齐。');
+      return ok;
     } catch (e) {
-      _toastError('自动整理没有完成，请重试', e);
+      _toastError('自动修复没有完成，请重试', e);
       return false;
     }
   }
@@ -2076,7 +2174,7 @@ class AppStore extends ChangeNotifier {
 
   Future<bool> _applySourceNow(String text) async {
     if (agentBusy) {
-      _toastWarn('NoN 正在工作，等这一轮结束再改画布。');
+      _toastWarn('NaN 正在工作，等这一轮结束再改画布。');
       return false;
     }
     if (!engineReady) {
@@ -2139,7 +2237,7 @@ class AppStore extends ChangeNotifier {
 
   Future<bool> _constrainLayoutNow(String intent) async {
     if (agentBusy) {
-      _toastWarn('NoN 正在工作，等这一轮结束再改画布。');
+      _toastWarn('NaN 正在工作，等这一轮结束再改画布。');
       return false;
     }
     if (!engineReady) {
@@ -2250,14 +2348,28 @@ class AppStore extends ChangeNotifier {
 
   Future<bool> runPlan(String brief) => _runAgent('plan', brief);
 
+  /// 从右侧 NaN 面板发起的「在当前工作台里做这件事」。
+  ///
+  /// 面板在 3D / 视频 / 热应用工作区里常驻，此时用户输入的是该工作区的任务
+  /// （建场景 / 改动画 / 调应用），不能落成设计画布的 BUILD。模式取当前视图
+  /// 对应的那个工作台，并记回 [chatWorkspaceMode]（下一次一句话仍落在那里）。
+  Future<bool> runWorkspace(String instruction, {String? mode}) {
+    final target = normalizeWorkspaceMode(mode ?? workspaceModeForView(view));
+    if (settings.chatWorkspaceMode != target) {
+      settings.chatWorkspaceMode = target;
+      unawaited(saveSettings());
+    }
+    return _runAgent('workspace', instruction);
+  }
+
   Future<bool> runBuild(String instruction) => _runAgent('build', instruction);
 
   Future<bool> runRefine(String instruction) => _runAgent('refine', instruction);
 
   /// 发消息给外部 ACP 智能体（设置里选择后生效）。会话幂等：同一
-  /// 项目+agent 复用已建立的连接；事件形状与 NoN 管线同族，时间线直接复用。
+  /// 项目+agent 复用已建立的连接；事件形状与 NaN 管线同族，时间线直接复用。
   Future<bool> runAcp(String text) async {
-    // 移动端没有本地 agent/引擎：第三方智能体（ACP）不可用，强制走 NoN 内置
+    // 移动端没有本地 agent/引擎：第三方智能体（ACP）不可用，强制走 NaN 内置
     //（设置里残留 acpAgentId 也不放行——用户裁决 2026-11-16）。
     if (defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.android) {
@@ -2265,7 +2377,7 @@ class AppStore extends ChangeNotifier {
       return false;
     }
     if (agentBusy) {
-      _toastWarn('NoN 正在工作，等这一轮结束再发送。');
+      _toastWarn('NaN 正在工作，等这一轮结束再发送。');
       return false;
     }
     if (!capabilities.isUsable(CapabilityId.externalAgent)) {
@@ -2457,7 +2569,7 @@ class AppStore extends ChangeNotifier {
     final brief = text.trim();
     if (brief.isEmpty) return false;
     if (agentBusy) {
-      _toastWarn('NoN 正在工作，等这一轮结束再发送。');
+      _toastWarn('NaN 正在工作，等这一轮结束再发送。');
       return false;
     }
     appendChat(ChatMessage.user(brief));
@@ -2468,8 +2580,17 @@ class AppStore extends ChangeNotifier {
   /// 一轮聊天 run：进度卡入列 → 事件镜像推进 → 终态收尾 + BUILD 成功
   /// 追加产物卡（原型）。
   Future<bool> _runChatTurn(String brief) async {
+    // 目标工作台：auto/设计走「先文档后原型」的老管线；3D/视频/热应用是
+    // 相互独立的模块，直接一次工作区 run（不写 PRD、不碰设计画布）。
+    final targetMode = normalizeWorkspaceMode(settings.chatWorkspaceMode);
+    final workspaceView = workspaceViewForMode(targetMode);
+    final workspaceRun = workspaceView != null;
     final fresh = !docs.hasContent;
-    final card = ChatMessage.progress(fresh ? '理解 brief，撰写产品文档' : '按指令更新原型');
+    final card = ChatMessage.progress(
+      workspaceRun
+          ? '在${workspaceModeLabel(targetMode)}工作台执行'
+          : (fresh ? '理解 brief，撰写产品文档' : '按指令更新原型'),
+    );
     appendChat(card);
     _chatCard = card;
     chatActive = true;
@@ -2480,7 +2601,9 @@ class AppStore extends ChangeNotifier {
         // 桌面/连接桌面：先建空项目（generateFromBrief 同一先建后用纪律）；
         // 移动离线（api==null）不建——内置 Dart PLAN 成功后自建最小项目态
         // （_runDartLoop 的 !hasProject 分支）。
-        if (!hasProject && api != null) {
+        // 目标工作台是 3D / 视频 / 热应用时不建设计项目：四个工作区互相独立，
+        // 给视频任务塞一个空设计项目只会污染最近项目列表（用户裁决 2026-11-18）。
+        if (!workspaceRun && !hasProject && api != null) {
           final name = brief.replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), '').trim();
           final created = await newProject(
             name: name.length > 18 ? name.substring(0, 18) : (name.isEmpty ? 'untitled' : name),
@@ -2493,18 +2616,28 @@ class AppStore extends ChangeNotifier {
             return false;
           }
         }
-        ok = await _runAgent('plan', brief);
-        if (ok && docs.prd.trim().isNotEmpty) {
-          card.text = '规划页面并生成原型';
-          notifyListeners();
-          ok = await _runAgent(
-            'build',
-            '请根据 PRD 与 UI 说明生成完整可交互原型。先规划页面连接，再逐屏生成，最后连线并自检。\n\nBRIEF:\n$brief',
-          );
+        if (workspaceRun) {
+          // 用户已经选好工作台：直接进工作区，面板里能看见 NaN 正在干活。
+          if (view != workspaceView && view != 'play' &&
+              PlatformCapabilities.current().isDesktop) {
+            setView(workspaceView);
+          }
+          ok = await _runAgent('workspace', brief);
           built = ok;
+        } else {
+          ok = await _runAgent('plan', brief);
+          if (ok && docs.prd.trim().isNotEmpty) {
+            card.text = '规划页面并生成原型';
+            notifyListeners();
+            ok = await _runAgent(
+              'build',
+              '请根据 PRD 与 UI 说明生成完整可交互原型。先规划页面连接，再逐屏生成，最后连线并自检。\n\nBRIEF:\n$brief',
+            );
+            built = ok;
+          }
         }
       } else {
-        ok = await _runAgent('build', brief);
+        ok = await _runAgent(workspaceRun ? 'workspace' : 'build', brief);
         built = ok;
       }
       return ok;
@@ -2513,12 +2646,14 @@ class AppStore extends ChangeNotifier {
       _chatCard = null;
       card.running = false;
       if (ok && built) {
-        card.text = '原型已生成';
-        appendChat(ChatMessage.artifact(
-          kind: artifactPrototype,
-          title: projectName,
-          detail: '可交互原型已生成，点开进入工作区',
-        ));
+        card.text = workspaceRun ? '${workspaceModeLabel(targetMode)}已更新' : '原型已生成';
+        if (!workspaceRun) {
+          appendChat(ChatMessage.artifact(
+            kind: artifactPrototype,
+            title: projectName,
+            detail: '可交互原型已生成，点开进入工作区',
+          ));
+        }
       } else {
         card.ok = ok;
         if (!ok) card.detail ??= agentUserMessage ?? failureMessage(agentError);
@@ -2601,7 +2736,7 @@ class AppStore extends ChangeNotifier {
   /// 动作不丢（卡片还在流里），可稍后重发。
   Future<void> handleChatAction(String name, Map<String, dynamic> context) async {
     if (agentBusy) {
-      _toastWarn('NoN 正在工作，等这一轮结束再操作。');
+      _toastWarn('NaN 正在工作，等这一轮结束再操作。');
       return;
     }
     // 用户气泡只放人话（「选择：X」）；结构化上下文只进本轮运行指令——
@@ -2627,6 +2762,9 @@ class AppStore extends ChangeNotifier {
 
   bool _hotappFromPrototypeBusy = false;
 
+  /// 「由原型生成热应用」在飞：工具栏据此显示进度并禁止重复点击。
+  bool get hotappFromPrototypeBusy => _hotappFromPrototypeBusy;
+
   /// 由产品原型生成**可验证**的热应用（设计 → 热应用，唯一允许的模块间关联）。
   ///
   /// 画板/跳转取自当前渲染信封；生成后跑确定性覆盖验证（每屏 data-screen、
@@ -2649,9 +2787,14 @@ class AppStore extends ChangeNotifier {
       return;
     }
     final s = settings;
+    // 端点与智能体同一条回退：设置里没填时用当前模型自带的 api（空端点
+    // 曾让生成入口看起来「点了没反应」）。
+    final base = s.baseUrl.trim().isNotEmpty
+        ? s.baseUrl.trim()
+        : (model?.baseUrl.trim() ?? '');
     final config = HotAppLlmConfig(
       model: s.modelId,
-      baseUrl: s.baseUrl,
+      baseUrl: base,
       apiKey: s.apiKey,
       thinkingLevel: s.thinkingLevel,
     );
@@ -2660,12 +2803,32 @@ class AppStore extends ChangeNotifier {
       return;
     }
     _hotappFromPrototypeBusy = true;
+    notifyListeners();
+    _toast('正在由原型生成「原型验证 demo」…', '${artboards.length} 屏 / ${links.length} 条跳转');
     try {
       final service = HotAppService(library: await NonAppLibrary.open());
-      final name = await _uniqueHotAppName(service, _prototypeAppName());
+      // 一个项目只对应一个「由原型生成」的热应用：同名应用已存在就原地更新，
+      // 避免每点一次就多出一个 demo-2 / demo-3。
+      final base = _prototypeAppName();
+      final replaceCurrent = await service.read(base) != null;
+      final String? name;
+      if (replaceCurrent) {
+        name = base;
+      } else {
+        name = await _uniqueHotAppName(service, base);
+      }
       if (name == null) {
         _toastWarn('同名应用太多了', '清理旧的热应用或换个项目名再试。');
         return;
+      }
+      if (replaceCurrent) {
+        try {
+          await service.delete(base);
+        } catch (_) {
+          // 删不掉就别覆盖，诚实报错，避免「更新」其实没写进去。
+          _toastError('旧的热应用删不掉，更新没有开始', '可以在应用列表里手动删掉它再试。');
+          return;
+        }
       }
       final doc = mbt.length > 12000 ? mbt.substring(0, 12000) : mbt;
       final result = await service.generateFromPrototype(
@@ -2677,11 +2840,12 @@ class AppStore extends ChangeNotifier {
       );
       setHotApp(result.app.name);
       setView('plugin:hotapp');
+      final verb = replaceCurrent ? '更新' : '生成';
       if (result.verified) {
-        _toastSuccess('热应用已生成并通过验证',
+        _toastSuccess('热应用已$verb并通过验证',
             '${artboards.length} 屏 / ${links.length} 条跳转全部覆盖，页面在本机直接运行。');
       } else {
-        _toastWarn('热应用已生成，但原型覆盖不完全', result.failureSummary);
+        _toastWarn('热应用已$verb，但原型覆盖不完全', result.failureSummary);
       }
     } on HotAppFailure catch (failure) {
       _toastError(hotAppFailureMessage(failure));
@@ -2689,6 +2853,7 @@ class AppStore extends ChangeNotifier {
       _toastError('由原型生成热应用没有完成', '请稍后重试');
     } finally {
       _hotappFromPrototypeBusy = false;
+      notifyListeners();
     }
   }
 
@@ -2868,7 +3033,9 @@ class AppStore extends ChangeNotifier {
             ? '理解需求，撰写产品文档'
             : mode == 'refine'
                 ? '定位改动，保持设计系统'
-                : '规划页面并落画布',
+                : mode == 'workspace'
+                    ? '在${workspaceModeLabel(settings.chatWorkspaceMode)}工作台执行'
+                    : '规划页面并落画布',
       ),
     ];
     // 聊天流驱动的 run 与嵌入宿主内发起的 run 不跳视图（聊天流是主面；
@@ -2878,8 +3045,16 @@ class AppStore extends ChangeNotifier {
       rightTab = 'agent';
     }
     if (!_keepChatView) {
-      if (mode == 'plan') view = 'docs';
-      if (mode != 'plan') view = 'design';
+      // workspace 模式不把主面硬拽到设计画布：先落到用户选的工作台，
+      // 之后由 NaN 实际调用的工具接管（followAgentWorkspace）。
+      final workspaceView = workspaceViewForMode(settings.chatWorkspaceMode);
+      if (mode == 'plan') {
+        view = 'docs';
+      } else if (mode == 'workspace') {
+        if (workspaceView != null) view = workspaceView;
+      } else {
+        view = 'design';
+      }
     }
     _dartAgentCancel = CancellationToken();
     notifyListeners();
@@ -2889,6 +3064,7 @@ class AppStore extends ChangeNotifier {
     final myRun = runId!;
     final events = StreamController<Map<String, dynamic>>();
     try {
+      final workspaceMode = normalizeWorkspaceMode(settings.chatWorkspaceMode);
       final runFuture = runDartAgent(
         request: DartAgentRequest(
           mode: mode,
@@ -2901,10 +3077,22 @@ class AppStore extends ChangeNotifier {
           thinkingLevel: settings.thinkingLevel,
           maxSteps: settings.maxSteps,
           contextWindow: selected?.context,
+          // workspace 模式把用户选的工作台告诉循环（提示词与工具分流都靠它）。
+          workspaceHint: mode == 'workspace' ? workspaceMode : '',
         ),
         // Build/Refine 的写路径经 store 锚定桥：design_op 落 applyAgentOp
         // （applyOp 同队列同提交语义 + AgentGate）；检视走 HTTP 只读路由。
         bridge: engineReady ? _StoreEngineGate(this) : null,
+        // 3D / 热应用 / 视频是本地服务，不需要设计引擎：把工作区工具接到
+        // 右侧的 NaN。此前这里不传 workspace，本地 run 根本看不到这些工具。
+        workspace: mode == 'plan'
+            ? null
+            : LocalWorkspaceServices(
+                model: selected?.id ?? settings.modelId,
+                baseUrl: base,
+                apiKey: settings.apiKey,
+                thinkingLevel: settings.thinkingLevel,
+              ),
         // 测试注入 scripted mock；生产恒 null（OpenAIProvider 直连）。
         modelOverride: debugAgentModelOverride,
         abortSignal: _dartAgentCancel,
@@ -2974,6 +3162,8 @@ class AppStore extends ChangeNotifier {
   Future<bool> _runAgent(String mode, String instruction) async {
     if (agentBusy) return false;
     final localRuntime = settings.agentRuntime != agentRuntimeServer;
+    // 只有设计画布的 BUILD 需要设计引擎；3D/视频/热应用是本地服务，
+    // workspace 模式不因引擎缺失而拒绝。
     if (localRuntime && mode == 'build' && !engineReady) {
       _toastWarn('构建原型需要设计服务，请先连接桌面或稍后重试');
       return false;
@@ -3034,15 +3224,32 @@ class AppStore extends ChangeNotifier {
     usage = const {};
     timeline = [
       TimelineEntry.user(instruction),
-      TimelineEntry(kind: 'phase', text: mode == 'plan' ? '理解 brief，撰写产品文档' : mode == 'refine' ? '定位改动，保持设计系统' : '规划页面并生成原型'),
+      TimelineEntry(
+        kind: 'phase',
+        text: mode == 'plan'
+            ? '理解 brief，撰写产品文档'
+            : mode == 'refine'
+                ? '定位改动，保持设计系统'
+                : mode == 'workspace'
+                    ? '在${workspaceModeLabel(settings.chatWorkspaceMode)}工作台执行'
+                    : '规划页面并生成原型',
+      ),
     ];
     // 同 _runDartLoop：聊天流驱动/嵌入宿主内的 run 不跳视图。
     if (!chatActive) {
       rightTab = 'agent';
     }
     if (!_keepChatView) {
-      if (mode == 'plan') view = 'docs';
-      if (mode != 'plan') view = 'design';
+      // workspace 模式不把主面硬拽到设计画布：先落到用户选的工作台，
+      // 之后由 NaN 实际调用的工具接管（followAgentWorkspace）。
+      final workspaceView = workspaceViewForMode(settings.chatWorkspaceMode);
+      if (mode == 'plan') {
+        view = 'docs';
+      } else if (mode == 'workspace') {
+        if (workspaceView != null) view = workspaceView;
+      } else {
+        view = 'design';
+      }
     }
     notifyListeners();
 
@@ -3061,6 +3268,7 @@ class AppStore extends ChangeNotifier {
       'max_steps': settings.maxSteps,
       'session_key': projectPath ?? projectName,
       'context_window': selected.context,
+      'workspace_hint': normalizeWorkspaceMode(settings.chatWorkspaceMode),
     };
 
     var success = false;
@@ -3093,8 +3301,8 @@ class AppStore extends ChangeNotifier {
             item.error = agentError;
           }
         }
-        timeline.add(TimelineEntry.finish(false, 'NoN 异常结束', failureMessage(agentError)));
-        _toastError('NoN 异常结束，已提交的部分已保留', agentError);
+        timeline.add(TimelineEntry.finish(false, 'NaN 异常结束', failureMessage(agentError)));
+        _toastError('NaN 异常结束，已提交的部分已保留', agentError);
       }
     } catch (e) {
       agentError = e.toString();
@@ -3130,6 +3338,9 @@ class AppStore extends ChangeNotifier {
         break;
       case 'tool_start':
         _flushStreamAsAssistant();
+        // 任务状态驱动工作区：NaN 调用哪个工作台的工具，主面就跟到哪个工作台
+        // （桌面壳；演示不拽走，手机聊天优先壳不切）。
+        followAgentWorkspace((event['tool'] ?? '').toString());
         timeline.add(TimelineEntry(
           kind: 'tool',
           tool: (event['tool'] ?? '').toString(),
@@ -3287,7 +3498,7 @@ class AppStore extends ChangeNotifier {
           }
         }
         if (event['docs'] is Map) docs = Docs.fromJson(event['docs']);
-        timeline.add(TimelineEntry.finish(false, 'NoN 异常结束', failureMessage(agentError)));
+        timeline.add(TimelineEntry.finish(false, 'NaN 异常结束', failureMessage(agentError)));
         break;
       case 'done':
         final finalMbt = event['mbt_b64']?.toString();
@@ -3306,7 +3517,7 @@ class AppStore extends ChangeNotifier {
         }
         if (event['docs'] is Map) docs = Docs.fromJson(event['docs']);
         final summary = (event['text'] ?? '').toString();
-        timeline.add(TimelineEntry.finish(true, 'NoN 完成', summary));
+        timeline.add(TimelineEntry.finish(true, 'NaN 完成', summary));
         // designFromEngine：直接构建（无 PLAN）时规范仍是默认 → 自动从
         // 画布提取真实配色，流程闭环（异步，不阻塞终态）。
         unawaited(_autoDesignFromEngine());

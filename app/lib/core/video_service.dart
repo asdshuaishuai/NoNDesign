@@ -94,13 +94,13 @@ String videoFailureMessage(Object? error) {
           : '';
   switch (code) {
     case 'spec_missing':
-      return '这份脚本还缺一份说明规范，先补齐规范再渲染';
+      return '这份脚本还缺一份说明规范，先补齐规范再看画面';
     case 'spec_invalid':
       return '说明规范不完整，请按模板补齐后再试';
     case 'no_scenes':
       return '脚本里还没有任何场景';
     case 'no_frames':
-      return '所有场景的时长都是 0，渲染不出画面';
+      return '所有场景的时长都是 0，算不出画面';
     case 'undeclared_symbol':
       return '脚本里用了没在规范中声明的量或公式';
     case 'expr_syntax_error':
@@ -1362,6 +1362,22 @@ List<double> videoSampleTimes(double totalSeconds, {int samples = 6}) {
   ];
 }
 
+/// 播放器时间读数：`mm:ss.SSS`。
+///
+/// 视频模块是代码动画（逐帧由算式生成，不落到成片文件），播放器按秒推进，
+/// 读数必须精确到毫秒，用户才能把画面和脚本里的节拍时间对上。超过一小时
+/// 分钟位继续累加（不截断到 59），负值按 0 处理。
+String formatVideoTime(double seconds) {
+  if (!seconds.isFinite || seconds <= 0) return '00:00.000';
+  final totalMillis = (seconds * 1000).round();
+  final minutes = totalMillis ~/ 60000;
+  final secs = (totalMillis ~/ 1000) % 60;
+  final millis = totalMillis % 1000;
+  return '${minutes.toString().padLeft(2, '0')}:'
+      '${secs.toString().padLeft(2, '0')}.'
+      '${millis.toString().padLeft(3, '0')}';
+}
+
 /// 抽帧时间点对应的帧文件路径（帧目录存在时才有意义）。
 List<String> videoFrameListing({
   required String framesDirectory,
@@ -1875,16 +1891,6 @@ class VideoService {
       } catch (_) {}
     }
     return null;
-  }
-
-  static String _desktopDocumentsRoot() {
-    if (Platform.isWindows) {
-      final profile = Platform.environment['USERPROFILE'];
-      if (profile != null && profile.isNotEmpty) return profile;
-    }
-    final home = Platform.environment['HOME'];
-    if (home != null && home.isNotEmpty) return home;
-    return Directory.systemTemp.path;
   }
 }
 

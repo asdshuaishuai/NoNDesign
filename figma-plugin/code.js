@@ -1,6 +1,6 @@
-// NoNDesign Bridge — Figma 双向插件（2026-11-16）
-// Import：读 nondesign.json（NoN 导出包）→ 逐板建真实可编辑 Figma Frame。
-// Export：把当前页选区序列化成 NoNDesign 节点 JSON → 下载，供 NoN 物化。
+// NaN Bridge — Figma 双向插件（2026-11-16）
+// Import：读 nondesign.json（NaN 导出包）→ 逐板建真实可编辑 Figma Frame。
+// Export：把当前页选区序列化成 NaN 节点 JSON → 下载，供 NaN 物化。
 // 纯手工节点映射，零网络。
 
 figma.showUI(__html__, { width: 360, height: 420 });
@@ -28,7 +28,7 @@ figma.ui.onmessage = async (msg) => {
       figma.viewport.scrollAndZoomIntoView([frame]);
     }
     var made2 = made2 || 0;
-    figma.notify('NoNDesign: 导入完成 ' + made + ' 板');
+    figma.notify('NaN: 导入完成 ' + made + ' 板');
     return;
   }
   if (msg.type === 'export-selection') {

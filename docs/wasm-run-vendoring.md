@@ -109,13 +109,13 @@ $ bash scripts/fetch_wasm_run_libs.sh --check
 
 ```bash
 cd app
-flutter build macos --debug --no-pub     # ✓ Built …/NoNDesign.app
+flutter build macos --debug --no-pub     # ✓ Built …/NaN.app
 flutter build ios --no-codesign --no-pub # ✓ Built build/ios/iphoneos/Runner.app (86.4MB)
 ```
 
 产物核对：
 
-- macOS `NoNDesign.app/Contents/Frameworks/wasm_run_dart.framework`（vendored 动态库被
+- macOS `NaN.app/Contents/Frameworks/wasm_run_dart.framework`（vendored 动态库被
   native assets 包成 framework）；
 - iOS `Runner.app/Frameworks/wasm_run_dart.framework`；
 - 两个产物都含 `flutter_assets/assets/engine/{moonviz.wasm,components.json,manifest.json}`；
