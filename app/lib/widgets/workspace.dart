@@ -660,6 +660,12 @@ class _BoardTabs extends StatelessWidget {
             // 3D / 视频是独立模块，入口在主页工作台，不挂在设计工具条上。
             for (final def in pluginRegistry.where((d) => d.id == 'hotapp'))
               IconAction(icon: def.icon, tooltip: def.tooltip, size: 26, onTap: () => store.setView('plugin:${def.id}')),
+            IconAction(
+              icon: Icons.phone_android_outlined,
+              tooltip: '由原型生成热应用',
+              size: 26,
+              onTap: () => store.generateHotAppFromPrototype(),
+            ),
             const SizedBox(width: 4),
             TextButton.icon(
               onPressed: () => store.setView('docs'),

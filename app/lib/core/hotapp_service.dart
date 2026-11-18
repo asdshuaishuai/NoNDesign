@@ -171,6 +171,69 @@ class HotAppService {
     return _install(name: cleanName, title: cleanBrief, html: html, brief: cleanBrief);
   }
 
+  /// 「由原型生成可验证的热应用」。
+  ///
+  /// 与 [generate] 的区别：需求不是一句话，而是原型本身——画板清单 + 跳转
+  /// 清单 + 规范文档。生成后跑**确定性覆盖验证**：
+  ///  * 每个画板必须有 `<section data-screen="<id>">`；
+  ///  * 每条跳转 from→to 必须在 from 画板段落里出现 `data-nav="<to>"`。
+  /// 结构门（离线 / 零外链 / CSP）仍由 NonAppLibrary.install 把关。
+  /// 验证失败不回滚安装，但结果如实标注未通过项。
+  Future<HotAppFromPrototypeResult> generateFromPrototype({
+    required String name,
+    required HotAppLlmConfig config,
+    required String prototypeMbt,
+    required List<PrototypeScreenSpec> screens,
+    required List<PrototypeLinkSpec> flows,
+  }) async {
+    final cleanName = name.trim();
+    if (screens.isEmpty) throw const HotAppFailure('brief_empty', 'prototype_has_no_screens');
+    if (!config.isConfigured) throw const HotAppFailure('llm_error', 'model_not_configured');
+    if (!_hotAppNameRe.hasMatch(cleanName)) throw const HotAppFailure('name_invalid');
+    if (await library.read(cleanName) != null) throw const HotAppFailure('name_taken');
+
+    final screenLines = screens
+        .map((s) => '- <section data-screen="${s.id}"> …标题：${s.title.isEmpty ? s.id : s.title}')
+        .join('\n');
+    final flowLines = flows.isEmpty
+        ? '（原型没有声明跳转）'
+        : flows.map((f) => "- ${f.from} → ${f.to}（在 ${f.from} 段落内的可点元素上加 data-nav=\"${f.to}\"）").join('\n');
+    final doc = prototypeMbt.trim().isEmpty ? '（无）' : prototypeMbt.trim();
+
+    final prompt = '把下面的产品原型忠实实现为单文件 HTML 应用。\n'
+        '硬性要求（缺一条都算没有完成）：\n'
+        '1. 每个原型画板对应一个段落：<section data-screen=\"画板id\">…</section>；'
+        '页面初始只显示入口画板，其余隐藏。\n'
+        '2. 每条原型跳转 from→to：在 from 画板段落内的可点元素上加属性 '
+        'data-nav=\"to\",点击后切换到目标画板。\n'
+        '3. 需要记住的数据一律用 window.NoN.db.exec（本机 SQLite，无需服务器）。\n'
+        '4. 不引用任何网络资源：CSS/JS 全内联，不出现 http(s):// 或 // 开头的外链。\n'
+        '5. 只输出完整 HTML 文档，不要解释。\n\n'
+        '原型画板：\n$screenLines\n\n原型跳转：\n$flowLines\n\n'
+        '原型规范文档（供理解语义）：\n$doc';
+
+    final raw = await _chat(
+      HotAppLlmRequest(
+        system: _hotAppSystemPrompt,
+        prompt: prompt,
+        model: config.model,
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        thinkingLevel: config.thinkingLevel,
+      ),
+    );
+    final brief = '原型生成（${screens.length} 屏 / ${flows.length} 条跳转）';
+    final htmlBytes = normalizeHotAppHtml(raw, brief: brief);
+    final html = utf8.decode(htmlBytes);
+    final app = await _install(name: cleanName, title: brief, html: htmlBytes, brief: brief);
+    final checks = _verifyPrototypeCoverage(html, screens, flows);
+    return HotAppFromPrototypeResult(
+      app: app,
+      checks: checks,
+      verified: checks.every((c) => c.ok),
+    );
+  }
+
   /// 精修现有应用（覆盖即热更新）。
   ///
   /// 失败时旧文件原样保留（校验通过才写临时文件，最后一步 rename 替换）。
@@ -302,6 +365,99 @@ Map<String, Map<String, dynamic>>? hotAppProviderOptions(String level) {
 /// 模型回包 → 可落盘的 HTML 字节。
 ///
 /// 步骤：去代码围栏 → 取文档起点（首个 `<` 起） → 空白裁剪 →
+/// 原型侧输入：画板与跳转（来自引擎渲染信封）。
+class PrototypeScreenSpec {
+  final String id;
+  final String title;
+  const PrototypeScreenSpec({required this.id, required this.title});
+}
+
+class PrototypeLinkSpec {
+  final String from;
+  final String to;
+  const PrototypeLinkSpec({required this.from, required this.to});
+}
+
+/// 单条验证结论（确定性检查，不是模型自评）。
+class HotAppVerifyCheck {
+  final String id;
+  final bool ok;
+  final String detail;
+  const HotAppVerifyCheck(this.id, this.ok, this.detail);
+}
+
+/// 「由原型生成热应用」的结果：应用本体 + 覆盖验证报告。
+/// [verified] 为 false 时应用已入库（结构门全过），但原型覆盖不完全——
+/// 调用方必须把缺失项如实告诉用户，不得冒充成功。
+class HotAppFromPrototypeResult {
+  final LibraryApp app;
+  final List<HotAppVerifyCheck> checks;
+  final bool verified;
+  const HotAppFromPrototypeResult({
+    required this.app,
+    required this.checks,
+    required this.verified,
+  });
+
+  /// 未通过检查的人话摘要（为空 = 全部通过）。
+  String get failureSummary {
+    final bad = checks.where((c) => !c.ok).toList();
+    if (bad.isEmpty) return '';
+    return bad.map((c) => c.detail).join('；');
+  }
+}
+
+final RegExp _prototypeScreenTagRe = RegExp('data-screen="([a-zA-Z0-9_-]+)"');
+
+/// 确定性覆盖验证：画板段落 + 跳转连线，全部是字节级检查。
+List<HotAppVerifyCheck> _verifyPrototypeCoverage(
+  String html,
+  List<PrototypeScreenSpec> screens,
+  List<PrototypeLinkSpec> flows,
+) {
+  final checks = <HotAppVerifyCheck>[];
+  // 画板段落位置表：id → 在文档中的出现位置（按出现顺序切段）。
+  final marks = <String, int>{};
+  for (final m in _prototypeScreenTagRe.allMatches(html)) {
+    final id = m.group(1)!;
+    marks.putIfAbsent(id, () => m.start);
+  }
+  final ordered = marks.entries.toList()..sort((a, b) => a.value.compareTo(b.value));
+  int sectionEnd(int pos) {
+    for (final e in ordered) {
+      if (e.value > pos) return e.value;
+    }
+    return html.length;
+  }
+
+  for (final screen in screens) {
+    final present = marks.containsKey(screen.id);
+    checks.add(HotAppVerifyCheck(
+      'screen_${screen.id}',
+      present,
+      present ? '画板 ${screen.id} 已实现' : '缺少画板 ${screen.id}（${screen.title}）',
+    ));
+  }
+  for (final flow in flows) {
+    final fromPos = marks[flow.from];
+    var ok = false;
+    var detail = '跳转 ${flow.from} → ${flow.to}：来源画板不存在';
+    if (fromPos != null) {
+      final span = html.substring(fromPos, sectionEnd(fromPos));
+      ok = span.contains('data-nav="${flow.to}"');
+      detail = ok
+          ? '跳转 ${flow.from} → ${flow.to} 已实现'
+          : '跳转 ${flow.from} → ${flow.to} 缺少连线（from 段落里没有 data-nav="${flow.to}"）';
+    }
+    checks.add(HotAppVerifyCheck(
+      'flow_${flow.from}_${flow.to}',
+      ok,
+      detail,
+    ));
+  }
+  return checks;
+}
+
 /// [assertHtmlOfflineSafe]（零外链 + 结构 + 最短长度）。
 Uint8List normalizeHotAppHtml(String raw, {required String brief, bool requireDocument = true}) {
   var text = raw.trim();

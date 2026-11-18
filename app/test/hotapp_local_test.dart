@@ -290,4 +290,97 @@ void main() {
       expect(injected, contains("connect-src 'self'"));
     });
   });
+
+  group('由原型生成（可验证）', () {
+    PrototypeScreenSpec screen(String id) => PrototypeScreenSpec(id: id, title: id);
+
+    String protoHtml({required bool withSettings, required bool withNav}) {
+      final settingsSection = withSettings
+          ? '<section data-screen="settings"><h1>设置</h1></section>'
+          : '';
+      final nav = withNav ? '<button data-nav="settings">去设置</button>' : '';
+      return '<!doctype html><html><head><meta charset="utf-8"><style>'
+              'body{margin:0;font:14px system-ui;background:#fff;color:#111}'
+              '</style></head><body>'
+              '<section data-screen="home"><h1>番茄钟</h1><div>25:00</div>$nav</section>'
+              '$settingsSection'
+              '<script>document.addEventListener("click",function(e){'
+              'var t=e.target.closest("[data-nav]");if(!t)return;'
+              'var to=t.getAttribute("data-nav");'
+              'document.querySelectorAll("[data-screen]").forEach(function(s){'
+              's.style.display=s.getAttribute("data-screen")===to?"block":"none";});});'
+              '</script></body></html>';
+    }
+
+    test('全量覆盖：屏幕 + 连线都实现 → verified=true', () async {
+      late String capturedPrompt;
+      final service = HotAppService(
+        library: library,
+        llm: (request) async {
+          capturedPrompt = request.prompt;
+          return protoHtml(withSettings: true, withNav: true);
+        },
+      );
+
+      final result = await service.generateFromPrototype(
+        name: 'proto-pomodoro',
+        config: _config(),
+        prototypeMbt: '---\nmoonviz:\n  entry: home\n---\n# home …\n# settings …',
+        screens: [screen('home'), screen('settings')],
+        flows: [PrototypeLinkSpec(from: 'home', to: 'settings')],
+      );
+
+      expect(result.verified, isTrue, reason: result.failureSummary);
+      expect(result.app.name, 'proto-pomodoro');
+      expect(result.checks.map((c) => c.ok), everyElement(isTrue));
+      // 提示词必须带上画板清单、跳转清单与确定性标记要求
+      expect(capturedPrompt, contains('data-screen="home"'));
+      expect(capturedPrompt, contains('data-screen="settings"'));
+      expect(capturedPrompt, contains('data-nav="settings"'));
+      expect(capturedPrompt, contains('home → settings'));
+      final page = File('${result.app.dir}/index.html');
+      expect(page.existsSync(), isTrue);
+    });
+
+    test('缺画板：应用仍入库，但如实标注未通过项', () async {
+      final service = HotAppService(
+        library: library,
+        llm: (_) async => protoHtml(withSettings: false, withNav: true),
+      );
+
+      final result = await service.generateFromPrototype(
+        name: 'proto-missing',
+        config: _config(),
+        prototypeMbt: '原型文档',
+        screens: [screen('home'), screen('settings')],
+        flows: const [],
+      );
+
+      expect(result.verified, isFalse);
+      expect(result.failureSummary, contains('缺少画板 settings'));
+      final apps = await service.list();
+      expect(apps.map((a) => a.name), contains('proto-missing'),
+          reason: '结构门已过的产物不回滚，缺覆盖要如实上报');
+    });
+
+    test('缺连线：from 段落里没有 data-nav → 该跳转检查失败', () async {
+      final service = HotAppService(
+        library: library,
+        llm: (_) async => protoHtml(withSettings: true, withNav: false),
+      );
+
+      final result = await service.generateFromPrototype(
+        name: 'proto-no-link',
+        config: _config(),
+        prototypeMbt: '原型文档',
+        screens: [screen('home'), screen('settings')],
+        flows: [PrototypeLinkSpec(from: 'home', to: 'settings')],
+      );
+
+      expect(result.verified, isFalse);
+      expect(result.failureSummary, contains('缺少连线'));
+      final okFlow = result.checks.where((c) => c.id == 'screen_home');
+      expect(okFlow.single.ok, isTrue, reason: '画板在，缺的是连线');
+    });
+  });
 }

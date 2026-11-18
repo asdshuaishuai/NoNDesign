@@ -23,6 +23,8 @@ import 'project_service.dart';
 import 'remote/desktop_rpc_host.dart';
 import 'remote/rpc_methods.dart';
 import 'remote_desktop_client.dart';
+import 'hotapp_service.dart';
+import 'nonapp_library.dart';
 import 'toast_service.dart';
 
 /// Kept for the shell/full-screen hosts that still wire a ScaffoldMessenger.
@@ -2621,6 +2623,107 @@ class AppStore extends ChangeNotifier {
       if (!ok) return;
     }
     setView(_projectLandingView);
+  }
+
+  bool _hotappFromPrototypeBusy = false;
+
+  /// 由产品原型生成**可验证**的热应用（设计 → 热应用，唯一允许的模块间关联）。
+  ///
+  /// 画板/跳转取自当前渲染信封；生成后跑确定性覆盖验证（每屏 data-screen、
+  /// 每条连线 data-nav），结果如实上报：验证未过时应用仍入库，但提示缺失项。
+  Future<void> generateHotAppFromPrototype() async {
+    if (_hotappFromPrototypeBusy) return;
+    if (!hasProject) return;
+    if (agentBusy) {
+      _toastWarn('NaN 正在工作，等这一轮结束再生成热应用。');
+      return;
+    }
+    final artboards = render.artboards
+        .where((a) => a.id != '__seed')
+        .map((a) => PrototypeScreenSpec(id: a.id, title: a.name))
+        .toList();
+    final links =
+        render.flows.map((f) => PrototypeLinkSpec(from: f.from, to: f.to)).toList();
+    if (artboards.isEmpty) {
+      _toastWarn('画布上还没有原型', '先生成原型，再由原型生成热应用。');
+      return;
+    }
+    final s = settings;
+    final config = HotAppLlmConfig(
+      model: s.modelId,
+      baseUrl: s.baseUrl,
+      apiKey: s.apiKey,
+      thinkingLevel: s.thinkingLevel,
+    );
+    if (!config.isConfigured) {
+      _toastWarn('先在设置里配好模型连接', '热应用生成使用当前选中的模型。');
+      return;
+    }
+    _hotappFromPrototypeBusy = true;
+    try {
+      final service = HotAppService(library: await NonAppLibrary.open());
+      final name = await _uniqueHotAppName(service, _prototypeAppName());
+      if (name == null) {
+        _toastWarn('同名应用太多了', '清理旧的热应用或换个项目名再试。');
+        return;
+      }
+      final doc = mbt.length > 12000 ? mbt.substring(0, 12000) : mbt;
+      final result = await service.generateFromPrototype(
+        name: name,
+        config: config,
+        prototypeMbt: doc,
+        screens: artboards,
+        flows: links,
+      );
+      setHotApp(result.app.name);
+      setView('plugin:hotapp');
+      if (result.verified) {
+        _toastSuccess('热应用已生成并通过验证',
+            '${artboards.length} 屏 / ${links.length} 条跳转全部覆盖，页面在本机直接运行。');
+      } else {
+        _toastWarn('热应用已生成，但原型覆盖不完全', result.failureSummary);
+      }
+    } on HotAppFailure catch (failure) {
+      _toastError(hotAppFailureMessage(failure));
+    } catch (error) {
+      _toastError('由原型生成热应用没有完成', '请稍后重试');
+    } finally {
+      _hotappFromPrototypeBusy = false;
+    }
+  }
+
+  /// 项目名 → 合法热应用名（小写字母/数字/短横线/下划线）。
+  String _prototypeAppName() {
+    final lowered = projectName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]+'), '-');
+    var cleaned = lowered.replaceAll(RegExp(r'-{2,}'), '-');
+    while (cleaned.startsWith('-')) {
+      cleaned = cleaned.substring(1);
+    }
+    while (cleaned.endsWith('-')) {
+      cleaned = cleaned.substring(0, cleaned.length - 1);
+    }
+    if (cleaned.isEmpty || !RegExp(r'^[a-z0-9]').hasMatch(cleaned)) {
+      cleaned = 'prototype-app';
+    }
+    if (cleaned.length > 40) cleaned = cleaned.substring(0, 40);
+    return cleaned;
+  }
+
+  Future<String?> _uniqueHotAppName(HotAppService service, String base) async {
+    final taken = <String>{};
+    try {
+      for (final app in await service.list()) {
+        taken.add(app.name);
+      }
+    } catch (_) {
+      return null;
+    }
+    if (!taken.contains(base)) return base;
+    for (var i = 2; i < 10; i++) {
+      final candidate = '$base-$i';
+      if (!taken.contains(candidate)) return candidate;
+    }
+    return null;
   }
 
   /// 聊天记录落盘（$recoveryDir/chat.json，与 recovery 同目录、测试可注入）。

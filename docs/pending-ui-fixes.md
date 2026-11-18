@@ -73,3 +73,23 @@
 
 验证：`flutter analyze` 0 error/warning；`flutter test` 820 项全绿（含新增
 project_hub_test：桌面落 hub / hub 卡片进入对应模块 / 移动端行为不变）。
+
+## 新能力：由产品原型生成可验证的热应用（2026-11-18，已实施）
+
+设计 → 热应用是唯一允许的模块间关联；本能力把它做成一等能力并加上**确定性验证**：
+
+- 服务面 `HotAppService.generateFromPrototype`：输入画板清单 + 跳转清单 + 规范文档，
+  提示词要求逐屏 `<section data-screen="<id>">`、逐连线 `data-nav="<to>"`、
+  本机数据走 `window.NoN.db`、零外链全内联。
+- **覆盖验证是字节级检查，不是模型自评**：逐画板查段落、逐连线查 from 段落内的
+  `data-nav` 目标；结构门（离线/零外链/CSP）仍由 NonAppLibrary.install 把关。
+- 结果如实上报：验证未过时应用仍入库（结构门已过、不回滚），但 `verified=false`
+  并给出缺失项人话摘要；UI 不冒充成功。
+- 入口：设计画布工具条「由原型生成热应用」（设计视图内，紧邻热应用入口）；
+  store 路径 `generateHotAppFromPrototype`（应用名由项目名派生并去重，成功/部分成功
+  都会切到热应用工作台打开新应用）。
+- 后续：agent 工具 `hotapp_from_prototype`（需给 AgentWorkspaceServices/RPC 面
+  加方法，涉及 api.dart 远端实现与 rpc_methods 宿主，单独一批做）。
+
+验证：hotapp_local_test 新增 3 例（全量覆盖 verified=true / 缺画板如实上报 /
+缺连线如实上报），全量 `flutter test` 823 项全绿，analyze 0 error/warning。
