@@ -134,20 +134,28 @@ void main() {
     _expectWorkspaceSelector();
     _expectContinuousBackdrop(tester, const Size(1440, 900));
 
-    // 宽屏内容列自适应：留白 = 窗口宽 6%，输入卡与下方两栏同宽、左右对称。
+    // 宽屏版式（用户裁决 2026-11-19）：hero 文案占左侧、聊天框缩小后占右侧，
+    // 下方「作品集 / 最近项目」两栏吃满内容列。留白 = 窗口宽 6%。
     final composer = tester.getRect(find.byKey(const ValueKey('welcome-composer')));
     final cards = tester.getRect(find.byKey(const ValueKey('welcome-cards')));
+    final title = tester.getRect(find.text('把想法变成\n能用的作品'));
     final gutter = (1440 * 0.06).clamp(16.0, 96.0).toDouble();
-    expect((composer.width - (1440 - gutter * 2)).abs(), lessThanOrEqualTo(1),
-        reason: '内容列应随窗口自适应（不是固定列宽）');
-    expect((cards.width - composer.width).abs(), lessThanOrEqualTo(1));
-    expect((composer.left - gutter).abs(), lessThanOrEqualTo(1));
-    expect((composer.left - (1440 - composer.right)).abs(), lessThanOrEqualTo(1));
+    expect((cards.width - (1440 - gutter * 2)).abs(), lessThanOrEqualTo(1),
+        reason: '下方两栏应吃满内容列（随窗口自适应）');
+    expect((cards.left - gutter).abs(), lessThanOrEqualTo(1));
+    expect((1440 - cards.right - gutter).abs(), lessThanOrEqualTo(1));
+    // 聊天框缩到右侧一块（不是通栏），hero 文案在它左边。
+    expect(composer.width, lessThanOrEqualTo(520.0));
+    expect(composer.width, greaterThanOrEqualTo(300.0));
+    expect((1440 - composer.right - gutter).abs(), lessThanOrEqualTo(1),
+        reason: '聊天框必须右对齐到内容列右边界');
+    expect(title.right, lessThan(composer.left), reason: 'hero 文案在左，聊天框在右');
+    expect((title.left - gutter).abs(), lessThanOrEqualTo(1), reason: 'hero 左对齐内容列');
 
     // 宽屏：作品集 / 最近项目并排（左右两栏），不是单列堆叠。
-    final portfolio = tester.getRect(find.text('作品集'));
-    final recent = tester.getRect(find.text('最近项目'));
+    final portfolio = tester.getRect(find.byKey(const ValueKey('welcome-portfolio-card')));
+    final recent = tester.getRect(find.byKey(const ValueKey('welcome-recent-card')));
     expect(portfolio.left, lessThan(recent.left));
-    expect((portfolio.top - recent.top).abs(), lessThan(40));
+    expect((portfolio.top - recent.top).abs(), lessThan(1));
   });
 }

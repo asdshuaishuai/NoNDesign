@@ -31,7 +31,6 @@ import 'package:nondesign/core/toast_service.dart';
 import 'package:nondesign/core/video_clip.dart';
 import 'package:nondesign/core/video_service.dart';
 import 'package:nondesign/plugins/registry.dart';
-import 'package:nondesign/widgets/project_hub.dart';
 import 'package:nondesign/widgets/right_panel.dart' show Inspector;
 import 'package:nondesign/widgets/video_animation_surface.dart';
 import 'package:nondesign/widgets/video_clip_surface.dart';
@@ -454,7 +453,6 @@ void main() {
     expect(store.projectPath, isNull);
     // 设计侧重型面板一个都不在（没有项目也不会被拉进设计工作区）。
     expect(find.byType(Inspector), findsNothing);
-    expect(find.byType(ProjectHubView), findsNothing);
 
     // 播放 / 拖时间 / 换示例 / 开帧率弹层 / 开关对照 sheet：都不离开视频。
     await tester.tap(find.byKey(const ValueKey('video-animation-play')));
@@ -513,7 +511,6 @@ void main() {
     expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
     expect(_timeText(tester).data, '00:00.000 / 00:08.000');
     expect(find.byType(Inspector), findsNothing);
-    expect(find.byType(ProjectHubView), findsNothing);
 
     // 视频内的操作不碰项目态、也不换视图。
     await tester.tap(find.byKey(const ValueKey('video-load-sample')));

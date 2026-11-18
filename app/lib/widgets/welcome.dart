@@ -229,9 +229,18 @@ class _WelcomeState extends State<Welcome> {
       builder: (context, constraints) {
         final gutter = _wideGutter(constraints.maxWidth);
         final vpad = (constraints.maxHeight * _wideVerticalRatio).clamp(10.0, 24.0).toDouble();
-        final heroGap = (constraints.maxHeight * 0.019).clamp(12.0, 22.0).toDouble();
+        final columnGap = (constraints.maxWidth * 0.022).clamp(18.0, 40.0).toDouble();
         final sectionGap = (constraints.maxHeight * _wideSectionRatio).clamp(18.0, 34.0).toDouble();
         final cardGap = (constraints.maxWidth * 0.01).clamp(8.0, 20.0).toDouble();
+        // 版式（用户裁决 2026-11-19，验收图）：hero 文案占左侧、聊天框缩小后
+        // 占右侧一块，不再是一条通栏大框。聊天框按窗口宽的比例收缩到 340–520，
+        // 并强制给左侧文案留出至少 300 的阅读宽（窄窗口先压聊天框）。
+        final contentWidth = constraints.maxWidth - gutter * 2;
+        var composerWidth = (contentWidth * 0.38).clamp(340.0, 520.0).toDouble();
+        final heroMin = 300.0;
+        final composerCeiling = contentWidth - heroMin - columnGap;
+        if (composerWidth > composerCeiling) composerWidth = composerCeiling;
+        if (composerWidth < 300) composerWidth = 300;
         return SingleChildScrollView(
           child: ConstrainedBox(
             // 内容短于视口时仍垂直居中；内容更长时整页可滚（1024×768 与
@@ -243,13 +252,36 @@ class _WelcomeState extends State<Welcome> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _hero(context, store, narrow: false),
-                  SizedBox(height: heroGap),
-                  _briefCard(context, store),
-                  const SizedBox(height: 6),
-                  _briefHints(context),
+                  Row(
+                    key: const ValueKey('welcome-hero-row'),
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // 左：品牌主张 / 标题 / 副标题（整块左对齐，不再居中）。
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: _hero(context, store, narrow: false),
+                        ),
+                      ),
+                      SizedBox(width: columnGap),
+                      // 右：聊天框（含左下角的工作台类型选择）。
+                      SizedBox(
+                        width: composerWidth,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _briefCard(context, store),
+                            const SizedBox(height: 6),
+                            _briefHints(context),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                   SizedBox(height: sectionGap),
-                  // 作品集 / 最近项目：与上方输入卡同宽，左右两等分。
+                  // 作品集 / 最近项目：仍两栏并排，宽度吃满内容列（不挤在聊天框下）。
+                  // 各自按内容自然高度排在顶部，不强行等高——最近项目列表长，
+                  // 拉平会把作品集撑成一块空板。
                   Row(
                     key: const ValueKey('welcome-cards'),
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -302,7 +334,9 @@ class _WelcomeState extends State<Welcome> {
     final p = context.palette;
     // 字号也自适应：宽屏跟着窗口宽度缓慢放大（38–52），窄屏固定 32。
     final viewportWidth = MediaQuery.sizeOf(context).width;
-    final titleSize = narrow ? 32.0 : (viewportWidth * 0.0278).clamp(38.0, 52.0).toDouble();
+    // 标题现在只占左半区（右侧是聊天框）：字号按窗口宽缓增但收敛更低，
+    // 避免两行标题把左侧列撑得比聊天框高很多。
+    final titleSize = narrow ? 30.0 : (viewportWidth * 0.0235).clamp(32.0, 46.0).toDouble();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -375,9 +409,13 @@ class _WelcomeState extends State<Welcome> {
 
   Widget _briefCard(BuildContext context, AppStore store) {
     final p = context.palette;
+    // 示例都是「设计」任务（先写 PRD 再出原型），只在选择设计时给；
+    // 3D / 视频 / 热应用 / 自动 不摆设计示例，避免把用户带错工作台。
+    final designMode =
+        normalizeWorkspaceMode(store.chatWorkspaceMode) == workspaceModeDesign;
     return Container(
       key: const ValueKey('welcome-composer'),
-      padding: const EdgeInsets.all(9),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: p.panel.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(16),
@@ -385,6 +423,8 @@ class _WelcomeState extends State<Welcome> {
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 50, offset: const Offset(0, 24))],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           TextField(
             key: const ValueKey('welcome-brief'),
@@ -399,91 +439,96 @@ class _WelcomeState extends State<Welcome> {
               enabledBorder: InputBorder.none,
               focusedBorder: InputBorder.none,
               filled: false,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
             ),
             onSubmitted: (_) => _start(store),
           ),
-          const SizedBox(height: 6),
-          _workspaceSelector(context, store),
-          const SizedBox(height: 8),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final examples = [
-                for (final example in ['电商 App', 'SaaS 仪表盘', 'AI 助手', '个人作品集'])
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(4),
-                      onTap: () => _brief.text = '做一个$example：先写 PRD 与 UI 说明，再生成完整可交互原型。移动端优先，风格现代克制。',
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                        decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
-                        child: Text(example, style: TextStyle(fontSize: 10, color: p.ink3)),
-                      ),
-                    ),
-                  ),
-              ];
-              final button = FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: p.accent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-                ),
-                onPressed: store.agentBusy ? null : () => _start(store),
-                icon: store.agentBusy
-                    ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5))
-                    : const Icon(Icons.auto_awesome, size: 13),
-                label: const Text('开始创作', style: TextStyle(fontSize: 12)),
-              );
-              if (constraints.maxWidth < 520) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+          if (designMode) ...[
+            const SizedBox(height: 8),
+            _briefExamples(),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Wrap(spacing: 4, runSpacing: 6, children: examples),
-                    const SizedBox(height: 8),
-                    Align(alignment: Alignment.centerRight, child: button),
+                    // 左下角：这次落到哪个工作台（用户裁决 2026-11-19）。
+                    _workspaceSelector(context, store),
+                    const SizedBox(height: 5),
+                    Text(
+                      _workspaceHintText(normalizeWorkspaceMode(store.chatWorkspaceMode)),
+                      key: const ValueKey('welcome-workspace-hint'),
+                      style: TextStyle(fontSize: 10, height: 1.3, color: p.ink4),
+                    ),
                   ],
-                );
-              }
-              return Row(children: [...examples, const Spacer(), button]);
-            },
+                ),
+              ),
+              const SizedBox(width: 8),
+              _startButton(store),
+            ],
           ),
         ],
       ),
     );
   }
 
+  /// 设计示例（仅在「设计」工作台选中时出现）：一句话填满输入框。
+  Widget _briefExamples() {
+    final p = context.palette;
+    return Wrap(
+      spacing: 4,
+      runSpacing: 6,
+      children: [
+        for (final example in ['电商 App', 'SaaS 仪表盘', 'AI 助手', '个人作品集'])
+          InkWell(
+            key: ValueKey('welcome-example-$example'),
+            borderRadius: BorderRadius.circular(4),
+            onTap: () => setState(() {
+              _brief.text = '做一个$example：先写 PRD 与 UI 说明，再生成完整可交互原型。移动端优先，风格现代克制。';
+            }),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
+              child: Text(example, style: TextStyle(fontSize: 10, color: p.ink3)),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _startButton(AppStore store) {
+    final p = context.palette;
+    return FilledButton.icon(
+      style: FilledButton.styleFrom(
+        backgroundColor: p.accent,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+      ),
+      onPressed: store.agentBusy ? null : () => _start(store),
+      icon: store.agentBusy
+          ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5))
+          : const Icon(Icons.auto_awesome, size: 13),
+      label: const Text('开始创作', style: TextStyle(fontSize: 12)),
+    );
+  }
+
   /// 目标工作台选择器：多个工作区并存，用户必须能指定这次任务落到哪个。
   /// 选择写回 `store.chatWorkspaceMode`（持久化 + 通知），发送时自动生效。
+  /// 工作台类型选择（聊天框左下角）：这次任务落到哪个工作台。
+  /// 选择写回 `store.chatWorkspaceMode`（持久化 + 通知），发送时自动生效。
   Widget _workspaceSelector(BuildContext context, AppStore store) {
-    final p = context.palette;
     final selected = normalizeWorkspaceMode(store.chatWorkspaceMode);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
-      decoration: BoxDecoration(
-        color: p.panel2.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: p.line),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              for (final mode in kWorkspaceModes) _workspaceChip(context, store, mode, mode == selected),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            _workspaceHintText(selected),
-            key: const ValueKey('welcome-workspace-hint'),
-            style: TextStyle(fontSize: 10.5, height: 1.3, color: p.ink4),
-          ),
-        ],
-      ),
+    return Wrap(
+      spacing: 5,
+      runSpacing: 5,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final mode in kWorkspaceModes) _workspaceChip(context, store, mode, mode == selected),
+      ],
     );
   }
 
@@ -570,6 +615,7 @@ class _WelcomeState extends State<Welcome> {
   Widget _portfolioCard(BuildContext context, AppStore store) {
     final p = context.palette;
     return InkWell(
+      key: const ValueKey('welcome-portfolio-card'),
       onTap: () => store.setView('portfolio'),
       borderRadius: BorderRadius.circular(12),
       child: Container(
@@ -583,11 +629,15 @@ class _WelcomeState extends State<Welcome> {
           Icon(Icons.collections_bookmark_outlined, size: 18, color: p.accent),
           const SizedBox(width: 10),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('作品集', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.ink)),
-              Text('热应用 · 视频 · 3D 场景——生成过的都在这里',
-                  maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4)),
-            ]),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('作品集', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.ink)),
+                Text('热应用 · 视频 · 3D 场景——生成过的都在这里',
+                    maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4)),
+              ],
+            ),
           ),
           Icon(Icons.chevron_right, size: 15, color: p.ink4),
         ]),
@@ -598,6 +648,7 @@ class _WelcomeState extends State<Welcome> {
   Widget _recentCard(BuildContext context, AppStore store) {
     final p = context.palette;
     return Container(
+      key: const ValueKey('welcome-recent-card'),
       padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
         color: p.panel.withValues(alpha: 0.55),

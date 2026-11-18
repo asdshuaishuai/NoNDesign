@@ -20,7 +20,6 @@ import 'workspace_inspector.dart';
 import 'settings_dialog.dart';
 import 'status_bar.dart';
 import 'title_bar.dart';
-import 'project_hub.dart';
 
 /// 插件快捷键数字键池（⌘5 起）；池容量即同时可注册插件数上限。
 /// 消费点在 main.dart 根级 bindings——workspace 级 CallbackShortcuts 在
@@ -115,12 +114,6 @@ class _WorkspaceState extends State<Workspace> {
       if (pluginView != null) {
         return Scaffold(backgroundColor: p.bg, body: SafeArea(child: pluginView));
       }
-    }
-    // 项目中性主面（架构裁决 2026-11-18）：设计 / 热应用 / 3D / 视频相互独立，
-    // 项目落地不默认进设计画布，先给模块入口；嵌入式（移动画中画）不适用。
-    if (!widget.embedded && store.view == 'hub') {
-      return Scaffold(
-          backgroundColor: p.bg, body: const SafeArea(child: ProjectHubView()));
     }
     return CallbackShortcuts(
       bindings: {

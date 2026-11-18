@@ -224,14 +224,13 @@ class AppStore extends ChangeNotifier {
   List<String> selectedNodes = const [];
   String view = 'design';
 
-  /// 项目落地视图（架构裁决 2026-11-18）：设计 / 热应用 / 3D / 视频是相互
-  /// 独立的模块，项目打开/新建**不默认落在设计画布**——桌面壳落中性模块
-  /// 入口（hub），移动端壳以设计为工作面，保持原行为。
-  String get _projectLandingView {
-    final mobile = defaultTargetPlatform == TargetPlatform.iOS ||
-        defaultTargetPlatform == TargetPlatform.android;
-    return mobile ? 'design' : 'hub';
-  }
+  /// 项目落地视图：**已加载的项目直接进它所属的工作区**（用户裁决 2026-11-19）。
+  ///
+  /// 项目（DDP）的内容就是文档 + 画板，属于设计工作区；打开/新建后直接落画布，
+  /// 不再先给一层「选择模块」的中性入口——那一层既多余（项目本身已经决定了
+  /// 内容在哪），也让「带了一个项目却停在选择界面」变成死路。3D / 视频 / 热应用
+  /// 是独立工作区，各有自己的入口，不参与项目落地。
+  static const String _projectLandingView = 'design';
 
   String docsTab = 'prd';
   String panel = 'project';

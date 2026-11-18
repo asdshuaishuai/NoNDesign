@@ -140,27 +140,33 @@ void _expectContinuousBackdrop(WidgetTester tester, Size size) {
       reason: '出现局部大面积渐变（角落光斑/色块），会在页面上形成竖直色带: $partialGradients');
 }
 
-/// 宽屏内容列必须**随窗口自适应**：两侧留白 = 窗口宽 6%（16–96 收敛），
-/// 内容列 = 窗口宽 - 2×留白，作品集/最近项目两栏与输入卡同宽、左右对称。
-/// （旧实现写死 720 / 1040 列宽 + 固定 36 padding，大窗口下两侧空档会重新
-/// 裂成看起来像分栏的色带。）
+/// 宽屏版式（用户裁决 2026-11-19，验收图）：
+///   * hero 文案（badge/标题/副标题）占左侧，左对齐内容列左边界；
+///   * 聊天框缩小后占右侧一块（340–520 宽），右对齐内容列右边界；
+///   * 「作品集 / 最近项目」两栏在下方，吃满内容列并左右对称。
+/// 内容列 = 窗口宽 - 2×留白（留白按窗口宽 6%，16–96 收敛）。
 void _expectAdaptiveContentColumn(WidgetTester tester, Size size) {
   final composer = tester.getRect(find.byKey(const ValueKey('welcome-composer')));
   final cards = tester.getRect(find.byKey(const ValueKey('welcome-cards')));
+  final title = tester.getRect(find.text('把想法变成\n能用的作品'));
   final gutter = _wideGutterFor(size.width);
-  final expected = size.width - gutter * 2;
-  expect((composer.width - expected).abs(), lessThanOrEqualTo(1),
-      reason: '内容列宽应随窗口自适应（期望 $expected，实际 ${composer.width}）');
-  expect((cards.width - composer.width).abs(), lessThanOrEqualTo(1),
-      reason: '作品集/最近项目两栏必须与上方输入卡同宽');
-  final left = composer.left;
-  final right = size.width - composer.right;
-  expect((left - gutter).abs(), lessThanOrEqualTo(1), reason: '左侧留白应按窗口比例');
-  expect((right - gutter).abs(), lessThanOrEqualTo(1), reason: '右侧留白应按窗口比例');
-  expect((left - right).abs(), lessThanOrEqualTo(1), reason: '左右留白必须对称');
-  // 留白必须明显小于内容列（不再出现大块空白区）。
-  expect(left, lessThan(composer.width * 0.12),
-      reason: '留白不得超过内容宽度的 12%（否则又像分栏）');
+  final expectedContent = size.width - gutter * 2;
+  expect((cards.width - expectedContent).abs(), lessThanOrEqualTo(1),
+      reason: '下方两栏应吃满内容列（期望 $expectedContent，实际 ${cards.width}）');
+  expect((cards.left - gutter).abs(), lessThanOrEqualTo(1), reason: '内容列左边距应按窗口比例');
+  expect((size.width - cards.right - gutter).abs(), lessThanOrEqualTo(1),
+      reason: '内容列右边距应按窗口比例');
+  // 聊天框：右侧一块，不是通栏大框。
+  expect(composer.width, lessThanOrEqualTo(520.0),
+      reason: '聊天框不得再占满通栏（用户要求缩小、占右侧）');
+  expect(composer.width, greaterThanOrEqualTo(300.0), reason: '聊天框不能窄到不可用');
+  expect((size.width - composer.right - gutter).abs(), lessThanOrEqualTo(1),
+      reason: '聊天框必须右对齐内容列右边界');
+  // hero 在左、聊天框在右；hero 左对齐内容列。
+  expect((title.left - gutter).abs(), lessThanOrEqualTo(1), reason: 'hero 文案左对齐内容列');
+  expect(title.right, lessThan(composer.left), reason: 'hero 文案在左，聊天框在右');
+  // 左右两块都在视口内。
+  expect(composer.left, greaterThan(0));
 }
 
 void main() {
@@ -209,18 +215,17 @@ void main() {
       _expectContinuousBackdrop(tester, size);
       _expectAdaptiveContentColumn(tester, size);
 
-      // 「标题 + 输入卡」列居中：标题块中心 = 视口中心。
+      // 版式：hero 文案在左、聊天框在右（不再整列居中）。
       final titleRect = tester.getRect(find.text('把想法变成\n能用的作品'));
-      expect((titleRect.center.dx - size.width / 2).abs(), lessThan(1.5),
-          reason: '聊天框所在的标题列必须水平居中');
+      expect(titleRect.left, lessThan(size.width / 2), reason: 'hero 文案必须在左半区');
 
       // 作品集 / 最近项目并排且位于输入卡下方（左右两栏）。
       final titleBottom = titleRect.bottom;
-      final portfolio = tester.getRect(find.text('作品集'));
-      final recent = tester.getRect(find.text('最近项目'));
+      final portfolio = tester.getRect(find.byKey(const ValueKey('welcome-portfolio-card')));
+      final recent = tester.getRect(find.byKey(const ValueKey('welcome-recent-card')));
       expect(portfolio.left, lessThan(recent.left), reason: '作品集在左，最近项目在右');
       expect(portfolio.top, greaterThan(titleBottom), reason: '两张卡在输入区下方');
-      expect((portfolio.top - recent.top).abs(), lessThan(40), reason: '两栏同一行');
+      expect((portfolio.top - recent.top).abs(), lessThan(1), reason: '两栏同一行、顶对齐');
     });
   }
 
@@ -282,44 +287,49 @@ void main() {
     expect(tester.takeException(), isNull);
 
     final title = tester.getRect(find.text('把想法变成\n能用的作品'));
-    // 顶栏 60 + 24 padding ≈ 84 起算；真正居中后标题应在视口上半区偏中。
-    expect(title.top, greaterThan(120));
-    expect(title.top, lessThan(920 * 0.45));
+    // 顶栏 60 + 24 padding ≈ 84 起算；左右两块整体垂直居中，标题落在上半区。
+    expect(title.top, greaterThan(100));
+    expect(title.top, lessThan(920 * 0.5));
     _expectWorkspaceSelector();
     _expectContinuousBackdrop(tester, const Size(1440, 920));
     _expectAdaptiveContentColumn(tester, const Size(1440, 920));
     expect(find.text('还没有项目。上面输入一句话，马上开始。'), findsOneWidget);
   });
 
-  // 自适应回归：内容列不能写死固定宽度——窗口变宽，内容列必须跟着变宽，
-  // 留白按窗口比例走。这里跑 1024 / 1440 / 1920 三档比对。
-  testWidgets('宽屏内容列随窗口自适应（不是固定列宽）', (tester) async {
+  // 自适应回归：内容列随窗口变宽；聊天框按比例收缩到上限后定宽 520，
+  // 但 hero 阅读宽永远 ≥ 300（窗口变宽先让 hero 变宽）。
+  testWidgets('宽屏：内容列自适应，聊天框右侧收缩且有上限', (tester) async {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    Future<double> composerWidthAt(Size size) async {
+    Future<(double, double)> at(Size size) async {
       tester.view.physicalSize = size;
       await tester.pumpWidget(_wrap(_filledStore()));
       await tester.pump(const Duration(milliseconds: 50));
       expect(tester.takeException(), isNull);
-      return tester.getRect(find.byKey(const ValueKey('welcome-composer'))).width;
+      return (
+        tester.getRect(find.byKey(const ValueKey('welcome-cards'))).width,
+        tester.getRect(find.byKey(const ValueKey('welcome-composer'))).width,
+      );
     }
 
-    final w1024 = await composerWidthAt(const Size(1024, 768));
-    final w1440 = await composerWidthAt(const Size(1440, 920));
-    final w1920 = await composerWidthAt(const Size(1920, 1080));
+    final (cards1024, composer1024) = await at(const Size(1024, 768));
+    final (cards1440, composer1440) = await at(const Size(1440, 920));
+    final (cards1920, composer1920) = await at(const Size(1920, 1080));
 
-    // 窗口变宽 → 内容列跟着变宽（不是三档同一个写死值）。
-    expect(w1440, greaterThan(w1024 + 100), reason: '1440 内容列必须比 1024 宽');
-    expect(w1920, greaterThan(w1440 + 100), reason: '1920 内容列必须比 1440 宽');
-
-    // 1024 / 1440 都在比例留白区间：内容占比稳定（≈88%）。
-    expect((w1024 / 1024 - w1440 / 1440).abs(), lessThan(0.01),
-        reason: '内容列占宽比例应稳定（按窗口比例留白）');
-    // 1920 起留白收敛到上限 96，内容仍是窗口宽 - 2×留白。
-    expect((w1920 - (1920 - 2 * _wideGutterFor(1920))).abs(), lessThanOrEqualTo(1),
-        reason: '超宽窗口留白收敛上限后，内容仍自适应铺满');
+    // 内容列（两栏）随窗口变宽。
+    expect(cards1440, greaterThan(cards1024 + 100), reason: '1440 内容列必须比 1024 宽');
+    expect(cards1920, greaterThan(cards1440 + 100), reason: '1920 内容列必须比 1440 宽');
+    // 聊天框：不随窗口无限变宽，收敛在 340–520。
+    expect(composer1024, greaterThanOrEqualTo(300.0));
+    expect(composer1440, lessThanOrEqualTo(520.0));
+    expect(composer1920, lessThanOrEqualTo(520.0));
+    expect(composer1920, greaterThanOrEqualTo(composer1024 - 1));
+    // hero 阅读宽 ≥ 300：1920 下聊天框定宽后，剩余全部给 hero。
+    final sectionGap = (1920 * 0.022).clamp(18.0, 40.0).toDouble();
+    final heroWidth = cards1920 - composer1920 - sectionGap;
+    expect(heroWidth, greaterThan(500), reason: '宽窗口下 hero 文案列应显著宽于聊天框');
   });
 
   // 目标工作台选择器：点「视频」→ 高亮切换 + store 持久化。
@@ -436,6 +446,48 @@ void main() {
     expect(find.byKey(const ValueKey('welcome-brief')), findsOneWidget,
         reason: '主页仍用一句话起步输入框');
     _expectNoWorkbenchList();
+    expect(tester.takeException(), isNull);
+  });
+
+  // 用户裁决 2026-11-19（验收图）：聊天框左下角 = 工作台类型选择；原来左下角
+  // 的设计示例只在选择「设计」时出现，其他工作台不摆设计示例。
+  testWidgets('聊天框左下角是工作台类型选择；设计示例只随「设计」出现', (tester) async {
+    tester.view.physicalSize = const Size(1440, 920);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final store = _filledStore();
+    await tester.pumpWidget(_wrap(store));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final composer = tester.getRect(find.byKey(const ValueKey('welcome-composer')));
+    final chip = tester.getRect(find.byKey(const ValueKey('welcome-workspace-auto')));
+    // 选择器在聊天框内部，落在左下角（下半部、左半边）。
+    expect(composer.contains(chip.center), isTrue, reason: '工作台选择必须在聊天框内');
+    expect(chip.center.dx, lessThan(composer.center.dx), reason: '选择器在聊天框左侧');
+    expect(chip.center.dy, greaterThan(composer.center.dy), reason: '选择器在聊天框下半部');
+
+    // 默认「自动」：不摆设计示例（示例是设计任务的写法）。
+    expect(find.byKey(const ValueKey('welcome-example-电商 App')), findsNothing,
+        reason: '非设计工作台不出现设计示例');
+
+    // 切到「设计」：示例出现，且仍在聊天框内。
+    await tester.tap(find.byKey(const ValueKey('welcome-workspace-design')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(store.chatWorkspaceMode, workspaceModeDesign);
+    final example = find.byKey(const ValueKey('welcome-example-电商 App'));
+    expect(example, findsOneWidget, reason: '选择设计后出现设计示例');
+    expect(composer.contains(tester.getRect(example).center), isTrue);
+
+    // 切到「视频」：设计示例收回。
+    await tester.tap(find.byKey(const ValueKey('welcome-workspace-video')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(store.chatWorkspaceMode, workspaceModeVideo);
+    expect(find.byKey(const ValueKey('welcome-example-电商 App')), findsNothing,
+        reason: '切到视频后设计示例收回');
     expect(tester.takeException(), isNull);
   });
 }
