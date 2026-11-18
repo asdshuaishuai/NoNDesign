@@ -28,6 +28,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:nondesign/core/models.dart';
+import 'package:nondesign/core/portfolio_entries.dart';
 import 'package:nondesign/core/platform_capabilities.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
@@ -35,6 +36,9 @@ import 'package:nondesign/widgets/chat_pip_shell.dart';
 import 'package:nondesign/widgets/desktop_shell.dart';
 import 'package:nondesign/widgets/shell_host.dart';
 import 'package:nondesign/widgets/welcome.dart';
+import 'package:nondesign/widgets/hotapp_workspace.dart';
+import 'package:nondesign/widgets/three_workspace.dart';
+import 'package:nondesign/widgets/video_workspace.dart';
 import 'package:nondesign/widgets/workspace.dart';
 
 /// 宽屏左右留白比例（welcome.dart 的 `_wideGutterRatio` 镜像）：窗口宽的 6%，
@@ -488,6 +492,88 @@ void main() {
     expect(store.chatWorkspaceMode, workspaceModeVideo);
     expect(find.byKey(const ValueKey('welcome-example-电商 App')), findsNothing,
         reason: '切到视频后设计示例收回');
+    expect(tester.takeException(), isNull);
+  });
+
+  // 用户裁决 2026-11-19：首页作品集要和「最近项目」一样展开成列表
+  // （热应用 / 3D / 视频 三条真实产物 + 查看全部），不是一张只跳转的窄卡。
+  testWidgets('作品集卡展开成列表：条目可直达工作台，查看全部进作品集', (tester) async {
+    tester.view.physicalSize = const Size(1440, 920);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(() {
+      threeLoadOnOpen = null;
+      videoLoadOnOpen = null;
+      hotAppLoadOnOpen = null;
+    });
+
+    final store = _filledStore();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    // boot 之外的测试路径：直接注入扫描结果（生产由 store.refreshPortfolio 填）。
+    store.portfolioEntries = [
+      PortfolioEntry(
+          kind: 'hotapp', ref: 'demo-app', title: 'demo-app', detail: '热应用', modified: now - 60000),
+      PortfolioEntry(
+          kind: 'three', ref: 'saturn-demo', title: 'saturn-demo', detail: '3D 场景',
+          modified: now - 120000),
+      PortfolioEntry(
+          kind: 'video', ref: '/tmp/clip.mp4', title: 'clip.mp4', detail: '视频',
+          path: '/tmp/clip.mp4', modified: now),
+    ];
+    store.portfolioLoadedAt = now;
+
+    await tester.pumpWidget(_wrap(store));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final card = find.byKey(const ValueKey('welcome-portfolio-card'));
+    expect(card, findsOneWidget);
+    // 三条都在卡内（不是跳转卡片）。
+    for (final title in ['demo-app', 'saturn-demo', 'clip.mp4']) {
+      expect(find.descendant(of: card, matching: find.text(title)), findsOneWidget,
+          reason: '作品集展开卡应列出 $title');
+    }
+    expect(find.descendant(of: card, matching: find.textContaining('热应用')), findsWidgets);
+
+    // 点 3D 条目 → 直达 3D 工作台，并把项目名交给工作台。
+    await tester.tap(find.byKey(const ValueKey('welcome-shelf-three-saturn-demo')));
+    await tester.pump();
+    expect(threeLoadOnOpen, 'saturn-demo');
+    expect(store.view, 'plugin:three');
+
+    // 回到首页态后点「查看全部…」→ 作品集视图。
+    store.setView('home');
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('welcome-portfolio-all')));
+    await tester.pump();
+    expect(store.view, 'portfolio');
+
+    // 点热应用条目 → 热应用工作台。
+    store.setView('home');
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('welcome-shelf-hotapp-demo-app')));
+    await tester.pump();
+    expect(hotAppLoadOnOpen, 'demo-app');
+    expect(store.view, 'plugin:hotapp');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('作品集卡空态给一句人话（不空屏、不留死链）', (tester) async {
+    tester.view.physicalSize = const Size(1440, 920);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final store = _filledStore();
+    store.portfolioEntries = const [];
+    store.portfolioLoadedAt = DateTime.now().millisecondsSinceEpoch;
+    await tester.pumpWidget(_wrap(store));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final card = find.byKey(const ValueKey('welcome-portfolio-card'));
+    expect(find.descendant(of: card, matching: find.textContaining('还没有作品')), findsOneWidget);
+    // 「查看全部」仍在：空态也能进艺术架换一种看法。
+    expect(find.byKey(const ValueKey('welcome-portfolio-all')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

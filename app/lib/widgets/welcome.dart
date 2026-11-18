@@ -3,10 +3,14 @@ import 'package:provider/provider.dart';
 
 import '../core/keys.dart';
 import '../core/models.dart';
+import '../core/portfolio_entries.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/toast_service.dart';
 import 'common.dart';
+import 'hotapp_workspace.dart';
+import 'three_workspace.dart';
+import 'video_workspace.dart';
 import 'workspace.dart';
 
 /// 主页（用户裁决：布局固定不变，是死规矩）。
@@ -608,37 +612,162 @@ class _WelcomeState extends State<Welcome> {
   // ---------------------------------------------------------------------------
 
   /// 作品集入口卡：聚合热应用/视频/3D 三类产物，快速查看与使用。
+  /// 作品集卡（用户裁决 2026-11-19）：**展开成列表**，和「最近项目」同一种
+  /// 读法——标题行 + 最多 5 条产物（热应用 / 3D 场景 / 视频）+ 「查看全部」。
+  ///
+  /// 数据来自 [AppStore.refreshPortfolio]（与艺术架同源，只列非项目类产物；
+  /// 原型项目在「最近项目」卡里，不重复）。点条目直达对应工作台。
   Widget _portfolioCard(BuildContext context, AppStore store) {
     final p = context.palette;
-    return InkWell(
+    final entries = store.portfolioEntries;
+    return Container(
       key: const ValueKey('welcome-portfolio-card'),
-      onTap: () => store.setView('portfolio'),
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(13),
-        decoration: BoxDecoration(
-          color: p.panel.withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: p.line),
-        ),
-        child: Row(children: [
-          Icon(Icons.collections_bookmark_outlined, size: 18, color: p.accent),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text('作品集', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.ink)),
-                Text('热应用 · 视频 · 3D 场景——生成过的都在这里',
-                    maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4)),
-              ],
-            ),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: p.panel.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: p.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('作品集', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
+              const SizedBox(width: 6),
+              Text('热应用 · 3D · 视频', style: TextStyle(fontSize: 10, color: p.ink4)),
+              const Spacer(),
+              if (store.portfolioLoading)
+                SizedBox(
+                  width: 11,
+                  height: 11,
+                  child: CircularProgressIndicator(strokeWidth: 1.4, color: p.ink4),
+                )
+              else
+                InkWell(
+                  key: const ValueKey('welcome-portfolio-refresh'),
+                  onTap: () => store.refreshPortfolio(force: true),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(Icons.refresh, size: 13, color: p.ink4),
+                  ),
+                ),
+              const SizedBox(width: 8),
+              InkWell(
+                key: const ValueKey('welcome-portfolio-all'),
+                onTap: () => store.setView('portfolio'),
+                child: Text('查看全部…', style: TextStyle(fontSize: 10, color: p.ink4)),
+              ),
+            ],
           ),
-          Icon(Icons.chevron_right, size: 15, color: p.ink4),
-        ]),
+          const SizedBox(height: 8),
+          if (store.portfolioError != null && entries.isEmpty)
+            _shelfHint(context, store.portfolioError!, retryable: true)
+          else if (entries.isEmpty)
+            _shelfHint(context, '还没有作品。做出来的热应用、3D 场景和视频会出现在这里。')
+          else
+            for (final entry in entries.take(kHomePortfolioLimit))
+              _shelfRow(context, store, entry),
+        ],
       ),
     );
+  }
+
+  Widget _shelfHint(BuildContext context, String text, {bool retryable = false}) {
+    final p = context.palette;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
+      decoration: BoxDecoration(
+        border: Border.all(color: p.line),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Flexible(
+            child: Text(text,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4)),
+          ),
+          if (retryable) ...[
+            const SizedBox(width: 8),
+            InkWell(
+              key: const ValueKey('welcome-portfolio-retry'),
+              onTap: () => context.read<AppStore>().refreshPortfolio(force: true),
+              child: Text('重试', style: TextStyle(fontSize: 10, color: p.accent)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _shelfRow(BuildContext context, AppStore store, PortfolioEntry entry) {
+    final p = context.palette;
+    final icon = switch (entry.kind) {
+      'hotapp' => Icons.auto_fix_high_outlined,
+      'three' => Icons.view_in_ar_outlined,
+      _ => Icons.movie_outlined,
+    };
+    return InkWell(
+      // ref 才唯一：视频产物可能同名（两段都叫 frames.mp4），用标题做 Key 会撞。
+      key: ValueKey('welcome-shelf-${entry.kind}-${entry.ref}'),
+      borderRadius: BorderRadius.circular(8),
+      // 打开契约与艺术架一致：对应工作台的开局全局 + setView。
+      onTap: () => _openShelfEntry(store, entry),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        child: Row(
+          children: [
+            Container(
+              width: 27,
+              height: 27,
+              decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
+              child: Icon(icon, size: 13, color: p.ink4),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(entry.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: p.ink2)),
+                  Text(
+                    entry.modified == null
+                        ? entry.detail
+                        : '${entry.detail} · ${relativeTime(entry.modified)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10, color: p.ink4),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, size: 13, color: p.ink4),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 点作品集条目 → 对应工作台（与艺术架同一打开契约）。
+  void _openShelfEntry(AppStore store, PortfolioEntry entry) {
+    if (entry.ref.isEmpty) return;
+    switch (entry.kind) {
+      case 'hotapp':
+        // 该全局只写应用名（不是路径），两个取值域不得混用。
+        hotAppLoadOnOpen = entry.ref;
+        store.setView('plugin:hotapp');
+      case 'three':
+        threeLoadOnOpen = entry.ref;
+        store.setView('plugin:three');
+      case 'video':
+        videoLoadOnOpen = entry.path ?? entry.ref;
+        store.setView('plugin:video');
+    }
   }
 
   Widget _recentCard(BuildContext context, AppStore store) {

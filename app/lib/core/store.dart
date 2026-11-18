@@ -25,6 +25,7 @@ import 'remote/rpc_methods.dart';
 import 'remote_desktop_client.dart';
 import 'hotapp_service.dart';
 import 'nonapp_library.dart';
+import 'portfolio_entries.dart';
 import 'toast_service.dart';
 
 /// Kept for the shell/full-screen hosts that still wire a ScaffoldMessenger.
@@ -231,6 +232,20 @@ class AppStore extends ChangeNotifier {
   /// 内容在哪），也让「带了一个项目却停在选择界面」变成死路。3D / 视频 / 热应用
   /// 是独立工作区，各有自己的入口，不参与项目落地。
   static const String _projectLandingView = 'design';
+
+  // 首页「作品集」展开卡（与艺术架同源，但只列热应用 / 3D / 视频）。
+  /// 最近一次扫描到的作品集条目（新建工程/回主页时刷新）。
+  List<PortfolioEntry> portfolioEntries = const [];
+  /// 正在扫描（卡片上显示轻量进度，不占位）。
+  bool portfolioLoading = false;
+  /// 最近一次成功扫描的时间（毫秒）；null = 还没扫过。
+  int? portfolioLoadedAt;
+  /// 扫描失败的可见提示（人话）；null = 正常。
+  String? portfolioError;
+
+  /// boot 是否已经跑完：作品集自动刷新只对生产启动后的 store 生效，
+  /// 避免测试里手动构造的 AppStore 去扫真实用户目录。
+  bool _bootCompleted = false;
 
   String docsTab = 'prd';
   String panel = 'project';
@@ -509,6 +524,11 @@ class AppStore extends ChangeNotifier {
       await _loadRecovery();
       await _loadChat();
       await refreshProjects();
+      // 启动即准备首页作品集（不等它：扫目录可能与引擎启动争 IO，卡片先空着
+      // 再随 notifyListeners 补上）。_bootCompleted 之后 setView('home') 才会
+      // 自动刷新——测试里手动构造的 store 不会扫真实用户目录。
+      _bootCompleted = true;
+      unawaited(refreshPortfolio(force: true));
       // Dev/e2e affordance: auto-open a project and/or jump to a view.
       // NONDESIGN_OPEN=/path/to.ddp  NONDESIGN_VIEW=design|docs|source|play
       final envOpen = Platform.environment['NONDESIGN_OPEN'];
@@ -739,6 +759,33 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 刷新首页「作品集」展开卡：热应用 / 3D 场景 / 视频三类产物。
+  ///
+  /// 与艺术架同源（同一套本地目录），但只做一次轻量列举，不建索引、不联网。
+  /// 15 秒内的重复调用直接复用上次结果（切视图/回主页会触发很多次）；
+  /// `force: true` 用于用户手动点刷新。扫描失败只给一句人话提示，不清空
+  /// 已有列表——旧结果比空列表更接近真相。
+  Future<void> refreshPortfolio({bool force = false}) async {
+    if (portfolioLoading) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final loadedAt = portfolioLoadedAt;
+    if (!force && loadedAt != null && now - loadedAt < 15000) return;
+    portfolioLoading = true;
+    notifyListeners();
+    try {
+      final entries = await loadPortfolioEntries();
+      portfolioEntries = entries;
+      portfolioError = null;
+    } catch (e) {
+      debugPrint('[portfolio] scan failed: $e');
+      portfolioError = '作品集暂时读不出来';
+    } finally {
+      portfolioLoading = false;
+      portfolioLoadedAt = DateTime.now().millisecondsSinceEpoch;
+      notifyListeners();
+    }
+  }
+
   List<Map<String, dynamic>> _loadRecent(SharedPreferences prefs) {
     try {
       final raw = jsonDecode(prefs.getString(_recentKey) ?? '[]');
@@ -792,6 +839,10 @@ class AppStore extends ChangeNotifier {
 
   void setView(String value) {
     view = value;
+    // 回主页时刷新作品集：在 3D/视频/热应用里刚做出来的东西要能立刻出现在
+    // 首页展开卡里。只在 boot 完成后的生产路径触发（测试手动构造的 store
+    // 不该去扫用户目录）；轻缓存避免频繁切视图时反复扫盘。
+    if (value == 'home' && _bootCompleted) unawaited(refreshPortfolio());
     notifyListeners();
   }
 
