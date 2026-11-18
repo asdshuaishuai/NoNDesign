@@ -19,6 +19,7 @@ import 'package:provider/provider.dart';
 import '../core/nonapp_library.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import '../core/video_clip.dart';
 import '../core/video_samples.dart';
 import 'common.dart';
 // Inspector / AgentPanel 是 right_panel.dart 的 part——只能经库入口导入。
@@ -243,6 +244,10 @@ class _VideoInspector extends StatelessWidget {
         ),
       );
     }
+    final clipId = store.settings.videoClipId;
+    if (clipId.isNotEmpty) {
+      return _VideoClipInspector(clipId: clipId);
+    }
     final idx = store.settings.videoSampleIdx.clamp(0, videoSamples.length - 1);
     final sample = videoSamples[idx];
     final stats = _VideoSampleStats.of(sample);
@@ -296,6 +301,135 @@ class _VideoInspector extends StatelessWidget {
           onTap: () => store.setView('plugin:video'),
         ),
       ],
+    );
+  }
+}
+
+/// 动效合成短片的只读检查：当前选中的片子 + 播放规格 + 去哪看。
+class _VideoClipInspector extends StatelessWidget {
+  const _VideoClipInspector({required this.clipId});
+
+  final String clipId;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.watch<AppStore>();
+    final p = context.palette;
+    return FutureBuilder<VideoClipCatalog>(
+      future: sharedVideoClips(),
+      builder: (context, snapshot) {
+        final catalog = snapshot.data;
+        final clip = catalog?.clips
+            .where((c) => c.id == clipId)
+            .cast<VideoClipInfo?>()
+            .firstWhere((c) => true, orElse: () => null);
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(
+            child: Text('正在读动效合成…', style: TextStyle(fontSize: 11, color: p.ink4)),
+          );
+        }
+        if (clip == null) {
+          return ListView(
+            padding: const EdgeInsets.all(12),
+            children: [
+              _WiHeader(
+                  icon: Icons.movie_outlined, title: '视频检查', subtitle: '动效合成'),
+              const SizedBox(height: 12),
+              _WiCard(
+                children: [
+                  Text(
+                    catalog?.error.isNotEmpty == true
+                        ? catalog!.error
+                        : '这支短片不在示例清单里了，回工作台重新选一支。',
+                    style: TextStyle(fontSize: 10, height: 1.5, color: p.ink3),
+                  ),
+                ],
+              ),
+              _WiPrimary(
+                key: const ValueKey('wi-open-workspace'),
+                label: '打开视频工作台',
+                icon: Icons.arrow_forward,
+                onTap: () => store.setView('plugin:video'),
+              ),
+            ],
+          );
+        }
+        final styleLabel = switch (clip.style) {
+          'hand' => '简笔手绘',
+          'motion' => '动效排版',
+          'ui' => '界面演示',
+          'data' => '数据动效',
+          _ => '动效合成',
+        };
+        return ListView(
+          padding: const EdgeInsets.all(12),
+          children: [
+            _WiHeader(
+              icon: Icons.movie_outlined,
+              title: '视频检查',
+              subtitle: clip.title,
+            ),
+            const SizedBox(height: 12),
+            _WiCard(
+              children: [
+                _WiRow(label: '当前示例', value: clip.title),
+                const SizedBox(height: 6),
+                Text(clip.subtitle,
+                    style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4)),
+              ],
+            ),
+            _WiCard(
+              children: [
+                const SectionLabel('播放参数'),
+                const SizedBox(height: 6),
+                _WiRow(label: '类型', value: styleLabel),
+                const SizedBox(height: 4),
+                _WiRow(label: '时长', value: '${clip.duration.toStringAsFixed(1)} 秒'),
+                const SizedBox(height: 4),
+                _WiRow(label: '画面', value: '1280×720'),
+                const SizedBox(height: 4),
+                _WiRow(label: '帧率', value: '30 fps'),
+              ],
+            ),
+            if (clip.tags.isNotEmpty)
+              _WiCard(
+                children: [
+                  const SectionLabel('看点'),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final tag in clip.tags)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: p.accent.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Text(tag, style: TextStyle(fontSize: 9.5, color: p.accent)),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            _WiCard(
+              children: [
+                Text(
+                  '这支是 HTML/CSS/JS 动效合成：应用内实时播放，可拖动进度逐帧看；成片导出暂未开放。',
+                  style: TextStyle(fontSize: 10, height: 1.5, color: p.ink3),
+                ),
+              ],
+            ),
+            _WiPrimary(
+              key: const ValueKey('wi-open-workspace'),
+              label: '打开视频工作台',
+              icon: Icons.arrow_forward,
+              onTap: () => store.setView('plugin:video'),
+            ),
+          ],
+        );
+      },
     );
   }
 }

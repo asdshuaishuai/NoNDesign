@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>水的三态 · 简笔循环</title>
+<style>
+  /* 简笔画 · 水的三态循环（冰 → 水 → 汽 → 冰）
+   * 图层：纸底 → 手绘边框 → 循环箭头/粒子（SVG）→ 手绘标注片 → 三张卡片 → 标题 / 收尾 → 颗粒 / 暗角 */
+  #nd-stage {
+    background:
+      radial-gradient(120% 100% at 24% 6%, #fcf7ec 0%, #f6efe1 44%, #ecdfc9 100%);
+  }
+  #nd-cam { position: absolute; inset: 0; transform-origin: 50% 48%; }
+  #art { position: absolute; left: 0; top: 0; display: block; }
+
+  /* ---------------------------------------------------------------- 标题 */
+  #title {
+    position: absolute; left: 0; top: 224px; width: 100%;
+    text-align: center; z-index: 5; will-change: transform;
+  }
+  #title .line { display: inline-block; white-space: nowrap; }
+  #title .ch {
+    display: inline-block;
+    font-family: var(--hand);
+    font-size: 168px;
+    line-height: 1;
+    color: var(--ink);
+    margin: 0 10px;
+    transform-origin: 50% 82%;
+    will-change: transform, opacity;
+  }
+  #header-rule {
+    position: absolute; left: 96px; top: 150px; width: 158px; height: 3px;
+    border-radius: 2px; background: var(--accent);
+    transform-origin: 0 50%; transform: scaleX(0); z-index: 5;
+  }
+
+  /* ---------------------------------------------------------------- 卡片 */
+  .card {
+    position: absolute; width: 220px; height: 160px; z-index: 4;
+    padding: 10px 14px 12px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1px;
+    background: #fdf8ee;
+    border: 2px solid var(--ink);
+    border-radius: 5px;
+    box-shadow: 9px 11px 0 rgba(38, 38, 43, 0.1);
+    transform-origin: 50% 64%;
+    will-change: transform, opacity;
+  }
+  .card .icon { width: 66px; height: 66px; overflow: visible; }
+  .card .icon path { fill: none; stroke: var(--ink); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+  .card .icon .cool { stroke: var(--cool); }
+  .card .icon .faint { stroke: var(--ink-faint); stroke-width: 2; }
+  .card .name { font-family: var(--hand); font-size: 39px; line-height: 1.02; color: var(--ink); }
+  .card .tag {
+    font-family: var(--hand); font-size: 15px; letter-spacing: 0.1em;
+    color: var(--ink-soft);
+  }
+  .card .tag b { font-weight: 400; color: var(--cool); }
+
+  /* ---------------------------------------------------------------- 手绘标注片 */
+  .chip {
+    position: absolute; width: 138px; z-index: 3;
+    padding: 7px 0 6px; text-align: center;
+    background: #fbf6ea;
+    border: 1.6px solid var(--cool);
+    border-radius: 4px;
+    box-shadow: 4px 5px 0 rgba(38, 38, 43, 0.07);
+    transform-origin: 50% 50%;
+    will-change: transform, opacity;
+  }
+  .chip .cn {
+    font-family: var(--hand); font-size: 26px; line-height: 1.08;
+    letter-spacing: 0.12em; color: var(--ink);
+  }
+  .chip .temp {
+    margin-top: 1px; font-family: var(--mono); font-size: 13px;
+    letter-spacing: 0.06em; color: var(--ink-faint);
+  }
+  .chip .temp.warm { color: var(--accent); }
+  .chip .temp.cool { color: var(--cool); }
+
+  /* ---------------------------------------------------------------- SVG 手绘 */
+  .flow-arc { fill: none; stroke: var(--cool); stroke-width: 4; stroke-linecap: round; }
+  .arc-head { fill: none; stroke: var(--cool); stroke-width: 3.6; stroke-linecap: round; }
+  .leader { fill: none; stroke: var(--ink-faint); stroke-width: 1.6; stroke-linecap: round; }
+  #loop-arc { fill: none; stroke: var(--ink-faint); stroke-width: 2.1; stroke-linecap: round; }
+  #loop-head { fill: none; stroke: var(--ink-faint); stroke-width: 2.1; stroke-linecap: round; }
+  #loop-text {
+    font-family: var(--hand); font-size: 24px; letter-spacing: 0.24em;
+    fill: var(--ink-soft); text-anchor: middle;
+  }
+  .steam { fill: none; stroke: var(--cool); stroke-width: 2.4; stroke-linecap: round; }
+  .drop { fill: var(--cool); }
+  .heat { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linecap: round; }
+  .spark { fill: none; stroke: var(--ink-faint); stroke-width: 1.8; stroke-linecap: round; }
+  .mote-dot { fill: var(--accent); }
+
+
+  #note-left {
+    position: absolute; left: 112px; top: 632px; z-index: 4;
+    font-family: var(--hand); font-size: 23px; letter-spacing: 0.12em;
+    color: var(--ink-soft);
+  }
+  #note-left .dot { color: var(--accent); }
+  #note-right {
+    position: absolute; right: 104px; top: 640px; z-index: 4;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em;
+    color: var(--ink-faint);
+  }
+  /* ---------------------------------------------------------------- 收尾 */
+  #outro { position: absolute; inset: 0; z-index: 6; opacity: 0; }
+  #outro .big {
+    position: absolute; left: 0; right: 0; top: 238px; text-align: center;
+    font-family: var(--hand); font-size: 96px; line-height: 1; color: var(--ink);
+    letter-spacing: 0.04em;
+  }
+  #outro .big .dot { color: var(--accent); }
+  #outro .swash {
+    position: absolute; left: 50%; top: 350px; margin-left: -172px;
+  }
+  #outro .sub {
+    position: absolute; left: 0; right: 0; top: 376px; text-align: center;
+    font-family: var(--hand); font-size: 31px; letter-spacing: 0.2em;
+    color: var(--ink-soft);
+  }
+  #outro-foot {
+    position: absolute; left: 0; right: 0; top: 604px; text-align: center;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.26em;
+    color: var(--ink-faint);
+  }
+  #stamp {
+    position: absolute; left: 50%; top: 452px; margin-left: -116px;
+    width: 232px; padding: 10px 0 9px; text-align: center;
+    font-family: var(--hand); font-size: 27px; letter-spacing: 0.24em;
+    color: var(--accent);
+    border: 3px solid var(--accent); border-radius: 8px;
+    transform-origin: 50% 50%;
+  }
+</style>
+</head>
+<body>
+<div id="nd-viewport">
+  <div id="nd-stage">
+    <div id="nd-cam">
+      <svg id="art" width="1280" height="720" viewBox="0 0 1280 720">
+        <defs>
+          <!-- 手绘抖动：直线也有铅笔呼吸感（seed 由 render 微调，制造 Boil） -->
+          <filter id="rough" x="-10%" y="-10%" width="120%" height="120%">
+            <feTurbulence id="roughNoise" type="fractalNoise" baseFrequency="0.021 0.028"
+              numOctaves="2" seed="7" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="3.4"
+              xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+          <filter id="roughSoft" x="-10%" y="-10%" width="120%" height="120%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.03 0.042"
+              numOctaves="2" seed="13" result="n2" />
+            <feDisplacementMap in="SourceGraphic" in2="n2" scale="2.1"
+              xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+          <linearGradient id="paperGlow" x1="0" y1="0" x2="0.62" y2="1">
+            <stop offset="0" stop-color="#fffaf0" stop-opacity="0.8" />
+            <stop offset="0.55" stop-color="#fff6e6" stop-opacity="0.16" />
+            <stop offset="1" stop-color="#e6d5b8" stop-opacity="0.3" />
+          </linearGradient>
+        </defs>
+
+        <!-- 纸底 -->
+        <rect width="1280" height="720" fill="url(#paperGlow)" />
+
+        <!-- 手绘边框（整片不退场） -->
+        <g id="frame-layer" filter="url(#roughSoft)" opacity="0">
+          <rect x="30" y="26" width="1220" height="668" rx="3"
+            fill="none" stroke="var(--ink)" stroke-width="1.6" />
+          <rect x="38" y="34" width="1204" height="652" rx="2"
+            fill="none" stroke="var(--ink)" stroke-width="0.8" opacity="0.6" />
+        </g>
+
+        <!-- 循环图（收尾整体退场） -->
+        <g id="diagram" opacity="0">
+          <!-- 三条手绘弧线 + 箭头 -->
+          <g id="arcs" filter="url(#rough)">
+            <path id="arc-0" class="flow-arc" d="M 472 472 Q 640 640 808 472" />
+            <path id="arc-1" class="flow-arc" d="M 920 392 Q 1010 276 752 168" />
+            <path id="arc-2" class="flow-arc" d="M 530 168 Q 250 276 360 392" />
+          </g>
+          <g id="heads" filter="url(#roughSoft)"></g>
+
+          <!-- 标注引出线 -->
+          <g id="leaders" filter="url(#roughSoft)">
+            <path id="leader-0" class="leader" d="M 640 581 L 640 563" />
+            <path id="leader-1" class="leader" d="M 977 294 L 938 284" />
+            <path id="leader-2" class="leader" d="M 239 294 L 330 284" />
+          </g>
+
+          <!-- 中心小注：循环箭头 -->
+          <g id="loop-note" opacity="0">
+            <path id="loop-arc" d="" transform="translate(640,300)" />
+            <path id="loop-head" d="" transform="translate(640,300)" />
+            <text id="loop-text" x="640" y="364">循环往复</text>
+          </g>
+
+          <!-- 粒子（JS 生成） -->
+          <g id="motes"></g>
+        </g>
+      </svg>
+
+      <!-- 手绘标注片 -->
+      <div class="chip" id="chip-0" style="left:571px;top:581px">
+        <div class="cn">融化</div>
+        <div class="temp cool">0℃</div>
+      </div>
+      <div class="chip" id="chip-1" style="left:979px;top:261px">
+        <div class="cn">蒸发</div>
+        <div class="temp warm">100℃</div>
+      </div>
+      <div class="chip" id="chip-2" style="left:99px;top:261px">
+        <div class="cn">凝华</div>
+        <div class="temp">＜0℃</div>
+      </div>
+
+      <!-- 三张手绘卡片 -->
+      <div class="card" id="card-gas" style="left:530px;top:88px">
+        <svg class="icon" viewBox="0 0 64 64">
+          <path class="ico-draw" d="M 11 51 Q 32 61 53 51" />
+          <path class="ico-draw cool" d="M 22 44 C 16 37 27 33 21 25 C 18 21 24 17 21 11" />
+          <path class="ico-draw cool" d="M 32 44 C 26 37 37 33 31 25 C 28 21 34 17 31 11" />
+          <path class="ico-draw cool" d="M 42 44 C 36 37 47 33 41 25 C 38 21 44 17 41 11" />
+        </svg>
+        <div class="name">汽</div>
+        <div class="tag">气态 · <b>水蒸气</b></div>
+      </div>
+
+      <div class="card" id="card-ice" style="left:250px;top:392px">
+        <svg class="icon" viewBox="0 0 64 64">
+          <path class="ico-draw" d="M 32 5 L 32 59" />
+          <path class="ico-draw" d="M 8.7 18.5 L 55.3 45.5" />
+          <path class="ico-draw" d="M 8.7 45.5 L 55.3 18.5" />
+          <path class="ico-draw faint" d="M 32 13 L 26 19 M 32 13 L 38 19 M 32 51 L 26 45 M 32 51 L 38 45" />
+          <path class="ico-draw faint" d="M 13 21 L 20 21 M 13 21 L 15 28 M 51 43 L 44 43 M 51 43 L 49 36" />
+          <path class="ico-draw faint" d="M 13 43 L 20 43 M 13 43 L 15 36 M 51 21 L 44 21 M 51 21 L 49 28" />
+        </svg>
+        <div class="name">冰</div>
+        <div class="tag">固态 · <b>晶体格</b></div>
+      </div>
+
+      <div class="card" id="card-water" style="left:810px;top:392px">
+        <svg class="icon" viewBox="0 0 64 64">
+          <path class="ico-draw" d="M 32 6 C 42 22 53 33 53 42 A 21 21 0 0 1 11 42 C 11 33 22 22 32 6 Z" />
+          <path class="ico-draw cool" d="M 19 44 C 24 40 28 48 33 44 C 38 40 42 48 47 44" />
+        </svg>
+        <div class="name">水</div>
+        <div class="tag">液态 · <b>氢键流动</b></div>
+      </div>
+
+      <!-- 开场标题（缩小落到左上角当页眉） -->
+      <div id="title">
+        <div class="line" id="title-chars"><span class="ch">水</span><span class="ch">的</span><span class="ch">三</span><span class="ch">态</span></div>
+      </div>
+      <div id="header-rule"></div>
+      <div id="note-left">变的是排列 <span class="dot">·</span> 不变的是分子</div>
+      <div id="note-right">PHASE&nbsp;CYCLE&nbsp;/&nbsp;H₂O</div>
+
+      <!-- 收尾落版 -->
+      <div id="outro">
+        <div class="big">冰 <span class="dot">·</span> 水 <span class="dot">·</span> 汽</div>
+        <svg class="swash" width="344" height="12" viewBox="0 0 344 12">
+          <path d="M 4 7 C 90 1 240 11 340 5" fill="none" stroke="var(--accent)"
+            stroke-width="3" stroke-linecap="round" />
+        </svg>
+        <div class="sub">同一个水分子，三种样子</div>
+        <div id="stamp">三态循环</div>
+        <div id="outro-foot">H₂O &nbsp;·&nbsp; 简笔循环演示</div>
+      </div>
+    </div>
+
+    <div class="nd-grain"></div>
+    <div class="nd-vignette"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var DURATION = 14.0;
+
+  var T = {
+    frameIn: 0.0,
+    titleIn: 0.14, titleStep: 0.1, titleDur: 0.72,
+    titleMove: [2.12, 2.86],
+    headerRule: [2.8, 3.2],
+    cardIn: 2.58, cardStep: 0.29, cardDur: 0.62,
+    arcIn: 2.9, arcStep: 0.26, arcDur: 0.86,
+    headIn: 3.5,
+    labelIn: 3.55, labelStep: 0.1,
+    loopIn: [4.05, 4.7],
+    flowIn: 4.4,
+    clear: [10.35, 11.15],
+    outroIn: [10.9, 11.78],
+    stampIn: [11.66, 12.24],
+  };
+
+  // ---------------------------------------------------------------- 几何
+
+  // 二次贝塞尔：a 起点 / b 控制点 / c 终点（卡片边缘之间的手绘弧）
+  var ARC = [
+    { a: { x: 472, y: 472 }, b: { x: 640, y: 640 }, c: { x: 802, y: 478 } },
+    { a: { x: 920, y: 392 }, b: { x: 1010, y: 276 }, c: { x: 759, y: 171 } },
+    { a: { x: 530, y: 168 }, b: { x: 250, y: 276 }, c: { x: 354, y: 386 } },
+  ];
+  var CHIP_POS = [
+    { x: 640, y: 612, rot: -1.4 },
+    { x: 1048, y: 292, rot: 1.6 },
+    { x: 168, y: 292, rot: -1.8 },
+  ];
+
+  function qPoint(arc, p) {
+    var m = 1 - p;
+    return {
+      x: m * m * arc.a.x + 2 * m * p * arc.b.x + p * p * arc.c.x,
+      y: m * m * arc.a.y + 2 * m * p * arc.b.y + p * p * arc.c.y,
+    };
+  }
+  function qTangent(arc, p) {
+    var m = 1 - p;
+    return {
+      x: 2 * m * (arc.b.x - arc.a.x) + 2 * p * (arc.c.x - arc.b.x),
+      y: 2 * m * (arc.b.y - arc.a.y) + 2 * p * (arc.c.y - arc.b.y),
+    };
+  }
+  function frac(v) { return v - Math.floor(v); }
+  function dash(path, p, len) {
+    var total = len || path.getTotalLength();
+    path.style.strokeDasharray = total + ' ' + total;
+    path.style.strokeDashoffset = String(total * (1 - ND.clamp(p, 0, 1)));
+    return total;
+  }
+
+  // 用折线拼手绘圆环，方便精确控制箭头位置
+  function ringPath(cx, cy, r, a0, a1, steps) {
+    steps = steps || 44;
+    var d = '';
+    for (var i = 0; i <= steps; i++) {
+      var a = (a0 + (a1 - a0) * (i / steps)) * Math.PI / 180;
+      var x = cx + r * Math.cos(a);
+      var y = cy + r * Math.sin(a);
+      d += (i === 0 ? 'M ' : ' L ') + x.toFixed(2) + ' ' + y.toFixed(2);
+    }
+    return d;
+  }
+
+  function buildLoopNote() {
+    var arc = $('loop-arc');
+    var head = $('loop-head');
+    // 从 -60° 顺时针扫 330° 到正上方，箭头在顶端指向右（↻）
+    var a0 = -60, a1 = 270, r = 26;
+    arc.setAttribute('d', ringPath(0, 0, r, a0, a1, 56));
+    var a = a1 * Math.PI / 180;
+    var tipX = Math.cos(a) * r, tipY = Math.sin(a) * r;
+    // 顺时针（角度递增）的切线方向
+    var tx = -Math.sin(a), ty = Math.cos(a);
+    var back = Math.atan2(-ty, -tx);
+    var len = 10, spread = 0.55;
+    function leg(sign) {
+      var ang = back + sign * spread;
+      return (tipX + Math.cos(ang) * len).toFixed(1) + ' ' +
+        (tipY + Math.sin(ang) * len).toFixed(1);
+    }
+    head.setAttribute('d', 'M ' + leg(-1) + ' L ' + tipX.toFixed(1) + ' ' + tipY.toFixed(1) +
+      ' L ' + leg(1));
+  }
+
+  // ---------------------------------------------------------------- 元素
+
+  var cam, roughNoise, frameLayer, diagram;
+  var titleEl, titleChars, headerRule;
+  var cards = [], cardIcons = [], chips = [];
+  var arcs = [], arcLens = [], heads = [], leaders = [];
+  var loopArc, loopHead, loopText, loopNote;
+  var outro, stamp, swash, outroBig, outroSub, noteLeft, noteRight, outroFoot;
+  var steam = [], drops = [], heats = [], sparks = [], flow = [];
+
+  function grab() {
+    cam = $('nd-cam');
+    roughNoise = $('roughNoise');
+    frameLayer = $('frame-layer');
+    diagram = $('diagram');
+    titleEl = $('title');
+    titleChars = Array.prototype.slice.call(document.querySelectorAll('#title-chars .ch'));
+    headerRule = $('header-rule');
+    loopArc = $('loop-arc');
+    loopHead = $('loop-head');
+    loopText = $('loop-text');
+    loopNote = $('loop-note');
+    outro = $('outro');
+    stamp = $('stamp');
+    swash = document.querySelector('#outro .swash path');
+    outroBig = document.querySelector('#outro .big');
+    outroSub = document.querySelector('#outro .sub');
+    noteLeft = $('note-left');
+    noteRight = $('note-right');
+    outroFoot = $('outro-foot');
+    cards = ['card-gas', 'card-ice', 'card-water'].map($);
+    chips = ['chip-0', 'chip-1', 'chip-2'].map($);
+    arcs = [0, 1, 2].map(function (i) { return $('arc-' + i); });
+    leaders = [0, 1, 2].map(function (i) { return $('leader-' + i); });
+  }
+
+  // ---------------------------------------------------------------- 构建
+
+  var CARD_META = [
+    { rot: -1.8, y: 88 },
+    { rot: 1.7, y: 392 },
+    { rot: -1.2, y: 392 },
+  ];
+
+  function buildCards() {
+    cards.forEach(function (el, index) {
+      var paths = Array.prototype.slice.call(el.querySelectorAll('path'));
+      cardIcons[index] = paths.map(function (p) {
+        var len = p.getTotalLength();
+        p.style.strokeDasharray = len + ' ' + len;
+        p.style.strokeDashoffset = String(len);
+        return len;
+      });
+    });
+  }
+
+  function buildHeads() {
+    var g = $('heads');
+    ARC.forEach(function (arc) {
+      var dx = arc.c.x - arc.b.x;
+      var dy = arc.c.y - arc.b.y;
+      var d = Math.sqrt(dx * dx + dy * dy) || 1;
+      dx /= d; dy /= d;
+      var len = 16, spread = 0.42;
+      var group = document.createElementNS(SVGNS, 'g');
+      group.setAttribute('opacity', '0');
+      [-spread, spread].forEach(function (angle) {
+        var cos = Math.cos(angle), sin = Math.sin(angle);
+        var vx = -(dx * cos - dy * sin);
+        var vy = -(dx * sin + dy * cos);
+        var p = document.createElementNS(SVGNS, 'path');
+        p.setAttribute('class', 'arc-head');
+        p.setAttribute('d', 'M ' + arc.c.x.toFixed(1) + ' ' + arc.c.y.toFixed(1) +
+          ' L ' + (arc.c.x + vx * len).toFixed(1) + ' ' + (arc.c.y + vy * len).toFixed(1));
+        group.appendChild(p);
+      });
+      g.appendChild(group);
+      heads.push(group);
+    });
+  }
+
+  function buildMotes() {
+    var motes = $('motes');
+    var i;
+
+    // 蒸汽：汽卡片顶上冒出的短线
+    for (i = 0; i < 9; i++) {
+      var s = document.createElementNS(SVGNS, 'path');
+      s.setAttribute('class', 'steam');
+      motes.appendChild(s);
+      steam.push({ el: s, bx: 586 + i * 12.8, by: 84, phase: i * 0.137 });
+    }
+
+    // 液滴：沿「融化」弧滑下
+    for (i = 0; i < 11; i++) {
+      var c = document.createElementNS(SVGNS, 'circle');
+      c.setAttribute('class', 'drop');
+      c.setAttribute('r', '3.2');
+      motes.appendChild(c);
+      drops.push({ el: c, phase: i / 11 });
+    }
+
+    // 热流：沿「蒸发」弧往上飘
+    for (i = 0; i < 7; i++) {
+      var hp = document.createElementNS(SVGNS, 'path');
+      hp.setAttribute('class', 'heat');
+      motes.appendChild(hp);
+      heats.push({ el: hp, phase: i / 7 });
+    }
+
+    // 冰晶闪光
+    [{ x: 262, y: 380 }, { x: 460, y: 404 }, { x: 240, y: 520 },
+     { x: 492, y: 506 }, { x: 300, y: 352 }, { x: 440, y: 566 }].forEach(function (p, index) {
+      var sp = document.createElementNS(SVGNS, 'path');
+      sp.setAttribute('class', 'spark');
+      motes.appendChild(sp);
+      sparks.push({ el: sp, x: p.x, y: p.y, phase: index * 0.31 });
+    });
+
+    // 循环流点：三条弧各一颗
+    for (i = 0; i < 3; i++) {
+      var dot = document.createElementNS(SVGNS, 'circle');
+      dot.setAttribute('class', 'mote-dot');
+      dot.setAttribute('r', '4.8');
+      motes.appendChild(dot);
+      flow.push({ el: dot, arc: i, phase: i / 3 });
+    }
+  }
+
+  // ---------------------------------------------------------------- 渲染
+
+  function render(t) {
+    // 手绘 Boil：每 1/6 秒换一次抖动种子（纯 t 函数）
+    if (roughNoise) roughNoise.setAttribute('seed', String(7 + Math.floor(t * 6) % 4));
+
+    // ---- 相机：入场轻推，收尾回正
+    var push = ND.ease.inOutCubic(ND.phase(t, 2.4, 8.6));
+    var back = ND.ease.inOutCubic(ND.phase(t, T.clear[0] + 0.1, 1.0));
+    var camScale = ND.lerp(1 + push * 0.04, 1, back);
+    var camX = ND.lerp(-push * 9, 0, back);
+    var camY = ND.lerp(-push * 5, 0, back);
+    // 落版后极轻的呼吸，避免最后一秒像静止图片
+    camScale += 0.003 * Math.sin(t * 1.1) * ND.phase(t, T.stampIn[0] + 0.4, 0.8);
+    cam.style.transform = 'translate3d(' + camX.toFixed(2) + 'px,' + camY.toFixed(2) +
+      'px,0) scale(' + camScale.toFixed(4) + ')';
+
+    // ---- 手绘边框：一落笔就出现
+    frameLayer.style.opacity = String(0.92 * ND.phase(t, T.frameIn, 0.6));
+
+    // ---- 标题：逐字落下，然后缩到左上角当页眉（整片保留）
+    var moveP = ND.ease.inOutCubic(ND.phase(t, T.titleMove[0], T.titleMove[1] - T.titleMove[0]));
+    titleEl.style.transform = 'translate3d(' + (-416 * moveP).toFixed(2) + 'px,' +
+      (-196 * moveP).toFixed(2) + 'px,0) scale(' + ND.lerp(1, 0.34, moveP).toFixed(4) + ')';
+    titleChars.forEach(function (ch, index) {
+      var p = ND.ease.outBack(ND.stagger(t, index, T.titleIn + 0.04, T.titleStep, T.titleDur));
+      var a = ND.phase(t, T.titleIn + index * T.titleStep, 0.26);
+      ch.style.opacity = String(ND.clamp(a, 0, 1));
+      ch.style.transform = 'translate3d(0,' + (58 * (1 - p)).toFixed(2) + 'px,0) rotate(' +
+        ((index - 1.4) * -3.2 * (1 - p)).toFixed(2) + 'deg)';
+    });
+    headerRule.style.transform = 'scaleX(' +
+      ND.ease.outQuint(ND.phase(t, T.headerRule[0], T.headerRule[1] - T.headerRule[0])).toFixed(3) + ')';
+
+
+    // ---- 退场：循环图与卡片整体让位给落版
+    var clearP = ND.ease.inOutCubic(ND.phase(t, T.clear[0], T.clear[1] - T.clear[0]));
+    var sceneFade = 1 - clearP;
+    var clearOut = ND.phase(t, T.outroIn[0], 0.6);
+    // ---- 角落注记
+    var noteLeftP = ND.ease.outCubic(ND.phase(t, 3.3, 0.7));
+    var noteRightP = ND.ease.outCubic(ND.phase(t, 3.6, 0.7));
+    noteLeft.style.opacity = String(noteLeftP * (1 - clearOut));
+    noteLeft.style.transform = 'translate3d(0,' + (10 * (1 - noteLeftP)).toFixed(2) + 'px,0)';
+    noteRight.style.opacity = String(noteRightP * 0.9 * (1 - clearOut));
+    diagram.style.opacity = String(ND.clamp(ND.phase(t, T.arcIn - 0.55, 0.45) * sceneFade, 0, 1));
+    diagram.style.transform = 'translate3d(0,' + (-18 * clearP).toFixed(2) + 'px,0)';
+
+    // ---- 三条弧线逐笔画出
+    ARC.forEach(function (arc, index) {
+      var p = ND.ease.outCubic(ND.phase(t, T.arcIn + index * T.arcStep, T.arcDur));
+      dash(arcs[index], p, arcLens[index]);
+      var hp = ND.phase(t, T.headIn + index * T.arcStep, 0.25);
+      heads[index].setAttribute('opacity', String(ND.clamp(hp * 1.4, 0, 1)));
+      // 引出线：弧画完再连到标注片
+      dash(leaders[index], ND.ease.outCubic(ND.phase(t, T.labelIn + index * T.labelStep - 0.08, 0.4)));
+    });
+
+    // ---- 标注片
+    CHIP_POS.forEach(function (pos, index) {
+      var p = ND.ease.outBack(ND.phase(t, T.labelIn + index * T.labelStep, 0.52));
+      var a = ND.phase(t, T.labelIn + index * T.labelStep, 0.22);
+      chips[index].style.opacity = String(ND.clamp(a, 0, 1) * sceneFade);
+      chips[index].style.transform = 'translate3d(0,' + (12 * (1 - p)).toFixed(2) + 'px,0) rotate(' +
+        (pos.rot + (1 - p) * -3).toFixed(2) + 'deg) scale(' + (0.92 + 0.08 * p).toFixed(3) + ')';
+    });
+
+    // ---- 中心循环小注
+    var loopP = ND.ease.outCubic(ND.phase(t, T.loopIn[0], T.loopIn[1] - T.loopIn[0]));
+    if (loopP > 0.002) {
+      loopNote.setAttribute('opacity', String(0.9 * loopP * sceneFade));
+      dash(loopArc, loopP);
+      loopHead.setAttribute('opacity', String(loopP));
+      loopText.setAttribute('opacity', String(loopP));
+    } else {
+      loopNote.setAttribute('opacity', '0');
+    }
+
+    // ---- 卡片：弹入 + 图标逐笔 + 一点手动摆位的抖动
+    cards.forEach(function (el, index) {
+      var start = T.cardIn + index * T.cardStep;
+      var p = ND.ease.outBack(ND.phase(t, start, T.cardDur));
+      var a = ND.phase(t, start, 0.28);
+      var meta = CARD_META[index];
+      var wobble = 0.22 * Math.sin(t * 1.25 + index * 2.1) * ND.phase(t, start + 0.5, 0.6);
+      el.style.opacity = String(ND.clamp(a, 0, 1) * sceneFade);
+      el.style.transform = 'translate3d(0,' + (26 * (1 - p)).toFixed(2) + 'px,0) rotate(' +
+        (meta.rot + (1 - p) * -5 + wobble).toFixed(2) + 'deg) scale(' +
+        ND.lerp(0.9, 1, p).toFixed(3) + ')';
+
+      var paths = el.querySelectorAll('path');
+      var lens = cardIcons[index];
+      for (var i = 0; i < paths.length; i++) {
+        var ip = ND.ease.outCubic(ND.phase(t, start + 0.18 + i * 0.05, 0.4));
+        paths[i].style.strokeDashoffset = String(lens[i] * (1 - ip));
+      }
+    });
+
+    // ---- 蒸汽
+    steam.forEach(function (item, index) {
+      var on = ND.clamp((t - T.cardIn - 0.45) * 2, 0, 1);
+      var p = frac((t - T.cardIn - 0.45) * 0.3 + item.phase);
+      var y = item.by - 54 * p;
+      var x = item.bx + Math.sin(t * 1.7 + index * 1.3) * 1.6;
+      item.el.setAttribute('d', 'M ' + x.toFixed(1) + ' ' + y.toFixed(1) +
+        ' c -5 -5, 5 -9, 0 -15');
+      item.el.style.opacity = String(0.5 * Math.sin(Math.PI * p) * on * sceneFade);
+    });
+
+    // ---- 液滴（融化弧）
+    drops.forEach(function (item, index) {
+      var p = frac((t - T.flowIn) * 0.23 + item.phase);
+      var pt = qPoint(ARC[0], p);
+      item.el.setAttribute('cx', (pt.x + Math.sin(t * 5 + index) * 1.2).toFixed(1));
+      item.el.setAttribute('cy', pt.y.toFixed(1));
+      item.el.style.opacity =
+        String(0.6 * Math.pow(Math.sin(Math.PI * p), 0.7) *
+          ND.clamp((t - T.flowIn) * 3, 0, 1) * sceneFade);
+    });
+
+    // ---- 热流（蒸发弧）
+    heats.forEach(function (item) {
+      var p = frac((t - T.flowIn) * 0.31 + item.phase);
+      var pt = qPoint(ARC[1], p);
+      var tan = qTangent(ARC[1], p);
+      var d = Math.sqrt(tan.x * tan.x + tan.y * tan.y) || 1;
+      var len = 7 + 6 * Math.sin(Math.PI * p);
+      item.el.setAttribute('d', 'M ' + pt.x.toFixed(1) + ' ' + pt.y.toFixed(1) +
+        ' l ' + (tan.x / d * len).toFixed(1) + ' ' + (tan.y / d * len).toFixed(1));
+      item.el.style.opacity =
+        String(0.5 * Math.sin(Math.PI * p) * ND.clamp((t - T.flowIn) * 3, 0, 1) * sceneFade);
+    });
+
+    // ---- 冰晶闪光
+    sparks.forEach(function (item) {
+      var on = ND.clamp((t - T.cardIn - 0.45) * 2, 0, 1);
+      var tw = Math.abs(Math.sin(t * 1.6 + item.phase * 6.2));
+      var r = 3 + 3 * tw;
+      item.el.setAttribute('d', 'M ' + (item.x - r).toFixed(1) + ' ' + item.y +
+        ' L ' + (item.x + r).toFixed(1) + ' ' + item.y +
+        ' M ' + item.x + ' ' + (item.y - r).toFixed(1) +
+        ' L ' + item.x + ' ' + (item.y + r).toFixed(1));
+      item.el.style.opacity = String((0.14 + 0.46 * tw) * on * sceneFade);
+    });
+
+    // ---- 循环流点（三条弧同时流动）
+    flow.forEach(function (item) {
+      var p = frac((t - T.flowIn) * 0.34 + item.phase);
+      var pt = qPoint(ARC[item.arc], p);
+      item.el.setAttribute('cx', pt.x.toFixed(1));
+      item.el.setAttribute('cy', pt.y.toFixed(1));
+      item.el.style.opacity =
+        String(0.85 * Math.pow(Math.sin(Math.PI * p), 0.5) *
+          ND.clamp((t - T.flowIn) * 2, 0, 1) * sceneFade);
+    });
+
+    // ---- 收尾落版
+    var oP = ND.ease.outCubic(ND.phase(t, T.outroIn[0], T.outroIn[1] - T.outroIn[0]));
+    outro.style.opacity = String(oP);
+    outroBig.style.transform = 'translate3d(0,' + (26 * (1 - oP)).toFixed(2) + 'px,0)';
+    outroSub.style.transform = 'translate3d(0,' + (18 * (1 - oP)).toFixed(2) + 'px,0)';
+    dash(swash, ND.ease.outQuint(ND.phase(t, T.outroIn[1] - 0.18, 0.55)));
+    var sP = ND.ease.outBack(ND.phase(t, T.stampIn[0], 0.52));
+    stamp.style.opacity = String(ND.clamp(ND.phase(t, T.stampIn[0], 0.2), 0, 1));
+    stamp.style.transform = 'rotate(' + (-6 * (1 - sP) - 3).toFixed(2) + 'deg) scale(' +
+      (0.7 + 0.3 * sP).toFixed(3) + ')';
+    outroFoot.style.opacity = String(ND.clamp(ND.phase(t, T.stampIn[0] + 0.12, 0.5), 0, 1) * 0.9);
+  }
+
+  // ---------------------------------------------------------------- 启动
+
+  function boot() {
+    grab();
+    buildCards();
+    buildHeads();
+    buildLoopNote();
+    buildMotes();
+    ARC.forEach(function (arc, index) {
+      arcLens[index] = arcs[index].getTotalLength();
+    });
+    ND.scene({ duration: DURATION, title: '水的三态 · 简笔循环', render: render });
+  }
+
+  // engine.js 可能在短片脚本之前或之后注入：两种情况都延迟到 DOMContentLoaded 注册。
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

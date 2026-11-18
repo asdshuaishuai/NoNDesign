@@ -1,15 +1,20 @@
-/// 视频工作区（代码动画版）。
+/// 视频工作区（两种渲染面）。
 ///
-/// 视频模块**不是**「渲染成片再看」，而是代码动画：时间线脚本 + 规范在
-/// [VideoDocument] 里编译成算式，每一帧都由 [VideoDocument.frameSvg] 现算。
-/// 工作台只有一整块播放面：
+/// 视频模块**不是**「渲染成片再看」，而是应用内实时播放：
 ///
-///  * 主区铺满 [VideoAnimationSurface]（圆角 + 内边距），播放/暂停、回片头、
-///    循环、时间条与时间读数都在播放器自己的控制栏里；
-///  * 编辑类动作不占画面，全部收进同一条 46px 顶部工具条：示例选择、
-///    帧率、编辑脚本、规范对照状态（点开是一张 result sheet）；
-///  * 只读/低频入口（「加载示例」与「代码动画直接播放，暂不导出成片」）放在
-///    工具条尾部与播放器底部一行，不抢画面。
+///  * **矢量动画**：时间线脚本 + 规范在 [VideoDocument] 里编译成算式，每一帧
+///    都由 [VideoDocument.frameSvg] 现算，铺满 [VideoAnimationSurface]；
+///  * **动效合成**：自包含 HTML/CSS/JS 短片（`assets/video/clip/`）在
+///    [VideoClipSurface] 的 WebView 里实时播放，运输条读同一份
+///    [VideoClipPlayback]；工具条只留返回主页 / 规格对照（只读卡）/ 加示例。
+///
+/// 两种模式共用同一条 46px 顶部工具条与示例选择器（分「矢量动画」与
+/// 「动效合成」两组）；编辑类动作（帧率、编辑脚本）只在矢量动画下出现，
+/// 动效合成是成品短片，没有脚本可编辑。切示例/切模式时旧播放器当场释放。
+///
+/// 矢量动画的编辑类动作不占画面：示例选择、帧率、编辑脚本、对照状态（点开
+/// 是一张 result sheet）都收进工具条；低频入口放在工具条尾部与播放器底部
+/// 一行，不抢画面。
 ///
 /// 成片导出（mp4）暂时不做：界面上没有任何渲染/导出按钮，也不再有渲染任务、
 /// 进度轮询与产物文件夹入口。艺术架里**已有的** mp4 仍可点开播放（走的还是
@@ -30,16 +35,38 @@ import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/toast_service.dart';
+import '../core/video_clip.dart';
 import '../core/video_service.dart';
 import 'video_animation_surface.dart';
+import 'video_clip_surface.dart';
 import 'video_player_surface.dart';
 
 /// 视频工作区。
+///
+/// 两种渲染面并存：
+///  * **矢量动画**（默认）：[VideoAnimationSurface] 逐帧播放代码动画；
+///  * **动效合成**：自包含 HTML 短片在 [VideoClipSurface] 里实时播放，
+///    运输条（[VideoClipTransport]）读同一份 [VideoClipPlayback]。
+///
+/// 两种模式共用同一条 46px 工具条与示例选择器；切换示例/模式时旧播放器
+/// 当场释放（矢量面随 widget 销毁停表，动效合成的 WebView/计时器随播放源
+/// dispose），不会把旧计时器留到后台。
 class VideoWorkspace extends StatefulWidget {
-  const VideoWorkspace({super.key, this.service});
+  const VideoWorkspace({
+    super.key,
+    this.service,
+    this.clips,
+    this.clipPlaybackFactory,
+  });
 
   /// 测试注入（生产用 [VideoService.instance]，示例与文档在进程内）。
   final VideoService? service;
+
+  /// 测试注入：动效合成清单（生产从 `assets/video/clip/clips.json` 加载）。
+  final List<VideoClipInfo>? clips;
+
+  /// 测试注入：不构造真 WebView 的播放源工厂（生产为 null，由播放面自建）。
+  final VideoClipPlayback Function(VideoClipInfo clip)? clipPlaybackFactory;
 
   @override
   State<VideoWorkspace> createState() => _VideoWorkspaceState();
@@ -62,6 +89,26 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   String _scriptTimeline = '';
   String _scriptSpec = '';
 
+  // ---- 动效合成（第二渲染面） -------------------------------------------
+
+  /// 短片清单（`clips.json` 顺序；测试可注入）。
+  List<VideoClipInfo> _clips = const <VideoClipInfo>[];
+
+  /// 清单加载失败的一句人话；空串 = 正常。
+  String _clipsError = '';
+
+  /// 清单是否还在读（读的时候选择器给一条「载入中」）。
+  bool _clipsLoading = true;
+
+  /// 非 null = 动效合成模式；null = 矢量动画模式。
+  VideoClipInfo? _clip;
+
+  /// 运输条的数据源（生产是播放面自建的 WebView 播放源，测试是注入的 Fake）。
+  VideoClipPlayback? _clipPlayback;
+
+  /// 测试注入的播放源：本工作台拥有其生命周期，切示例/离开模式时 dispose。
+  VideoClipPlayback? _injectedClipPlayback;
+
   AppStore get store => context.read<AppStore>();
   VideoService get _service => widget.service ?? VideoService.instance;
   ToastService get _toasts => store.toasts;
@@ -69,6 +116,9 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   @override
   void initState() {
     super.initState();
+    // 清单先读：它不依赖恢复路径，切回创作面时选择器要已经能列出短片。
+    _initClips();
+
     // 艺术架产物直载优先于一切恢复路径：用户点开的是某个产物，不是
     // 「上次编辑态」。消费即清（跨实例通道）。
     final pendingArtifact = videoLoadOnOpen;
@@ -88,6 +138,101 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         if (mounted) store.setVideoState(job: '');
       });
     }
+  }
+
+  @override
+  void dispose() {
+    // 切视图即销毁工作台：注入的播放源不能留给已消失的运输条。
+    _releaseClipPlayback();
+    super.dispose();
+  }
+
+  // ------------------------------------------------------------ 动效合成清单
+
+  void _initClips() {
+    final injected = widget.clips;
+    if (injected != null) {
+      _clips = injected;
+      _clipsLoading = false;
+      return;
+    }
+    loadVideoClips().then((catalog) {
+      if (!mounted) return;
+      setState(() {
+        _clips = catalog.clips;
+        _clipsError = catalog.error;
+        _clipsLoading = false;
+      });
+    });
+  }
+
+  // ------------------------------------------------------------ 动效合成选择
+
+  /// 切到某个矢量动画示例（会先释放动效合成的播放源）。
+  void _selectSample(int index) {
+    _releaseClipPlayback();
+    setState(() {
+      _clip = null;
+      _sampleIdx = index;
+      _applySample(index);
+    });
+    store.setVideoState(sampleIdx: index, clipId: '');
+  }
+
+  /// 切到某支动效合成短片（会先释放上一个播放源）。
+  void _selectClip(int index) {
+    if (index < 0 || index >= _clips.length) return;
+    _releaseClipPlayback();
+    final clip = _clips[index];
+    final injected = widget.clipPlaybackFactory?.call(clip);
+    setState(() {
+      _clip = clip;
+      _injectedClipPlayback = injected;
+      _clipPlayback = injected;
+    });
+    store.setVideoState(clipId: clip.id);
+  }
+
+  /// 播放面自建了 WebView 播放源后回传一次（生产路径）。
+  void _onClipPlayback(VideoClipPlayback? playback) {
+    if (!mounted || playback == null) return;
+    if (identical(_clipPlayback, playback)) return;
+    // 回调来自子 widget 的 post-frame：再等一帧落 setState，避免构建期标脏。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _clipPlayback = playback);
+    });
+  }
+
+  /// 释放动效合成的播放源：
+  ///  * 注入的 Fake 归本工作台；WebView 播放源归播放面（随 widget 销毁释放）。
+  void _releaseClipPlayback() {
+    final owned = _injectedClipPlayback;
+    _injectedClipPlayback = null;
+    _clipPlayback = null;
+    owned?.dispose();
+  }
+
+  /// 「加示例」：重播当前这支（成品合成没有脚本可编辑，能做的就是重新载入）。
+  void _restartClip() {
+    final playback = _clipPlayback;
+    if (playback == null) {
+      _toasts.warn('动效合成还没准备好', '稍等一下再试，或换一支示例。');
+      return;
+    }
+    playback.restart();
+  }
+
+  Future<void> _showClipReviewSheet() async {
+    final clip = _clip;
+    if (clip == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 680),
+      builder: (sheetContext) => _ClipReviewSheet(clip: clip),
+    );
   }
 
   // ------------------------------------------------------------------ 脚本
@@ -119,14 +264,6 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         technical: <String>['$error'],
       );
     }
-  }
-
-  void _selectSample(int index) {
-    setState(() {
-      _sampleIdx = index;
-      _applySample(index);
-    });
-    store.setVideoState(sampleIdx: index);
   }
 
   void _reloadSelectedSample() {
@@ -269,7 +406,12 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   }
 
   /// 一块播放面铺满主区 + 底部一行不抢画面的提示。
+  ///
+  /// 矢量动画与动效合成共用同一块留边：主区 14 边距，播放面自己圆角；
+  /// 动效合成在播放面下方多一条运输条（它不抢画面，只是控制条）。
   Widget _authoringBody(BuildContext context) {
+    final clip = _clip;
+    if (clip != null) return _clipAuthoringBody(context, clip);
     return Column(children: [
       Expanded(
         child: Padding(
@@ -286,6 +428,47 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
             child: Text(
               '代码动画直接播放，暂不导出成片',
               key: const ValueKey('video-player-hint'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10, color: context.palette.ink4),
+            ),
+          ),
+        ]),
+      ),
+    ]);
+  }
+
+  /// 动效合成主区：16:9 播放面 + 运输条 + 模式口径。
+  Widget _clipAuthoringBody(BuildContext context, VideoClipInfo clip) {
+    final playback = _clipPlayback;
+    return Column(children: [
+      Expanded(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
+          child: VideoClipSurface(
+            // 换短片即换实例：旧 WebView/计时器随旧播放面释放。
+            key: ObjectKey(clip),
+            clip: clip,
+            host: store.capabilities.platform,
+            playback: _injectedClipPlayback,
+            onPlaybackChanged: _onClipPlayback,
+          ),
+        ),
+      ),
+      if (playback != null)
+        VideoClipTransport(
+          playback: playback,
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+        ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(Icons.play_circle_outline, size: 12, color: context.palette.ink4),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              'HTML/CSS/JS 动效合成，应用内实时播放，暂不导出成片',
+              key: const ValueKey('video-clip-hint'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 10, color: context.palette.ink4),
@@ -347,6 +530,38 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
               child: const Text('返回创作台', style: TextStyle(fontSize: 11)),
             ),
             const Spacer(),
+          ] else if (_clip != null) ...[
+            // 动效合成：成品短片没有脚本可编辑，工具条只留返回主页 /
+            // 规格对照（只读卡）/ 加示例。
+            if (width >= 520) ...[
+              const SizedBox(width: 2),
+              Icon(Icons.movie_outlined, size: 17, color: p.accent),
+              const SizedBox(width: 6),
+            ],
+            if (showTitle)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 180),
+                child: Text(
+                  '视频工作台',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink),
+                ),
+              ),
+            if (labels) const Spacer() else const SizedBox(width: 6),
+            if (labels) ...[
+              _samplePicker(context, maxWidth: 260),
+              const SizedBox(width: 8),
+              _clipReviewChip(context, showLabel: true),
+              const SizedBox(width: 4),
+              _addClipSampleButton(context),
+            ] else ...[
+              Flexible(child: _samplePicker(context, maxWidth: 150)),
+              const SizedBox(width: 2),
+              _clipReviewChip(context, showLabel: false),
+              const SizedBox(width: 2),
+              _addClipSampleButton(context),
+            ],
           ] else ...[
             if (width >= 520) ...[
               const SizedBox(width: 2),
@@ -419,23 +634,40 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     );
   }
 
-  /// 示例选择：显示当前示例名，点开是三个标杆示例（带一行说明）。
+  /// 示例选择：两组——「矢量动画」（3 个内置示例）与「动效合成」
+  /// （`clips.json` 的短片，展示 title + subtitle）。
+  ///
+  /// 选中即切换渲染面：矢量走 [VideoAnimationSurface]，动效合成走
+  /// [VideoClipSurface] + 运输条；旧播放器在切换时释放。
   Widget _samplePicker(BuildContext context, {required double maxWidth}) {
     final p = context.palette;
     final samples = _service.samples;
-    return PopupMenuButton<int>(
+    final clip = _clip;
+    final clipTitle = clip?.title ?? '';
+    return PopupMenuButton<Object>(
       key: const ValueKey('video-sample-picker'),
       tooltip: '选择示例',
       position: PopupMenuPosition.under,
-      onSelected: _selectSample,
+      onSelected: (value) {
+        if (value is int) {
+          _selectSample(value);
+        } else if (value is _ClipPick) {
+          _selectClip(value.index);
+        }
+      },
       color: p.panel2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
         side: BorderSide(color: p.line),
       ),
-      itemBuilder: (context) => <PopupMenuEntry<int>>[
+      itemBuilder: (context) => <PopupMenuEntry<Object>>[
+        PopupMenuItem<Object>(
+          enabled: false,
+          height: 26,
+          child: Text('矢量动画', style: TextStyle(fontSize: 10, color: p.ink4)),
+        ),
         for (var i = 0; i < samples.length; i++)
-          PopupMenuItem<int>(
+          PopupMenuItem<Object>(
             value: i,
             height: 54,
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -443,7 +675,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                 samples[i].label,
                 style: TextStyle(
                   fontSize: 12,
-                  color: i == _sampleIdx ? p.accent : p.ink2,
+                  color: clip == null && i == _sampleIdx ? p.accent : p.ink2,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -456,6 +688,52 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
               ),
             ]),
           ),
+        const PopupMenuDivider(),
+        PopupMenuItem<Object>(
+          enabled: false,
+          height: 26,
+          child: Text('动效合成', style: TextStyle(fontSize: 10, color: p.ink4)),
+        ),
+        if (_clipsLoading)
+          PopupMenuItem<Object>(
+            enabled: false,
+            height: 34,
+            child: Text('载入中…', style: TextStyle(fontSize: 11, color: p.ink4)),
+          )
+        else if (_clips.isEmpty)
+          PopupMenuItem<Object>(
+            enabled: false,
+            height: 40,
+            child: Text(
+              _clipsError.isEmpty ? '暂无动效合成示例' : _clipsError,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10, color: p.ink4),
+            ),
+          )
+        else
+          for (var i = 0; i < _clips.length; i++)
+            PopupMenuItem<Object>(
+              value: _ClipPick(i),
+              height: 54,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                  _clips[i].title,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: clip?.id == _clips[i].id ? p.accent : p.ink2,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  _clips[i].subtitle.isEmpty ? _clips[i].file : _clips[i].subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 10, color: p.ink4),
+                ),
+              ]),
+            ),
       ],
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
@@ -468,11 +746,16 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
             border: Border.all(color: p.line),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('标杆示例', style: TextStyle(fontSize: 9, color: p.ink4)),
+            Text(clip != null ? '动效合成' : '标杆示例',
+                style: TextStyle(fontSize: 9, color: p.ink4)),
             const SizedBox(width: 6),
             Flexible(
               child: Text(
-                samples.isEmpty ? '' : samples[_sampleIdx.clamp(0, samples.length - 1)].label,
+                clip != null
+                    ? clipTitle
+                    : (samples.isEmpty
+                        ? ''
+                        : samples[_sampleIdx.clamp(0, samples.length - 1)].label),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 11, color: p.ink2),
@@ -545,6 +828,49 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         padding: const EdgeInsets.symmetric(horizontal: 6),
       ),
       child: const Text('加载示例', style: TextStyle(fontSize: 11)),
+    );
+  }
+
+  /// 动效合成的「规格对照」：只读卡（subtitle + tags），没有脚本可对照。
+  Widget _clipReviewChip(BuildContext context, {required bool showLabel}) {
+    final p = context.palette;
+    return InkWell(
+      key: const ValueKey('video-clip-review-chip'),
+      onTap: _showClipReviewSheet,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        height: 28,
+        padding: EdgeInsets.symmetric(horizontal: showLabel ? 10 : 6),
+        decoration: BoxDecoration(
+          color: p.accent.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: p.accent.withValues(alpha: 0.5)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.rule_outlined, size: 13, color: p.accent),
+          if (showLabel) ...[
+            const SizedBox(width: 5),
+            Text('规格对照', style: TextStyle(fontSize: 11, color: p.ink2)),
+            const SizedBox(width: 5),
+            Text('只读',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: p.accent)),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  /// 动效合成的「加示例」：重新载入当前短片（成品合成没有脚本可编辑）。
+  Widget _addClipSampleButton(BuildContext context) {
+    return TextButton(
+      key: const ValueKey('video-clip-add-sample'),
+      onPressed: _restartClip,
+      style: TextButton.styleFrom(
+        minimumSize: const Size(0, 28),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+      ),
+      child: const Text('加示例', style: TextStyle(fontSize: 11)),
     );
   }
 
@@ -956,5 +1282,120 @@ class _ScriptEditorDialogState extends State<_ScriptEditorDialog> {
         ),
       ),
     ]);
+  }
+}
+
+/// 示例选择器的取值：动效合成短片下标（矢量动画示例直接用 int 下标）。
+class _ClipPick {
+  const _ClipPick(this.index);
+
+  final int index;
+}
+
+String _clipStyleLabel(String style) => switch (style) {
+      'hand' => '手绘',
+      'motion' => '动效排版',
+      'ui' => '界面演示',
+      'data' => '数据',
+      _ => '动效合成',
+    };
+
+/// 动效合成的只读对照卡：title / subtitle / tags / 时长 / 风格。
+///
+/// 短片是**成品合成**（画面在 HTML 里），这里没有脚本与规范可编辑，
+/// 所以只把清单里的事实摊开给用户对照，不提供任何写入口。
+class _ClipReviewSheet extends StatelessWidget {
+  const _ClipReviewSheet({required this.clip});
+
+  final VideoClipInfo clip;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Material(
+      key: const ValueKey('video-clip-review-sheet'),
+      color: p.bgElevated,
+      clipBehavior: Clip.antiAlias,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              Icon(Icons.rule_outlined, size: 16, color: p.accent),
+              const SizedBox(width: 6),
+              Text('规格对照',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: p.accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: p.accent.withValues(alpha: 0.5)),
+                ),
+                child: Text(
+                  '只读',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: p.accent),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 10),
+            Text(clip.title,
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: p.ink)),
+            if (clip.subtitle.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(clip.subtitle,
+                  style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5)),
+            ],
+            if (clip.tags.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final tag in clip.tags)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: p.panel2,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: p.line),
+                    ),
+                    child: Text('#$tag',
+                        style: TextStyle(fontSize: 10, color: p.ink3)),
+                  ),
+              ]),
+            ],
+            const SizedBox(height: 12),
+            Row(children: [
+              Icon(Icons.schedule, size: 13, color: p.ink4),
+              const SizedBox(width: 6),
+              Text('时长 ${formatVideoTime(clip.duration)}',
+                  style: TextStyle(fontSize: 11, color: p.ink3)),
+              const SizedBox(width: 14),
+              Icon(Icons.brush_outlined, size: 13, color: p.ink4),
+              const SizedBox(width: 6),
+              Text(_clipStyleLabel(clip.style),
+                  style: TextStyle(fontSize: 11, color: p.ink3)),
+            ]),
+            const SizedBox(height: 10),
+            Text(
+              '这支短片是成品合成，画面与节奏由短片自身决定；这里只做只读对照。',
+              style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5),
+            ),
+            const SizedBox(height: 12),
+            Row(children: [
+              Icon(Icons.play_circle_outline, size: 12, color: p.ink4),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'HTML/CSS/JS 动效合成，应用内实时播放，暂不导出成片',
+                  style: TextStyle(fontSize: 10, color: p.ink4),
+                ),
+              ),
+            ]),
+          ]),
+        ),
+      ),
+    );
   }
 }

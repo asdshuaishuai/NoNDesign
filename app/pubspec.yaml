@@ -146,6 +146,8 @@ flutter:
     # A2UI 官方 Web 渲染器的自包含页面（release 依赖 asset 声明，debug 回退
     # 仓库路径只用于测试）。
     - assets/a2ui_web/
+    # 动效合成短片（自包含 HTML + clips.json，运行时离线加载）
+    - assets/video/clip/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

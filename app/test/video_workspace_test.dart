@@ -28,11 +28,13 @@ import 'package:nondesign/core/platform_capabilities.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/core/toast_service.dart';
+import 'package:nondesign/core/video_clip.dart';
 import 'package:nondesign/core/video_service.dart';
 import 'package:nondesign/plugins/registry.dart';
 import 'package:nondesign/widgets/project_hub.dart';
 import 'package:nondesign/widgets/right_panel.dart' show Inspector;
 import 'package:nondesign/widgets/video_animation_surface.dart';
+import 'package:nondesign/widgets/video_clip_surface.dart';
 import 'package:nondesign/widgets/video_player_surface.dart';
 import 'package:nondesign/widgets/video_workspace.dart';
 
@@ -646,4 +648,264 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
+
+  _clipModeTests();
 }
+
+
+// ---------------------------------------------------------------------------
+// 动效合成（HTML/CSS/JS 短片）接线
+// ---------------------------------------------------------------------------
+
+VideoClipInfo _clipInfo(
+  int index, {
+  String id = '',
+  String title = '',
+  String subtitle = '',
+  String style = 'motion',
+  double duration = 13.2,
+  List<String> tags = const <String>[],
+}) {
+  final clipId = id.isEmpty ? 'clip-$index' : id;
+  return VideoClipInfo(
+    id: clipId,
+    title: title.isEmpty ? '动效合成 $index' : title,
+    subtitle: subtitle.isEmpty ? '副标题 $index' : subtitle,
+    style: style,
+    duration: duration,
+    tags: tags,
+  );
+}
+
+/// 测试用播放源：不建 WebView，记录 dispose 以便断言「切模式即释放」。
+class _FakeClipPlayback extends VideoClipPlayback {
+  _FakeClipPlayback(this.clip);
+
+  final VideoClipInfo clip;
+
+  double _t = 0;
+  bool _playing = false;
+  bool _loop = true;
+
+  bool disposed = false;
+
+  @override
+  double get t => _t;
+
+  @override
+  double get duration => clip.duration;
+
+  @override
+  bool get playing => _playing;
+
+  @override
+  bool get loop => _loop;
+
+  @override
+  bool get ready => true;
+
+  @override
+  String get loadError => '';
+
+  @override
+  Future<void> play() async {
+    _playing = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> pause() async {
+    _playing = false;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> seek(double seconds) async {
+    _t = seconds.clamp(0.0, clip.duration).toDouble();
+    notifyListeners();
+  }
+
+  @override
+  Future<void> restart() async {
+    _t = 0;
+    _playing = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> setLoop(bool value) async {
+    _loop = value;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    disposed = true;
+    super.dispose();
+  }
+}
+
+Widget _wrapClips(
+  AppStore store,
+  VideoService service, {
+  required List<VideoClipInfo> clips,
+  required VideoClipPlayback Function(VideoClipInfo clip) factory,
+}) =>
+    ChangeNotifierProvider<AppStore>.value(
+      value: store,
+      child: MaterialApp(
+        theme: AppTheme.build(dark: true),
+        builder: (context, child) =>
+            withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
+        home: Scaffold(
+          body: VideoWorkspace(
+            service: service,
+            clips: clips,
+            clipPlaybackFactory: factory,
+          ),
+        ),
+      ),
+    );
+
+Future<void> _pumpClips(
+  WidgetTester tester,
+  AppStore store,
+  VideoService service,
+  List<VideoClipInfo> clips,
+  VideoClipPlayback Function(VideoClipInfo clip) factory, {
+  Size size = const Size(1440, 900),
+}) async {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(_wrapClips(store, service, clips: clips, factory: factory));
+  await tester.pump(const Duration(milliseconds: 50));
+  await tester.pump(const Duration(milliseconds: 80));
+}
+
+void _clipModeTests() {
+  testWidgets('切到动效合成：出现播放面与运输条，矢量编辑入口消失，视图不变', (tester) async {
+    final store = _store();
+    store.setView('plugin:video');
+    final service = _FakeVideoService(sample: _sampleDoc());
+    final clips = <VideoClipInfo>[
+      _clipInfo(
+        0,
+        id: 'sketch-friction',
+        title: '摩擦力 · 简笔演示',
+        subtitle: '手绘纸面 + 逐笔描线 + 数值滚动',
+        style: 'hand',
+        duration: 13.2,
+        tags: const <String>['简笔', '物理'],
+      ),
+      _clipInfo(1, title: '动效排版 · 标题落位', subtitle: '字号与字距的层次'),
+      _clipInfo(2, title: '界面 · 卡片进场', subtitle: '分层入场与落定'),
+      _clipInfo(3, title: '数据 · 折线生长', subtitle: '数字滚动 + 折线描出'),
+    ];
+    final created = <_FakeClipPlayback>[];
+    await _pumpClips(tester, store, service, clips, (clip) {
+      final playback = _FakeClipPlayback(clip);
+      created.add(playback);
+      return playback;
+    });
+
+    // 起点仍是矢量动画。
+    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-clip-surface')), findsNothing);
+
+    // 选择器分两组：动效合成那 4 条按清单顺序就在菜单里。
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    expect(find.text('矢量动画'), findsOneWidget);
+    expect(find.text('动效合成'), findsOneWidget);
+    for (final clip in clips) {
+      expect(find.text(clip.title), findsOneWidget);
+      expect(find.text(clip.subtitle), findsOneWidget);
+    }
+    await tester.tap(find.text('摩擦力 · 简笔演示'));
+    await tester.pumpAndSettle();
+
+    // 主区换成动效合成播放面 + 运输条。
+    expect(find.byKey(const ValueKey('video-clip-surface')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-clip-transport')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-clip-play')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-clip-slider')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-clip-time')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-clip-frame')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-clip-loop')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-animation-surface')), findsNothing);
+
+    // 工具条：规格对照 + 加示例在；矢量稿的编辑脚本/帧率不在。
+    expect(find.byKey(const ValueKey('video-clip-review-chip')), findsOneWidget);
+    expect(find.text('规格对照'), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-clip-add-sample')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-edit-script')), findsNothing);
+    expect(find.text('编辑脚本'), findsNothing);
+    expect(find.byKey(const ValueKey('video-fps-control')), findsNothing);
+    expect(find.byKey(const ValueKey('video-review-chip')), findsNothing);
+
+    // 模式口径文案跟着换。
+    expect(
+      find.text('HTML/CSS/JS 动效合成，应用内实时播放，暂不导出成片'),
+      findsOneWidget,
+    );
+    expect(find.text('代码动画直接播放，暂不导出成片'), findsNothing);
+
+    // 视频是独立工作区：切模式不换视图。
+    expect(store.view, 'plugin:video');
+
+    // 规格对照是只读卡：subtitle 与 tags 都在，没有写入口。
+    await tester.tap(find.byKey(const ValueKey('video-clip-review-chip')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('video-clip-review-sheet')), findsOneWidget);
+    expect(find.text('手绘纸面 + 逐笔描线 + 数值滚动'), findsOneWidget);
+    expect(find.text('#简笔'), findsOneWidget);
+    expect(find.text('#物理'), findsOneWidget);
+    expect(find.text('只读'), findsWidgets);
+    expect(find.text('编辑脚本'), findsNothing);
+    await tester.tapAt(const Offset(6, 6));
+    await tester.pumpAndSettle();
+
+    // 切回矢量动画：原播放面恢复，动效合成的播放源当场释放。
+    expect(created, hasLength(1));
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('生物 · 细胞有丝分裂'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-clip-surface')), findsNothing);
+    expect(find.byKey(const ValueKey('video-clip-transport')), findsNothing);
+    expect(created.single.disposed, isTrue, reason: '切模式必须释放旧播放器');
+    expect(store.view, 'plugin:video');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('动效合成窄屏（320）：工具条与运输条不溢出，仍可切回矢量', (tester) async {
+    final store = _store(os: HostOs.ios);
+    final service = _FakeVideoService(host: VideoHost.ios, sample: _sampleDoc());
+    final clips = <VideoClipInfo>[_clipInfo(0, title: '动效排版 · 标题落位')];
+    await _pumpClips(
+      tester,
+      store,
+      service,
+      clips,
+      (clip) => _FakeClipPlayback(clip),
+      size: const Size(320, 640),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('动效排版 · 标题落位').last);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('video-clip-surface')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-clip-transport')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-clip-review-chip')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-clip-add-sample')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+

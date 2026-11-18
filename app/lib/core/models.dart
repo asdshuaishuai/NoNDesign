@@ -537,6 +537,10 @@ class AppSettings {
   String hotappApp;
   /// 视频工作台：当前示例下标 + 在飞/最近的渲染 job（回来可接回轮询）。
   int videoSampleIdx;
+  /// 视频工作台当前选中的动效合成短片 id（'' = 停在矢量动画）。
+  /// 选择是工作台级状态，但「检查」面板/回到工作台都要续接同一支片，
+  /// 所以按既有 threeProjectName / hotappApp 的同样做法持久化。
+  String videoClipId;
   String videoJob;
   /// 3D 规范手编草稿（项目名 → JSON 文本）：未保存的编辑跨视图保留。
   Map<String, String> threeSpecDrafts;
@@ -574,6 +578,7 @@ class AppSettings {
     this.threeProjectName = '',
     this.hotappApp = '',
     this.videoSampleIdx = 0,
+    this.videoClipId = '',
     this.videoJob = '',
     Map<String, String>? threeSpecDrafts,
     this.serverUrl = '',
@@ -600,6 +605,7 @@ class AppSettings {
         'threeProjectName': threeProjectName,
         'hotappApp': hotappApp,
         'videoSampleIdx': videoSampleIdx,
+        'videoClipId': videoClipId,
         'videoJob': videoJob,
         'threeSpecDrafts': threeSpecDrafts,
         'serverUrl': serverUrl,
@@ -623,6 +629,7 @@ class AppSettings {
         threeProjectName: (m['threeProjectName'] ?? '').toString(),
         hotappApp: (m['hotappApp'] ?? '').toString(),
         videoSampleIdx: (m['videoSampleIdx'] is num) ? (m['videoSampleIdx'] as num).toInt() : 0,
+        videoClipId: (m['videoClipId'] ?? '').toString(),
         videoJob: (m['videoJob'] ?? '').toString(),
         threeSpecDrafts: (m['threeSpecDrafts'] is Map)
             ? Map<String, String>.fromEntries(

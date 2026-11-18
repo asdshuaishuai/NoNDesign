@@ -1,0 +1,1305 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>界面精修 · 三步引导</title>
+<style>
+  /* 界面精修演示：一台手机 + 三屏引导（欢迎 → 能力 → 完成）
+   * 图层：环境（径向景深 / 网格 / 底部光斑 / 浮尘 / 暗角）→ 相机
+   *       （侧边步骤轨 · 屏注 · 手机外框 · 三块屏 · 落版）→ 颗粒
+   * 设计令牌：间距 8 / 12 / 16，圆角 12 / 16 / 20，西文用等宽数字。 */
+
+  :root {
+    --ui-ink: #12141c;
+    --ui-ink2: #5f6678;
+    --ui-ink3: #8d93a6;
+    --ui-line: #e7eaf3;
+    --ui-acc: #5b6cff;
+    --ui-acc2: #8b5cf6;
+    --ui-mint: #1fa78f;
+    --ui-shadow: 0 6px 18px -12px rgba(20, 26, 54, 0.28);
+    --ui-w: 254px;      /* 屏内容宽：294 - 20*2 */
+    --ui-x: 20px;
+  }
+
+  /* ---------------------------------------------------------------- 舞台 / 环境 */
+
+  #nd-stage { background: #070910; }
+
+  #env { position: absolute; inset: 0; overflow: hidden; }
+
+  .env-base {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(76% 60% at 50% 28%, #1a2137 0%, #101524 42%, #070910 78%),
+      radial-gradient(44% 44% at 84% 10%, rgba(139, 92, 246, 0.12), transparent 70%);
+  }
+  .env-spot {
+    position: absolute; inset: 0;
+    background: linear-gradient(184deg, rgba(120, 142, 255, 0.10) 0%, transparent 46%);
+  }
+
+  .env-grid {
+    position: absolute; inset: -8%;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+    background-size: 48px 48px;
+    -webkit-mask-image: radial-gradient(60% 64% at 50% 44%, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.42) 54%, transparent 80%);
+    mask-image: radial-gradient(60% 64% at 50% 44%, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.42) 54%, transparent 80%);
+    opacity: 0;
+  }
+
+  /* 底部光斑：全片唯一的实光源，托住手机底部 */
+  .env-pool {
+    position: absolute; left: 50%; bottom: -250px; width: 940px; height: 540px;
+    margin-left: -470px; opacity: 0;
+    background: radial-gradient(closest-side,
+      rgba(96, 112, 255, 0.55) 0%,
+      rgba(124, 108, 255, 0.24) 44%,
+      rgba(139, 92, 246, 0.07) 68%,
+      transparent 79%);
+    filter: blur(7px);
+  }
+  .env-pool-2 {
+    position: absolute; left: 50%; bottom: -150px; width: 460px; height: 210px;
+    margin-left: -230px; opacity: 0;
+    background: radial-gradient(closest-side, rgba(188, 204, 255, 0.34), transparent 74%);
+    filter: blur(12px);
+  }
+  .env-halo {
+    position: absolute; left: 50%; top: 43%; width: 720px; height: 500px;
+    margin: -250px 0 0 -360px; opacity: 0;
+    background: radial-gradient(closest-side, rgba(120, 140, 255, 0.14), transparent 70%);
+  }
+
+  .mote {
+    position: absolute; border-radius: 50%;
+    background: rgba(200, 212, 255, 0.8);
+    will-change: transform, opacity;
+  }
+
+  /* 暗角放在手机之下：舞台压边，屏幕保持通透 */
+  #vig {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(92% 78% at 50% 46%, rgba(0, 0, 0, 0) 46%, rgba(0, 0, 0, 0.52) 100%),
+      linear-gradient(180deg, rgba(3, 4, 9, 0.42) 0%, transparent 22%, transparent 80%, rgba(2, 3, 7, 0.55) 100%);
+  }
+
+  /* 颗粒在手机之上，但只做质感，不压暗 */
+  .nd-grain { opacity: 0.30; mix-blend-mode: soft-light; }
+
+  /* ---------------------------------------------------------------- 相机 / 侧注 */
+
+  #cam { position: absolute; inset: 0; transform-origin: 50% 50%; will-change: transform; }
+
+  #rail { position: absolute; left: 84px; top: 166px; width: 168px; opacity: 0; }
+  .rail-kicker {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.34em;
+    color: rgba(206, 214, 255, 0.34);
+  }
+  .rail-kicker b { font-weight: 400; color: rgba(150, 165, 255, 0.9); }
+  .rail-body { position: relative; margin-top: 20px; padding-left: 18px; }
+  .rail-track {
+    position: absolute; left: 0; top: 6px; width: 1px; height: 132px;
+    background: rgba(255, 255, 255, 0.10);
+  }
+  .rail-fill {
+    position: absolute; left: 0; top: 6px; width: 1px; height: 132px;
+    background: linear-gradient(180deg, #8b98ff 0%, #b49bff 100%);
+    transform-origin: 50% 0; transform: scaleY(0);
+    box-shadow: 0 0 12px rgba(124, 139, 255, 0.7);
+  }
+  .rail-item {
+    position: relative; height: 44px; display: flex; align-items: center; gap: 10px;
+  }
+  .rail-item::before {
+    content: ""; position: absolute; left: -21px; top: 50%; margin-top: -3px;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.16);
+  }
+  .rail-item.on::before {
+    background: #9aa6ff;
+    box-shadow: 0 0 0 3px rgba(124, 139, 255, 0.16), 0 0 14px rgba(124, 139, 255, 0.8);
+  }
+  .rail-item .n {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em;
+    color: rgba(255, 255, 255, 0.28); width: 18px;
+  }
+  .rail-item .t {
+    font-family: var(--body); font-size: 12px; letter-spacing: 0.16em;
+    color: rgba(255, 255, 255, 0.44);
+  }
+  .rail-item .tick {
+    margin-left: auto; font-size: 10px; color: rgba(150, 165, 255, 0.95);
+    opacity: 0;
+  }
+  .rail-note {
+    margin-top: 22px; font-family: var(--mono); font-size: 8.5px;
+    letter-spacing: 0.24em; color: rgba(255, 255, 255, 0.22);
+  }
+
+  #meta { position: absolute; right: 84px; top: 166px; width: 214px; height: 150px; }
+  .meta-item { position: absolute; left: 0; top: 0; width: 214px; opacity: 0; }
+  .meta-rule {
+    width: 22px; height: 1px; background: rgba(124, 139, 255, 0.85);
+    margin-bottom: 12px; transform-origin: 0 50%; transform: scaleX(0);
+  }
+  .meta-kicker {
+    font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.3em;
+    color: rgba(160, 175, 255, 0.75);
+  }
+  .meta-title {
+    margin-top: 9px; font-family: var(--body); font-size: 14px; font-weight: 600;
+    letter-spacing: 0.03em; color: rgba(255, 255, 255, 0.9);
+  }
+  .meta-line {
+    margin-top: 8px; font-family: var(--body); font-size: 10.5px; line-height: 1.85;
+    letter-spacing: 0.04em; color: rgba(255, 255, 255, 0.38);
+  }
+
+  /* ---------------------------------------------------------------- 手机外框 */
+
+  #phone-wrap {
+    position: absolute; left: 50%; top: 30px; width: 306px; height: 648px;
+    margin-left: -153px; transform-origin: 50% 50%; will-change: transform, opacity;
+    opacity: 0;
+  }
+
+  #phone {
+    position: absolute; inset: 0; border-radius: 46px; padding: 9px 6px;
+    background:
+      linear-gradient(152deg, #5b6378 0%, #232936 13%, #0d1018 40%, #090b11 62%, #2b3140 87%, #666f86 100%);
+    box-shadow:
+      0 44px 92px -30px rgba(0, 0, 0, 0.92),
+      0 14px 34px -14px rgba(0, 0, 0, 0.72),
+      inset 0 1px 0 rgba(255, 255, 255, 0.32),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.10),
+      0 0 0 1px rgba(255, 255, 255, 0.07);
+  }
+  /* 侧键 */
+  .key { position: absolute; width: 3px; border-radius: 2px;
+    background: linear-gradient(180deg, #5d6473, #22262f); }
+  .key-l1 { left: -3px; top: 128px; height: 28px; }
+  .key-l2 { left: -3px; top: 172px; height: 54px; }
+  .key-r1 { right: -3px; top: 158px; height: 80px; }
+
+  #screen {
+    position: absolute; inset: 9px 6px; border-radius: 37px; overflow: hidden;
+    background: #0b0d14;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.7);
+  }
+
+  #screen-shade {
+    position: absolute; inset: 0; border-radius: 37px; pointer-events: none; z-index: 8;
+    background: linear-gradient(90deg, rgba(4, 6, 12, 0.45) 0%, rgba(4, 6, 12, 0.10) 28%, transparent 54%);
+    opacity: 0;
+  }
+
+  #glass {
+    position: absolute; inset: 0; border-radius: 37px; pointer-events: none; z-index: 11;
+    background: linear-gradient(118deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.03) 22%, transparent 40%);
+    mix-blend-mode: screen;
+  }
+
+  #island {
+    position: absolute; left: 50%; top: 7px; width: 84px; height: 25px;
+    margin-left: -42px; border-radius: 13px; background: #07080d; z-index: 10;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+  #island::after {
+    content: ""; position: absolute; right: 9px; top: 8.5px; width: 8px; height: 8px;
+    border-radius: 50%; background: #121a2c;
+    box-shadow: inset 0 0 0 1px rgba(90, 110, 200, 0.38);
+  }
+
+  #statusbar {
+    position: absolute; left: 23px; right: 23px; top: 13px; height: 13px;
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.04em;
+    color: #171a24; z-index: 9;
+  }
+  #statusbar .sig { display: flex; align-items: center; gap: 4px; }
+  #statusbar .bars { display: flex; align-items: flex-end; gap: 1.6px; height: 8px; }
+  #statusbar .bars i { width: 2.2px; border-radius: 1px; background: #171a24; display: block; }
+
+  #homebar {
+    position: absolute; left: 50%; bottom: 8px; width: 96px; height: 4px;
+    margin-left: -48px; border-radius: 2px; background: rgba(20, 23, 33, 0.28);
+    z-index: 9;
+  }
+
+  /* ---------------------------------------------------------------- 屏幕通用 */
+
+  .screen {
+    position: absolute; inset: 0; border-radius: 37px; overflow: hidden;
+    will-change: transform;
+  }
+
+  .s-head {
+    position: absolute; left: var(--ui-x); right: var(--ui-x); top: 48px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .s-head .step {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em;
+    color: var(--ui-ink3);
+  }
+  .s-head .step b { color: var(--ui-acc); font-weight: 500; }
+
+  .dots { display: flex; align-items: center; gap: 5px; }
+  .dots i {
+    display: block; width: 18px; height: 6px; border-radius: 3px;
+    background: #d9ddeb; transform: scaleX(0.3333); transform-origin: 50% 50%;
+  }
+
+  /* ---------------------------------------------------------------- 屏 1 · 欢迎 */
+
+  #scr1 { background: radial-gradient(118% 76% at 8% 0%, #ffffff 0%, #f8f9fd 44%, #eef1fa 100%); }
+  .s1-orb {
+    position: absolute; right: -80px; top: -80px; width: 240px; height: 240px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 38% 40%,
+      rgba(91, 108, 255, 0.22) 0%, rgba(139, 92, 246, 0.09) 48%, transparent 72%);
+    filter: blur(2px);
+  }
+
+  #brand { position: absolute; left: var(--ui-x); top: 50px; display: flex; align-items: center; gap: 11px; }
+  #brand-mark {
+    width: 40px; height: 40px; border-radius: 12px;
+    background: linear-gradient(142deg, #5b6cff 0%, #7b6bff 52%, #8b5cf6 100%);
+    box-shadow: 0 8px 18px -8px rgba(91, 108, 255, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    display: grid; place-items: center; transform-origin: 50% 50%;
+  }
+  #brand-mark svg { width: 22px; height: 22px; overflow: visible; }
+  #brand-mark path {
+    fill: none; stroke: #ffffff; stroke-width: 2.4;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  #brand-name {
+    font-family: var(--body); font-size: 17px; font-weight: 700; letter-spacing: 0.01em;
+    color: var(--ui-ink); line-height: 1.1;
+  }
+  #brand-sub {
+    margin-top: 3px; font-family: var(--body); font-size: 9px; letter-spacing: 0.22em;
+    color: var(--ui-ink3);
+  }
+  #skip {
+    position: absolute; right: var(--ui-x); top: 60px;
+    font-family: var(--body); font-size: 10.5px; letter-spacing: 0.12em;
+    color: var(--ui-ink3);
+  }
+
+  #hero { position: absolute; left: var(--ui-x); top: 178px; width: 254px; }
+  .hl { overflow: hidden; padding-bottom: 2px; }
+  .hl span {
+    display: block; font-family: var(--body); font-size: 25px; font-weight: 700;
+    letter-spacing: -0.015em; line-height: 1.4; color: var(--ui-ink);
+    will-change: transform;
+  }
+  .hl em {
+    font-style: normal;
+    background: linear-gradient(96deg, #5b6cff 0%, #8b5cf6 88%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  #sub1 {
+    position: absolute; left: var(--ui-x); top: 272px; width: 254px; margin: 0;
+    font-family: var(--body); font-size: 11.5px; line-height: 1.85;
+    letter-spacing: 0.03em; color: var(--ui-ink2);
+  }
+
+  #proof { position: absolute; left: var(--ui-x); top: 368px; display: flex; align-items: center; gap: 10px; }
+  .avatars { display: flex; }
+  .avatars i {
+    width: 22px; height: 22px; border-radius: 50%; margin-left: -6px;
+    display: grid; place-items: center;
+    font-family: var(--body); font-size: 8.5px; font-style: normal; color: #fff;
+    border: 2px solid #fbfcff; will-change: transform;
+  }
+  .avatars i:first-child { margin-left: 0; }
+  .avatars i:nth-child(1) { background: linear-gradient(140deg, #5b6cff, #8b5cf6); }
+  .avatars i:nth-child(2) { background: linear-gradient(140deg, #1fa78f, #3aa7e0); }
+  .avatars i:nth-child(3) { background: linear-gradient(140deg, #f0a33c, #ef6f6c); }
+  #proof-t { font-family: var(--body); font-size: 10px; letter-spacing: 0.06em; color: var(--ui-ink3); }
+
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    border-radius: 14px; will-change: transform;
+    font-family: var(--body); font-size: 13.5px; font-weight: 600; letter-spacing: 0.06em;
+  }
+  .btn svg { width: 15px; height: 15px; overflow: visible; }
+  .btn svg path {
+    fill: none; stroke: currentColor; stroke-width: 1.9;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  #cta1 {
+    position: absolute; left: var(--ui-x); top: 460px; width: 254px; height: 48px;
+    color: #ffffff;
+    background: linear-gradient(132deg, #5b6cff 0%, #7066ff 48%, #8b5cf6 100%);
+    transform-origin: 50% 62%;
+  }
+  #ripple1 {
+    position: absolute; left: 147px; top: 484px; width: 254px; height: 48px;
+    margin: -24px 0 0 -127px; border-radius: 14px; opacity: 0;
+    border: 1.5px solid rgba(124, 139, 255, 0.85);
+  }
+
+  #dots1 { position: absolute; left: 0; right: 0; top: 532px; justify-content: center; }
+  #micro1 {
+    position: absolute; left: 0; right: 0; top: 556px; text-align: center;
+    font-family: var(--body); font-size: 9px; letter-spacing: 0.16em; color: #a3a9bb;
+  }
+
+  /* ---------------------------------------------------------------- 屏 2 · 能力 */
+
+  #scr2 { background: linear-gradient(178deg, #fbfcff 0%, #f4f6fc 56%, #edf0f9 100%); }
+  .s2-orb {
+    position: absolute; left: -90px; bottom: -110px; width: 250px; height: 250px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 60% 40%, rgba(31, 167, 143, 0.14), transparent 68%);
+  }
+  #s2-title {
+    position: absolute; left: var(--ui-x); top: 76px; width: 254px;
+    font-family: var(--body); font-size: 19px; font-weight: 700; letter-spacing: -0.01em;
+    color: var(--ui-ink); line-height: 1.35;
+  }
+  #s2-title .spark {
+    display: inline-block; width: 15px; height: 15px; margin-left: 6px; vertical-align: -1px;
+  }
+  #s2-title .spark path {
+    fill: none; stroke: #f0a33c; stroke-width: 1.7;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  #s2-sub {
+    position: absolute; left: var(--ui-x); top: 106px; width: 254px;
+    font-family: var(--body); font-size: 10.5px; letter-spacing: 0.05em;
+    color: var(--ui-ink3);
+  }
+
+  .card {
+    position: absolute; left: var(--ui-x); width: 254px; height: 100px;
+    border-radius: 16px; background: #ffffff;
+    border: 1px solid var(--ui-line);
+    box-shadow: var(--ui-shadow);
+    padding: 14px; display: flex; align-items: center; gap: 12px;
+    will-change: transform;
+  }
+  .card .ico {
+    flex: 0 0 38px; width: 38px; height: 38px; border-radius: 12px;
+    display: grid; place-items: center;
+  }
+  .card .ico svg { width: 20px; height: 20px; overflow: visible; }
+  .card .ico path, .card .ico rect, .card .ico circle {
+    fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .card .tx { min-width: 0; }
+  .card .ct {
+    font-family: var(--body); font-size: 12.5px; font-weight: 700; letter-spacing: 0.03em;
+    color: var(--ui-ink); line-height: 1.2;
+  }
+  .card .cd {
+    margin-top: 5px; font-family: var(--body); font-size: 10px; line-height: 1.5;
+    letter-spacing: 0.03em; color: var(--ui-ink3);
+  }
+  #card0 { top: 140px; }
+  #card0 .ico { background: #eef1ff; }
+  #card0 .ico path, #card0 .ico rect { stroke: #5b6cff; }
+  #card1 { top: 252px; }
+  #card1 .ico { background: #e9f8f4; }
+  #card1 .ico path { stroke: #1fa78f; }
+  #card2 { top: 364px; }
+  #card2 .ico { background: #f4edff; }
+  #card2 .ico path, #card2 .ico circle { stroke: #8b5cf6; }
+
+  #cta2 {
+    position: absolute; left: var(--ui-x); top: 486px; width: 254px; height: 46px;
+    color: #2a3044; background: #ffffff;
+    border: 1px solid #e2e6f2;
+    transform-origin: 50% 62%;
+  }
+  #cta2 svg path { stroke: #5b6cff; }
+  #foot2 {
+    position: absolute; left: 0; right: 0; top: 550px; text-align: center;
+    font-family: var(--body); font-size: 9px; letter-spacing: 0.14em; color: #a7adbe;
+  }
+
+  /* ---------------------------------------------------------------- 屏 3 · 完成 */
+
+  #scr3 { background: radial-gradient(124% 88% at 50% 26%, #ffffff 0%, #f7f9fe 44%, #eef1fa 100%); }
+  .s3-orb {
+    position: absolute; left: 50%; top: 56px; width: 300px; height: 300px;
+    margin-left: -150px; border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%,
+      rgba(91, 108, 255, 0.12) 0%, rgba(139, 92, 246, 0.05) 48%, transparent 70%);
+  }
+  .ring-amb {
+    position: absolute; left: 50%; top: 136px; border-radius: 50%;
+    border: 1px solid rgba(91, 108, 255, 0.11);
+  }
+  #ringAmb1 { width: 188px; height: 188px; margin: -94px 0 0 -94px; }
+  #ringAmb2 { width: 248px; height: 248px; margin: -124px 0 0 -124px; }
+
+  #check { position: absolute; left: 101px; top: 90px; width: 92px; height: 92px; }
+  #check svg { width: 92px; height: 92px; overflow: visible; }
+  #check-ring { fill: none; stroke: #5b6cff; stroke-width: 2.4; stroke-linecap: round; opacity: 0.5; }
+  #check-disc { fill: url(#gAccent); opacity: 0; transform-origin: 46px 46px; }
+  #check-tick {
+    fill: none; stroke: #ffffff; stroke-width: 4.6;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  #check-glow {
+    position: absolute; left: 50%; top: 136px; width: 210px; height: 210px;
+    margin: -105px 0 0 -105px; border-radius: 50%; opacity: 0;
+    background: radial-gradient(closest-side, rgba(124, 139, 255, 0.40), rgba(124, 139, 255, 0) 72%);
+  }
+  #ripple3, #ripple3b {
+    position: absolute; left: 50%; top: 136px; width: 92px; height: 92px;
+    margin: -46px 0 0 -46px; border-radius: 50%; opacity: 0;
+    border: 1.5px solid rgba(124, 139, 255, 0.75);
+  }
+  #ripple3b { border-color: rgba(167, 139, 250, 0.55); }
+
+  #s3-title {
+    position: absolute; left: 0; right: 0; top: 204px; text-align: center;
+    font-family: var(--body); font-size: 25px; font-weight: 700; letter-spacing: -0.01em;
+    color: var(--ui-ink);
+  }
+  #s3-sub {
+    position: absolute; left: 0; right: 0; top: 240px; text-align: center;
+    font-family: var(--body); font-size: 10.5px; letter-spacing: 0.05em; color: var(--ui-ink3);
+  }
+
+  #pcard {
+    position: absolute; left: var(--ui-x); top: 282px; width: 254px; height: 88px;
+    border-radius: 16px; background: #ffffff; border: 1px solid var(--ui-line);
+    box-shadow: var(--ui-shadow); padding: 14px 16px;
+    will-change: transform;
+  }
+  .pc-row { display: flex; align-items: baseline; justify-content: space-between; }
+  .pc-label { font-family: var(--body); font-size: 10px; letter-spacing: 0.1em; color: var(--ui-ink3); }
+  .pc-num {
+    font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+    color: #5b6cff; font-variant-numeric: tabular-nums; transform-origin: 100% 60%;
+    display: inline-block; will-change: transform;
+  }
+  .track {
+    position: relative; margin-top: 12px; height: 8px; border-radius: 4px;
+    background: #eef0f7; overflow: hidden;
+  }
+  .fill {
+    position: absolute; inset: 0; border-radius: 4px;
+    background: linear-gradient(90deg, #5b6cff 0%, #7d67ff 52%, #8b5cf6 100%);
+    transform-origin: 0 50%; transform: scaleX(0);
+  }
+  .shine {
+    position: absolute; top: 0; left: 0; width: 46px; height: 8px;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0));
+    transform: translateX(-60px); opacity: 0;
+  }
+  .pc-foot { margin-top: 9px; font-family: var(--body); font-size: 9px; letter-spacing: 0.08em; color: #b0b6c6; }
+
+  #close3 {
+    position: absolute; left: 0; right: 0; top: 398px; text-align: center;
+    font-family: var(--body); font-size: 11.5px; letter-spacing: 0.06em; color: #565d70;
+  }
+  #close3 em { font-style: normal; color: #5b6cff; }
+
+  #cta3 {
+    position: absolute; left: var(--ui-x); top: 436px; width: 254px; height: 46px;
+    color: #ffffff;
+    background: linear-gradient(132deg, #5b6cff 0%, #7066ff 48%, #8b5cf6 100%);
+    transform-origin: 50% 55%;
+  }
+  #micro3 {
+    position: absolute; left: 0; right: 0; top: 556px; text-align: center;
+    font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.26em; color: #b9bfcd;
+  }
+
+  .burst { position: absolute; left: 147px; top: 136px; width: 0; height: 0; }
+  .burst i {
+    position: absolute; left: 0; top: 0; border-radius: 50%;
+    background: #7c8bff; will-change: transform, opacity;
+  }
+
+  /* ---------------------------------------------------------------- 落版 */
+
+  #finale { position: absolute; left: 0; right: 0; top: 640px; text-align: center; }
+  .fin-row { display: flex; align-items: center; justify-content: center; gap: 14px; }
+  .fin-kicker {
+    font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.36em;
+    color: rgba(190, 202, 255, 0.45); opacity: 0;
+  }
+  .fin-rule {
+    width: 46px; height: 1px; background: rgba(190, 202, 255, 0.28);
+    transform-origin: 50% 50%; transform: scaleX(0);
+  }
+  .fin-line {
+    margin-top: 10px; font-family: var(--body); font-size: 20px; font-weight: 500;
+    letter-spacing: 0.07em; color: rgba(255, 255, 255, 0.94); line-height: 1.5;
+    clip-path: inset(-25% 100% -25% 0); will-change: clip-path;
+  }
+  .fin-line em { font-style: normal; color: #a9b4ff; }
+  #fin-dot {
+    display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+    background: #8b5cf6; margin: 0 0 13px 3px; vertical-align: middle; opacity: 0;
+  }
+</style>
+</head>
+<body>
+<div id="nd-viewport">
+  <div id="nd-stage">
+
+    <!-- 环境 -->
+    <div id="env">
+      <div class="env-base"></div>
+      <div class="env-spot"></div>
+      <div class="env-grid" id="envGrid"></div>
+      <div class="env-halo" id="envHalo"></div>
+      <div class="env-pool" id="envPool"></div>
+      <div class="env-pool-2" id="envPool2"></div>
+      <div id="motes"></div>
+    </div>
+    <div id="vig"></div>
+
+    <div id="cam">
+
+      <!-- 左侧步骤轨 -->
+      <div id="rail">
+        <div class="rail-kicker">ONBOARDING <b>/ 03</b></div>
+        <div class="rail-body">
+          <div class="rail-track"></div>
+          <div class="rail-fill" id="railFill"></div>
+          <div class="rail-item" id="rail0"><span class="n">01</span><span class="t">欢迎</span><span class="tick">✓</span></div>
+          <div class="rail-item" id="rail1"><span class="n">02</span><span class="t">能力</span><span class="tick">✓</span></div>
+          <div class="rail-item" id="rail2"><span class="n">03</span><span class="t">完成</span><span class="tick">✓</span></div>
+        </div>
+        <div class="rail-note">3 STEPS · 12.6S</div>
+      </div>
+
+      <!-- 右侧屏注 -->
+      <div id="meta">
+        <div class="meta-item" id="meta0">
+          <div class="meta-rule"></div>
+          <div class="meta-kicker">SCREEN 01</div>
+          <div class="meta-title">价值先行</div>
+          <div class="meta-line">品牌字标 → 一句价值主张<br>→ 一枚主按钮</div>
+        </div>
+        <div class="meta-item" id="meta1">
+          <div class="meta-rule"></div>
+          <div class="meta-kicker">SCREEN 02</div>
+          <div class="meta-title">能力逐条落位</div>
+          <div class="meta-line">三张卡片错开 115ms 滑入<br>图标逐笔描线</div>
+        </div>
+        <div class="meta-item" id="meta2">
+          <div class="meta-rule"></div>
+          <div class="meta-kicker">SCREEN 03</div>
+          <div class="meta-title">完成态收束</div>
+          <div class="meta-line">勾选描线 → 进度走满<br>→ 数值同步</div>
+        </div>
+      </div>
+
+      <!-- 手机 -->
+      <div id="phone-wrap">
+        <div id="phone">
+          <div class="key key-l1"></div>
+          <div class="key key-l2"></div>
+          <div class="key key-r1"></div>
+
+          <div id="screen">
+            <!-- 屏 1 · 欢迎 -->
+            <div class="screen" id="scr1">
+              <div class="s1-orb" id="s1orb"></div>
+
+              <div id="brand">
+                <div id="brand-mark">
+                  <svg viewBox="0 0 24 24"><path id="brandN" d="M7 18 L7 6 L17 18 L17 6" /></svg>
+                </div>
+                <div id="brand-text">
+                  <div id="brand-name">NaN</div>
+                  <div id="brand-sub">设计工作台</div>
+                </div>
+              </div>
+              <div id="skip">跳过</div>
+
+              <div id="hero">
+                <div class="hl"><span id="h1line">把一句话，变成</span></div>
+                <div class="hl"><span id="h2line">能点的<em>界面</em>。</span></div>
+              </div>
+              <p id="sub1">需求、草稿、原型，<br>一次对话走完。</p>
+
+              <div id="proof">
+                <div class="avatars"><i>陈</i><i>林</i><i>周</i></div>
+                <div id="proof-t">12,000+ 位创作者在用</div>
+              </div>
+
+              <div id="ripple1"></div>
+              <div class="btn" id="cta1">
+                <span>开始体验</span>
+                <svg viewBox="0 0 20 20"><path id="arrow1" d="M3.5 10 H15 M11 5.6 L15.4 10 L11 14.4" /></svg>
+              </div>
+
+              <div class="dots" id="dots1"><i></i><i></i><i></i></div>
+              <div id="micro1">约 1 分钟 · 随时可跳过</div>
+            </div>
+
+            <!-- 屏 2 · 能力 -->
+            <div class="screen" id="scr2">
+              <div class="s2-orb"></div>
+
+              <div class="s-head">
+                <span class="step"><b>02</b> / 能力</span>
+                <span class="dots" id="dots2"><i></i><i></i><i></i></span>
+              </div>
+
+              <div id="s2-title">细节，决定界面手感
+                <svg class="spark" viewBox="0 0 20 20"><path id="sparkPath" d="M10 2.4 C10.9 6.4 13.6 9.1 17.6 10 C13.6 10.9 10.9 13.6 10 17.6 C9.1 13.6 6.4 10.9 2.4 10 C6.4 9.1 9.1 6.4 10 2.4 Z" /></svg>
+              </div>
+              <div id="s2-sub">从间距到动效，每一处都有依据</div>
+
+              <div class="card" id="card0">
+                <div class="ico">
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <rect id="i0a" x="2.6" y="2.6" width="6.2" height="6.2" rx="1.9" />
+                    <rect id="i0b" x="11.2" y="2.6" width="6.2" height="6.2" rx="1.9" />
+                    <rect id="i0c" x="2.6" y="11.2" width="6.2" height="6.2" rx="1.9" />
+                    <rect id="i0d" x="11.2" y="11.2" width="6.2" height="6.2" rx="1.9" />
+                  </svg>
+                </div>
+                <div class="tx">
+                  <div class="ct">版式与间距</div>
+                  <div class="cd">8 / 12 / 16 的呼吸节奏</div>
+                </div>
+              </div>
+
+              <div class="card" id="card1">
+                <div class="ico">
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path id="i1a" d="M4.6 3.4 L4.6 15.2 L7.9 12.2 L10.9 17.2 L12.9 16.1 L10 11.4 L14.4 11.1 Z" />
+                    <path id="i1b" d="M14.6 4.2 A6.6 6.6 0 0 1 16.9 9.2" />
+                  </svg>
+                </div>
+                <div class="tx">
+                  <div class="ct">状态与反馈</div>
+                  <div class="cd">按下、加载、完成，都有回应</div>
+                </div>
+              </div>
+
+              <div class="card" id="card2">
+                <div class="ico">
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path id="i2a" d="M3 13.4 C5.4 13.4 5.6 6.6 8.2 6.6 C10.8 6.6 11 13.4 13.4 13.4 C15 13.4 15.8 10.6 16.2 8.2" />
+                    <path id="i2b" d="M13.6 9.6 L16.4 7.4 L18 10.4" />
+                  </svg>
+                </div>
+                <div class="tx">
+                  <div class="ct">动效与过渡</div>
+                  <div class="cd">推演收束，从不硬切</div>
+                </div>
+              </div>
+
+              <div class="btn" id="cta2">
+                <span>继续</span>
+                <svg viewBox="0 0 20 20"><path id="arrow2" d="M3.5 10 H15 M11 5.6 L15.4 10 L11 14.4" /></svg>
+              </div>
+              <div id="foot2">所有能力都可以随时关闭</div>
+            </div>
+
+            <!-- 屏 3 · 完成 -->
+            <div class="screen" id="scr3">
+              <div class="s3-orb"></div>
+              <div class="ring-amb" id="ringAmb1"></div>
+              <div class="ring-amb" id="ringAmb2"></div>
+
+              <div class="s-head">
+                <span class="step"><b>03</b> / 完成</span>
+                <span class="dots" id="dots3"><i></i><i></i><i></i></span>
+              </div>
+
+              <div id="check-glow"></div>
+              <div class="burst" id="burst"></div>
+              <div id="ripple3"></div>
+              <div id="ripple3b"></div>
+              <div id="check">
+                <svg viewBox="0 0 92 92">
+                  <defs>
+                    <linearGradient id="gAccent" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0" stop-color="#5b6cff" />
+                      <stop offset="1" stop-color="#8b5cf6" />
+                    </linearGradient>
+                  </defs>
+                  <circle id="check-disc" cx="46" cy="46" r="32" />
+                  <circle id="check-ring" cx="46" cy="46" r="42" />
+                  <path id="check-tick" d="M31 47.4 L41.4 57.4 L61.4 35.6" />
+                </svg>
+              </div>
+
+              <div id="s3-title">全部就绪</div>
+              <div id="s3-sub">三个步骤都已完成，可以开始了</div>
+
+              <div id="pcard">
+                <div class="pc-row">
+                  <span class="pc-label">配置进度</span>
+                  <span class="pc-num" id="pcNum">0%</span>
+                </div>
+                <div class="track">
+                  <div class="fill" id="pcFill"></div>
+                  <div class="shine" id="pcShine"></div>
+                </div>
+                <div class="pc-foot">账号 · 能力 · 外观</div>
+              </div>
+
+              <div id="close3">接下来，把想法交给 <em>NaN</em>。</div>
+              <div class="btn" id="cta3">
+                <span>进入工作台</span>
+                <svg viewBox="0 0 20 20"><path id="arrow3" d="M3.5 10 H15 M11 5.6 L15.4 10 L11 14.4" /></svg>
+              </div>
+              <div id="micro3">NaN · ONBOARDING DONE</div>
+            </div>
+
+            <div id="screen-shade"></div>
+
+            <div id="statusbar">
+              <span>9:41</span>
+              <span class="sig">
+                <span class="bars"><i style="height:3px"></i><i style="height:4.5px"></i><i style="height:6px"></i><i style="height:7.5px"></i></span>
+                <svg width="12" height="9" viewBox="0 0 12 9" aria-hidden="true">
+                  <path d="M1 3.2 A7.2 7.2 0 0 1 11 3.2" fill="none" stroke="#171a24" stroke-width="1.3" stroke-linecap="round"/>
+                  <path d="M3 5.2 A4.4 4.4 0 0 1 9 5.2" fill="none" stroke="#171a24" stroke-width="1.3" stroke-linecap="round"/>
+                  <circle cx="6" cy="7.6" r="1" fill="#171a24"/>
+                </svg>
+                <svg width="16" height="9" viewBox="0 0 16 9" aria-hidden="true">
+                  <rect x="0.6" y="1" width="11.4" height="7" rx="2" fill="none" stroke="#171a24" stroke-width="1.1" opacity="0.5"/>
+                  <rect x="2" y="2.4" width="8.6" height="4.2" rx="1" fill="#171a24"/>
+                  <path d="M13.4 4 L14.6 4.6 L14.6 6.4 L13.4 7 Z" fill="#171a24" opacity="0.5"/>
+                </svg>
+              </span>
+            </div>
+            <div id="island"></div>
+            <div id="homebar"></div>
+            <div id="glass"></div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- 落版 -->
+      <div id="finale">
+        <div class="fin-row">
+          <div class="fin-rule" id="finRuleL"></div>
+          <div class="fin-kicker" id="finKicker">UI POLISH · 三步引导</div>
+          <div class="fin-rule" id="finRuleR"></div>
+        </div>
+        <div class="fin-line" id="finLine">好的引导，让人不知不觉<em>走完</em><span id="fin-dot"></span></div>
+      </div>
+
+    </div><!-- /cam -->
+
+    <div class="nd-grain"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var DURATION = 12.6;
+
+  // ---------------------------------------------------------------- 时间表
+  var T = {
+    phoneIn: [0.00, 0.80], glowIn: [0.10, 1.00],
+    brand: 0.34,
+    h1: 0.46, h2: 0.55, sub1: 0.66, proof: 0.78,
+    dots1: 0.86, cta1: 0.92, mic1: 1.06,
+    hover1: [1.98, 0.34], press1: [2.40, 0.14], release1: [2.54, 0.44],
+    tr1: [2.72, 0.58],
+
+    s2Head: 3.30, s2Title: 3.40, s2Sub: 3.52,
+    cards: 3.64, cardStep: 0.115, cardDur: 0.54,
+    spark: 3.76, cta2: 4.24,
+    hover2: [4.94, 0.34], press2: [5.28, 0.14], release2: [5.42, 0.44],
+    tr2: [5.60, 0.58],
+
+    s3Head: 6.10, ring: 6.26, disc: 6.68, tick: 6.84,
+    s3Title: 6.92, s3Sub: 7.02,
+    pcard: 7.14, prog: [7.30, 1.05],
+    numPop: 8.35, shine: [8.45, 0.95], close3: 8.78, cta3: 9.04, mic3: 9.16,
+    burst: 8.98, ripple3: [9.00, 0.85], pulse2: 9.86,
+
+    finale: 10.90, finRule: 10.96, finKicker: 11.02, finLine: 11.06
+  };
+
+  // 侧轨 / 屏注的切换点
+  var STEP_ON = [0.95, 3.02, 5.92];
+  var STEP_OFF = [3.02, 5.92, 10.94];
+  var META_IN = [0.98, 3.06, 5.96];
+  var META_OUT = [2.86, 5.78, 10.88];
+
+  // ---------------------------------------------------------------- 元素
+  var cam, phoneWrap, screenShade, scen = [], metaEls = [], rails = [];
+  var railEl, railFill, envGrid, envPool, envPool2, envHalo, s1orb;
+  var brandMark, brandTextWrap, brandN, h1line, h2line, sub1, skip, proof, proofT, avatarEls;
+  var cta1, cta2, cta3, ripple1, dots1El, micro1, arrow1, arrow2, arrow3;
+  var cardEls = [], cardIcos = [], s2Title, s2Sub, sparkPath, s2Head;
+  var ring, disc, tickPath, checkGlow, ripple3, ripple3b, ringAmb1, ringAmb2, checkEl;
+  var s3Title, s3Sub, s3Head, pcard, pcNum, pcFill, pcShine, close3, micro3;
+  var finLine, finKicker, finRuleL, finRuleR, finDot;
+  var dots = [[], [], []];
+  var burstEls = [], motes = [];
+  var lens = {};
+
+  function measure(el) {
+    try { return el.getTotalLength(); } catch (e) { return 0; }
+  }
+  function setupDraw(el, key) {
+    if (!el) return;
+    var len = measure(el);
+    lens[key] = len;
+    el.style.strokeDasharray = len + ' ' + len;
+    el.style.strokeDashoffset = String(len);
+  }
+  function dash(el, key, p) {
+    var len = lens[key] || 0;
+    el.style.strokeDashoffset = String(len * (1 - ND.clamp(p, 0, 1)));
+  }
+  function s01(v) { return ND.clamp(v, 0, 1); }
+  function win(t, a, b, dur) {
+    return s01(ND.phase(t, a, dur)) * (1 - s01(ND.phase(t, b, dur)));
+  }
+  // 按压包络：按下线性压到底，松开用 spring 回弹（过冲为负 → 顶起一点）
+  function pressEnv(t, press, release) {
+    if (t < press[0]) return 0;
+    if (t < release[0]) return ND.ease.inQuad(ND.phase(t, press[0], press[1]));
+    return 1 - ND.ease.spring(ND.phase(t, release[0], release[1]));
+  }
+  function pressStyle(el, hoverP, env, inset) {
+    var h = s01(hoverP);
+    var e = env;
+    var lift = -1.6 * h + 2.4 * e;
+    var sc = 1 + 0.016 * h - 0.05 * e;
+    var k = ND.clamp(e, -0.25, 1);
+    var y = ND.lerp(10, 3, k), blur = ND.lerp(22, 11, k), spread = ND.lerp(-8, -5, k);
+    var a = ND.lerp(0.62, 0.40, k) + 0.08 * h;
+    el.style.transform = 'translate3d(0,' + lift.toFixed(2) + 'px,0) scale(' + sc.toFixed(4) + ')';
+    el.style.boxShadow = inset +
+      ', 0 ' + y.toFixed(1) + 'px ' + blur.toFixed(1) + 'px ' + spread.toFixed(1) +
+      'px rgba(91,108,255,' + a.toFixed(3) + ')';
+  }
+
+  // ---------------------------------------------------------------- 构建
+  function buildMotes() {
+    var host = $('motes');
+    for (var i = 0; i < 14; i++) {
+      var d = document.createElement('div');
+      d.className = 'mote';
+      var s = 1.3 + 2.4 * (0.5 + 0.5 * Math.sin(i * 12.9898));
+      d.style.width = s.toFixed(1) + 'px';
+      d.style.height = s.toFixed(1) + 'px';
+      d.style.left = (60 + ((i * 137) % 1160)) + 'px';
+      d.style.top = (90 + ((i * 211) % 520)) + 'px';
+      if (i % 4 === 0) d.style.background = 'rgba(160, 175, 255, 0.9)';
+      host.appendChild(d);
+      motes.push({ el: d, seed: i * 0.9173, sp: 0.16 + 0.20 * (0.5 + 0.5 * Math.sin(i * 7.31)) });
+    }
+  }
+
+  function buildBurst() {
+    var host = $('burst');
+    for (var i = 0; i < 14; i++) {
+      var d = document.createElement('i');
+      var r = 2.0 + 2.2 * (0.5 + 0.5 * Math.sin(i * 3.71));
+      d.style.width = r.toFixed(1) + 'px';
+      d.style.height = r.toFixed(1) + 'px';
+      d.style.marginLeft = (-r / 2).toFixed(1) + 'px';
+      d.style.marginTop = (-r / 2).toFixed(1) + 'px';
+      d.style.opacity = '0';
+      if (i % 3 === 0) d.style.background = '#a78bfa';
+      if (i % 5 === 0) d.style.background = '#22b39b';
+      host.appendChild(d);
+      burstEls.push({ el: d, seed: i });
+    }
+  }
+
+  function grab() {
+    cam = $('cam'); phoneWrap = $('phone-wrap'); screenShade = $('screen-shade');
+    scen = [$('scr1'), $('scr2'), $('scr3')];
+    rails = [$('rail0'), $('rail1'), $('rail2')];
+    railEl = $('rail'); railFill = $('railFill');
+    envGrid = $('envGrid'); envPool = $('envPool'); envPool2 = $('envPool2');
+    envHalo = $('envHalo'); s1orb = $('s1orb');
+
+    brandMark = $('brand-mark'); brandTextWrap = $('brand-text'); brandN = $('brandN');
+    h1line = $('h1line'); h2line = $('h2line'); sub1 = $('sub1');
+    skip = $('skip'); proof = $('proof'); proofT = $('proof-t');
+    avatarEls = Array.prototype.slice.call(document.querySelectorAll('.avatars i'));
+
+    cta1 = $('cta1'); cta2 = $('cta2'); cta3 = $('cta3');
+    ripple1 = $('ripple1'); dots1El = $('dots1'); micro1 = $('micro1');
+    arrow1 = $('arrow1'); arrow2 = $('arrow2'); arrow3 = $('arrow3');
+
+    cardEls = [$('card0'), $('card1'), $('card2')];
+    cardIcos = [
+      [$('i0a'), $('i0b'), $('i0c'), $('i0d')],
+      [$('i1a'), $('i1b')],
+      [$('i2a'), $('i2b')]
+    ];
+    s2Title = $('s2-title'); s2Sub = $('s2-sub'); sparkPath = $('sparkPath');
+    s2Head = document.querySelector('#scr2 .s-head');
+
+    ring = $('check-ring'); disc = $('check-disc'); tickPath = $('check-tick');
+    checkEl = $('check'); checkGlow = $('check-glow'); ripple3 = $('ripple3'); ripple3b = $('ripple3b');
+    ringAmb1 = $('ringAmb1'); ringAmb2 = $('ringAmb2');
+    s3Title = $('s3-title'); s3Sub = $('s3-sub');
+    s3Head = document.querySelector('#scr3 .s-head');
+    pcard = $('pcard'); pcNum = $('pcNum'); pcFill = $('pcFill'); pcShine = $('pcShine');
+    close3 = $('close3'); micro3 = $('micro3');
+
+    finLine = $('finLine'); finKicker = $('finKicker');
+    finRuleL = $('finRuleL'); finRuleR = $('finRuleR'); finDot = $('fin-dot');
+
+    dots = [
+      Array.prototype.slice.call(document.querySelectorAll('#dots1 i')),
+      Array.prototype.slice.call(document.querySelectorAll('#dots2 i')),
+      Array.prototype.slice.call(document.querySelectorAll('#dots3 i'))
+    ];
+    metaEls = [$('meta0'), $('meta1'), $('meta2')];
+    Array.prototype.forEach.call(document.querySelectorAll('.meta-item'), function (el) {
+      el._rule = el.querySelector('.meta-rule');
+    });
+
+    setupDraw(brandN, 'brandN');
+    setupDraw(arrow1, 'arrow1');
+    setupDraw(arrow2, 'arrow2');
+    setupDraw(arrow3, 'arrow3');
+    setupDraw(sparkPath, 'spark');
+    setupDraw(ring, 'ring');
+    setupDraw(tickPath, 'tick');
+    for (var i = 0; i < 3; i++) {
+      for (var k = 0; k < cardIcos[i].length; k++) setupDraw(cardIcos[i][k], 'i' + i + k);
+    }
+  }
+
+  // ---------------------------------------------------------------- 渲染
+
+  function render(t) {
+    // ============ 环境
+    var gIn = ND.ease.outCubic(ND.phase(t, 0.10, 0.95));
+    envGrid.style.opacity = String(0.9 * gIn);
+    envGrid.style.transform = 'translate3d(0,' + (18 - 26 * gIn + t * 0.35).toFixed(2) + 'px,0)';
+    envHalo.style.opacity = String(0.55 * gIn);
+    var poolP = ND.ease.outCubic(ND.phase(t, T.glowIn[0], T.glowIn[1]));
+    var finGlow = ND.ease.inOutCubic(ND.phase(t, T.finale, 0.9));
+    envPool.style.opacity = String(0.72 * poolP + 0.55 * finGlow);
+    envPool.style.transform = 'translate3d(0,' + (14 * (1 - poolP) - 10 * finGlow).toFixed(2) + 'px,0) scale(' +
+      (0.94 + 0.06 * poolP + 0.06 * finGlow).toFixed(3) + ')';
+    envPool2.style.opacity = String(0.5 * poolP + 0.3 * finGlow);
+
+    for (var mi = 0; mi < motes.length; mi++) {
+      var m = motes[mi];
+      var ph = t * m.sp + m.seed * 6.283;
+      m.el.style.transform = 'translate3d(' + (Math.sin(ph) * 14).toFixed(1) + 'px,' +
+        (Math.sin(ph * 0.63 + 1.1) * 22 - t * 2.2).toFixed(1) + 'px,0)';
+      m.el.style.opacity = String((0.10 + 0.22 * (0.5 + 0.5 * Math.sin(ph * 1.7))) * poolP);
+    }
+
+    // ============ 相机
+    var dolly = 1 + 0.030 * ND.ease.inOutCubic(ND.phase(t, 0.9, 9.6));
+    var pull = ND.ease.inOutCubic(ND.phase(t, T.finale, 0.9));
+    dolly = ND.lerp(dolly, 1.012, pull);
+    cam.style.transform = 'scale(' + dolly.toFixed(4) + ')';
+
+    // ============ 手机整体：入场 → 轻浮 → 落版后退半步
+    var pin = ND.ease.outQuint(ND.phase(t, T.phoneIn[0], T.phoneIn[1]));
+    var floatP = ND.phase(t, 1.5, 1.0);
+    var floatY = 1.5 * Math.sin(t * 0.82) * floatP;
+    var finP = ND.ease.inOutCubic(ND.phase(t, T.finale, 0.85));
+    var phScale = ND.lerp(ND.lerp(0.962, 1, pin), 0.86, finP);
+    var phY = ND.lerp(ND.lerp(24, 0, pin), -6, finP) + floatY * (1 - finP);
+    phoneWrap.style.opacity = String(0.30 + 0.70 * pin);
+    phoneWrap.style.transform = 'translate3d(0,' + phY.toFixed(2) + 'px,0) scale(' + phScale.toFixed(4) + ')';
+
+    // ============ 三屏推演：旧屏左移淡出，新屏自右缓入
+    var p1 = ND.phase(t, T.tr1[0], T.tr1[1] - T.tr1[0]);
+    var p2 = ND.phase(t, T.tr2[0], T.tr2[1] - T.tr2[0]);
+    var out1 = ND.ease.inOutCubic(p1);
+    var out2 = ND.ease.inOutCubic(p2);
+    var in2 = ND.ease.outQuint(ND.phase(t, T.tr1[0] + 0.05, 0.50));
+    var in3 = ND.ease.outQuint(ND.phase(t, T.tr2[0] + 0.05, 0.50));
+
+    scen[0].style.transform = 'translate3d(' + (-52 * out1).toFixed(2) + 'px,0,0) scale(' +
+      (1 - 0.014 * out1).toFixed(4) + ')';
+    scen[0].style.opacity = String(1 - out1);
+
+    scen[1].style.transform = 'translate3d(' + (78 * (1 - in2) - 52 * out2).toFixed(2) + 'px,0,0) scale(' +
+      (ND.lerp(1.016, 1, in2) - 0.014 * out2).toFixed(4) + ')';
+    scen[1].style.opacity = String(s01(in2) * (1 - out2));
+
+    scen[2].style.transform = 'translate3d(' + (78 * (1 - in3)).toFixed(2) + 'px,0,0) scale(' +
+      ND.lerp(1.016, 1, in3).toFixed(4) + ')';
+    scen[2].style.opacity = String(s01(in3));
+
+    var shade = Math.max(1 - in2, 0) * (p1 > 0 && p1 < 1 ? 1 : 0) +
+                Math.max(1 - in3, 0) * (p2 > 0 && p2 < 1 ? 1 : 0);
+    screenShade.style.opacity = String(ND.clamp(shade, 0, 1) * 0.85);
+
+    // ============ 屏 1
+    var bp = ND.ease.outCubic(ND.phase(t, T.brand, 0.52));
+    brandMark.style.opacity = String(s01(ND.phase(t, T.brand, 0.22)));
+    brandMark.style.transform = 'rotate(' + (-8 * (1 - bp)).toFixed(2) + 'deg)';
+    dash(brandN, 'brandN', ND.ease.outCubic(ND.phase(t, T.brand + 0.10, 0.46)));
+    var bnP = ND.ease.outCubic(ND.phase(t, T.brand + 0.16, 0.5));
+    brandTextWrap.style.opacity = String(bnP);
+    brandTextWrap.style.transform = 'translate3d(' + (-6 * (1 - bnP)).toFixed(2) + 'px,0,0)';
+    skip.style.opacity = String(0.9 * s01(ND.phase(t, T.brand + 0.3, 0.4)));
+
+    var hl1 = ND.ease.outQuint(ND.phase(t, T.h1, 0.62));
+    var hl2 = ND.ease.outQuint(ND.phase(t, T.h2, 0.62));
+    h1line.parentNode.style.transform = 'translate3d(0,' + (112 * (1 - hl1)).toFixed(2) + '%,0)';
+    h2line.parentNode.style.transform = 'translate3d(0,' + (112 * (1 - hl2)).toFixed(2) + '%,0)';
+
+    var sbP = ND.ease.outCubic(ND.phase(t, T.sub1, 0.62));
+    sub1.style.opacity = String(sbP);
+    sub1.style.transform = 'translate3d(0,' + (12 * (1 - sbP)).toFixed(2) + 'px,0)';
+
+    var pfP = ND.ease.outCubic(ND.phase(t, T.proof, 0.55));
+    proof.style.opacity = String(pfP);
+    proof.style.transform = 'translate3d(0,' + (10 * (1 - pfP)).toFixed(2) + 'px,0)';
+    for (var ai = 0; ai < avatarEls.length; ai++) {
+      var ap = ND.ease.outBack(ND.phase(t, T.proof + 0.04 + ai * 0.06, 0.46));
+      avatarEls[ai].style.transform = 'scale(' + (0.4 + 0.6 * ap).toFixed(3) + ')';
+    }
+    proofT.style.opacity = String(s01(ND.phase(t, T.proof + 0.12, 0.4)));
+
+    var c1in = ND.ease.outBack(ND.phase(t, T.cta1, 0.58));
+    var hov1 = s01(ND.ease.outCubic(ND.phase(t, T.hover1[0], T.hover1[1])));
+    var env1 = pressEnv(t, T.press1, T.release1);
+    cta1.style.opacity = String(s01(ND.phase(t, T.cta1, 0.24)));
+    pressStyle(cta1, hov1, env1 + (1 - c1in) * 0.14, '0 1px 0 rgba(255,255,255,0.30) inset');
+    cta1.style.transform += ' translate3d(0,' + (10 * (1 - c1in)).toFixed(2) + 'px,0)';
+    dash(arrow1, 'arrow1', ND.ease.outCubic(ND.phase(t, T.cta1 + 0.16, 0.4)));
+
+    var rp1 = ND.phase(t, T.release1[0], 0.52);
+    if (rp1 > 0 && rp1 < 1) {
+      ripple1.style.opacity = String(0.5 * (1 - rp1));
+      ripple1.style.transform = 'scale(' + (1 + 0.08 * ND.ease.outCubic(rp1)).toFixed(3) + ',' +
+        (1 + 0.55 * ND.ease.outCubic(rp1)).toFixed(3) + ')';
+    } else {
+      ripple1.style.opacity = '0';
+    }
+
+    var d1p = ND.ease.outCubic(ND.phase(t, T.dots1, 0.5));
+    dots1El.style.opacity = String(d1p);
+    var grow1 = ND.ease.inOutCubic(ND.phase(t, T.tr1[0] - 0.16, 0.42));
+    for (var d = 0; d < 3; d++) {
+      var on1 = d === 0 ? 1 : (d === 1 ? grow1 : 0);
+      dots[0][d].style.transform = 'scaleX(' + (0.3333 + 0.6667 * on1).toFixed(3) + ')';
+      dots[0][d].style.background = on1 > 0.02
+        ? 'rgba(91,108,255,' + (0.25 + 0.75 * on1).toFixed(2) + ')' : '#d9ddeb';
+    }
+    micro1.style.opacity = String(0.9 * s01(ND.phase(t, T.mic1, 0.5)));
+
+    s1orb.style.transform = 'translate3d(' + (4 * Math.sin(t * 0.7)).toFixed(2) + 'px,' +
+      (6 * Math.cos(t * 0.55)).toFixed(2) + 'px,0) scale(' + (1 + 0.04 * Math.sin(t * 0.9)).toFixed(3) + ')';
+
+    // ============ 屏 2
+    var h2p = ND.ease.outCubic(ND.phase(t, T.s2Head, 0.5));
+    s2Head.style.opacity = String(h2p);
+    s2Head.style.transform = 'translate3d(0,' + (8 * (1 - h2p)).toFixed(2) + 'px,0)';
+    var t2p = ND.ease.outQuint(ND.phase(t, T.s2Title, 0.55));
+    s2Title.style.opacity = String(s01(ND.phase(t, T.s2Title, 0.3)));
+    s2Title.style.transform = 'translate3d(0,' + (14 * (1 - t2p)).toFixed(2) + 'px,0)';
+    var s2p = ND.ease.outCubic(ND.phase(t, T.s2Sub, 0.55));
+    s2Sub.style.opacity = String(s2p);
+    s2Sub.style.transform = 'translate3d(0,' + (10 * (1 - s2p)).toFixed(2) + 'px,0)';
+
+    var sparkP = ND.ease.outCubic(ND.phase(t, T.spark, 0.55));
+    dash(sparkPath, 'spark', sparkP);
+    var twk = 1 + 0.055 * Math.sin(t * 2.6) * s01(ND.phase(t, T.spark + 0.3, 0.6));
+    sparkPath.parentNode.style.transform = 'rotate(' + (sparkP * 24).toFixed(1) + 'deg) scale(' + twk.toFixed(3) + ')';
+
+    for (var ci = 0; ci < 3; ci++) {
+      var start = T.cards + ci * T.cardStep;
+      var cp = ND.ease.outQuint(ND.phase(t, start, T.cardDur));
+      cardEls[ci].style.opacity = String(s01(ND.phase(t, start, 0.26)));
+      cardEls[ci].style.transform = 'translate3d(' + (36 * (1 - cp)).toFixed(2) + 'px,' +
+        (10 * (1 - cp)).toFixed(2) + 'px,0) scale(' + (0.985 + 0.015 * cp).toFixed(4) + ')';
+      for (var ck = 0; ck < cardIcos[ci].length; ck++) {
+        dash(cardIcos[ci][ck], 'i' + ci + ck,
+          ND.ease.outCubic(ND.phase(t, start + 0.10 + ck * 0.055, 0.42)));
+      }
+    }
+
+    var d2p = s01(ND.phase(t, T.s2Head + 0.1, 0.5));
+    var grow2 = ND.ease.inOutCubic(ND.phase(t, T.tr2[0] - 0.16, 0.42));
+    for (var d2 = 0; d2 < 3; d2++) {
+      var on2 = d2 === 1 ? 1 : (d2 === 2 ? grow2 : 0);
+      dots[1][d2].style.opacity = String(d2p);
+      dots[1][d2].style.transform = 'scaleX(' + (0.3333 + 0.6667 * on2).toFixed(3) + ')';
+      dots[1][d2].style.background = on2 > 0.02
+        ? 'rgba(91,108,255,' + (0.25 + 0.75 * on2).toFixed(2) + ')' : '#d9ddeb';
+    }
+
+    var c2in = ND.ease.outBack(ND.phase(t, T.cta2, 0.56));
+    var hov2 = s01(ND.ease.outCubic(ND.phase(t, T.hover2[0], T.hover2[1])));
+    var env2 = pressEnv(t, T.press2, T.release2);
+    cta2.style.opacity = String(s01(ND.phase(t, T.cta2, 0.24)));
+    pressStyle(cta2, hov2, env2 + (1 - c2in) * 0.14, '0 1px 0 rgba(255,255,255,0.9) inset');
+    cta2.style.transform += ' translate3d(0,' + (10 * (1 - c2in)).toFixed(2) + 'px,0)';
+    dash(arrow2, 'arrow2', ND.ease.outCubic(ND.phase(t, T.cta2 + 0.16, 0.4)));
+
+    // ============ 屏 3
+    var h3p = ND.ease.outCubic(ND.phase(t, T.s3Head, 0.5));
+    s3Head.style.opacity = String(h3p);
+    for (var d3 = 0; d3 < 3; d3++) {
+      var g3 = ND.ease.inOutCubic(ND.phase(t, T.s3Head + d3 * 0.05, 0.45));
+      dots[2][d3].style.opacity = String(h3p);
+      dots[2][d3].style.transform = 'scaleX(' + (0.3333 + 0.6667 * g3).toFixed(3) + ')';
+      dots[2][d3].style.background = 'rgba(91,108,255,' + (0.25 + 0.6 * g3).toFixed(2) + ')';
+    }
+
+    dash(ring, 'ring', ND.ease.outCubic(ND.phase(t, T.ring, 0.52)));
+    var discP = ND.ease.outBack(ND.phase(t, T.disc, 0.5));
+    disc.style.opacity = String(s01(ND.phase(t, T.disc, 0.2)));
+    disc.style.transform = 'scale(' + (0.5 + 0.5 * discP).toFixed(3) + ')';
+    dash(tickPath, 'tick', ND.ease.outCubic(ND.phase(t, T.tick, 0.40)));
+
+    var glowP = s01(ND.phase(t, T.disc, 0.7));
+    var glowB = t > T.burst ? 1 + 0.10 * Math.sin((t - T.burst) * 1.5) : 1;
+    checkGlow.style.opacity = String(0.52 * glowP * glowB);
+    var breathe = 1 + 0.012 * Math.sin((t - T.burst) * 1.6) * s01(ND.phase(t, T.burst, 0.8));
+    checkEl.style.transform = 'scale(' + breathe.toFixed(4) + ')';
+
+    var t3p = ND.ease.outQuint(ND.phase(t, T.s3Title, 0.55));
+    s3Title.style.opacity = String(s01(ND.phase(t, T.s3Title, 0.3)));
+    s3Title.style.transform = 'translate3d(0,' + (14 * (1 - t3p)).toFixed(2) + 'px,0)';
+    var s3p = ND.ease.outCubic(ND.phase(t, T.s3Sub, 0.55));
+    s3Sub.style.opacity = String(s3p);
+    s3Sub.style.transform = 'translate3d(0,' + (10 * (1 - s3p)).toFixed(2) + 'px,0)';
+
+    var pcIn = ND.ease.outCubic(ND.phase(t, T.pcard, 0.55));
+    pcard.style.opacity = String(s01(ND.phase(t, T.pcard, 0.26)));
+    pcard.style.transform = 'translate3d(0,' + (16 * (1 - pcIn)).toFixed(2) + 'px,0) scale(' +
+      (0.985 + 0.015 * pcIn).toFixed(4) + ')';
+
+    var progP = ND.ease.outCubic(ND.phase(t, T.prog[0], T.prog[1] - T.prog[0]));
+    pcFill.style.transform = 'scaleX(' + progP.toFixed(4) + ')';
+    pcNum.textContent = Math.round(progP * 100) + '%';
+    var popS = 1 + 0.16 * Math.sin(Math.PI * s01(ND.phase(t, T.numPop, 0.5)));
+    pcNum.style.transform = 'scale(' + popS.toFixed(3) + ')';
+
+    var shP = ND.phase(t, T.shine[0], T.shine[1]);
+    if (shP > 0 && shP < 1) {
+      pcShine.style.opacity = String(0.9 * Math.sin(Math.PI * shP));
+      pcShine.style.transform = 'translateX(' + (-60 + 300 * ND.ease.inOutCubic(shP)).toFixed(1) + 'px)';
+    } else {
+      pcShine.style.opacity = '0';
+    }
+
+    var clP = ND.ease.outCubic(ND.phase(t, T.close3, 0.6));
+    close3.style.opacity = String(clP * 0.95);
+    close3.style.transform = 'translate3d(0,' + (10 * (1 - clP)).toFixed(2) + 'px,0)';
+
+    var c3in = ND.ease.outBack(ND.phase(t, T.cta3, 0.58));
+    cta3.style.opacity = String(s01(ND.phase(t, T.cta3, 0.24)));
+    pressStyle(cta3, 0, (1 - c3in) * 0.16, '0 1px 0 rgba(255,255,255,0.30) inset');
+    cta3.style.transform += ' translate3d(0,' + (12 * (1 - c3in)).toFixed(2) + 'px,0)';
+    dash(arrow3, 'arrow3', ND.ease.outCubic(ND.phase(t, T.cta3 + 0.18, 0.42)));
+    micro3.style.opacity = String(0.9 * s01(ND.phase(t, T.mic3, 0.5)));
+
+    var ambP = ND.ease.outCubic(ND.phase(t, T.pcard, 1.2));
+    ringAmb1.style.opacity = String(0.6 * ambP);
+    ringAmb1.style.transform = 'scale(' + (0.94 + 0.06 * ambP).toFixed(3) + ')';
+    ringAmb2.style.opacity = String(0.4 * ambP);
+    ringAmb2.style.transform = 'scale(' + (0.92 + 0.08 * ambP).toFixed(3) + ')';
+
+    // 完成瞬间的确定性粒子
+    var bow = ND.phase(t, T.burst, 0.9);
+    for (var bi = 0; bi < burstEls.length; bi++) {
+      var b = burstEls[bi];
+      if (bow <= 0 || bow >= 1) { b.el.style.opacity = '0'; continue; }
+      var ang = (b.seed / 14) * 6.2832 + 0.35 * Math.sin(b.seed * 12.9898);
+      var spd = 46 + 34 * (0.5 + 0.5 * Math.sin(b.seed * 78.233));
+      var dd = spd * ND.ease.outCubic(bow);
+      b.el.style.transform = 'translate3d(' + (Math.cos(ang) * dd).toFixed(1) + 'px,' +
+        (Math.sin(ang) * dd + 46 * bow * bow).toFixed(1) + 'px,0) scale(' +
+        (1 - 0.55 * bow).toFixed(3) + ')';
+      b.el.style.opacity = String(Math.pow(1 - bow, 1.4) * 0.95);
+    }
+
+    var r3 = ND.phase(t, T.ripple3[0], T.ripple3[1]);
+    if (r3 > 0 && r3 < 1) {
+      ripple3.style.opacity = String(0.45 * (1 - r3));
+      ripple3.style.transform = 'scale(' + (1 + 1.9 * ND.ease.outCubic(r3)).toFixed(3) + ')';
+    } else {
+      ripple3.style.opacity = '0';
+    }
+    // 停留段的一记轻脉冲，避免完成页静止成图片
+    var r3b = ND.phase(t, T.pulse2, 1.6);
+    if (r3b > 0 && r3b < 1) {
+      ripple3b.style.opacity = String(0.30 * (1 - r3b) * s01(ND.phase(t, T.pulse2, 0.25)));
+      ripple3b.style.transform = 'scale(' + (1 + 1.1 * ND.ease.outCubic(r3b)).toFixed(3) + ')';
+    } else {
+      ripple3b.style.opacity = '0';
+    }
+
+    // ============ 侧轨 / 屏注
+    var railIn = ND.ease.outCubic(ND.phase(t, 0.95, 0.7));
+    railEl.style.opacity = String(railIn);
+    railEl.style.transform = 'translate3d(' + (-14 * (1 - railIn)).toFixed(2) + 'px,0,0)';
+    var fillP = ND.ease.inOutCubic(ND.phase(t, 0.95, 10.1));
+    railFill.style.transform = 'scaleY(' + (0.04 + 0.96 * fillP).toFixed(3) + ')';
+
+    for (var ri = 0; ri < 3; ri++) {
+      var el = rails[ri];
+      var on = win(t, STEP_ON[ri], STEP_OFF[ri], 0.34);
+      var done = ND.ease.inOutCubic(ND.phase(t, STEP_OFF[ri], 0.42));
+      el.querySelector('.n').style.color = 'rgba(150,165,255,' + (0.28 + 0.66 * on).toFixed(2) + ')';
+      el.querySelector('.t').style.color = 'rgba(255,255,255,' + (0.42 + 0.52 * on).toFixed(2) + ')';
+      el.querySelector('.tick').style.opacity = String(0.95 * done);
+      el.querySelector('.tick').style.transform = 'translate3d(' + (-6 * (1 - done)).toFixed(1) + 'px,0,0)';
+      el.style.transform = 'translate3d(' + (4 * on).toFixed(2) + 'px,0,0)';
+      if (on > 0.5) { el.classList.add('on'); } else { el.classList.remove('on'); }
+    }
+
+    for (var mi2 = 0; mi2 < metaEls.length; mi2++) {
+      var ma = win(t, META_IN[mi2], META_OUT[mi2], 0.34);
+      metaEls[mi2].style.opacity = String(ma);
+      metaEls[mi2].style.transform = 'translate3d(' + (8 * (1 - ma)).toFixed(2) + 'px,0,0)';
+      if (metaEls[mi2]._rule) metaEls[mi2]._rule.style.transform = 'scaleX(' + s01(ma * 1.2).toFixed(3) + ')';
+    }
+
+    // ============ 落版
+    var fk = ND.ease.outCubic(ND.phase(t, T.finKicker, 0.5));
+    finKicker.style.opacity = String(0.95 * fk);
+    finKicker.style.transform = 'translate3d(0,' + (6 * (1 - fk)).toFixed(2) + 'px,0)';
+    var fr = ND.ease.outQuint(ND.phase(t, T.finRule, 0.7));
+    finRuleL.style.transform = 'scaleX(' + fr.toFixed(3) + ')';
+    finRuleR.style.transform = 'scaleX(' + fr.toFixed(3) + ')';
+    var fl = ND.ease.outQuint(ND.phase(t, T.finLine, 0.72));
+    var clip = 'inset(-25% ' + ((1 - fl) * 100).toFixed(2) + '% -25% 0)';
+    finLine.style.clipPath = clip;
+    finLine.style.webkitClipPath = clip;
+    finLine.style.transform = 'translate3d(0,' + (6 * (1 - fl)).toFixed(2) + 'px,0)';
+    finDot.style.opacity = String(s01(ND.phase(t, T.finLine + 0.3, 0.4)));
+  }
+
+  // ---------------------------------------------------------------- 启动
+
+  function boot() {
+    grab();
+    buildMotes();
+    buildBurst();
+    ND.scene({ duration: DURATION, title: '界面精修 · 三步引导', render: render });
+  }
+
+  // 契约：延迟到 DOMContentLoaded（engine.js 可能在本脚本之后注入）
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

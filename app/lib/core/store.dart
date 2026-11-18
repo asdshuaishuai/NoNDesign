@@ -902,7 +902,8 @@ class AppStore extends ChangeNotifier {
   }
 
   /// 视频工作台：示例下标 + 渲染 job（回来可重新接回轮询）。
-  void setVideoState({int? sampleIdx, String? job}) {
+  void setVideoState({int? sampleIdx, String? clipId, String? job}) {
+    if (clipId != null && clipId != settings.videoClipId) settings.videoClipId = clipId;
     if (sampleIdx != null) settings.videoSampleIdx = sampleIdx;
     if (job != null) settings.videoJob = job;
     saveSettings();
