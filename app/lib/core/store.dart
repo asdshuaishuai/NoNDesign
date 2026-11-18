@@ -221,6 +221,16 @@ class AppStore extends ChangeNotifier {
   String? clipboardNodeId;
   List<String> selectedNodes = const [];
   String view = 'design';
+
+  /// 项目落地视图（架构裁决 2026-11-18）：设计 / 热应用 / 3D / 视频是相互
+  /// 独立的模块，项目打开/新建**不默认落在设计画布**——桌面壳落中性模块
+  /// 入口（hub），移动端壳以设计为工作面，保持原行为。
+  String get _projectLandingView {
+    final mobile = defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android;
+    return mobile ? 'design' : 'hub';
+  }
+
   String docsTab = 'prd';
   String panel = 'project';
   String rightTab = 'agent';
@@ -1364,7 +1374,7 @@ class AppStore extends ChangeNotifier {
         historyIndex = 0;
         // 聊天流驱动的建项目（sendChat 新 brief）与嵌入宿主内建项目不跳
         // 视图——聊天流是主面，切走就拆宿主（review pip-1）。
-        if (!_keepChatView) view = 'design';
+        if (!_keepChatView) view = _projectLandingView;
         panel = 'project';
         rightTab = 'agent';
         timeline = [];
@@ -1401,7 +1411,7 @@ class AppStore extends ChangeNotifier {
       docs = Docs();
       activeBoard = (res['entry'] ?? 'home').toString();
       selectedNode = null;
-      if (!_keepChatView) view = 'design'; // 同空分支：聊天流/嵌入宿主不跳视图
+      if (!_keepChatView) view = _projectLandingView; // 同空分支：聊天流/嵌入宿主不跳视图
       panel = 'project';
       rightTab = 'agent';
       timeline = [];
@@ -1517,7 +1527,7 @@ class AppStore extends ChangeNotifier {
       selectedNode = null;
       // 嵌入宿主/聊天流里打开项目只换内容，不换路由（review pip-1：
       // 「最近项目」点一下就把聊天宿主拆成全屏设计视图，触屏回不来）。
-      if (!_keepChatView) view = 'design';
+      if (!_keepChatView) view = _projectLandingView;
       panel = 'project';
       rightTab = 'agent';
       // 上一项目 run 的流式/思考残留不进新项目面板（timeline 是否同清属
@@ -1828,7 +1838,7 @@ class AppStore extends ChangeNotifier {
     if (ok) {
       activeBoard = templateId ?? id;
       // 嵌入宿主内建板留在聊天宿主（画板条「＋ 新建」在浮窗里同样可达）。
-      if (!_keepChatView) view = 'design';
+      if (!_keepChatView) view = _projectLandingView;
       notifyListeners();
     }
     return ok;
@@ -2610,7 +2620,7 @@ class AppStore extends ChangeNotifier {
       final ok = await newProject(empty: true);
       if (!ok) return;
     }
-    setView('design');
+    setView(_projectLandingView);
   }
 
   /// 聊天记录落盘（$recoveryDir/chat.json，与 recovery 同目录、测试可注入）。

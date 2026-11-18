@@ -53,3 +53,23 @@
   tablet_layout）单独跑了 78 项，全绿。
 
 未覆盖：本机屏幕锁定，未能抓取运行中窗口的实机截图；主页无右栏与两 tab 由 widget 测试锚定。
+
+## 架构裁决（用户 2026-11-18，已实施）
+
+设计 / 热应用 / 3D / 视频 = **四个相互独立的模块**；NaN（chat agent）可以控制每个模块；
+唯一的模块间关联是 **设计 → 热应用**（可以从设计生成热应用）。设计与 3D、视频无关联。
+
+实施内容：
+
+- **项目落地不默认设计**：`store._projectLandingView` —— 桌面壳（macOS/Windows/Linux）
+  新建/打开项目落在中性模块入口 `hub`（ProjectHubView：四个模块卡片 + NaN 提示）；
+  移动端壳保持设计工作面。运行完成后跳设计画布展示结果是显式行为，保留。
+- **设计工具条解耦**：设计画布工具条只保留热应用入口（设计 → 热应用是唯一合法关联）；
+  3D / 视频入口在主页工作台与全局 ⌘5/⌘6 快捷键，不再挂在设计工具条上。
+- **发布资产修复（实测发现）**：`assets/three/`（3D 预览模板 + three.module.js）与
+  `assets/a2ui_web/`（A2UI 官方 Web 渲染器页面）此前未声明进 `flutter.assets`，
+  release 包里 3D 工作台报「预览文件缺失」、A2UI Web 卡不可用。已加入 pubspec 并验证
+  3D 规范 → 生成 → WebView 渲染全链可用。
+
+验证：`flutter analyze` 0 error/warning；`flutter test` 820 项全绿（含新增
+project_hub_test：桌面落 hub / hub 卡片进入对应模块 / 移动端行为不变）。

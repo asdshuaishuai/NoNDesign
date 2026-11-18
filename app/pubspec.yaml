@@ -140,6 +140,12 @@ flutter:
     # moonviz.wasm + components.json + manifest.json 三者同源同版本；
     # 漂移由 test/engine_asset_drift_test.dart 守门。
     - assets/engine/
+    # 3D 预览模板与 three.module.js（发布包必须随包，否则 3D 工作台报
+    # “assets/three/preview.html: Unable to load asset”）。
+    - assets/three/
+    # A2UI 官方 Web 渲染器的自包含页面（release 依赖 asset 声明，debug 回退
+    # 仓库路径只用于测试）。
+    - assets/a2ui_web/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

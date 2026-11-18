@@ -20,6 +20,7 @@ import 'right_panel.dart';
 import 'settings_dialog.dart';
 import 'status_bar.dart';
 import 'title_bar.dart';
+import 'project_hub.dart';
 
 /// 插件快捷键数字键池（⌘5 起）；池容量即同时可注册插件数上限。
 /// 消费点在 main.dart 根级 bindings——workspace 级 CallbackShortcuts 在
@@ -112,6 +113,12 @@ class _WorkspaceState extends State<Workspace> {
       if (pluginView != null) {
         return Scaffold(backgroundColor: p.bg, body: SafeArea(child: pluginView));
       }
+    }
+    // 项目中性主面（架构裁决 2026-11-18）：设计 / 热应用 / 3D / 视频相互独立，
+    // 项目落地不默认进设计画布，先给模块入口；嵌入式（移动画中画）不适用。
+    if (!widget.embedded && store.view == 'hub') {
+      return Scaffold(
+          backgroundColor: p.bg, body: const SafeArea(child: ProjectHubView()));
     }
     return CallbackShortcuts(
       bindings: {
@@ -649,7 +656,9 @@ class _BoardTabs extends StatelessWidget {
             IconAction(icon: Icons.code, tooltip: '源码 ${modCombo('⌘3')}', size: 26, onTap: () => store.setView('source')),
             IconAction(icon: Icons.play_arrow_outlined, tooltip: '演示模式 ${modCombo('⌘4')}', size: 26, onTap: () => store.setView('play')),
             IconAction(icon: Icons.collections_bookmark_outlined, tooltip: '作品集', size: 26, onTap: () => store.setView('portfolio')),
-            for (final def in pluginRegistry)
+            // 架构裁决：设计只与热应用相关（设计可生成热应用）；
+            // 3D / 视频是独立模块，入口在主页工作台，不挂在设计工具条上。
+            for (final def in pluginRegistry.where((d) => d.id == 'hotapp'))
               IconAction(icon: def.icon, tooltip: def.tooltip, size: 26, onTap: () => store.setView('plugin:${def.id}')),
             const SizedBox(width: 4),
             TextButton.icon(
