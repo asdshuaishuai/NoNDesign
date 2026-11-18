@@ -42,7 +42,7 @@ jobs:
   # 不能静默跳过整套测试。
   gate:
     name: gate (analyze + test)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -67,10 +67,13 @@ jobs:
 
   # macOS 安装包：.app → ad-hoc 签名 → DMG（含 Applications 拖拽链接、卷标、卷图标）。
   # 只在 Apple Silicon 构建机上产出（应用本身 ARCHS=arm64，MediaPipe 也没有 Intel 切片）。
+  # 为什么用 macos-26 而不是 macos-15：2026-11-19 实测 macos-15 标签在公开仓库上
+  # 长时间排队（20 分钟仍未分配 runner），而 macos-26 立即分配且是 arm64
+  # （Image: macos-26-arm64）。下面的 uname 守卫继续兜住架构。
   macos-release:
     name: macos-release (arm64 dmg)
     needs: gate
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
