@@ -319,6 +319,26 @@ String toolFailureMessage(String? rawError) {
     case 'engine_generate_failed':
     case 'generate_unavailable':
       return '页面生成没有完成，请重试';
+    case 'canvas_empty':
+      return '画布还是空的：先用 generate_page 生成第一屏，再做设计操作';
+    case 'unknown_component':
+      return '这个组件名不存在：先用 list_components 查合法组件名';
+    case 'unknown_variant':
+      return '这个变体名不存在：换该组件的合法变体，或把变体槽写成 -';
+    case 'place_invalid_arg':
+      return 'place 参数不对：place <板> <组件> <id> [变体|-] [x] [y] [w] [h]';
+    case 'place_unknown_key':
+      return 'place 的 k=v 键不在编辑词表里（text/fill/stroke/radius/opacity/motion…）';
+    case 'id_exists':
+      return '这个 id 已经存在：换一个新 id';
+    case 'mixed_parents':
+      return '一次操作混用了不同父节点：拆成多次，每次同一父节点';
+    case 'generate_multi_too_many':
+      return '一次生成的画板数超限：拆成多次 generate_page';
+    case 'mbt_operation_unknown_key':
+      return 'op 里的键不在词表里：对照检查规范的键名';
+    case 'not_renderable_visual_logic':
+      return '文档里有渲染不了的过程式逻辑：改用声明式节点语法';
     case 'engine_gate_failed':
     case 'mbt_gate_block':
       return '这次改动未通过设计校验';
@@ -1110,6 +1130,19 @@ Future<String> composeProjectMap(EngineGateBridge bridge, String mbt) async {
   return lines.join('\n');
 }
 
+/// 空画布判定以引擎为准（session_list_artboards）：真引擎在空画布上返回
+/// 空表；查询失败/双打不支持时**不拦**（fail-open）——拦错了比不拦更伤。
+Future<bool> _canvasIsEmpty(EngineGateBridge bridge, String mbt) async {
+  try {
+    final boards = await bridge.session(mbt, 'session_list_artboards');
+    final data = boards['data'];
+    if (data is! List) return false;
+    return data.isEmpty;
+  } catch (_) {
+    return false;
+  }
+}
+
 List<dynamic> _listOf(dynamic value) => (value is List) ? value : const [];
 String _s(dynamic value) => value?.toString() ?? '';
 
@@ -1286,6 +1319,8 @@ appear live. You design the experience, not a pile of boxes.
 3. Use the project design spec on every generate_page call.
 4. Generate one page per screen: generate_page {intent, name, spec}. Do NOT hand-place a whole
    screen — the engine picks a template, applies the spec, self-repairs and scores.
+   EMPTY CANVAS (0 boards): the FIRST canvas action MUST be generate_page — design_op and
+   inspect cannot run before the first board exists; retrying them only burns steps.
    READ THE ENVELOPE: `autofix{fixes,detail}` is what the engine already healed; `missing[]`
    is what the page type expects but lacks — materialize it with `autofill <ab>` (idempotent)
    or place the blocks yourself; `skipped[]` are combined-intent segments that matched no page
@@ -2412,6 +2447,10 @@ ToolSet _buildTools(_Ctx ctx) {
         final bridge = ctx.bridge;
         if (bridge == null) {
           out = {'ok': false, 'error': 'engine_unavailable'};
+        } else if (await _canvasIsEmpty(bridge, ctx.mbt)) {
+          // 空画布上 design_op 必然失败（没有画板可挂，session 打不开）——
+          // 显性给出唯一正确动作，避免模型在同一个门上连环重试。
+          out = {'ok': false, 'error': 'canvas_empty'};
         } else {
           try {
             final env = await bridge.applyAgent(ctx.mbt, op); // AgentGate——唯一写路径
