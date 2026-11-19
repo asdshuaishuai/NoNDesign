@@ -187,36 +187,29 @@ jobs:
         working-directory: app
         run: flutter pub get
 
-      # 判定走 --machine 事件而非退出码（2026-11-19 实证）：wasmtime 在
-      # Windows 上的 trap 展开（fuel/timeout 测试的 catch_unwind 跨 FFI 边
-      # 界）会在**测试全部通过之后**的退出阶段 panic abort——run
-      # 44484570410 里 33/33 全绿、进程仍以非零退出。以 testDone 事件为准，
-      # 并要求足量事件数防止「进程没跑起来也被判绿」。
+      # 判定走输出文件而非退出码（2026-11-19 两轮实证）：wasmtime 在 Windows
+      # 上的 trap 展开（fuel/timeout 的 catch_unwind 跨 FFI 边界）会在测试
+      # 结束后的退出阶段 panic abort，退出码不可信；且 --machine 事件不带
+      # 错误文本、GitHub 日志视图还会截掉中段。人类可读输出落盘，按 ✅/[E]
+      # 计数判定，失败行连同断言详情全部留在日志里。
       - name: 引擎宿主 + 契约冒烟（真实 DLL 加载）
         working-directory: app
         shell: pwsh
         run: |
-          flutter test --no-pub --machine test/engine_host_test.dart test/engine_contract_test.dart *> engine-smoke-events.log
-          $failed = @()
-          $done = 0
-          Get-Content engine-smoke-events.log | ForEach-Object {
-            try { $e = $_ | ConvertFrom-Json } catch { return }
-            if ($e.type -eq 'testDone' -and -not $e.hidden) {
-              $done += 1
-              if (-not $e.success) { $script:failed += $_ }
-            }
-          }
-          Write-Host "engine smoke events: $done tests done"
-          if ($failed.Count -gt 0) {
-            Write-Host "::error::engine smoke failures:"
-            $failed | ForEach-Object { Write-Host $_ }
+          flutter test --no-pub test/engine_host_test.dart test/engine_contract_test.dart *> engine-smoke-full.log
+          $passed = (Select-String -Path engine-smoke-full.log -Pattern '✅').Count
+          $failedLines = Select-String -Path engine-smoke-full.log -Pattern '\[E\]'
+          $failedLines | ForEach-Object { Write-Host $_.Line }
+          if ($failedLines.Count -gt 0) {
+            Write-Host "::error::engine smoke: $($failedLines.Count) failed, $passed passed"
             exit 1
           }
-          if ($done -lt 30) {
-            Write-Host "::error::too few engine smoke events ($done) — the run likely aborted before tests executed"
+          if ($passed -lt 30) {
+            Write-Host "::error::engine smoke: too few passing tests ($passed) — the run likely aborted before tests executed"
+            Get-Content engine-smoke-full.log -Tail 40 | ForEach-Object { Write-Host $_ }
             exit 1
           }
-          Write-Host "engine smoke: $done/$done passed (teardown abort tolerated)"
+          Write-Host "engine smoke: $passed passed (teardown abort tolerated)"
 
   # Windows 引擎执行器自建（真因 2026-11-19，CI smoke 实证）：上游 wasm_run
   # v0.2.0 的 Windows 预编译资产是 wasmi 后端——wasmi 没有 SIMD，引擎 wasm
