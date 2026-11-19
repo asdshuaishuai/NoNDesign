@@ -9,6 +9,7 @@ import 'core/layout.dart';
 import 'core/mediapipe_embedder_adapter.dart';
 import 'core/mediapipe_service.dart';
 import 'core/nonapp_intake.dart';
+import 'core/orientation.dart';
 import 'core/platform_capabilities.dart';
 import 'core/store.dart';
 import 'core/theme.dart';
@@ -45,8 +46,50 @@ void main() {
   );
 }
 
-class NonApp extends StatelessWidget {
+/// 移动适配方向门宿主：手机锁竖屏、平板跟随系统旋转（横屏=桌面壳、
+/// 竖屏=聊天优先壳）；桌面宿主是 no-op，行为不变（移动适配 2026-11-19）。
+class NonApp extends StatefulWidget {
   const NonApp({super.key});
+
+  @override
+  State<NonApp> createState() => _NonAppState();
+}
+
+class _NonAppState extends State<NonApp> with WidgetsBindingObserver {
+  bool get _isMobile {
+    final os = PlatformCapabilities.current().os;
+    return os == HostOs.ios || os == HostOs.android;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isMobile) {
+      WidgetsBinding.instance.addObserver(this);
+      // 首帧后视图尺寸才可信：拿到第一个真实 metrics 就把方向门钉下来
+      //（手机竖屏锁定 / 平板四向）。
+      WidgetsBinding.instance.addPostFrameCallback((_) => _applyGate());
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_isMobile) WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    // 旋转 / 分屏 / 折叠屏展开都会走这里：手机永远被压回竖屏，
+    // 平板按当前短边重新决定四向或竖屏。
+    _applyGate();
+  }
+
+  void _applyGate() {
+    final views = WidgetsBinding.instance.platformDispatcher.views;
+    if (views.isEmpty) return;
+    applyDeviceOrientationFor(views.first);
+  }
 
   @override
   Widget build(BuildContext context) {
