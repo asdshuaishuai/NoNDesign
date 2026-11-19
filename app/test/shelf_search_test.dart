@@ -262,6 +262,7 @@ void main() {
     await _pumpAt(tester, _view(searchIndex: index), 402, store: _store());
 
     await _search(tester, '不存在的作品');
+    await _waitForGone(tester, find.text('热应用甲'));
 
     expect(find.byKey(const ValueKey('shelf-search-empty')), findsOneWidget);
     expect(find.text('没有匹配的作品'), findsOneWidget);
@@ -273,6 +274,7 @@ void main() {
     await _pumpAt(tester, _view(searchIndex: index), 402, store: _store());
 
     await _search(tester, '语义探针');
+    await _waitForGone(tester, find.text('热应用甲'));
     expect(find.text('热应用甲'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('shelf-search-clear')));
@@ -297,6 +299,7 @@ void main() {
     expect(find.text('design-lab'), findsOneWidget);
 
     await _search(tester, 'hotapp');
+    await _waitForGone(tester, find.text('design-lab'));
     expect(find.text('design-lab'), findsNothing);
     expect(find.byKey(const ValueKey('shelf-search-empty')), findsOneWidget);
   });
