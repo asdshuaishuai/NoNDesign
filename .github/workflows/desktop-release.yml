@@ -209,6 +209,13 @@ jobs:
           repository: juancastillo0/wasm_run
           ref: wasm_run-v0.2.0
 
+      - name: 安装 Dart（FRB codegen 的 build.rs 要读 pubspec.lock）
+        uses: dart-lang/setup-dart@v1
+
+      - name: dart pub get（生成 packages/wasm_run/pubspec.lock）
+        working-directory: packages/wasm_run
+        run: dart pub get
+
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
 
