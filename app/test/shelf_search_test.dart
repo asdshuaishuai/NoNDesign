@@ -187,7 +187,14 @@ Future<void> _waitForGone(WidgetTester tester, Finder finder) async {
 void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
-    _temp = Directory.systemTemp.createTempSync('shelf_search_');
+    // 夹具根目录必须可控且完全确定（2026-11-19 CI 实证根因）：检索走条目
+    // 绝对路径的子串匹配，而 Directory.systemTemp 的 TMPDIR 带 33 位随机
+    // 串——串里恰好含「3d」时（概率极高），检索词「3D」就会命中热应用卡
+    // 的路径字段，列表「正确地」保留它，断言随之偶红。固定路径消掉一切
+    // 随机性（createTempSync 的随机后缀同理，故不用它）。
+    _temp = Directory('/tmp/nondesign_shelf_tests/fixture');
+    if (_temp.existsSync()) _temp.deleteSync(recursive: true);
+    _temp.createSync(recursive: true);
     _threeDir = Directory('${_temp.path}/3d')..createSync(recursive: true);
     _videoDir = Directory('${_temp.path}/videos/job-1')..createSync(recursive: true);
     _library = await NonAppLibrary.open(root: Directory('${_temp.path}/hotapps'));
