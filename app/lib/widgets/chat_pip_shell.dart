@@ -43,44 +43,10 @@ class _ChatPiPShellState extends State<ChatPiPShell> {
   /// 空态必须自己给出反馈）。
   String? _paneHint;
 
-  /// 自动拉起画中画的监听目标（didChangeDependencies 里接线）。
-  AppStore? _observed;
-
-  /// 本次 run 是否已经自动拉起过：一轮 run 只拉一次，不跟用户抢开关。
-  bool _autoOpenedForRun = false;
-
-  bool _wasAgentBusy = false;
-
   @override
   void initState() {
     super.initState();
     _restore();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final s = context.read<AppStore>();
-    if (!identical(s, _observed)) {
-      _observed?.removeListener(_onStoreChanged);
-      _observed = s..addListener(_onStoreChanged);
-    }
-  }
-
-  /// 移动适配裁决（2026-11-19）：手机/竖屏平板「运行 chat agent 时直接
-  /// 预览工作区实况」——首轮实况帧就绪（previewRender 从空到有）且浮窗
-  /// 未开时自动拉起画中画；一轮只拉一次，用户手动关掉后不再抢回。
-  void _onStoreChanged() {
-    final s = _observed;
-    if (s == null || !mounted) return;
-    if (s.agentBusy && !_wasAgentBusy) {
-      _autoOpenedForRun = false; // 新一轮 run 开始：重置本轮自动拉起标记。
-    }
-    _wasAgentBusy = s.agentBusy;
-    if (_autoOpenedForRun || !s.agentBusy) return;
-    if (s.previewRender == null) return;
-    _autoOpenedForRun = true;
-    if (!_pipOpen) _openPip();
   }
 
   Future<void> _restore() async {
@@ -91,7 +57,6 @@ class _ChatPiPShellState extends State<ChatPiPShell> {
 
   @override
   void dispose() {
-    _observed?.removeListener(_onStoreChanged);
     final rect = _pipRect;
     if (rect != null) ShellStorage.savePipRect(rect);
     super.dispose();

@@ -12,6 +12,7 @@ import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/toast_service.dart';
 import 'a2ui_card.dart';
+import 'chat_live_preview.dart';
 import 'common.dart';
 import 'settings_dialog.dart';
 import 'workspace.dart' show openProjectFlow, showNewProjectFlow;
@@ -126,6 +127,11 @@ class _ChatStreamViewState extends State<ChatStreamView> {
         child: Column(
           children: [
             _topBar(context, store, p),
+            // 移动适配（2026-11-19）：chat agent 跑起来后，实况预览直接
+            // 长在聊天流的框里（genUI 形态的内嵌工作区卡）——不是画中画。
+            // 只挂在聊天主面（桌面窄栏不放，桌面主面本身就是实况）。
+            if (!widget.railMode && store.agentBusy && store.previewRender != null)
+              const ChatLivePreviewCard(),
             Expanded(
               child: messages.isEmpty
                   ? _emptyState(context, p)
