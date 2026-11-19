@@ -517,6 +517,11 @@ void main() {
       expect(toolFailureMessage('nonapp_unsupported_version'), '应用版本过新，请更新本应用');
       expect(toolFailureMessage('engine_generate_failed: timeout'), '页面生成没有完成，请重试');
       expect(toolFailureMessage('unknown_artboard:home'), '找不到这个画板，请重试');
+      expect(toolFailureMessage('canvas_empty'), '画布还是空的：先用 generate_page 生成第一屏，再做设计操作');
+      expect(toolFailureMessage('unknown_component: polyline'), '这个组件名不存在：先用 list_components 查合法组件名');
+      expect(toolFailureMessage('place_unknown_key:parent'), 'place 的 k=v 键不在编辑词表里（text/fill/stroke/radius/opacity/motion…）');
+      expect(toolFailureMessage('id_exists: stat_v0'), '这个 id 已经存在：换一个新 id');
+      expect(toolFailureMessage('generate_multi_too_many:4'), '一次生成的画板数超限：拆成多次 generate_page');
       expect(toolFailureMessage('something_else'), '这次操作没有成功，请重试');
       expect(toolFailureMessage(null), '这次操作没有成功，请重试');
       // 映射结果里不出现裸错误码。
@@ -655,6 +660,37 @@ void main() {
       expect(toolNames.contains('three_list'), isFalse);
       expect(toolNames.contains('figma_export'), isFalse);
     }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('空画布上 design_op → canvas_empty 人话，不打引擎、不烧步数', () async {
+      final engine = _FakeEngine()
+        ..mbt = '---\nmoonviz:\n  format: visual-document\n  revision: 0\n---\n'
+        ..boards.clear(); // 引擎真值面：空画布 = session_list_artboards 返回空表
+      final events = <Map<String, dynamic>>[];
+      final result = await runDartAgent(
+        request: _buildRequest(engine),
+        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
+          <LanguageModelV4ContentPart>[
+            mockToolCall(
+              toolName: 'design_op',
+              input: <String, dynamic>{'op': 'place home card c1 10 10 100 40'},
+            ),
+          ],
+          <LanguageModelV4ContentPart>[
+            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '停'}),
+          ],
+        ]),
+        bridge: LocalEngineGate(engine),
+        onEvent: events.add,
+      );
+      expect(result.ok, isTrue);
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'design_op',
+      );
+      expect(end['ok'], isFalse);
+      expect(end['error'], 'canvas_empty');
+      expect(end['message'], '画布还是空的：先用 generate_page 生成第一屏，再做设计操作');
+      expect(engine.applyCount, 0, reason: '空画布守卫在前，引擎门一次都不该打');
+    });
 
     test('门拒绝 → tool_end 同时给原始码与人话，ops 不追加', () async {
       final engine = _FakeEngine();
