@@ -266,6 +266,10 @@ class AppStore extends ChangeNotifier {
   int? runId;
   List<TimelineEntry> timeline = [];
   String streamText = '';
+
+  /// ask 卡在运行中点下的选项队列（先进先出）：本轮收尾后逐个自动续跑，
+  /// 一轮收一个（run 的三个收尾 finally 统一调 [continueQueuedChatAction]）。
+  final List<({String summary, String instruction})> _queuedChatActions = [];
   /// PLAN 阶段 write_doc 的流式正文缓冲（doc_delta 累积；doc_written 清空）。
   String liveDocText = '';
   String thinkingText = '';
@@ -2572,6 +2576,7 @@ class AppStore extends ChangeNotifier {
       _runInstruction = null;
       notifyListeners();
       unawaited(_persistRecovery(force: true));
+      continueQueuedChatAction();
     }
     return success;
   }
@@ -2800,22 +2805,40 @@ class AppStore extends ChangeNotifier {
   }
 
   /// A2UI 交互卡动作回流（plan §2「确认表单/参数选择 → 回流续跑」）：
-  /// 动作摘要作为用户消息入列并自动续跑一轮。agentBusy 时只提示——
-  /// 动作不丢（卡片还在流里），可稍后重发。
+  /// 动作摘要作为用户消息入列并自动续跑一轮。agentBusy 时**入队不丢**——
+  /// ask 卡的本意就是「选择作为下一条指令回来」，模型经常边问边继续手头的
+  /// 交付；本轮收尾的 finally 统一调 [continueQueuedChatAction] 自动续跑。
   Future<void> handleChatAction(String name, Map<String, dynamic> context) async {
-    if (agentBusy) {
-      _toastWarn('NaN 正在工作，等这一轮结束再操作。');
-      return;
-    }
     // 用户气泡只放人话（「选择：X」）；结构化上下文只进本轮运行指令——
     // 此前把 jsonEncode(context) 与会话内部标签一起拼进气泡，并且随
     // chat.json 落盘（审查 a2ui-action-summary-json）。
     final label = name.trim().isEmpty ? '这个选项' : name.trim();
     final summary = '选择：$label';
+    final instruction = context.isEmpty ? summary : '$summary\n${jsonEncode(context)}';
+    if (agentBusy) {
+      _queuedChatActions.add((summary: summary, instruction: instruction));
+      _toastWarn('已记住「$label」，这一轮结束后自动继续。');
+      notifyListeners();
+      return;
+    }
     appendChat(ChatMessage.user(summary));
     unawaited(_persistChat());
-    final instruction = context.isEmpty ? summary : '$summary\n${jsonEncode(context)}';
     await _runChatTurn(instruction);
+  }
+
+  /// run 收尾后把运行中点下的 ask 卡选项自动续跑（队列先进先出，一轮收
+  /// 一个；新一轮结束再收下一个）。三个 run 收尾 finally 都会调它。
+  void continueQueuedChatAction() {
+    if (agentBusy || _queuedChatActions.isEmpty) return;
+    final action = _queuedChatActions.removeAt(0);
+    if (!hasProject) {
+      _queuedChatActions.clear();
+      _toastWarn('项目已经不在了，这个选择没有继续。');
+      return;
+    }
+    appendChat(ChatMessage.user(action.summary));
+    unawaited(_persistChat());
+    unawaited(_runChatTurn(action.instruction));
   }
 
   /// 聊天流顶栏「工作区」入口：无项目先建空项目（先建后用纪律），再切
@@ -3214,6 +3237,7 @@ class AppStore extends ChangeNotifier {
       previewRender = null;
       notifyListeners();
       unawaited(_persistRecovery(force: true));
+      continueQueuedChatAction();
     }
     return success;
   }
@@ -3392,6 +3416,7 @@ class AppStore extends ChangeNotifier {
       previewRender = null;
       notifyListeners();
       unawaited(_persistRecovery(force: true)); // 终态快照（run 标记已清）
+      continueQueuedChatAction();
     }
     return success;
   }
