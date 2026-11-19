@@ -32,15 +32,14 @@ import '../core/app_paths.dart';
 import '../core/embedding_index.dart';
 import '../core/mediapipe_service.dart';
 import '../core/nonapp_library.dart';
+import '../core/portfolio_entries.dart';
 import '../core/platform_capabilities.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/three_service.dart';
 import 'art_shelf_card.dart';
 import 'common.dart';
-import 'hotapp_workspace.dart';
-import 'three_workspace.dart';
-import 'video_workspace.dart';
+import 'workspace_open.dart';
 
 class PortfolioView extends StatefulWidget {
   const PortfolioView({
@@ -407,17 +406,18 @@ class _PortfolioViewState extends State<PortfolioView> {
       await _openPrototype(ref);
       return;
     }
-    if (kind == 'hotapp') {
-      // 该全局只写应用名（不是路径）：临时预览走 hotAppOfflinePath，
-      // 两个取值域不得混用。
-      hotAppLoadOnOpen = ref;
-      store.setView('plugin:hotapp');
-    } else if (kind == 'video') {
-      videoLoadOnOpen = item['path']?.toString() ?? ref;
-      store.setView('plugin:video');
-    } else if (kind == 'three') {
-      threeLoadOnOpen = ref;
-      store.setView('plugin:three');
+    // 三种产物走同一个切换口（工作台跟着项目走）。
+    if (kind == 'hotapp' || kind == 'video' || kind == 'three') {
+      openPortfolioEntry(
+        store,
+        PortfolioEntry(
+          kind: kind,
+          ref: ref,
+          title: '${item['title'] ?? ref}',
+          detail: '${item['detail'] ?? ''}',
+          path: item['path']?.toString(),
+        ),
+      );
     }
   }
 

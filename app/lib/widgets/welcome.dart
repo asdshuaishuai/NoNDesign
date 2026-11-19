@@ -8,10 +8,8 @@ import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/toast_service.dart';
 import 'common.dart';
-import 'hotapp_workspace.dart';
-import 'three_workspace.dart';
-import 'video_workspace.dart';
 import 'workspace.dart';
+import 'workspace_open.dart';
 
 /// 主页（用户裁决：布局固定不变，是死规矩）。
 ///
@@ -753,22 +751,9 @@ class _WelcomeState extends State<Welcome> {
     );
   }
 
-  /// 点作品集条目 → 对应工作台（与艺术架同一打开契约）。
-  void _openShelfEntry(AppStore store, PortfolioEntry entry) {
-    if (entry.ref.isEmpty) return;
-    switch (entry.kind) {
-      case 'hotapp':
-        // 该全局只写应用名（不是路径），两个取值域不得混用。
-        hotAppLoadOnOpen = entry.ref;
-        store.setView('plugin:hotapp');
-      case 'three':
-        threeLoadOnOpen = entry.ref;
-        store.setView('plugin:three');
-      case 'video':
-        videoLoadOnOpen = entry.path ?? entry.ref;
-        store.setView('plugin:video');
-    }
-  }
+  /// 点作品集条目 → 对应工作台（与艺术架同一打开契约，见 workspace_open.dart）。
+  void _openShelfEntry(AppStore store, PortfolioEntry entry) =>
+      openPortfolioEntry(store, entry);
 
   Widget _recentCard(BuildContext context, AppStore store) {
     final p = context.palette;

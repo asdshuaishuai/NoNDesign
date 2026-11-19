@@ -4,6 +4,9 @@
 /// * 宽度 clamp(320,420)，默认 360（由壳传入，拖动左缘改宽并持久化）；
 /// * 两个 tab：NaN / 检查——NaN 就是聊天与任务指令执行的窗口（AgentPanel），
 ///   不再保留独立的「聊天」tab（与 NaN 重复，用户实测 2026-11-18）；
+/// * 窄栏里**没有工作区切换条**（用户裁决 2026-11-19）：一个项目只属于它自己
+///   的工作台类型，工作台跟着项目走——切换入口在顶栏的项目下拉，不在聊天栏里
+///   摆一排「主页/设计/3D/视频/热应用」；
 /// * 折叠后是主面右侧的第二列 44px 条带（不叠在主面上，顶栏/状态栏右段不被
 ///   盖住），点任一 tab 图标即展开到该 tab；视口窄到放不下时由壳层给出提示；
 /// * 选中画布节点会把 `store.rightTab` 切到 inspect，但**不抢** NaN：本窄栏
@@ -13,7 +16,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../core/models.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
@@ -74,7 +76,6 @@ class ChatRail extends StatelessWidget {
               child: Column(
                 children: [
                   _header(context, p),
-                  _workspaceStrip(context, p),
                   Expanded(child: _body()),
                 ],
               ),
@@ -157,103 +158,6 @@ class ChatRail extends StatelessWidget {
     );
   }
 
-
-  /// 四个工作区的常驻手动切换条（用户裁决 2026-11-18）。
-  ///
-  /// 右侧 NaN 是常驻的，左侧工作区固定——所以「切哪个工作区」必须随时可达：
-  /// * 手动：点这一条（主页 / 设计 / 3D / 视频 / 热应用）；
-  /// * NaN 在别的面调用 3D / 视频 / 热应用工具时不再自动拽人切工作区
-  ///   （工作区彼此独立，见 `store.followAgentWorkspace`）。
-  /// 点一次同时记下「这次先落哪」（chatWorkspaceMode），下次一句话仍落在那里。
-  Widget _workspaceStrip(BuildContext context, NonPalette p) {
-    final store = context.watch<AppStore>();
-    final currentView = store.view;
-    const items = <(String, String, IconData)>[
-      ('home', '主页', Icons.home_outlined),
-      (workspaceModeDesign, '设计', Icons.design_services_outlined),
-      (workspaceModeThree, '3D', Icons.view_in_ar_outlined),
-      (workspaceModeVideo, '视频', Icons.movie_outlined),
-      (workspaceModeHotapp, '热应用', Icons.auto_fix_high_outlined),
-    ];
-    final activeMode = AppStore.workspaceModeForView(currentView);
-    // 设计面含设计/文档/源码/演示/项目入口：这些都算「在设计工作区」。
-    final onDesignFace = !currentView.startsWith('plugin:') && currentView != 'play';
-    return Container(
-      height: 34,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
-      child: Row(
-        children: [
-          for (final item in items)
-            Expanded(
-              child: _workspaceChip(
-                context,
-                p,
-                mode: item.$1,
-                label: item.$2,
-                icon: item.$3,
-                active: item.$1 == 'home'
-                    ? currentView == 'home'
-                    : item.$1 == workspaceModeDesign
-                        ? onDesignFace && activeMode == workspaceModeDesign
-                        : currentView == 'plugin:${item.$1}',
-                onTap: () async {
-                  if (item.$1 == 'home') {
-                    store.setView('home');
-                    return;
-                  }
-                  final target = AppStore.workspaceViewForMode(item.$1);
-                  await store.setChatWorkspaceMode(item.$1);
-                  store.setView(target ?? 'design');
-                },
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _workspaceChip(
-    BuildContext context,
-    NonPalette p, {
-    required String mode,
-    required String label,
-    required IconData icon,
-    required bool active,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      key: ValueKey('rail-workspace-$mode'),
-      borderRadius: BorderRadius.circular(7),
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 2),
-        decoration: BoxDecoration(
-          color: active ? p.panel2 : Colors.transparent,
-          borderRadius: BorderRadius.circular(7),
-          border: Border.all(color: active ? p.accent.withValues(alpha: 0.45) : Colors.transparent),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 12, color: active ? p.accent : p.ink4),
-            const SizedBox(height: 1),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 9,
-                height: 1.1,
-                fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-                color: active ? p.ink : p.ink4,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _body() {
     switch (tab) {

@@ -247,6 +247,10 @@ class AppStore extends ChangeNotifier {
   /// 避免测试里手动构造的 AppStore 去扫真实用户目录。
   bool _bootCompleted = false;
 
+  /// 自动扫描是否可用（boot 完成后 true）。界面上的「自动刷新」入口要按它
+  /// 判断，否则测试/嵌入宿主点一下就会去扫真实用户目录。
+  bool get portfolioAutoRefreshEnabled => _bootCompleted;
+
   String docsTab = 'prd';
   String panel = 'project';
   String rightTab = 'agent';
@@ -773,7 +777,8 @@ class AppStore extends ChangeNotifier {
     portfolioLoading = true;
     notifyListeners();
     try {
-      final entries = await loadPortfolioEntries();
+      // limit: 0 = 全量：首页作品集卡只取前几条，顶栏项目菜单要按类型列全。
+      final entries = await loadPortfolioEntries(limit: 0);
       portfolioEntries = entries;
       portfolioError = null;
     } catch (e) {

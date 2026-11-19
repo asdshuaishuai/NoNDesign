@@ -21,18 +21,6 @@ import 'settings_dialog.dart';
 import 'status_bar.dart';
 import 'title_bar.dart';
 
-/// 插件快捷键数字键池（⌘5 起）；池容量即同时可注册插件数上限。
-/// 消费点在 main.dart 根级 bindings——workspace 级 CallbackShortcuts 在
-/// 插件视图内不挂载（视图路由早退），插件入口键必须活在根级才能
-/// 「进得去也出得来」。
-const pluginDigitKeys = [
-  LogicalKeyboardKey.digit5,
-  LogicalKeyboardKey.digit6,
-  LogicalKeyboardKey.digit7,
-  LogicalKeyboardKey.digit8,
-  LogicalKeyboardKey.digit9,
-];
-
 class Workspace extends StatefulWidget {
   /// 嵌入式宿主（聊天流常驻分栏 / 画中画浮窗，docs/plan-chat-stream-shell.md
   /// §2 S4）：跳过 TitleBar/StatusBar 与 play、portfolio、plugin 全屏早退，
@@ -1153,11 +1141,10 @@ class _ShortcutsDialog extends StatelessWidget {
         ('新建 / 打开', modCombo('⌘N / ⌘O')), ('导出 HTML', modCombo('⇧⌘H')),
       ],
       '画布': [('撤销 / 重做', modCombo('⌘Z / ⇧⌘Z')), ('适配窗口', modCombo('⌘0')), ('缩放', modCombo('⌘滚轮')), ('平移', 'space + 拖动')],
+      // 没有插件工作台的数字键（用户裁决 2026-11-19）：工作台类型跟着项目走，
+      // 切换进顶栏项目菜单；设计面自己的四个视图仍保留 ⌘1–⌘4。
       '视图': [
         ('设计画布', modCombo('⌘1')), ('设计文档', modCombo('⌘2')), ('源码', modCombo('⌘3')), ('演示模式', modCombo('⌘4')),
-        // 插件入口键（根级 bindings，注册表顺序派生）。
-        for (var i = 0; i < pluginRegistry.length && i < pluginDigitKeys.length; i++)
-          (pluginRegistry[i].title, modCombo('⌘${5 + i}')),
       ],
       'Agent': [('发送', modCombo('⌘↵')), ('停止', '运行胶囊停止')],
     };

@@ -389,8 +389,14 @@ void main() {
         expect(find.byType(DesktopShell), findsOneWidget);
         expect(find.byType(Workspace), findsOneWidget);
         expect(find.byKey(const ValueKey('desktop-chat-rail')), findsOneWidget);
-        // 工作区切换条常驻（手动切换四个工作区的唯一入口）。
-        expect(find.byKey(const ValueKey('rail-workspace-three')), findsOneWidget);
+        // 用户裁决 2026-11-19：右侧 NaN 窄栏里**没有**工作区切换条——一个项目
+        // 只属于它自己的工作台类型，不能在一个项目里横跳工作区。入口改由项目的
+        // 打开动作决定（顶栏项目菜单 / 主页作品集 / 艺术架 / 各工作台自己的
+        // 项目菜单）。这里锚定窄栏只剩 NaN/检查两个 tab。
+        expect(find.byKey(const ValueKey('rail-workspace-three')), findsNothing);
+        expect(find.byKey(const ValueKey('rail-workspace-home')), findsNothing);
+        expect(find.byKey(const ValueKey('desktop-chat-rail-tab-agent')), findsOneWidget);
+        expect(find.byKey(const ValueKey('desktop-chat-rail-tab-inspect')), findsOneWidget);
         expect(tester.takeException(), isNull);
 
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);

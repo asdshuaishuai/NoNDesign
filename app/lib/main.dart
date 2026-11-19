@@ -12,7 +12,6 @@ import 'core/nonapp_intake.dart';
 import 'core/platform_capabilities.dart';
 import 'core/store.dart';
 import 'core/theme.dart';
-import 'plugins/registry.dart';
 import 'widgets/command_palette.dart';
 import 'widgets/common.dart';
 import 'widgets/settings_dialog.dart';
@@ -98,12 +97,10 @@ class NonApp extends StatelessWidget {
                     store.setView('design');
                     store.bumpFit();
                   },
-                  // 插件快捷键 ⌘5/⌘6/…：根级挂载（注册表顺序派生）——
-                  // workspace 级 CallbackShortcuts 在插件视图内不挂载
-                  // （视图路由早退），插件入口键必须活在根级才能在
-                  // 插件视图内可达（配合各插件顶栏返回按钮与 Esc）。
-                  for (var i = 0; i < pluginRegistry.length && i < pluginDigitKeys.length; i++)
-                    modKey(pluginDigitKeys[i]): () => store.setView('plugin:${pluginRegistry[i].id}'),
+                  // 3D / 视频 / 热应用没有「就地切工作台」的快捷键（用户裁决
+                  // 2026-11-19：工作台类型由项目决定）。进这些工作台要么打开
+                  // 对应项目（顶栏项目菜单 / 主页作品集 / 艺术架），要么让 NaN
+                  // 在工作区模式下建一个——不再有 ⌘5–⌘7 直跳。
                   // Esc：插件视图与作品集（均无设计板）的返回设计出口（镜像
                   // 各全屏视图顶栏返回按钮）；聊天优先壳（手机/竖屏平板）里
                   // 设计面按 Esc 回到聊天主面。桌面壳没有整块聊天路由——Esc
@@ -168,7 +165,7 @@ class NonApp extends StatelessWidget {
   /// 手机/iPad 聊天优先壳由 [ChatPiPShell] 自己把 plugin 视图渲染成整屏。
   Widget _routeFor(AppStore store) {
     if (store.view == 'portfolio' || store.view == 'play') {
-      // 无项目也必须可路由（Welcome 卡片 / ⌘5–⌘7 曾点了不换屏）。
+      // 无项目也必须可路由（Welcome 卡片曾点了不换屏）。
       return const Workspace();
     }
     return const ShellHost();
