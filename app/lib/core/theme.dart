@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 
 @immutable
@@ -202,13 +204,13 @@ class AppTheme {
         onSurface: p.ink,
       ),
       splashFactory: InkRipple.splashFactory,
-      textTheme: base.textTheme.apply(bodyColor: p.ink, displayColor: p.ink).copyWith(
+      textTheme: _withPlatformFont(base.textTheme.apply(bodyColor: p.ink, displayColor: p.ink).copyWith(
         bodyMedium: TextStyle(fontSize: 13, color: p.ink2, height: 1.45),
         bodySmall: TextStyle(fontSize: 11, color: p.ink3, height: 1.4),
         titleMedium: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink),
         titleLarge: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3),
         headlineMedium: TextStyle(fontSize: 34, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -1),
-      ),
+      )),
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
         filled: true,
@@ -310,5 +312,51 @@ Widget withResponsiveTextScale(BuildContext context, Widget child) {
   return MediaQuery(
     data: mq.copyWith(textScaler: TextScaler.linear(responsiveTextScale(mq.size, mq.textScaler))),
     child: child,
+  );
+}
+
+
+/// 平台字体解析（Windows 中文观感优化，2026-11-19）：
+///
+/// Flutter 在 Windows 上的西文默认对 CJK 的系统回退链会落到宋体（点阵观感，
+/// 用户实测「字体太难看」）。显式给 CJK 挂微软雅黑回退、西文主字体挂
+/// Segoe UI；非 Windows 返回空 = 行为与引入前完全一致。
+String? get platformPrimaryFont => Platform.isWindows ? 'Segoe UI' : null;
+
+List<String> get platformFontFallback => Platform.isWindows
+    ? const <String>['Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC']
+    : const <String>[];
+
+TextStyle get platformDefaultTextStyle => TextStyle(
+      fontFamily: platformPrimaryFont,
+      fontFamilyFallback: platformFontFallback,
+    );
+
+TextTheme _withPlatformFont(TextTheme theme) {
+  if (!Platform.isWindows) return theme;
+  TextStyle map(TextStyle style) => style.copyWith(
+        fontFamily: style.fontFamily ?? 'Segoe UI',
+        fontFamilyFallback: <String>[
+          'Microsoft YaHei UI',
+          'Microsoft YaHei',
+          ...?style.fontFamilyFallback,
+        ],
+      );
+  return TextTheme(
+    displayLarge: map(theme.displayLarge ?? const TextStyle()),
+    displayMedium: map(theme.displayMedium ?? const TextStyle()),
+    displaySmall: map(theme.displaySmall ?? const TextStyle()),
+    headlineLarge: map(theme.headlineLarge ?? const TextStyle()),
+    headlineMedium: map(theme.headlineMedium ?? const TextStyle()),
+    headlineSmall: map(theme.headlineSmall ?? const TextStyle()),
+    titleLarge: map(theme.titleLarge ?? const TextStyle()),
+    titleMedium: map(theme.titleMedium ?? const TextStyle()),
+    titleSmall: map(theme.titleSmall ?? const TextStyle()),
+    bodyLarge: map(theme.bodyLarge ?? const TextStyle()),
+    bodyMedium: map(theme.bodyMedium ?? const TextStyle()),
+    bodySmall: map(theme.bodySmall ?? const TextStyle()),
+    labelLarge: map(theme.labelLarge ?? const TextStyle()),
+    labelMedium: map(theme.labelMedium ?? const TextStyle()),
+    labelSmall: map(theme.labelSmall ?? const TextStyle()),
   );
 }

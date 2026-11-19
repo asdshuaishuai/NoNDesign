@@ -1220,10 +1220,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('手机连接这台电脑',
+                    Text('局域网远程',
                         style: TextStyle(fontSize: mobile ? 14 : 12, fontWeight: FontWeight.w600, color: p.ink)),
                     const SizedBox(height: 2),
-                    Text('开启后，手机与 iPad 可以连到本机执行；关闭时不对外开放连接。',
+                    Text('开启后，同一局域网内的手机 / iPad 直连本机执行任务；本机不对公网开放。',
                         style: TextStyle(fontSize: mobile ? 11 : 9, height: 1.4, color: p.ink4)),
                   ],
                 ),
@@ -1234,6 +1234,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 onChanged: busy
                     ? null
                     : (value) async {
+                        // 局域网远程语义（用户裁决 2026-11-19）：开启即对
+                        // 局域网开放，不再要求单独开「允许局域网访问」。
+                        if (value) await store.setDesktopHostAllowLan(true);
                         await store.setDesktopHostEnabled(value);
                         if (mounted) setState(() {});
                       },

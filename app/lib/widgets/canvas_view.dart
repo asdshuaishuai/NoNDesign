@@ -2035,20 +2035,8 @@ class _EmptyCanvas extends StatelessWidget {
               style: TextStyle(fontSize: 12, height: 1.6, color: p.ink3),
             ),
             const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton(
-                  onPressed: () => store.setRightTab('agent'),
-                  child: const Text('打开 NaN'),
-                ),
-                OutlinedButton(
-                  onPressed: () => store.setView('docs'),
-                  child: const Text('先写文档'),
-                ),
-              ],
-            ),
+            // 移动适配（2026-11-19）：空项目不再放操作按钮——描述文案
+            // 指向右侧 NaN 面板即可，动作由面板/composer 承担。
           ],
         ),
           ),

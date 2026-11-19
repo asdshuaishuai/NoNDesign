@@ -410,7 +410,7 @@ void main() {
     await _openSettings(tester, store, _desktop, platform: TargetPlatform.macOS);
     await _openAgent(tester, _desktop);
 
-    expect(find.text('手机连接这台电脑'), findsOneWidget);
+    expect(find.text('局域网远程'), findsOneWidget);
     expect(find.text('http://127.0.0.1:1234'), findsOneWidget);
     expect(find.text('tok-9'), findsOneWidget);
     expect(find.text('本机地址（手机需开启局域网访问）'), findsOneWidget);
