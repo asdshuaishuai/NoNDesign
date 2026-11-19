@@ -30,3 +30,4 @@ key.txt
 
 # 本地发布产物（dmg / zip / 安装包，勿入库）
 dist/
+.zcode-site/

@@ -598,6 +598,80 @@ void main() {
     expect(store.saves, 1);
   });
 
+  testWidgets('自定义服务商（桌面）：下拉里有「自定义」选项，选中后端点/模型 ID 全自由填', (tester) async {
+    final store = _TestStore()
+      ..ready = true
+      ..registry = _registry()
+      ..settings = AppSettings(providerId: 'deepseek', modelId: 'deepseek-chat');
+
+    await _openSettings(tester, store, _padLandscape);
+    // 下拉里出现显式「自定义」选项。
+    await tester.tap(find.byKey(const ValueKey('settings-provider')));
+    await tester.pump(const Duration(milliseconds: 320));
+    await tester.tap(find.text('自定义').last);
+    await tester.pump(const Duration(milliseconds: 320));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(store.settings.providerId, 'custom');
+
+    // 端点立刻可编辑（无锁、无开关）；开关行已隐藏。
+    final endpoint = find.byKey(const ValueKey('settings-endpoint'));
+    expect(endpoint, findsOneWidget);
+    expect(tester.widget<TextField>(endpoint).readOnly, isFalse,
+        reason: '自定义服务商端点天然可编辑');
+    expect(find.byKey(const ValueKey('settings-endpoint-custom')), findsNothing,
+        reason: '自定义服务商不需要开关');
+    expect(find.text('自定义服务商：端点与模型 ID 均自由填写'), findsOneWidget);
+
+    // 模型行变成自由输入框：填清单外模型 ID，落盘生效。
+    final modelField = find.byKey(const ValueKey('settings-model-custom'));
+    expect(modelField, findsOneWidget);
+    await tester.enterText(modelField, 'my-gateway-model');
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(store.settings.modelId, 'my-gateway-model');
+    expect(store.saves, greaterThanOrEqualTo(1),
+        reason: '切服务商已落盘一次');
+  });
+
+  testWidgets('自定义服务商（手机）：picker 里有「自定义」，选中后模型 ID 直接填', (tester) async {
+    final store = _TestStore()
+      ..ready = true
+      ..registry = _registry()
+      ..settings = AppSettings(providerId: 'deepseek', modelId: 'deepseek-chat');
+
+    await _openSettings(tester, store, _phoneSmall);
+    await _openModels(tester, _phoneSmall);
+    await tester.tap(find.byKey(const ValueKey('settings-m-provider')));
+    await tester.pump(const Duration(milliseconds: 320));
+    // 「自定义」是 picker 末项：小屏 sheet 里在视口外，先滚进可见区再点。
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-m-provider-custom')),
+      160,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.tap(find.byKey(const ValueKey('settings-m-provider-custom')));
+    await tester.pump(const Duration(milliseconds: 320));
+    await tester.pump();
+
+    expect(store.settings.providerId, 'custom');
+
+    // 端点可编辑、开关行隐藏。
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('settings-m-endpoint')))
+        .readOnly, isFalse);
+    expect(find.byKey(const ValueKey('settings-m-endpoint-custom')), findsNothing);
+
+    // 模型 ID 直接输入并落盘。
+    final modelField = find.byKey(const ValueKey('settings-m-model-custom'));
+    expect(modelField, findsOneWidget);
+    await tester.enterText(modelField, 'gateway-model-x');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(store.settings.modelId, 'gateway-model-x');
+    expect(store.saves, greaterThanOrEqualTo(1));
+  });
+
   testWidgets('自定义端点开关：打开后端点可编辑，关闭恢复内置（手机）', (tester) async {
     final store = _TestStore()
       ..ready = true

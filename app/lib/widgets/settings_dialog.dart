@@ -83,8 +83,16 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     _stepsController = TextEditingController(text: store.settings.maxSteps.toString());
     _stepsFocus.addListener(() { if (mounted) setState(() {}); });
     _customEndpoint = _hasLegacyEndpoint(store);
+    _customModelController.text = store.settings.modelId;
     _loadAcpAgents();
   }
+
+  /// 「自定义」是服务商列表里的一个**显式选项**（synthetic id，不在内置
+  /// 清单里）：选中后端点与模型 ID 全部自由填写，开关语义不再需要。
+  /// 入口：桌面 _providerDropdown 末项 / 手机 _mPickProvider 末项。
+  static const String _customProviderId = 'custom';
+  bool _isCustomProvider(AppStore store) =>
+      store.settings.providerId == _customProviderId;
 
   /// 自定义端点开关切换：开 = 当前值保持可编辑；关 = 恢复内置端点并落盘。
   Future<void> _setCustomEndpoint(bool value, AppStore store) async {
@@ -350,36 +358,45 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           _labeled(context, '服务商',
               KeyedSubtree(key: const ValueKey('settings-provider'), child: _providerDropdown(context, store))),
           const SizedBox(height: 10),
-          // 模型行紧贴服务商下方：点按打开底部选择面板（搜索/更新/勾选）。
-          _labeled(context, '模型', _modelRow(context, store, keyName: 'settings-model-row')),
+          // 模型行紧贴服务商下方：内置服务商点按打开选择面板（搜索/更新/
+          // 勾选）；「自定义」服务商直接给模型 ID 输入框（清单外模型）。
+          _labeled(
+              context,
+              '模型',
+              _isCustomProvider(store)
+                  ? _customModelField(context, store, keyName: 'settings-model-custom')
+                  : _modelRow(context, store, keyName: 'settings-model-row')),
           const SizedBox(height: 10),
-          // 端点：默认内置只读；打开「自定义端点」后可编辑（兼容网关 / 中转）。
-          // 自定义态由「当前端点 ≠ 内置」派生（旧自定义端点自动落在自定义态）。
+          // 端点：内置服务商默认只读、开关解锁（自定义态由「当前端点 ≠ 内置」
+          // 派生）；「自定义」服务商天然可编辑，无锁、无恢复、无开关。
           _labeled(context, '端点', Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               TextField(
                 key: const ValueKey('settings-endpoint'),
                 controller: _baseController,
-                readOnly: !_customEndpoint,
+                readOnly: !_customEndpoint && !_isCustomProvider(store),
                 style: TextStyle(
                     fontSize: 11,
                     fontFamily: 'Menlo',
-                    color: _customEndpoint ? p.ink : p.ink2),
+                    color:
+                        (_customEndpoint || _isCustomProvider(store)) ? p.ink : p.ink2),
                 decoration: InputDecoration(
-                  hintText: _customEndpoint
+                  hintText: (_customEndpoint || _isCustomProvider(store))
                       ? 'https://your-gateway.example/v1'
                       : '内置端点',
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
-                  suffixIcon: _customEndpoint
-                      ? IconButton(
-                          visualDensity: VisualDensity.compact,
-                          icon: Icon(Icons.restart_alt, size: 14, color: p.ink4),
-                          tooltip: '恢复内置端点',
-                          onPressed: () => _setCustomEndpoint(false, store),
-                        )
-                      : Icon(Icons.lock_outline, size: 13, color: p.ink4),
+                  suffixIcon: _isCustomProvider(store)
+                      ? null
+                      : _customEndpoint
+                          ? IconButton(
+                              visualDensity: VisualDensity.compact,
+                              icon: Icon(Icons.restart_alt, size: 14, color: p.ink4),
+                              tooltip: '恢复内置端点',
+                              onPressed: () => _setCustomEndpoint(false, store),
+                            )
+                          : Icon(Icons.lock_outline, size: 13, color: p.ink4),
                 ),
                 onChanged: (v) => store.settings.baseUrl = _trimEndpoint(v),
                 onSubmitted: (v) async {
@@ -392,28 +409,32 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 },
               ),
               const SizedBox(height: 6),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      _customEndpoint
-                          ? '自定义端点已生效（兼容网关 / 中转）；点 🔄 恢复内置端点'
-                          : '端点为内置只读；打开自定义端点可接入兼容网关 / 中转',
-                      style: TextStyle(fontSize: 11, color: p.ink3),
+              if (!_isCustomProvider(store)) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _customEndpoint
+                            ? '自定义端点已生效（兼容网关 / 中转）；点 🔄 恢复内置端点'
+                            : '端点为内置只读；打开自定义端点可接入兼容网关 / 中转',
+                        style: TextStyle(fontSize: 11, color: p.ink3),
+                      ),
                     ),
-                  ),
-                  Text('自定义端点',
-                      style: TextStyle(fontSize: 11, color: p.ink3)),
-                  const SizedBox(width: 4),
-                  Switch.adaptive(
-                    key: const ValueKey('settings-endpoint-custom'),
-                    value: _customEndpoint,
-                    activeTrackColor: p.accent,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    onChanged: (v) => _setCustomEndpoint(v, store),
-                  ),
-                ],
-              ),
+                    Text('自定义端点',
+                        style: TextStyle(fontSize: 11, color: p.ink3)),
+                    const SizedBox(width: 4),
+                    Switch.adaptive(
+                      key: const ValueKey('settings-endpoint-custom'),
+                      value: _customEndpoint,
+                      activeTrackColor: p.accent,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onChanged: (v) => _setCustomEndpoint(v, store),
+                    ),
+                  ],
+                ),
+              ] else
+                Text('自定义服务商：端点与模型 ID 均自由填写',
+                    style: TextStyle(fontSize: 11, color: p.ink3)),
             ],
           )),
           if (_customEndpoint)
@@ -593,9 +614,27 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             child: Text(store.registry.provider(id)?['name']?.toString() ?? id,
                 style: const TextStyle(fontSize: 12)),
           ),
+        // 显式「自定义」选项：选它 = 端点 / 模型 ID / Key 全自由填写。
+        const DropdownMenuItem(
+          value: _customProviderId,
+          child: Text('自定义', style: TextStyle(fontSize: 12)),
+        ),
       ],
       onChanged: (id) async {
         if (id == null || id == store.settings.providerId) return;
+        if (id == _customProviderId) {
+          // 切到自定义：端点保留当前值（接下来自由编辑），模型 ID 保留并在
+          // 模型字段直接改；不查内置清单、不落内置端点。
+          store.settings
+            ..providerId = _customProviderId
+            ..thinkingLevel = 'auto';
+          _customModelController.text = store.settings.modelId;
+          _baseController.text = store.settings.baseUrl;
+          _query = '';
+          await store.saveSettings();
+          if (mounted) setState(() {});
+          return;
+        }
         final models = (store.registry.provider(id)?['models'] as Map?) ?? const {};
         // 显式 String 归一：keys 是 List<dynamic>，firstWhere 的 orElse 闭包
         // 推断成 () => dynamic 会以子类型错误崩溃（2026-11-13 实证）。
@@ -616,6 +655,39 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         _query = '';
         await store.saveSettings();
         if (mounted) setState(() {});
+      },
+    );
+  }
+
+  /// 「自定义」服务商的模型 ID 输入：清单外模型直接填（提交/失焦落盘，
+  /// 与端点字段同一纪律）。桌面与手机共用，尺寸随 [mobile] 收放。
+  Widget _customModelField(BuildContext context, AppStore store,
+      {required String keyName, bool mobile = false}) {
+    final p = context.palette;
+    return TextField(
+      key: ValueKey(keyName),
+      controller: _customModelController,
+      style: TextStyle(
+          fontSize: mobile ? 15 : 12, fontFamily: 'Menlo', color: p.ink),
+      decoration: InputDecoration(
+        hintText: '模型 ID（如 deepseek-chat / gpt-4o…）',
+        hintStyle: TextStyle(fontSize: mobile ? 13 : 11, color: p.ink4),
+        isDense: true,
+        contentPadding: EdgeInsets.symmetric(
+            horizontal: mobile ? 14 : 10, vertical: mobile ? 16 : 10),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(mobile ? 12 : 8),
+          borderSide: BorderSide(color: p.line),
+        ),
+      ),
+      onChanged: (v) => store.settings.modelId = v.trim(),
+      onSubmitted: (v) async {
+        store.settings.modelId = v.trim();
+        await store.saveSettings();
+      },
+      onTapOutside: (_) async {
+        store.settings.modelId = _customModelController.text.trim();
+        await store.saveSettings();
       },
     );
   }
@@ -2002,7 +2074,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   Widget _mModels(BuildContext context, AppStore store) {
     final p = context.palette;
     final provider = store.registry.provider(store.settings.providerId);
-    final providerName = (provider?['name'] ?? store.settings.providerId).toString();
+    final providerName = _isCustomProvider(store)
+        ? '自定义'
+        : (provider?['name'] ?? store.settings.providerId).toString();
     return ListView(
       key: const ValueKey('settings-m-detail-models'),
       padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
@@ -2041,44 +2115,55 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           ),
         ]),
         _mCard(context, title: '模型', children: [
-          _modelRow(context, store, keyName: 'settings-m-model-row', mobile: true),
+          _isCustomProvider(store)
+              ? _customModelField(context, store,
+                  keyName: 'settings-m-model-custom', mobile: true)
+              : _modelRow(context, store, keyName: 'settings-m-model-row', mobile: true),
         ]),
         _mCard(context, title: '端点',
-            helper: _customEndpoint
-                ? '自定义端点已生效（兼容网关 / 中转）。'
-                : '内置端点来自随包清单；打开自定义端点可接入兼容网关 / 中转。', children: [
+            helper: _isCustomProvider(store)
+                ? '自定义服务商：端点与模型 ID 均自由填写。'
+                : _customEndpoint
+                    ? '自定义端点已生效（兼容网关 / 中转）。'
+                    : '内置端点来自随包清单；打开自定义端点可接入兼容网关 / 中转。', children: [
           TextField(
             key: const ValueKey('settings-m-endpoint'),
             controller: _baseController,
-            readOnly: !_customEndpoint,
+            readOnly: !_customEndpoint && !_isCustomProvider(store),
             style: TextStyle(
                 fontSize: 13,
                 fontFamily: 'Menlo',
-                color: _customEndpoint ? p.ink : p.ink2),
+                color: (_customEndpoint || _isCustomProvider(store)) ? p.ink : p.ink2),
             decoration: _mDecoration(context,
-                hint: _customEndpoint ? 'https://your-gateway.example/v1' : '内置端点',
-                suffix: _customEndpoint
-                    ? IconButton(
-                        tooltip: '恢复内置端点',
-                        onPressed: () => _setCustomEndpoint(false, store),
-                        icon: Icon(Icons.restart_alt, size: 18, color: p.ink4))
-                    : Icon(Icons.lock_outline, size: 18, color: p.ink4)),
+                hint: (_customEndpoint || _isCustomProvider(store))
+                    ? 'https://your-gateway.example/v1'
+                    : '内置端点',
+                suffix: _isCustomProvider(store)
+                    ? null
+                    : _customEndpoint
+                        ? IconButton(
+                            tooltip: '恢复内置端点',
+                            onPressed: () => _setCustomEndpoint(false, store),
+                            icon: Icon(Icons.restart_alt, size: 18, color: p.ink4))
+                        : Icon(Icons.lock_outline, size: 18, color: p.ink4)),
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: Text('自定义端点',
-                    style: TextStyle(fontSize: 12, color: p.ink2)),
-              ),
-              Switch.adaptive(
-                key: const ValueKey('settings-m-endpoint-custom'),
-                value: _customEndpoint,
-                activeTrackColor: p.accent,
-                onChanged: (v) => _setCustomEndpoint(v, store),
-              ),
-            ],
-          ),
+          if (!_isCustomProvider(store)) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: Text('自定义端点',
+                      style: TextStyle(fontSize: 12, color: p.ink2)),
+                ),
+                Switch.adaptive(
+                  key: const ValueKey('settings-m-endpoint-custom'),
+                  value: _customEndpoint,
+                  activeTrackColor: p.accent,
+                  onChanged: (v) => _setCustomEndpoint(v, store),
+                ),
+              ],
+            ),
+          ],
         ]),
         _mCard(context, title: 'API Key（只存本机）', helper: '仅保存在本机设置中，不上传。', children: [
           TextField(
@@ -2195,12 +2280,36 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       : null,
                   onTap: () => Navigator.pop(ctx, id),
                 ),
+              // 显式「自定义」选项（synthetic id）：端点 / 模型 ID / Key 全自由。
+              ListTile(
+                key: const ValueKey('settings-m-provider-custom'),
+                minVerticalPadding: 14,
+                title: Text('自定义', style: TextStyle(fontSize: 15, color: p.ink)),
+                subtitle: Text(_customProviderId,
+                    style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink4)),
+                trailing: store.settings.providerId == _customProviderId
+                    ? Icon(Icons.check, size: 20, color: p.accent)
+                    : null,
+                onTap: () => Navigator.pop(ctx, _customProviderId),
+              ),
             ],
           ),
         ),
       ),
     );
     if (picked == null || picked == store.settings.providerId) return;
+    if (picked == _customProviderId) {
+      // 切到自定义：端点与模型 ID 保留当前值，接下来自由编辑。
+      store.settings
+        ..providerId = _customProviderId
+        ..thinkingLevel = 'auto';
+      _customModelController.text = store.settings.modelId;
+      _baseController.text = store.settings.baseUrl;
+      _query = '';
+      await store.saveSettings();
+      if (mounted) setState(() {});
+      return;
+    }
     final pv = store.registry.provider(picked);
     final models = (pv?['models'] as Map?) ?? const {};
     var first = '';
