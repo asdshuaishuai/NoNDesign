@@ -161,8 +161,13 @@ PortfolioView _emptyView({SearchIndex? searchIndex}) => PortfolioView(
 Future<void> _search(WidgetTester tester, String query) async {
   await tester.enterText(find.byKey(const ValueKey('shelf-search')), query);
   await tester.pump();
+  // 180ms 防抖 + 一次异步检索（假索引也要过一帧）。CI 慢机上只 pump 一次
+  // 260ms 偶尔赶不上：断言会撞见还没被过滤的旧列表（flaky）。这里多给若干
+  // 帧让「检索完成 → setState」落定，不用 pumpAndSettle（货架有常驻动效）。
   await tester.pump(const Duration(milliseconds: 260));
-  await tester.pump();
+  for (var i = 0; i < 20; i++) {
+    await tester.pump(const Duration(milliseconds: 20));
+  }
 }
 
 void main() {
