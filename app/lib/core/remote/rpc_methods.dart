@@ -257,7 +257,7 @@ class SystemRpcAcpRuntime implements RpcAcpRuntime {
     if (!supported) return const <AcpAgentAvailability>[];
     final cached = _cache;
     if (!probe && cached != null) return cached;
-    final detected = await AcpPathResolver(host: _host).detect();
+    final detected = await AcpPathResolver(host: _host).detect(catalog: _catalog);
     _cache = detected;
     return detected;
   }

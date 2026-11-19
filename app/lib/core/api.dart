@@ -33,6 +33,7 @@ import 'engine/engine_service.dart';
 import 'models.dart';
 import 'project_service.dart';
 import 'remote_desktop_client.dart';
+import 'remote/rpc_methods.dart';
 
 /// The engine face the runtime router needs.
 ///
@@ -175,15 +176,24 @@ class NoNDesignApi {
   /// calls go through the same RPC contract.
   NoNDesignApi(String baseUrl, [http.Client? client])
       : _local = null,
-        _remote = RemoteDesktopClient(baseUrl: baseUrl, client: client);
+        _remote = RemoteDesktopClient(baseUrl: baseUrl, client: client),
+        _localAcp = null;
 
   /// Local-first construction used by the store.
-  NoNDesignApi.runtime({LocalCore? local, RemoteDesktopClient? remote})
-      : _local = local,
-        _remote = remote;
+  ///
+  /// [localAcp] 在没有桌面连接时提供**本机**外部智能体扫描（同一
+  /// AcpPathResolver 探测器在进程内直跑，不经 RPC、不需要另一台电脑）。
+  NoNDesignApi.runtime({
+    LocalCore? local,
+    RemoteDesktopClient? remote,
+    SystemRpcAcpRuntime? localAcp,
+  })  : _local = local,
+        _remote = remote,
+        _localAcp = localAcp;
 
   final LocalCore? _local;
   final RemoteDesktopClient? _remote;
+  final SystemRpcAcpRuntime? _localAcp;
 
   /// The local runtime, when this router was built with one.
   LocalCore? get local => _local;
@@ -522,14 +532,26 @@ class NoNDesignApi {
   // -------------------------------------------------------------------------
 
   /// Available external agents. Empty when nothing can host one.
+  ///
+  /// 路由：配置了桌面 → 桌面扫描；否则 → **本机直扫**（历史缺陷：这里
+  /// 曾直接返回空列表，导致独立安装时外部智能体页永远扫不到本地已装的
+  /// CLI——用户实测 2026-11-19）。本机扫描只做可启动形态探测，不 spawn
+  /// 握手（快、无超时风险）。
   Future<List<AcpAgentInfo>> acpAgents({bool probe = false}) async {
     final desktop = _remote;
-    if (desktop == null || !desktop.isConfigured) return const [];
-    final reply = await desktop.call('agent.external.agents', {'probe': probe});
-    return ((reply['agents'] as List?) ?? const [])
-        .whereType<Map>()
-        .map((e) => AcpAgentInfo.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
+    if (desktop != null && desktop.isConfigured) {
+      final reply = await desktop.call('agent.external.agents', {'probe': probe});
+      return ((reply['agents'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => AcpAgentInfo.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    final localAcp = _localAcp;
+    if (localAcp == null || !localAcp.supported) return const [];
+    final detected = await localAcp.agents(probe: false);
+    return [
+      for (final a in detected) AcpAgentInfo.fromJson(a.toJson()),
+    ];
   }
 
   Future<Map<String, dynamic>> acpNewSession(String agent, String? cwd) async {
