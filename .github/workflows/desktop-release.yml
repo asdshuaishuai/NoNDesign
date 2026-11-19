@@ -145,6 +145,32 @@ jobs:
           retention-days: 14
 
   # Windows 安装包：Flutter Release 目录 → Inno Setup → setup.exe。
+  # Windows 本地引擎冒烟：在真实 Windows runner 上加载 wasm_run DLL 并跑
+  # 引擎契约（用户实测 v0.1.0 exe 构建原型报「需要设计服务」——本地引擎
+  # 在 Windows 上没起来，但桌面/移动测试都没覆盖 Windows DLL 加载路径；
+  # 这个 job 就是那条路的地面真相）。libs 已入库（third_party/wasm_run/
+  # libs），hook 离线取本地副本，不依赖网络。
+  windows-engine-smoke:
+    name: windows-engine-smoke (DLL load + wasm contract)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: flutter pub get
+        working-directory: app
+        run: flutter pub get
+
+      - name: 引擎宿主 + 契约冒烟（真实 DLL 加载）
+        working-directory: app
+        run: flutter test --no-pub test/engine_host_test.dart test/engine_contract_test.dart
+
   windows-release:
     name: windows-release (x64 setup.exe)
     needs: gate
@@ -206,6 +232,18 @@ jobs:
           $resolved = (Resolve-Path -LiteralPath $out).Path
           Write-Host "Release 目录: $resolved"
           "release_dir=$resolved" >> $env:GITHUB_OUTPUT
+
+      - name: 校验引擎动态库随包（缺失 = 本地引擎起不来）
+        shell: pwsh
+        run: |
+          $dll = Join-Path "${{ steps.winout.outputs.release_dir }}" "wasm_run_dart.dll"
+          if (-not (Test-Path -LiteralPath $dll)) {
+            Write-Host "::error::Release 目录缺 wasm_run_dart.dll —— 本地引擎在 Windows 上无法启动"
+            Get-ChildItem -LiteralPath "${{ steps.winout.outputs.release_dir }}" |
+              Select-Object -ExpandProperty Name
+            exit 1
+          }
+          Write-Host "engine dll ok: $dll ($((Get-Item $dll).Length) bytes)"
 
       - name: 安装 Inno Setup
         run: choco install innosetup --yes --no-progress
