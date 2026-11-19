@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection; // Agent 面板手势门用
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
@@ -13,6 +13,7 @@ import '../core/store.dart';
 import '../core/theme.dart';
 import 'a2ui_card.dart';
 import 'common.dart';
+import 'markdown_theme.dart';
 
 part 'agent_panel.dart';
 part 'inspector_panel.dart';

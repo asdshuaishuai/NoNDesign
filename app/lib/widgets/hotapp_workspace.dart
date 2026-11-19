@@ -23,7 +23,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -103,6 +103,9 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
   /// 原始诊断：只进折叠的「技术详情」与修改框预填，绝不作为主文案。
   String _lastErrorDetail = '';
   bool _dbUnavailable = false;
+  /// 点亮 [_dbUnavailable] 横幅的那次数据门失败（其他失败路径为 null，
+  /// 横幅回落到通用文案）。
+  HotAppDbFailure? _dbFailure;
 
   WebViewController? _controller;
   HotAppDb? _db;
@@ -298,6 +301,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       _lastError = '';
       _lastErrorDetail = '';
       _dbUnavailable = false;
+      _dbFailure = null;
     });
     try {
       final entry = await service.read(name);
@@ -346,6 +350,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       _entry = entry;
       _title = entry.brief?.isNotEmpty == true ? entry.brief! : entry.title;
       _dbUnavailable = false;
+      _dbFailure = null;
       if (_host.supportsInAppWebView) {
         _controller = _newController()..loadFile(path);
       } else {
@@ -379,6 +384,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     _closeDb();
     _entry = null;
     _dbUnavailable = true;
+    _dbFailure = null;
     if (_host.supportsInAppWebView) {
       _controller = _newController()..loadFile(path);
     } else {
@@ -467,15 +473,22 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
           _dbApp = app;
         }
         reply = _db!.exec(sql, params);
-        if (_dbUnavailable && mounted) setState(() => _dbUnavailable = false);
+        if (_dbUnavailable && mounted) {
+          setState(() {
+            _dbUnavailable = false;
+            _dbFailure = null;
+          });
+        }
       } on HotAppDbFailure catch (failure) {
         debugPrint('[hotapp] db rejected: $failure');
         if (failure.code == 'db_unavailable' && mounted) {
+          _dbFailure = failure;
           setState(() => _dbUnavailable = true);
         }
         reply = {'ok': false, 'error': 'unavailable'};
       } catch (error) {
         debugPrint('[hotapp] db failed: $error');
+        _dbFailure = null;
         if (mounted) setState(() => _dbUnavailable = true);
         reply = {'ok': false, 'error': 'unavailable'};
       }
@@ -1056,7 +1069,15 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
             exitLabel: '退出预览',
           ),
         if (_dbUnavailable && _offlinePath == null && _app != null)
-          _banner(p, text: '这个应用暂时无法保存数据，其他功能照常。', onExit: null),
+          _banner(
+            p,
+            // db 门失败用 [hotAppDbFailureMessage] 翻成人话；其余打不开路径
+            //（离线兜底/非门异常）没有失败对象，用通用文案。
+            text: _dbFailure != null
+                ? '${hotAppDbFailureMessage(_dbFailure)}，其他功能照常。'
+                : '这个应用暂时无法保存数据，其他功能照常。',
+            onExit: null,
+          ),
         if (_lastError.isNotEmpty) _errorBar(p),
         Expanded(child: _body(p)),
       ],
@@ -1076,7 +1097,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
           // 全屏工作台的可见出口（对齐 3D/视频工作台与 Esc）。
           IconButton(
             icon: const Icon(Icons.arrow_back, size: 18),
-            tooltip: '返回主页 ⌘1',
+            tooltip: '返回主页',
             color: p.ink2,
             visualDensity: VisualDensity.compact,
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
@@ -1488,6 +1509,3 @@ class _TopMenu extends StatelessWidget {
     );
   }
 }
-
-/// JSON 调试辅助（notes 序列化）。
-String hotAppNotesJson(List<String> notes) => jsonEncode(notes.map((n) => {'note': n}).toList());

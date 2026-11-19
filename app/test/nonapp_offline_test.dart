@@ -10,12 +10,11 @@
 //   ④ 冷启动竞态（review nonapp-2）：应用未就绪时打开包要等 ready 再安装；
 //   ⑤ 数据桥往返：页面消息 → SQLite → 结果回填 JS；
 //   ⑥ 库不可用：html 仍可临时预览，并常驻「不会保存」横幅。
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';

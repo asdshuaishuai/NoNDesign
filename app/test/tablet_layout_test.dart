@@ -6,7 +6,7 @@
 // 批次 12 追加：iPad 横版进桌面壳（工作区优先 + 右侧唯一聊天窄栏），
 // Workspace 自带 348 右栏必须关掉（showRightPanel:false）；竖屏仍是
 // 聊天优先壳（裁决 C）。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';

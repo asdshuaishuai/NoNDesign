@@ -1,6 +1,6 @@
 // 移动适配（2026-11-19）：chat agent 跑起来时，实况预览直接长在**聊天流的
 // 框里**（genUI 形态的内嵌工作区卡）——不是画中画浮窗；桌面窄栏不受影响。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';

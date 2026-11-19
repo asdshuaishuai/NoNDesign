@@ -1,4 +1,5 @@
-/// 手机（竖/横）与 iPad 竖屏壳：**聊天全屏 + 工作区画中画**。
+/// 手机竖屏（横屏仅为方向门兜底，真机不可达）与 iPad 竖屏壳：
+/// **聊天全屏 + 工作区画中画**。
 ///
 /// 这是产品裁决 C 的落地面（见 `core/layout.dart`）：3:4 平板放不下
 /// 「工作区 + 320–420 聊天栏」，所以竖屏平板不进入桌面壳，而是保留聊天主面，
@@ -11,7 +12,7 @@ library;
 
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../core/layout.dart';

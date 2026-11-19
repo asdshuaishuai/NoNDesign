@@ -14,7 +14,7 @@
 //     设计检查器/不建项目、不继承当前项目；只有显式「返回主页」才离开；
 //  8. 时间轴与生命周期：改帧率总帧数重算（播放按新帧率走表）、切示例换文档
 //     实例（旧计时器与旧帧缓存随旧播放面释放）、320 宽窄屏不溢出。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -490,7 +490,7 @@ void main() {
 
     // 只有显式的「返回主页」按钮才离开：视频是独立工作区，回主页（模块入口），
     // 不是回某个设计项目的画布。
-    expect(find.byTooltip('返回主页 ${modCombo('⌘1')}'), findsOneWidget);
+    expect(find.byTooltip('返回主页'), findsOneWidget);
     expect(find.byTooltip('返回设计 ${modCombo('⌘1')}'), findsNothing);
     await tester.tap(find.byIcon(Icons.arrow_back));
     await tester.pump();

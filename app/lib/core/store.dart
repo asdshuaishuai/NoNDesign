@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart' show CancellationToken;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show debugPrint, defaultTargetPlatform, kIsWeb, visibleForTesting;
-import 'package:flutter/material.dart' hide Flow;
+import 'package:material_ui/material_ui.dart' hide Flow;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -883,8 +883,9 @@ class AppStore extends ChangeNotifier {
 
   /// 工具名 → 该工具所属工作台的视图名。
   ///
-  /// 这是「任务状态驱动工作区切换」的唯一映射表：工具属于哪个工作台，
-  /// NaN 调用它时主面就跟着到哪个工作台（设计工具回设计画布）。
+  /// 仅 [followAgentWorkspace] 消费。工作区彼此独立（用户裁决 2026-11-19）：
+  /// 插件工作台（3D/视频/热应用）的工具**永不**把主面拽到对应工作区，
+  /// 只有设计工具能把主面带回设计画布。
   static String? workspaceViewForTool(String tool) {
     if (tool.startsWith('three_')) return 'plugin:three';
     if (tool.startsWith('hotapp_')) return 'plugin:hotapp';
@@ -916,8 +917,8 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  /// NaN 的任务状态可以带走主面（用户裁决：除手动切换外，四个工作区的
-  /// 切换完全取决于 NaN 的任务状态与它载入的工具）。
+  /// NaN 调用工具时的主面裁决（用户裁决 2026-11-19）：工作区彼此独立，
+  /// 插件工具永不把主面拽到另一个工作区；只有设计工具能把主面带回设计画布。
   ///
   /// 四条边界：
   ///  * 聊天流驱动 / 嵌入宿主内的 run 不换主面（与 `_keepChatView` 同纪律）：
@@ -1744,10 +1745,8 @@ class AppStore extends ChangeNotifier {
   Future<bool> saveProject({String? path}) async {
     if (!hasProject) return false;
     var target = path ?? projectPath;
-    if (target == null) {
-      // 移动端没有文件选择器：先落到应用文档目录的默认路径。
-      target = await _mobileProjectPath(projectName);
-    }
+    // 移动端没有文件选择器：先落到应用文档目录的默认路径。
+    target ??= await _mobileProjectPath(projectName);
     if (target == null) {
       // 没有原生文件选择器的宿主（或移动端默认路径分配失败）：给一条
       // 人话失败提示，别让异常从保存入口逸出（聊天面的保存按钮）。
@@ -2105,9 +2104,9 @@ class AppStore extends ChangeNotifier {
     return applyOp('ungroup $activeBoard $groupId');
   }
 
-  /// 交互标记：actionSpec 形如 back / haptic / navigate_to:<board> /
-  /// show_toast:<msg> / set_text:<node>:<text> / set_state:<node>:<state> /
-  /// toggle_state:<node> / play_sound:<name>。含空格时引擎可容忍（探针过）。
+  /// 交互标记：actionSpec 形如 back / haptic / navigate_to:`<board>` /
+  /// show_toast:`<msg>` / set_text:`<node>`:`<text>` / set_state:`<node>`:`<state>` /
+  /// toggle_state:`<node>` / play_sound:`<name>`。含空格时引擎可容忍（探针过）。
   Future<bool> interactNode(String node, String trigger, String actionSpec) {
     if (activeBoard == null) return Future.value(false);
     return applyOp('interact $activeBoard $node $trigger $actionSpec');
@@ -2159,7 +2158,7 @@ class AppStore extends ChangeNotifier {
         _toast('这页没有需要修复的问题', '规范、叠放、可读性都已经是干净的。');
         return true;
       }
-      final ok = await _commit(res);
+      final ok = _commit(res);
       if (ok) _toastSuccess('已修复这页的视觉问题', '列表分割线、间距、触控目标、对比度一次补齐。');
       return ok;
     } catch (e) {
@@ -3394,8 +3393,8 @@ class AppStore extends ChangeNotifier {
         break;
       case 'tool_start':
         _flushStreamAsAssistant();
-        // 任务状态驱动工作区：NaN 调用哪个工作台的工具，主面就跟到哪个工作台
-        // （桌面壳；演示不拽走，手机聊天优先壳不切）。
+        // 工作区彼此独立：插件工具永不切主面，只有设计工具能把主面带回
+        // 设计画布（桌面壳；演示不拽走，手机聊天优先壳不切）。
         followAgentWorkspace((event['tool'] ?? '').toString());
         timeline.add(TimelineEntry(
           kind: 'tool',

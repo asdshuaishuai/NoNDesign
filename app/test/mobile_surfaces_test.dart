@@ -2,7 +2,7 @@
 // Welcome 之外的壳层与工作台 body 也曾有固定宽度（文档工具条右溢 246px、
 // 空画布卡 520 宽、视频 300px 配置列、设置 860×600 被夹成 310 宽等）。
 // 这里在手机尺寸渲染真实组件，断言无 RenderFlex 溢出。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';

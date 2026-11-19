@@ -4,7 +4,7 @@
 // 选择界面」——模块选择入口（旧 hub）已删除。项目（DDP）的内容就是文档 +
 // 画板，属于设计工作区，所以打开/新建后一律落 `design`；3D / 视频 / 热应用
 // 是独立工作区，各有自己的入口，不参与项目落地。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';

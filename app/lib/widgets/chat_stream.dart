@@ -1,9 +1,10 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
+import 'markdown_theme.dart';
 import 'package:provider/provider.dart';
 
 import '../core/dart_agent.dart' show toolLabel;
@@ -887,7 +888,7 @@ class _AssistantBlockState extends State<_AssistantBlock> {
                 'pre': _PreBuilder(),
                 'code': _InlineCodeBuilder(),
               },
-              styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+              styleSheet: markdownStyleSheetOf(context).copyWith(
                 p: TextStyle(fontSize: 12.5, height: 1.6, color: p.ink2),
                 h1: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: p.ink),
                 h2: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: p.ink),

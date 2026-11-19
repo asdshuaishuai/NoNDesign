@@ -4,7 +4,10 @@
 ///  * 圆角胶囊 + 毛玻璃、顶部左侧堆叠——渲染在 `widgets/toast_host.dart`；
 ///  * 分级时长：info 2s / success 2.5s / warn 4s / error 5s，可手动关闭，
 ///    调用方可传更短/更长的时长，但一律钳在 1–5s（错误 5s 不早退）；
-///  * 历史保留最近 [ToastService.maxHistory] 条（时间与级别不丢），可回看、可重放；
+///  * 历史保留最近 [ToastService.maxHistory] 条（时间与级别不丢）——**仅服务
+///    内部缓冲**（去重刷新与 [ToastService.replay] 的入参来源），没有回看
+///    界面：通知中心 UI 已随 2026-11-19 的死代码清理退役，验收面不再承诺
+///    「可回看」（见 `docs/copy-glossary.md` §7 的登记）；
 ///  * 连续相同通知只保留一条并刷新计时，重复次数记在 [ToastItem.repeatCount]。
 ///
 /// 本文件不依赖页面级弹条组件、不依赖 BuildContext、不依赖任何路由：
@@ -255,11 +258,12 @@ class ToastService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 重放一条历史通知（通知中心点按行）——按新通知处理，时长重新计时。
+  /// 重放一条历史通知（服务级入口；原通知中心点按行，该 UI 已退役）——
+  /// 按新通知处理，时长重新计时。
   ToastItem? replay(ToastItem item) =>
       show(item.title, detail: item.detail, level: item.level);
 
-  /// 清空历史与当前显示（通知中心的「清空」）。
+  /// 清空历史与当前显示（服务级入口；原通知中心的「清空」按钮已退役）。
   void clearHistory() {
     if (_disposed) return;
     for (final timer in _timers.values) {
@@ -322,8 +326,8 @@ class ToastService extends ChangeNotifier {
 
   /// 通知文案整形：压平换行、截断、脱敏。
   ///
-  /// 历史会长期留在内存并被用户回看，所以敏感内容（密钥、令牌、家目录路径）
-  /// 必须在**进入服务之前**就被替换掉——不要指望调用点自己记得清理。
+  /// 历史会留在内存（去重刷新与重放都消费它），所以敏感内容（密钥、令牌、
+  /// 家目录路径）必须在**进入服务之前**就被替换掉——不要指望调用点自己记得清理。
   /// 规则保守：只替换明确的密钥形态、`Bearer` 头、家目录前缀与超长不透明串。
   static String sanitize(String raw, {int maxLength = 120}) {
     var out = raw.replaceAll(_whitespace, ' ').trim();

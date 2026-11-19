@@ -6,7 +6,7 @@
 // 移动端的视觉与交互集成（卡片出现/内嵌工作区/折叠/聊天仍可滚动）。
 //
 // 运行：flutter test integration_test/mobile_live_preview_sim.dart -d <udid>
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:provider/provider.dart';

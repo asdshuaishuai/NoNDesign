@@ -25,13 +25,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
-import '../core/keys.dart';
 import '../core/platform_capabilities.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
@@ -1137,7 +1136,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
 
   Widget _backButton(NonPalette p) => IconButton(
         icon: const Icon(Icons.arrow_back, size: 18),
-        tooltip: '返回主页 ${modCombo('⌘1')}',
+        tooltip: '返回主页',
         color: p.ink2,
         visualDensity: VisualDensity.compact,
         constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
@@ -1496,7 +1495,8 @@ class _EmptyNew extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Center(
-      // 手机横屏（844×390）放不下「说明 + 新建 + 六个套件」：空态整体可滚，
+      // 手机横屏（844×390——2026-11-19 起真机到不了，仅方向门兜底/web 矮窗
+      // 可达）放不下「说明 + 新建 + 六个套件」：空态整体可滚，
       // 不靠裁掉套件来适配小屏。
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(vertical: 20),

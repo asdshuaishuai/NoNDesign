@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -143,7 +143,7 @@ class _NonAppState extends State<NonApp> with WidgetsBindingObserver {
                   // 3D / 视频 / 热应用没有「就地切工作台」的快捷键（用户裁决
                   // 2026-11-19：工作台类型由项目决定）。进这些工作台要么打开
                   // 对应项目（顶栏项目菜单 / 主页作品集 / 艺术架），要么让 NaN
-                  // 在工作区模式下建一个——不再有 ⌘5–⌘7 直跳。
+                  // 在工作区模式下建一个。
                   // Esc：插件视图与作品集（均无设计板）的返回设计出口（镜像
                   // 各全屏视图顶栏返回按钮）；聊天优先壳（手机/竖屏平板）里
                   // 设计面按 Esc 回到聊天主面。桌面壳没有整块聊天路由——Esc
@@ -215,7 +215,8 @@ class _NonAppState extends State<NonApp> with WidgetsBindingObserver {
   }
 }
 
-/// 当前视口是否属于聊天优先壳（手机竖/横屏、iPad 竖屏）。
+/// 当前视口是否属于聊天优先壳（手机竖屏——横屏仅为方向门兜底、真机不可达；
+/// iPad 竖屏）。
 ///
 /// Esc 的「设计 → 聊天」只在聊天优先壳里成立：桌面壳的聊天在右侧窄栏，
 /// 不存在整块聊天路由可回。

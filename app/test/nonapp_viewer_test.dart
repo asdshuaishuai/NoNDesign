@@ -5,7 +5,7 @@
 //
 // 文案纪律（docs/copy-glossary.md）：用户可见文字不出现协议名，故断言用
 // 「本地预览」/「这个应用的内容不受支持」等用户词，而不是内部信封名。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nondesign/core/theme.dart';

@@ -4,7 +4,7 @@
 ///
 /// | 宿主形态                     | 壳                                        |
 /// |------------------------------|-------------------------------------------|
-/// | 手机竖屏 / 手机横屏          | [ChatPiPShell]：聊天全屏 + 工作区画中画     |
+/// | 手机竖屏（横屏为兜底）      | [ChatPiPShell]：聊天全屏 + 工作区画中画     |
 /// | iPad 竖屏（含 768×1024）     | [ChatPiPShell]（明确裁决 C）               |
 /// | iPad 横屏                    | [DesktopShell]：工作区/Welcome + 聊天窄栏  |
 /// | macOS / Windows / Linux      | [DesktopShell]                            |
@@ -15,7 +15,7 @@
 /// 泵 [ShellHost]。
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

@@ -4,7 +4,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show ValueListenable, mapEquals, debugPrint;
-import 'package:flutter/material.dart' hide Flow;
+import 'package:material_ui/material_ui.dart' hide Flow;
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
@@ -164,7 +164,7 @@ class NodeImageCache extends ChangeNotifier {
 ///    把 SourceAlpha 图层颜色置黑（resolver.dart:495 Color.fromARGB(a,0,0,0)），
 ///    恰为 feDropShadow 默认 flood-color 黑。flood-opacity 在三基元白名单内
 ///    无法表达，改写链不携带（阴影比引擎意图略重，可见性优先）。
-/// ② <image> 仅接受 data: href（parser.dart:610），http(s) href 直接
+/// ② `<image>` 仅接受 data: href（parser.dart:610），http(s) href 直接
 ///    return 丢弃（:649-652）——网络图整节点消失。这里把 http(s) href 按
 ///    NodeImageCache 同款管线语义（URL 幂等、失败不重试）预取原始字节，
 ///    改写为 data: URI（mime 按 Content-Type/扩展名收紧到 png/jpeg/webp/
@@ -224,7 +224,7 @@ class EngineSvgPrep extends ChangeNotifier {
         final raw = _attr(tag, name)?.trim();
         if (raw == null || raw.isEmpty) return null;
         final v = double.tryParse(raw.split(RegExp(r'[\s,]+')).first);
-        return v == null ? null : v.toString();
+        return v?.toString();
       }
 
       final std = num('stdDeviation') ?? '0';
@@ -338,37 +338,37 @@ class EngineSvgPrep extends ChangeNotifier {
   }
 }
 
-enum _ResizeHandle { topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left }
+enum ResizeHandle { topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left }
 
 /// 手柄 delta 应用到起始矩形（8 向钳制最小边 8）。painter 与手势收尾共用。
-Rect _applyResizeHandle(Rect start, Offset delta, _ResizeHandle handle) {
+Rect _applyResizeHandle(Rect start, Offset delta, ResizeHandle handle) {
   const minSide = 8.0;
   var left = start.left;
   var top = start.top;
   var right = start.right;
   var bottom = start.bottom;
-  if (handle == _ResizeHandle.topLeft || handle == _ResizeHandle.left || handle == _ResizeHandle.bottomLeft) {
+  if (handle == ResizeHandle.topLeft || handle == ResizeHandle.left || handle == ResizeHandle.bottomLeft) {
     left = math.min(left + delta.dx, right - minSide);
   }
-  if (handle == _ResizeHandle.topRight || handle == _ResizeHandle.right || handle == _ResizeHandle.bottomRight) {
+  if (handle == ResizeHandle.topRight || handle == ResizeHandle.right || handle == ResizeHandle.bottomRight) {
     right = math.max(right + delta.dx, left + minSide);
   }
-  if (handle == _ResizeHandle.topLeft || handle == _ResizeHandle.top || handle == _ResizeHandle.topRight) {
+  if (handle == ResizeHandle.topLeft || handle == ResizeHandle.top || handle == ResizeHandle.topRight) {
     top = math.min(top + delta.dy, bottom - minSide);
   }
-  if (handle == _ResizeHandle.bottomLeft || handle == _ResizeHandle.bottom || handle == _ResizeHandle.bottomRight) {
+  if (handle == ResizeHandle.bottomLeft || handle == ResizeHandle.bottom || handle == ResizeHandle.bottomRight) {
     bottom = math.max(bottom + delta.dy, top + minSide);
   }
   return Rect.fromLTRB(left, top, right, bottom);
 }
 
-SystemMouseCursor _resizeCursor(_ResizeHandle handle) => switch (handle) {
-      _ResizeHandle.topLeft || _ResizeHandle.bottomRight => SystemMouseCursors.resizeUpLeftDownRight,
-      _ResizeHandle.topRight || _ResizeHandle.bottomLeft => SystemMouseCursors.resizeUpRightDownLeft,
-      _ResizeHandle.top => SystemMouseCursors.resizeUp,
-      _ResizeHandle.bottom => SystemMouseCursors.resizeDown,
-      _ResizeHandle.left => SystemMouseCursors.resizeLeft,
-      _ResizeHandle.right => SystemMouseCursors.resizeRight,
+SystemMouseCursor _resizeCursor(ResizeHandle handle) => switch (handle) {
+      ResizeHandle.topLeft || ResizeHandle.bottomRight => SystemMouseCursors.resizeUpLeftDownRight,
+      ResizeHandle.topRight || ResizeHandle.bottomLeft => SystemMouseCursors.resizeUpRightDownLeft,
+      ResizeHandle.top => SystemMouseCursors.resizeUp,
+      ResizeHandle.bottom => SystemMouseCursors.resizeDown,
+      ResizeHandle.left => SystemMouseCursors.resizeLeft,
+      ResizeHandle.right => SystemMouseCursors.resizeRight,
     };
 
 class _CanvasViewState extends State<CanvasView> {
@@ -381,7 +381,7 @@ class _CanvasViewState extends State<CanvasView> {
   bool _nodePressed = false;
   // 8 向缩放手势状态：拖手柄期间 painter 用 ghost 矩形实时绘制。
   String? _resizingId;
-  _ResizeHandle? _resizeHandle;
+  ResizeHandle? _resizeHandle;
   Rect _resizeStart = Rect.zero;
   final ValueNotifier<Offset> _resizeDelta = ValueNotifier(Offset.zero);
   bool _handlePressed = false;
@@ -417,8 +417,8 @@ class _CanvasViewState extends State<CanvasView> {
     final dx = (viewport.width - layout.total.width * scale) / 2;
     final dy = (viewport.height - layout.total.height * scale) / 2;
     _controller.value = Matrix4.identity()
-      ..translate(dx, dy)
-      ..scale(scale);
+      ..translateByDouble(dx, dy, 0.0, 1.0)
+      ..scaleByDouble(scale, scale, scale, 1.0);
   }
 
   void _scaleBy(double factor, Size viewport, Offset focal) {
@@ -426,9 +426,9 @@ class _CanvasViewState extends State<CanvasView> {
     final target = (current * factor).clamp(0.08, 4.0);
     final scene = _controller.toScene(focal);
     _controller.value = Matrix4.identity()
-      ..translate(focal.dx, focal.dy)
-      ..scale(target)
-      ..translate(-scene.dx, -scene.dy);
+      ..translateByDouble(focal.dx, focal.dy, 0.0, 1.0)
+      ..scaleByDouble(target, target, target, 1.0)
+      ..translateByDouble(-scene.dx, -scene.dy, 0.0, 1.0);
   }
 
   /// 悬停板探测：挂在画布最外层的 Listener 收指针事件（悬停事件沿命中链
@@ -766,7 +766,7 @@ class _CanvasViewState extends State<CanvasView> {
                         Positioned.fill(
                           child: ListenableBuilder(
                             listenable: EngineSvgPrep.instance,
-                            builder: (_, __) => SvgPicture.string(
+                            builder: (_, _) => SvgPicture.string(
                               EngineSvgPrep.instance.prepared(board.svg),
                               fit: BoxFit.fill,
                             ),
@@ -894,15 +894,15 @@ class _CanvasViewState extends State<CanvasView> {
     final node = hit;
     final rect = Rect.fromLTWH(node.x, node.y, node.w, node.h);
     const grip = 14.0;
-    final targets = <(Offset, _ResizeHandle)>[
-      (rect.topLeft, _ResizeHandle.topLeft),
-      (rect.topCenter, _ResizeHandle.top),
-      (rect.topRight, _ResizeHandle.topRight),
-      (rect.centerRight, _ResizeHandle.right),
-      (rect.bottomRight, _ResizeHandle.bottomRight),
-      (rect.bottomCenter, _ResizeHandle.bottom),
-      (rect.bottomLeft, _ResizeHandle.bottomLeft),
-      (rect.centerLeft, _ResizeHandle.left),
+    final targets = <(Offset, ResizeHandle)>[
+      (rect.topLeft, ResizeHandle.topLeft),
+      (rect.topCenter, ResizeHandle.top),
+      (rect.topRight, ResizeHandle.topRight),
+      (rect.centerRight, ResizeHandle.right),
+      (rect.bottomRight, ResizeHandle.bottomRight),
+      (rect.bottomCenter, ResizeHandle.bottom),
+      (rect.bottomLeft, ResizeHandle.bottomLeft),
+      (rect.centerLeft, ResizeHandle.left),
     ];
     return [
       for (final (point, handle) in targets)
@@ -945,7 +945,7 @@ class _CanvasViewState extends State<CanvasView> {
               onPanEnd: (_) async {
                 _handlePressed = false;
                 final startRect = _resizeStart;
-                final which = _resizeHandle ?? _ResizeHandle.bottomRight;
+                final which = _resizeHandle ?? ResizeHandle.bottomRight;
                 final ghost = _applyResizeHandle(startRect, _resizeDelta.value, which);
                 final target = node.id;
                 _resizeDelta.value = Offset.zero;
@@ -1077,7 +1077,7 @@ class ArtboardPainter extends CustomPainter {
   final ValueListenable<Offset>? dragDelta;
   final String? resizeId;
   final Rect? resizeStart; // 缩放手势的起始矩形（board 坐标）
-  final _ResizeHandle? resizeHandle;
+  final ResizeHandle? resizeHandle;
   final ValueListenable<Offset>? resizeDelta;
   /// 演示模式入场进度（0→1；仅演示传入，编辑画布 null = 静态设计稿语义）。
   /// style.motion=='fade_in' 的节点把整体 alpha 乘以该进度；经 repaint
@@ -1114,7 +1114,7 @@ class ArtboardPainter extends CustomPainter {
       final isDragging = dragId == node.id;
       final isResizing = resizeId == node.id && resizeStart != null;
       final rect = isResizing
-          ? _applyResizeHandle(resizeStart!, resizeDelta, resizeHandle ?? _ResizeHandle.bottomRight)
+          ? _applyResizeHandle(resizeStart!, resizeDelta, resizeHandle ?? ResizeHandle.bottomRight)
           : Rect.fromLTWH(
               node.x + (isDragging ? dragDelta.dx : 0.0),
               node.y + (isDragging ? dragDelta.dy : 0.0),
@@ -1353,7 +1353,7 @@ class ArtboardPainter extends CustomPainter {
     // （超板如实可见，与演示模式「不裁剪」取向一致）。
     final width = math.max(4, rect.width - 24).round();
     final aq = (alpha * 16).round();
-    final key = '${node.text}|${node.style.fontSize}|${weight.index}|${align.index}|$width|$aq'
+    final key = '${node.text}|${node.style.fontSize}|${weight.value}|${align.index}|$width|$aq'
         '|${node.style.line}|${node.style.tracking}|${node.style.italic}';
     var painter = _textCache[key];
     if (painter == null) {

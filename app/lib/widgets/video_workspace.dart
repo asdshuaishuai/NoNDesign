@@ -26,12 +26,11 @@ library;
 
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../core/capability.dart';
-import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/toast_service.dart';
@@ -498,7 +497,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         return Row(children: [
           IconButton(
             icon: const Icon(Icons.arrow_back, size: 18),
-            tooltip: '返回主页 ${modCombo('⌘1')}',
+            tooltip: '返回主页',
             color: p.ink2,
             visualDensity: VisualDensity.compact,
             padding: EdgeInsets.zero,

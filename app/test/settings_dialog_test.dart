@@ -3,7 +3,7 @@
 // 直接 setState——保存写盘在飞期间关闭弹窗即 setState-after-dispose。
 // 用注入的慢速 saveSettings store 复现窗口期；同文件同型路径（:66 延迟
 // 回调 / :902 ACP 选项）都守了 mounted，唯独这里漏。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 

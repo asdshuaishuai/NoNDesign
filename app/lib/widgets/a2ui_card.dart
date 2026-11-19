@@ -39,10 +39,11 @@ import 'package:a2ui_flutter/basic_catalog.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart'
     show CancellationToken, TimeoutConfiguration, streamText;
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../core/theme.dart';
+import 'markdown_theme.dart';
 
 /// 打开外链的回调（a2ui_core 的 OpenUrlCallback 别名）。
 ///
@@ -76,8 +77,8 @@ typedef A2uiTransport =
 
 /// 默认传输：ai_sdk_dart `streamText` 的 textStream。
 ///
-/// OpenAI 兼容协议（ai_sdk_openai 的 OpenAIProvider），与 store/mobile_agent
-/// 现有链路同源；provider 在流结束/出错/被取消时释放。
+/// OpenAI 兼容协议（ai_sdk_openai 的 OpenAIProvider），与 core/dart_agent
+/// 的内置循环同链路；provider 在流结束/出错/被取消时释放。
 A2uiTransport aiSdkStreamTextTransport({
   required String apiKey,
   required String baseUrl,
@@ -390,9 +391,7 @@ class _A2uiCardState extends State<A2uiCard> {
             if (_text.isNotEmpty)
               MarkdownBody(
                 data: _text,
-                styleSheet: MarkdownStyleSheet.fromTheme(
-                  Theme.of(context),
-                ).copyWith(
+                styleSheet: markdownStyleSheetOf(context).copyWith(
                   p: TextStyle(fontSize: 12, color: palette.ink2, height: 1.45),
                 ),
               ),

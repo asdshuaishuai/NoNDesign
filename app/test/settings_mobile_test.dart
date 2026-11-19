@@ -2,7 +2,7 @@
 // - 分组根页（无顶部横向 tab），下钻详情单列卡片；
 // - 触控目标 ≥44/48，输入 ≥44，字号与卡片间距按移动端；
 // - 手机横屏矮窗同样走移动端布局。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 

@@ -51,7 +51,7 @@ plugins/             独立插件资产（视频制作说明）
 
 | 宿主 + 朝向 | 壳 |
 | --- | --- |
-| 手机竖屏 / 手机横屏 | `ChatPiPShell`：聊天全屏 + 工作区画中画 |
+| 手机（锁竖屏） | `ChatPiPShell`：聊天全屏 + 工作区画中画 |
 | iPad 竖屏（含 768×1024） | `ChatPiPShell`（明确裁决：3:4 太窄，画布+聊天栏会不可用） |
 | iPad 横屏 | `DesktopShell`：Workspace/Welcome + 右侧 320–420 可折叠聊天栏 |
 | macOS / Windows / Linux | `DesktopShell` |
@@ -59,6 +59,10 @@ plugins/             独立插件资产（视频制作说明）
 | 3D / 视频 / 热应用（`plugin:*`） | 留在响应式壳内：桌面壳左侧固定工作区 +
   右侧常驻 NaN 窄栏；手机/iPad 竖屏由 `ChatPiPShell` 整屏渲染工作区 |
 
+- **方向门（用户裁决 2026-11-19）**：手机端不允许横竖切换，锁定竖屏；平板跟随系统旋转
+  （横屏=桌面壳、竖屏=聊天优先壳），桌面无方向概念。唯一实现源是
+  `app/lib/core/orientation.dart`；运行时门在 `main.dart`，每次度量变化（旋转 / 分屏 /
+  折叠屏展开）都重钉方向，手机永远被压回竖屏。
 - **工作台切换 = 项目切换**（用户裁决 2026-11-19）：一个项目只对应它自己的工作台
   类型，项目内部不摆工作区切换条；右侧 NaN 窄栏只有 NaN / 检查两个 tab。
   切换入口是顶栏项目下拉（设计项目 / 3D 场景 / 热应用 / 视频 / 新建 / 打开 / 回主页），
@@ -68,8 +72,11 @@ plugins/             独立插件资产（视频制作说明）
 - 设置面板四档（手机 / iPad 竖 / iPad 横 / 桌面）不共用同一套堆叠；内置服务商端点
   打开即填且只读，模型选择走底部 sheet；「连接桌面」是一张合并卡片
   （地址 + 检测连接 + 内置/连接桌面二选一 + 人话文案）。
-- Toast 统一走 `ToastService`：圆角胶囊 + 毛玻璃 + 顶部左侧堆叠 + 1–5s 分级 +
-  通知历史。**不要在 `ToastHost` 之外直接 `ScaffoldMessenger.showSnackBar`。**
+- Toast 统一走 `ToastService`：圆角胶囊 + 毛玻璃 + 顶部左侧堆叠 + 1–5s 分级。
+  通知历史**只是服务内部缓冲**（去重刷新 / replay 入参），没有回看界面——通知
+  中心 UI 已随 2026-11-19 死代码清理退役（`app/test/toast_test.dart` 的
+  「无历史入口」锚定测试防守，重新回接 UI 需先推翻该登记）。**不要在
+  `ToastHost` 之外直接 `ScaffoldMessenger.showSnackBar`。**
 - 用户可见文案遵守 `docs/copy-glossary.md`：不出现 Python / server / wasm /
   MoonViz / DDP / mbt / canonical / nonapp / ACP / AgentGate / engine / session_*/
   tool_* / JSONL / localhost / 端口 / 构建代号。工具名必须经 `toolLabel()` 映射；
@@ -215,8 +222,9 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
   逐帧 `frameSvg(t)` 在应用内实时播放，全平台同一套行为；**成片导出暂时屏蔽**
   （`VideoService` 渲染代码保留，界面无入口）。既有 mp4 产物仍由艺术架播放。
 - 移动端本地引擎默认关闭；iOS/Android 是否启用取决于真机 wasm spike 证据。
-- Android 构建已可在修复 `MainActivity.kt` 后产出 debug APK；本机无 Android
-  设备/AVD，arm64 wasmtime 加载与 `_in` ABI 的真机验收仍未完成。
+- Android debug APK 构建链已修复（`MainActivity.kt` 非空收窄，1fa3a78），可
+  产出 debug APK（本会话未复跑 build 复证产物）；本机无 Android 设备/AVD，
+  arm64 wasmtime 加载与 `_in` ABI 的真机验收仍未完成。
 - 外部智能体（ACP）桌面独占；移动端按设计禁用。
 - 3D/热应用在 Linux/Windows 没有应用内 WebView，预览降级为浏览器或路径。
 - API Key 明文存本机 `SharedPreferences`（并镜像 `~/.nondesign/settings.json`）；

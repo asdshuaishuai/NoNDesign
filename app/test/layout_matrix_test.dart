@@ -12,7 +12,7 @@
 // | 1080×700（窄 PC）  | macOS  | DesktopShell   | 窄栏折叠成 44px 第二列条带    |
 //
 // 四个面不得统一：这里同时断言「手机壳不是桌面壳」「竖屏平板不是桌面壳」。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -214,7 +214,7 @@ void main() {
       expect(railWidth, lessThanOrEqualTo(kChatRailMaxWidth));
       final mainWidth = tester.getSize(find.byType(Workspace)).width;
       expect(mainWidth, greaterThanOrEqualTo(kDesktopMainMinWidth),
-          reason: '主面不得掉进 Workspace 手机档（$mainWidth < ${kDesktopMainMinWidth}）');
+          reason: '主面不得掉进 Workspace 手机档（$mainWidth < $kDesktopMainMinWidth）');
       expect(tester.takeException(), isNull);
     });
 

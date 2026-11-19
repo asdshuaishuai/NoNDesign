@@ -1,7 +1,8 @@
 // DDP container codec — pure Dart port of `vendor/moonviz-ddp` (Rust), which
-// is the authority for `.ddp` byte layout. The former Python implementation
-// (`server/ddp.py`) follows the same layout and is used only as a test oracle
-// while the migration finishes; nothing here talks to Python or a server.
+// is the authority for `.ddp` byte layout. (The former Python test oracle
+// `server/ddp.py` was removed with the de-Python migration, batch 15 — the
+// Rust crate is the only authority now.) Nothing here talks to Python or a
+// server.
 //
 // One `.ddp` is the authenticated representation of exactly one source
 // document (the canonical `.mbt.md` text):

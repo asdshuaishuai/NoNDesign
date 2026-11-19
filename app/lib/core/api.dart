@@ -178,9 +178,7 @@ class NoNDesignApi {
         _remote = RemoteDesktopClient(baseUrl: baseUrl, client: client);
 
   /// Local-first construction used by the store.
-  NoNDesignApi.runtime({LocalCore? local, RemoteDesktopClient? remote})
-      : _local = local,
-        _remote = remote;
+  NoNDesignApi.runtime({this._local, this._remote});
 
   final LocalCore? _local;
   final RemoteDesktopClient? _remote;
@@ -266,7 +264,7 @@ class NoNDesignApi {
   /// One session inspection/mutation call.
   Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) => _engine(
         'engine.session',
-        {'mbt': mbt, 'name': name, if (arg != null) 'arg': arg},
+        {'mbt': mbt, 'name': name, 'arg': ?arg},
         (engine) => engine.session(mbt, name, arg),
       );
 
@@ -469,7 +467,7 @@ class NoNDesignApi {
     }
     final desktop = _remote;
     if (desktop != null && desktop.isConfigured) {
-      final reply = await desktop.call('project.list', {if (dir != null) 'dir': dir});
+      final reply = await desktop.call('project.list', {'dir': ?dir});
       final projects = reply['projects'];
       if (projects is List) return projects;
     }
@@ -537,7 +535,7 @@ class NoNDesignApi {
     if (desktop == null || !desktop.isConfigured) {
       return {'ok': false, 'error': 'remote_unavailable'};
     }
-    return desktop.call('agent.external.session', {'agent': agent, if (cwd != null) 'cwd': cwd});
+    return desktop.call('agent.external.session', {'agent': agent, 'cwd': ?cwd});
   }
 
   /// Streamed external-agent prompt. Event shapes match the built-in loop.
@@ -626,7 +624,7 @@ class NoNDesignApi {
       );
 
   Future<Map<String, dynamic>> threeFeedback(String name, String kind, [Object? payload]) =>
-      _rpc('three.feedback', {'name': name, 'kind': kind, if (payload != null) 'payload': payload});
+      _rpc('three.feedback', {'name': name, 'kind': kind, 'payload': ?payload});
 
   Future<Map<String, dynamic>> threeContinue(String name, [String summary = '']) =>
       _rpc('three.continue', {'name': name, 'summary': summary});

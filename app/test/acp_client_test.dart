@@ -284,48 +284,6 @@ void main() {
     }, timeout: const Timeout(Duration(minutes: 2)));
   });
 
-  group('protocol probe', () {
-    test('假 agent → verified；不存在的命令 → failed；移动端 → unsupported', () async {
-      final dartPath = _findDart();
-      if (dartPath == null || dartPath.isEmpty) {
-        markTestSkipped('找不到 dart 可执行文件，跳过子进程链路');
-        return;
-      }
-      final host = _TestHost();
-      final resolver = AcpPathResolver(
-        host: host,
-        extraDirs: <String>[File(dartPath).parent.path],
-      );
-      final verified = await probeAcpAgent(
-        entry: _fakeEntry(dartPath),
-        host: host,
-        resolver: resolver,
-      );
-      expect(verified.state, 'verified');
-      expect(verified.detail, contains('fake-session'));
-
-      final missing = await probeAcpAgent(
-        entry: const AcpCatalogEntry(
-          id: 'missing',
-          name: 'Missing',
-          note: 'not installed anywhere',
-          candidates: <AcpLaunchCandidate>[
-            AcpLaunchCandidate(<String>['definitely-not-installed-xyz'], <String>['{exe}']),
-          ],
-        ),
-        host: host,
-        resolver: resolver,
-      );
-      expect(missing.state, 'failed');
-
-      final mobile = await probeAcpAgent(
-        entry: _fakeEntry(dartPath),
-        host: _TestHost(desktop: false),
-      );
-      expect(mobile.state, 'unsupported');
-    }, timeout: const Timeout(Duration(minutes: 2)));
-  });
-
   group('agent exit', () {
     test('prompt 中途进程死亡 → failed(acp_agent_exited)', () async {
       final dartPath = _findDart();

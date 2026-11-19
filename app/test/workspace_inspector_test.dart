@@ -4,7 +4,7 @@
 // * 窄栏 tab 文案与折叠条 tooltip/图标跟着工作区变（tab id 仍是 inspect）。
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 

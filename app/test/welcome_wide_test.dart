@@ -2,7 +2,8 @@
 //
 // 新主页只有三层：居中的「标题 + 一句话输入卡（内含目标工作台选择器）」，
 // 下面并排「作品集 / 最近项目」两张卡。插件工作台列表与「NON 的工作方式」
-// 说明卡已从主页删除——工作台入口只剩输入卡选择器 + 顶栏/⌘5–7。
+// 说明卡已从主页删除——工作台入口只剩输入卡选择器 + 顶栏项目下拉 +
+// 主页作品集（⌘5–⌘7 直跳键已随 9f17c0b 删除，工作台切换=项目切换）。
 //
 // 整页连续背景 + 自适应回归（用户实机验收）：1440 宽下原有两个角落径向光斑
 // 在页面上划出两条浅色竖带，主页看起来像被切成左/中/右三块；之后又指出内容列
@@ -21,7 +22,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';

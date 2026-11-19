@@ -6,7 +6,7 @@
 //  ③ 时间条拖动立即换帧；回片头；循环开关；
 //  ④ 不循环时播到片尾停住，再点播放从片头重来；
 //  ⑤ 单帧生成失败只留一句人话，面板不崩、不抛异常。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 

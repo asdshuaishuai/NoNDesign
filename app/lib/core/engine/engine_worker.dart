@@ -4,8 +4,10 @@
 ///
 /// 1. [EngineWasmCore] — the actual WASM interaction: the `in`/`arg`/`arg2`
 ///    byte-slot ABI, the UTF-16 read layout, fuel metering, memory recycling,
-///    trap recovery and the canonical-document session cache. It mirrors
-///    `server/engine.py` (the Python reference host) call for call.
+///    trap recovery and the canonical-document session cache. It was ported
+///    call for call from the retired Python reference host (`server/engine.py`,
+///    removed with the de-Python migration, batch 15 — see
+///    `docs/plan-dart-agent-migration.md`); this file is now the only host.
 /// 2. [engineWorkerEntry] — the isolate entry that owns one [EngineWasmCore]
 ///    and answers requests from [EngineHost]. Every engine call happens on
 ///    this isolate, so the UI isolate never blocks (a large `apply` can take
@@ -485,7 +487,9 @@ class EngineWasmCore {
 
   /// Runs one session call.
   ///
-  /// Dispatch mirrors `server/engine.py::session`:
+  /// Dispatch follows the layout inherited from the retired
+  /// `server/engine.py::session` (historical source; file removed with the
+  /// de-Python migration):
   ///  * unknown names — rejected before any session is opened;
   ///  * `session_close` / `session_open` — lifecycle, never a generic call:
   ///    closing drops the cache entry, opening is implicit (the host always

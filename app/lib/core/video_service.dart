@@ -1378,53 +1378,6 @@ String formatVideoTime(double seconds) {
       '${millis.toString().padLeft(3, '0')}';
 }
 
-/// 抽帧时间点对应的帧文件路径（帧目录存在时才有意义）。
-List<String> videoFrameListing({
-  required String framesDirectory,
-  required double totalSeconds,
-  required int fps,
-  int samples = 6,
-}) {
-  final last = math.max(0, (totalSeconds * fps).floor() - 1);
-  return <String>[
-    for (final time in videoSampleTimes(totalSeconds, samples: samples))
-      '$framesDirectory/frame_${math.min((time * fps).floor(), last).toString().padLeft(5, '0')}.png',
-  ];
-}
-
-/// 评审 agent 的对照提示词（环③，桌面保留；移动端没有抽帧+视觉链路）。
-String videoVisionPrompt(VideoSpec spec) {
-  final lines = <String>[
-    '你是视频质量评审。对照规范逐条核查抽帧，每条给 PASS/FAIL 与一句证据。',
-    '规范主题：${spec.title}',
-  ];
-  if (spec.kind == VideoSpecKind.science) {
-    final assumptions = spec.raw['assumptions'];
-    final facts = spec.raw['facts'];
-    lines
-      ..add('理想化假设：${assumptions is List ? assumptions.join('; ') : ''}')
-      ..add('事实核查清单（逐条判真伪）：');
-    if (facts is List) {
-      for (var i = 0; i < facts.length; i++) {
-        lines.add('  ${i + 1}. ${facts[i]}');
-      }
-    }
-  } else {
-    final palette = spec.raw['palette'];
-    final beats = spec.raw['beats'];
-    lines
-      ..add('风格锚：${spec.raw['style']}')
-      ..add('调色板：$palette')
-      ..add('节拍表：');
-    if (beats is List) {
-      for (final beat in beats) {
-        if (beat is Map) lines.add('  ${beat['at']}s ${beat['what']}');
-      }
-    }
-  }
-  return lines.join('\n');
-}
-
 /// 深扫脚本里全部 `{'expr': ...}`（含 motion/anim/points/textValue）。
 List<String> collectVideoExprSources(Object? node) {
   final out = <String>[];

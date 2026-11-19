@@ -2,7 +2,7 @@
 //  - 生成入口**只保留一个**，放在热应用工作台顶栏（「由原型生成」），带进度与
 //    结果反馈；设计画布工具条上不再叠两个看起来一样、点了没动静的图标。
 //  - 未配模型 / 没有原型时诚实早退：不崩溃、不换视图。
-import 'package:flutter/material.dart' hide Flow;
+import 'package:material_ui/material_ui.dart' hide Flow;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';

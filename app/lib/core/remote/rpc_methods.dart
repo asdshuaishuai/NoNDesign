@@ -211,7 +211,9 @@ abstract class RpcAcpRuntime {
   /// Whether this host can run external agents at all (desktop only).
   bool get supported;
 
-  /// Installed / selectable agents.
+  /// Installed / selectable agents. `probe` only bypasses the detect cache —
+  /// it never performs a live handshake; the result is always static
+  /// launchability detection.
   Future<List<AcpAgentAvailability>> agents({bool probe = false});
 
   /// Starts one session; throws [AcpFailure] on failure.
@@ -254,6 +256,8 @@ class SystemRpcAcpRuntime implements RpcAcpRuntime {
 
   @override
   Future<List<AcpAgentAvailability>> agents({bool probe = false}) async {
+    // `probe` 仅绕过检测缓存（让 [AcpPathResolver.detect] 重跑一次）——它从不
+    // 触发握手或启动验证；列表始终是「文件可启动形态」的静态检测结果。
     if (!supported) return const <AcpAgentAvailability>[];
     final cached = _cache;
     if (!probe && cached != null) return cached;

@@ -12,7 +12,7 @@
 // 折叠的「技术详情」里，默认不展开。
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../core/nonapp_package.dart';
 import '../core/theme.dart';

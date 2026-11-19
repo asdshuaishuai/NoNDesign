@@ -39,6 +39,9 @@ dependencies:
   provider: ^6.1.5+1
   file_selector: ^1.1.0
   flutter_markdown: ^0.7.7+1
+  # chat_stream 直接 import（markdown builder 类型）；此前只作为
+  # flutter_markdown 的传递依赖存在，depend_on_referenced_packages 需显式声明。
+  markdown: ^7.3.1
   shared_preferences: ^2.5.6
   flutter_svg: ^2.4.0
   webview_flutter: ^4.14.1
@@ -119,6 +122,10 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  # webview 测试替身直接 import 的平台接口（nonapp_hotapp_mount_test /
+  # nonapp_offline_test）；此前只作为 webview_flutter 的传递依赖存在，
+  # depend_on_referenced_packages 需显式声明（测试专用 → dev_dependencies）。
+  webview_flutter_platform_interface: ^2.15.1
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

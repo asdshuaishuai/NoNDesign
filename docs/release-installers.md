@@ -30,16 +30,31 @@
 job 依赖结构：
 
 ```
-gate (macos-15，arm64)
-  ├── macos-release (macos-15，arm64) ─┐
+gate (macos-26，arm64)
+  ├── macos-release (macos-26，arm64) ─┐
   └── windows-release (windows-latest) ─┴── release (ubuntu-latest，contents: write)
 ```
 
-- **gate**：`flutter pub get` → `flutter analyze --no-pub` → `flutter test --no-pub`。
-  不打包；测试不过，两个安装包 job 不会启动。gate 放在 **macOS（arm64）**：
-  整套测试目前只在 macOS 上完整验证过（平台分支、应用内 WebView、本地引擎
-  动态库、系统 SQLite），而 gate 红掉就直接出不了安装包，所以优先用已验证环境。
-  想换回 Linux 前，需要先在 Linux 上跑绿全量 analyze + test 并留下证据。
+> 2026-11-19 起 runs-on 从 macos-15 改为 **macos-26**：实测 macos-15 标签在公开仓库上
+> 长时间排队（20 分钟仍未分配 runner），macos-26 立即分配且是 arm64
+> （Image: macos-26-arm64）；job 里的 `uname` 守卫继续兜住架构
+> （见 `desktop-release.yml` 的 macos-release 注释）。
+
+- **gate**：`flutter pub get` → `flutter analyze --no-pub`（零容忍）→
+  `flutter test --no-pub`（失败时降并发重试一次）。不打包；测试不过，两个安装包
+  job 不会启动。gate 放在 **macOS（arm64）**：整套测试目前只在 macOS 上完整验证过
+  （平台分支、应用内 WebView、本地引擎动态库、系统 SQLite），而 gate 红掉就直接
+  出不了安装包，所以优先用已验证环境。想换回 Linux 前，需要先在 Linux 上跑绿
+  全量 analyze + test 并留下证据。
+  - analyze 门禁是**零容忍**（不带 `--no-fatal-infos`）。曾经有一批 info 级
+    既有告警（Flutter 3.50 把 material.dart 标记为 deprecated），当时用
+    `--no-fatal-infos` 放行、workflow 注释记 131 条；material → material_ui
+    迁移已在 2026-11-19 完成并复验 `flutter analyze --no-pub` 零告警，开关已
+    按「迁移完成后删掉即可恢复零容忍」的自设条件移除。今后新增 info 必须在
+    引入时就修掉，不允许再攒批次级白名单。
+  - flutter test 一次串行重试：个别用例对调度时序敏感（对端断连、检索防抖、流式
+    增量），在本机稳定通过、在共享 runner 上偶发失败。第一次失败时打 warning 并
+    用 `--concurrency=2` 重跑一次；两次都失败才判门禁红（不静默跳过任何用例）。
 - **macos-release**：`flutter build macos --release --no-pub` →
   `scripts/installer/make_dmg.sh`。脚本自己检查应用包路径、复制到临时目录、
   ad-hoc 签名、生成卷图标文件、先做可读写镜像并给卷根写「自定义图标」标记，
@@ -139,9 +154,11 @@ flutter analyze --no-pub
 flutter test --no-pub
 ```
 
-CI 在 macOS（arm64）上跑同一套，与本地验证环境一致。如果将来有某个用例只在
-某一平台失败，改 gate 时要在 workflow 注释里写明原因并保留核心用例，不能
-静默把整段测试去掉。
+CI 在 macOS（arm64，macos-26）上跑同一套，与本地验证环境一致；analyze 是
+零容忍（info/warning/error 都红），flutter test
+在 CI 失败时会降并发（`--concurrency=2`）重试一次。test 的重试是共享 runner
+的时序兜底，本机稳定通过就不需要。如果将来有某个用例只在某一平台失败，改
+gate 时要在 workflow 注释里写明原因并保留核心用例，不能静默把整段测试去掉。
 
 ## 4. 签名与公证现状
 

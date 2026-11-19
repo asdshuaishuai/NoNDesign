@@ -1,9 +1,11 @@
-// 批次 04：Toast 服务与通知中心。
+// 批次 04：Toast 服务与宿主。
 //
 // 锚定用户验收标准 H 的四件事：
 //  1. 顶部左侧堆叠 + 圆角胶囊 + 毛玻璃（低端 Android 可关）；
 //  2. 1–5s 分级时长（info 2 / success 2.5 / warn 4 / error 5），错误不早退；
-//  3. 通知历史（100 条、时间与级别不丢、可回看可重放）；
+//  3. 服务内部历史缓冲（100 条、时间与级别不丢）——**回看 UI 已于 2026-11-19
+//     退役**（通知中心删除，见 AGENTS.md Toast 节登记）；历史只剩去重刷新与
+//     replay 入参两个服务内用途，本文件末尾的「无历史入口」测试防守回接；
 //  4. 连续相同只保留一条并刷新计时。
 //
 // 另外守住两条结构性约束：
@@ -12,13 +14,11 @@
 
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/core/toast_service.dart';
-import 'package:nondesign/widgets/common.dart' show formatTime;
-import 'package:nondesign/widgets/notification_center.dart';
 import 'package:nondesign/widgets/toast_host.dart';
 
 import 'copy_guard_test.dart' show findCopyViolations;
@@ -37,7 +37,6 @@ Directory _appDir() {
 const List<String> _toastFiles = [
   'lib/core/toast_service.dart',
   'lib/widgets/toast_host.dart',
-  'lib/widgets/notification_center.dart',
 ];
 
 /// 去掉行注释后再扫描：文件头注释里点名「被本服务取代的旧机制」是为了
@@ -361,135 +360,13 @@ void main() {
       final svc = await _mountHost(tester);
       svc.error(
         '这是一条比较长的通知标题用来检查窄屏换行与省略',
-        '详情也会比较长：磁盘空间不足，请清理后重试；如果仍然失败，可以在通知中心回看这条记录。',
+        '详情也会比较长：磁盘空间不足，请清理后重试；如果仍然失败，请在日志里查看这条记录。',
       );
       await tester.pump(const Duration(milliseconds: 220));
 
       expect(tester.takeException(), isNull);
       expect(find.textContaining('这是一条比较长的通知标题'), findsOneWidget);
       expect(tester.getSize(find.byType(ToastCapsule)).width, lessThanOrEqualTo(ToastVisuals.maxWidth));
-      svc.dispose();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // 通知中心
-  // -------------------------------------------------------------------------
-
-  group('NotificationCenter', () {
-    testWidgets('空态 → 历史（级别/时间在）→ 点按重放', (tester) async {
-      final svc = ToastService();
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.build(),
-          home: Scaffold(body: Center(child: NotificationCenter(service: svc))),
-        ),
-      );
-      expect(find.text('还没有通知'), findsOneWidget);
-
-      final item = svc.error('导出失败', '磁盘空间不足');
-      await tester.pump();
-      expect(find.text('导出失败'), findsOneWidget);
-      expect(find.text('磁盘空间不足'), findsOneWidget);
-      expect(find.text(formatTime(item!.createdAt)), findsOneWidget);
-      expect(find.text('×2'), findsNothing);
-
-      svc.dismiss(item.id);
-      await tester.pump();
-      expect(svc.visible, isEmpty, reason: '关掉当前显示后历史还在');
-
-      await tester.tap(find.text('导出失败'));
-      await tester.pump();
-      expect(svc.visible.length, 1, reason: '点按历史行可重放');
-      expect(svc.visible.first.level, ToastLevel.error);
-
-      await tester.pump(const Duration(seconds: 6));
-      svc.dispose();
-    });
-
-    testWidgets('清空按钮清掉历史', (tester) async {
-      final svc = ToastService();
-      svc.info('一条通知');
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.build(),
-          home: Scaffold(body: Center(child: NotificationCenter(service: svc))),
-        ),
-      );
-      await tester.pump();
-      expect(find.text('一条通知'), findsOneWidget);
-
-      await tester.tap(find.text('清空'));
-      await tester.pump();
-      expect(find.text('还没有通知'), findsOneWidget);
-      expect(svc.history, isEmpty);
-      svc.dispose();
-    });
-
-    testWidgets('showNotificationCenter 可弹出并关闭', (tester) async {
-      final svc = ToastService();
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.build(),
-          home: Scaffold(
-            body: Builder(
-              builder: (ctx) => Center(
-                child: TextButton(
-                  onPressed: () => showNotificationCenter(ctx, service: svc),
-                  child: const Text('打开通知'),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('打开通知'));
-      await tester.pumpAndSettle();
-      expect(find.byType(NotificationCenter), findsOneWidget);
-      expect(find.text('还没有通知'), findsOneWidget);
-      expect(
-        tester.getCenter(find.byType(NotificationCenter)).dx,
-        closeTo(tester.getCenter(find.byType(MaterialApp)).dx, 1),
-        reason: '面板居中',
-      );
-
-      await tester.tap(find.text('关闭'));
-      await tester.pumpAndSettle();
-      expect(find.byType(NotificationCenter), findsNothing);
-      svc.dispose();
-    });
-
-    testWidgets('手机尺寸下历史名单不溢出', (tester) async {
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-
-      final svc = ToastService();
-      for (var i = 0; i < 30; i++) {
-        svc.info('通知 $i', '第 $i 条说明');
-      }
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.build(),
-          home: Scaffold(
-            body: Builder(
-              builder: (ctx) => Center(
-                child: TextButton(
-                  onPressed: () => showNotificationCenter(ctx, service: svc),
-                  child: const Text('打开通知'),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('打开通知'));
-      await tester.pumpAndSettle();
-
-      expect(tester.takeException(), isNull);
-      expect(find.byType(NotificationCenter), findsOneWidget);
-      expect(tester.getSize(find.byType(NotificationCenter)).width, lessThanOrEqualTo(390 - 32));
       svc.dispose();
     });
   });
@@ -514,6 +391,38 @@ void main() {
         final findings = findCopyViolations(File('${appDir.path}/$name').readAsStringSync());
         expect(findings, isEmpty, reason: '$name: ${findings.join("; ")}');
       }
+    });
+
+    test('无历史入口：除服务自身外，lib/ 不得消费 history/replay/clearHistory', () {
+      // 登记性防守（2026-11-19）：通知中心 UI 退役后，「通知历史可回看」不再
+      // 是验收项——历史降为 ToastService 内部缓冲（去重刷新 / replay 入参）。
+      // 若要在界面回接历史入口，先推翻 AGENTS.md Toast 节与
+      // docs/copy-glossary.md §7 的登记，再删掉本测试。
+      const serviceFile = 'lib/core/toast_service.dart';
+      const hostFile = 'lib/widgets/toast_host.dart';
+      // 只匹配 toast 服务专属的 API 形态：引擎撤销历史（store.history）、
+      // 3D（three_service 的 history 字段）、Icons.history 等同名但不同形，
+      // 不会命中这三个 token。宿主文件额外全禁 'history'——渲染层不得出现
+      // 任何历史面（只读回看也算入口）。
+      final patterns = <Pattern>[RegExp(r'\breplay\('), RegExp(r'\bclearHistory\('), 'maxHistory'];
+      final libDir = Directory('${_appDir().path}/lib');
+      final offenders = <String>[];
+      for (final file in libDir.listSync(recursive: true).whereType<File>()) {
+        if (!file.path.endsWith('.dart')) continue;
+        if (file.path.endsWith(serviceFile)) continue;
+        final isHost = file.path.endsWith(hostFile);
+        final code = _codeOnly(file.readAsStringSync());
+        final tokens = isHost ? <Pattern>[...patterns, 'history'] : patterns;
+        for (final token in tokens) {
+          if (code.contains(token)) {
+            final lineNo = code.split('\n').indexWhere((l) => l.contains(token)) + 1;
+            offenders.add('${file.path}:$lineNo → $token');
+          }
+        }
+      }
+      expect(offenders, isEmpty,
+          reason: '通知历史无 UI 入口是已登记的产品决策；'
+              '回接前先撤销登记：\n${offenders.join('\n')}');
     });
   });
 }

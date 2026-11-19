@@ -202,10 +202,10 @@ class HotAppService {
 
     final prompt = '把下面的产品原型忠实实现为单文件 HTML 应用。\n'
         '硬性要求（缺一条都算没有完成）：\n'
-        '1. 每个原型画板对应一个段落：<section data-screen=\"画板id\">…</section>；'
+        '1. 每个原型画板对应一个段落：<section data-screen="画板id">…</section>；'
         '页面初始只显示入口画板，其余隐藏。\n'
         '2. 每条原型跳转 from→to：在 from 画板段落内的可点元素上加属性 '
-        'data-nav=\"to\",点击后切换到目标画板。\n'
+        'data-nav="to",点击后切换到目标画板。\n'
         '3. 需要记住的数据一律用 window.NoN.db.exec（本机 SQLite，无需服务器）。\n'
         '4. 不引用任何网络资源：CSS/JS 全内联，不出现 http(s):// 或 // 开头的外链。\n'
         '5. 只输出完整 HTML 文档，不要解释。\n\n'

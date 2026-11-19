@@ -13,7 +13,7 @@
 ///    人话提示，绝不假装可用；
 ///  * **12 项目录 + PATH 强化**：nvm 各 node 版本 bin（新版优先）→ 登录 shell
 ///    的 PATH → 常见安装目录 → 进程 PATH；`npx` 形态同样在探测范围内；
-///    [AcpPathResolver.detect] 看可启动形态，[probeAcpAgent] 真跑一次握手；
+///    [AcpPathResolver.detect] 看可启动形态（静态检测，不做握手验证）；
 ///  * **工作区隔离**：agent 的 `fs/read_text_file` / `fs/write_text_file`
 ///    只能落在工作区内（符号链接真实路径也校验），越界返回 JSON-RPC 错误
 ///    （`-32001`），不写盘、不读盘；
@@ -73,7 +73,8 @@ String acpFailureMessage(String? code) {
 }
 
 // ============================================================
-// 目录（12 项，逐字对齐 server/acp_bridge.py 的最终白名单）
+// 目录（12 项；继承自已退场的 server/acp_bridge.py 最终白名单——该文件随
+// de-Python 迁移删除，本表即唯一权威）
 // ============================================================
 
 /// 一个可启动形态：`execs` 命中即用 `argv`（`{exe}` 替换成命中路径）。
@@ -1176,69 +1177,3 @@ class _ActivePrompt {
   final void Function(Map<String, dynamic> event) emit;
 }
 
-// ============================================================
-// 协议探测（initialize + session/new 实测）
-// ============================================================
-
-/// 一次探测的结论。
-class AcpProbeResult {
-  const AcpProbeResult(this.state, {this.detail = ''});
-
-  /// `verified` | `failed` | `unsupported`。
-  final String state;
-  final String detail;
-
-  bool get verified => state == 'verified';
-
-  Map<String, dynamic> toJson() => <String, dynamic>{'state': state, 'detail': detail};
-}
-
-/// 实测一个目录项能否完成 ACP 握手（spawn → initialize → session/new → close）。
-///
-/// 与「只看文件存在」的 [AcpPathResolver.detect] 互补：npx 首拉、需要登录的
-/// CLI、协议不兼容的适配器只有真跑一次才知道。失败不留进程、不留目录。
-Future<AcpProbeResult> probeAcpAgent({
-  required AcpCatalogEntry entry,
-  AcpHost? host,
-  AcpPathResolver? resolver,
-  String? workspace,
-  Duration timeout = const Duration(seconds: 30),
-}) async {
-  final resolvedHost = host ?? SystemAcpHost();
-  if (!resolvedHost.isDesktop) {
-    return const AcpProbeResult('unsupported', detail: 'desktop only');
-  }
-  if (entry.grayed) {
-    return AcpProbeResult('failed', detail: entry.note);
-  }
-  final ownsWorkspace = workspace == null;
-  final probeWorkspace =
-      workspace ?? Directory.systemTemp.createTempSync('acp-probe-').path;
-  final client = AcpClient(
-    host: resolvedHost,
-    resolver: resolver ?? AcpPathResolver(host: resolvedHost),
-    catalog: <AcpCatalogEntry>[entry],
-  );
-  try {
-    final started = await client.start(
-      agentId: entry.id,
-      workspace: probeWorkspace,
-      timeout: timeout,
-    );
-    return AcpProbeResult(
-      'verified',
-      detail: 'initialize+session/new ok (${started['sessionId']})',
-    );
-  } on AcpFailure catch (error) {
-    return AcpProbeResult('failed', detail: '${error.code}: ${error.detail}');
-  } catch (error) {
-    return AcpProbeResult('failed', detail: '$error');
-  } finally {
-    await client.close();
-    if (ownsWorkspace) {
-      try {
-        Directory(probeWorkspace).deleteSync(recursive: true);
-      } catch (_) {}
-    }
-  }
-}

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../core/keys.dart';
@@ -14,8 +14,9 @@ import 'workspace_open.dart';
 /// 主页（用户裁决：布局固定不变，是死规矩）。
 ///
 /// 结构只有三层：顶部品牌栏、中间「一句话 + 目标工作台」入口、下面并排
-/// 作品集 / 最近项目；底部状态行。**主页不再列插件工作台，也没有「工作方式」
-/// 说明卡**——目标工作台由输入卡里的选择器决定，其余入口走顶栏/⌘5–7。
+/// 作品集 / 最近项目；底部状态行。主页不直接列插件工作台：作品集卡聚合
+/// 热应用 / 3D / 视频三类产物，点条目直达对应工作台；其余入口走顶栏项目
+/// 下拉与作品集。
 class Welcome extends StatefulWidget {
   final VoidCallback onNewProject;
   final void Function(String path) onOpenPath;
@@ -514,8 +515,6 @@ class _WelcomeState extends State<Welcome> {
     );
   }
 
-  /// 目标工作台选择器：多个工作区并存，用户必须能指定这次任务落到哪个。
-  /// 选择写回 `store.chatWorkspaceMode`（持久化 + 通知），发送时自动生效。
   /// 工作台类型选择（聊天框左下角）：这次任务落到哪个工作台。
   /// 选择写回 `store.chatWorkspaceMode`（持久化 + 通知），发送时自动生效。
   Widget _workspaceSelector(BuildContext context, AppStore store) {

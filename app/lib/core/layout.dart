@@ -11,6 +11,13 @@
 /// | tablet landscape              | workspace/welcome + right chat rail      |
 /// | macOS / Windows / Linux       | workspace/welcome + right chat rail      |
 ///
+/// Mobile ruling 2026-11-19 (user decision; enforced by `orientation.dart` /
+/// `main.dart`): **phones are locked to portrait**. The `phone landscape` row
+/// above is no longer a real product face on devices — it survives only as the
+/// orientation-gate fallback (and on web short windows). It stays in the table
+/// because the classifier must still answer something if a phone-shaped
+/// landscape viewport ever shows up.
+///
 /// The iPad-portrait decision is deliberate and tested: a 3:4 tablet is too
 /// narrow to host the workspace *and* a 320–420pt chat rail without shrinking
 /// the canvas below a usable size, so portrait iPads keep the chat-first shell

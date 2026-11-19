@@ -10,7 +10,7 @@
 // 发送侧用 _RecordingSendStore 记录 sendChat 并落一条用户消息，避免在
 // widget 测试里造网络/模型配置；真实发送全链由 chat_stream_test.dart 的
 // store 级用例覆盖。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 

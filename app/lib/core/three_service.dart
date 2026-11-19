@@ -567,11 +567,10 @@ String? threeUiCatalogHealth(int count) {
 /// 「await 后重读再按层键控写回」（[runPass]）而不是内存锁。
 class ThreeService {
   ThreeService({
-    required Directory root,
+    required this._root,
     ThreeLlmCall? llm,
     ThreeAssetLoader? assets,
-  })  : _root = root,
-        _llm = llm ?? defaultThreeLlmCall,
+  })  : _llm = llm ?? defaultThreeLlmCall,
         _assets = assets ?? _bundleAssetLoader;
 
   /// 生产入口：`<用户文档>/NoNDesign/3d`。

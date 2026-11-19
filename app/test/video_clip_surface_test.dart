@@ -7,7 +7,7 @@
 //  ③ 注入 Fake 播放源时播放面不构造 WebView，16:9 画位仍在；
 //  ④ 平台没有应用内 WebView 时是「一句人话 + 用电脑上的连接桌面查看」，
 //     不是白屏；页面没启动时给「可重试」与重试按钮。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nondesign/core/platform_capabilities.dart';
@@ -27,14 +27,12 @@ VideoClipInfo _clip() => VideoClipInfo(
 /// 可编排的播放源：断言 UI 怎么调它，不需要真 WebView。
 class _FakePlayback extends VideoClipPlayback {
   _FakePlayback({
-    double duration = 13.2,
-    bool loop = true,
+    this._duration = 13.2,
     this.loadError = '',
-  })  : _duration = duration,
-        _loop = loop;
+  });
 
   final double _duration;
-  bool _loop;
+  bool _loop = true;
 
   double _t = 0;
   bool _playing = false;

@@ -13,7 +13,7 @@
 ///   的 tab 是壳层局部状态，只有用户显式点击才切换。
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../core/store.dart';

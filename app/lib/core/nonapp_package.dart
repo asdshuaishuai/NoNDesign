@@ -23,10 +23,12 @@
 //   · `assertHtmlOfflineSafe`（安装进本地库 / 写预览缓存前用）：允许比宽容
 //     面更严（误拒可接受），绝不允许更松（file:// 下只有 CSP 兜底）。
 //
-// 漂移风险：服务端改了 hotapp_agent.py:185-227 的三条正则，要回来对
-// `assertHtmlServerCompat`（同判据）与 `assertHtmlOfflineSafe`（更严面）。
+// 宽容判据的权威在本文件：旧在线实现 `server/hotapp_agent.py:185-227` 曾用
+// 下面这套正则，已随 de-Python 迁移（批次 15，2026-11-18）退场——不再有
+// 「改一侧必须改另一侧」的漂移对照物，`assertHtmlServerCompat` 以本文件内
+// 实现的这套语义为唯一判据，改动即影响旧包兼容面，须连同测试一起裁决。
 //
-//   服务端（server/hotapp_agent.py:185-227）：
+//   旧正则（考古存档，文件已删）：
 //     _ATTR_REF_RE = <(script|link|img) ... (src|href|srcset)="...">   (re.I|re.S)
 //     _CSS_URL_RE  = url( "..." | '...' | ... )
 //     _CSS_IMPORT_RE = @import ( url( "..."|'...'|... ) | "..." | '...' | ... )
@@ -36,7 +38,7 @@
 //   离线更严面：属性面更宽（多认 iframe、video、source、a 等元素的 src/href/poster/
 //   data），且额外全文扫 http(s)://；`//` 只在引用位置拒（JS 行注释里的
 //   `//` 不是外链）。唯一豁免：内联 SVG 的 xmlns 声明（那是命名空间标识，
-//   不是可加载引用，服务端也不拦）。
+//   不是可加载引用，旧在线实现同样不拦）。
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -48,7 +50,9 @@ import 'package:archive/archive.dart';
 /// `version:` 手工同步——漂移风险已登记在施工记录里。
 const String nonAppClientVersion = '0.1.0';
 
-/// 与 server/nonapp_agent.py 同一套上限（改一侧必须改另一侧）。
+/// 上限以本文件为唯一权威。旧在线实现 server/nonapp_agent.py 曾用同一套值，
+/// 该文件已随 de-Python 迁移（批次 15）退场，无同步对象；改这里的值即改变
+/// 包格式的兼容边界，须连同 nonapp_* 测试一起裁决。
 const int nonAppFormatVersion = 1;
 const int nonAppMaxPackageBytes = 8 * 1024 * 1024;
 const int nonAppMaxEntryBytes = 8 * 1024 * 1024;

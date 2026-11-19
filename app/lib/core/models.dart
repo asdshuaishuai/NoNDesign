@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 double _num(dynamic v, [double fallback = 0]) => (v is num) ? v.toDouble() : fallback;
 
 class NodeStyle {
@@ -436,11 +434,13 @@ class ModelRegistry {
 // 工作区模式（主页输入框选择的目标工作台）
 // ---------------------------------------------------------------------------
 
-/// 主页一句话输入的目标工作台：`auto` = 由 NaN 按任务自行决定。
+/// 主页一句话输入的目标工作台：`auto` = 未锁定工作台，与设计档同样走
+/// 「先文档后原型」的设计主线。
 ///
-/// 四个工作区互相独立（用户裁决 2026-11-18），但共用同一个 NaN：
-/// 用户在主页选中某个工作区，就是「这次任务先落在那里」；选 auto 则交给
-/// 智能体按任务状态与它调用的工具自己切（`store.followAgentWorkspace`）。
+/// 四个工作区互相独立，切换由用户驱动：选中某个工作区就是「这次任务先
+/// 落在那里」，开工前显式落视图（`store._runChatTurn`）；工具调永不把
+/// 主面拽到另一个工作区，只有设计工具能把主面带回设计画布
+/// （`store.followAgentWorkspace`，用户裁决 2026-11-19）。
 const String workspaceModeAuto = 'auto';
 const String workspaceModeDesign = 'design';
 const String workspaceModeThree = 'three';
@@ -553,7 +553,7 @@ class AppSettings {
   String _agentRuntime;
   String get agentRuntime => _agentRuntime;
   set agentRuntime(String value) => _agentRuntime = normalizeAgentRuntime(value);
-  /// 聊天优先壳（手机四向、iPad 竖屏）的主面选择：true = 聊天流，
+  /// 聊天优先壳（手机——锁竖屏、iPad 竖屏）的主面选择：true = 聊天流，
   /// false = 经典 Welcome。桌面/iPad 横屏的工作区壳不使用该值——设置面
   /// 只在聊天优先壳展示这一项，避免「开关打开却在桌面无效果」。
   bool chatStreamHome;
@@ -846,6 +846,3 @@ class TimelineEntry {
   static TimelineEntry finish(bool ok, String title, [String? detail]) =>
       TimelineEntry(kind: 'finish', ok: ok, title: title, text: detail ?? '');
 }
-
-Map<String, dynamic> deepCopy(Map<String, dynamic> m) =>
-    jsonDecode(jsonEncode(m)) as Map<String, dynamic>;

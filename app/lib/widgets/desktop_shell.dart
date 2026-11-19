@@ -13,7 +13,7 @@
 ///   与 348 的 RightPanel 形成双栏。
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../core/layout.dart';
@@ -242,8 +242,9 @@ class _DesktopShellState extends State<DesktopShell> {
     // 显式主页（工作区入口）：3D / 视频 / 热应用各自独立，返回时回主页而不是
     // 回某个设计项目——工作区之间不互相「挂靠」。
     if (store.view == 'home') return true;
-    // 插件工作台（3D / 视频 / 热应用）不是主页：从主页用 ⌘5–⌘7 或 NaN 切过去
-    // 时，即使还没有项目也必须让工作台占住主面（右侧 NaN 窄栏照常在）。
+    // 插件工作台（3D / 视频 / 热应用）不是主页：打开对应类型的项目（顶栏
+    // 项目菜单 / 主页作品集 / 艺术架）或让 NaN 在工作区模式下建一个，即使
+    // 还没有项目也必须让工作台占住主面（右侧 NaN 窄栏照常在）。
     if (store.view.startsWith('plugin:')) return false;
     // 离线恢复/导入的文档没有项目也要可见（旧路由的 api==null && docs 语义）。
     final docsVisible = store.view == 'docs' &&

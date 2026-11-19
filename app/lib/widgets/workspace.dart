@@ -1,5 +1,5 @@
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -416,7 +416,8 @@ Future<void> openProjectFlow(BuildContext context, String path) async {
   if (!context.mounted) return;
   var result = await store.openProjectPath(target);
   var attempt = 0;
-  while (result == OpenResult.needPassword && attempt < 3 && context.mounted) {
+  while (result == OpenResult.needPassword && attempt < 3) {
+    if (!context.mounted) return;
     final pw = await showNonDialog<String>(
       context: context,
       builder: (context) => PasswordDialog(path: target, retry: attempt > 0),

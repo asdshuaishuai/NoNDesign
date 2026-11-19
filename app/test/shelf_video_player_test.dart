@@ -9,7 +9,7 @@
 //    不开这两个参数视频会被自动播放策略静默拦住（真机黑屏的根因）；
 //  ④ 主帧加载失败 → 覆盖层「无法播放」+ 复制路径（失败不是死端）；
 //  ⑤ 默认创作面（代码动画）不创建 WebView（工作台测试无需平台桩）。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';

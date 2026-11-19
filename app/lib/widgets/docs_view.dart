@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
 
@@ -9,6 +9,7 @@ import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
+import 'markdown_theme.dart';
 import 'left_panel.dart' show ExtractCompareView, extractDesignData;
 
 class DocsView extends StatefulWidget {
@@ -91,9 +92,9 @@ class _DocsViewState extends State<DocsView> {
       }
       _lastTab = tab;
     }
-    if (tab != 'spec' && _syncedFor != '${tab}:${source.hashCode}' && _editor.text != source) {
+    if (tab != 'spec' && _syncedFor != '$tab:${source.hashCode}' && _editor.text != source) {
       _editor.text = source;
-      _syncedFor = '${tab}:${source.hashCode}';
+      _syncedFor = '$tab:${source.hashCode}';
     }
     return Column(
       children: [
@@ -330,7 +331,7 @@ class _DocsViewState extends State<DocsView> {
                     ),
                     child: MarkdownBody(
                       data: store.liveDocText,
-                      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                      styleSheet: markdownStyleSheetOf(context).copyWith(
                         p: TextStyle(fontSize: 13, height: 1.7, color: p.ink2),
                         h1: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: p.ink),
                         h2: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink),
@@ -349,7 +350,7 @@ class _DocsViewState extends State<DocsView> {
                     ),
                     child: MarkdownBody(
                       data: source,
-                      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                      styleSheet: markdownStyleSheetOf(context).copyWith(
                         p: TextStyle(fontSize: 13, height: 1.7, color: p.ink2),
                         h1: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: p.ink),
                         h2: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink),
@@ -467,7 +468,8 @@ class _SpecPreviewState extends State<_SpecPreview> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 窄屏（手机 390 / 手机横屏）此前标题 + 两个按钮挤在一行右溢 121px：
+          // 窄屏（手机 390 / 手机横屏——2026-11-19 起真机到不了，仅方向门兜底/
+          // web 矮窗可达）此前标题 + 两个按钮挤在一行右溢 121px：
           // 窄屏让按钮换行，宽屏保持原来的「标题左、按钮右」布局。
           LayoutBuilder(builder: (context, constraints) {
             final title = Text('设计规范',

@@ -25,14 +25,14 @@ void main() {
     } catch (_) {}
   });
 
-  Directory _videoRoot() {
+  Directory videoRoot() {
     final dir = Directory('${tmp.path}/videos')..createSync(recursive: true);
     return dir;
   }
 
   /// 写一个可被库扫描到的热应用（manifest + index.html）。
   void writeHotapp(String rootPath, String name, {String title = ''}) {
-    final dir = Directory('${rootPath}/$name')..createSync(recursive: true);
+    final dir = Directory('$rootPath/$name')..createSync(recursive: true);
     File('${dir.path}/manifest.json').writeAsStringSync(jsonEncode({
       'name': name,
       'title': title.isEmpty ? name : title,
@@ -43,7 +43,7 @@ void main() {
   }
 
   void writeThree(String rootPath, String name, {bool blocked = false}) {
-    final dir = Directory('${rootPath}/$name')..createSync(recursive: true);
+    final dir = Directory('$rootPath/$name')..createSync(recursive: true);
     File('${dir.path}/build-state.json').writeAsStringSync(jsonEncode({
       'current': 'material',
       'blocked': blocked,
@@ -63,7 +63,7 @@ void main() {
     writeHotapp(libRoot.path, 'demo-app', title: '演示应用');
     final threeRoot = Directory('${tmp.path}/three')..createSync(recursive: true);
     writeThree(threeRoot.path, 'saturn-demo');
-    final videos = _videoRoot();
+    final videos = videoRoot();
     writeVideo(videos, 'clip.mp4', DateTime(2026, 11, 19, 10));
 
     final entries = await loadPortfolioEntries(
@@ -89,7 +89,7 @@ void main() {
   });
 
   test('视频按修改时间倒序；3D 未完成标记可见', () async {
-    final videos = _videoRoot();
+    final videos = videoRoot();
     writeVideo(videos, 'older.mp4', DateTime(2026, 11, 18, 8));
     writeVideo(videos, 'newer.mp4', DateTime(2026, 11, 19, 8));
     final threeRoot = Directory('${tmp.path}/three')..createSync(recursive: true);
@@ -117,7 +117,7 @@ void main() {
     for (var i = 0; i < 4; i++) {
       writeThree(threeRoot.path, 'scene-$i');
     }
-    final videos = _videoRoot();
+    final videos = videoRoot();
     for (var i = 0; i < 4; i++) {
       writeVideo(videos, 'v$i.mp4', DateTime(2026, 11, 19, i));
     }
@@ -156,7 +156,7 @@ void main() {
   });
 
   test('通用文件名（frames.mp4）用目录名当标题，避免首页一排同名条目', () async {
-    final videos = _videoRoot();
+    final videos = videoRoot();
     final dir = Directory('${videos.path}/video-1795006477531-1')..createSync(recursive: true);
     writeVideo(dir, 'frames.mp4', DateTime(2026, 11, 19, 9));
 

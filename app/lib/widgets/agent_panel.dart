@@ -431,7 +431,7 @@ class _AgentPanelState extends State<AgentPanel> {
                           // 通知才刷新，打字后按钮滞留禁用态）。
                           ListenableBuilder(
                             listenable: _input,
-                            builder: (_, __) => FilledButton.icon(
+                            builder: (_, _) => FilledButton.icon(
                               style: FilledButton.styleFrom(
                                 backgroundColor: p.accent,
                                 foregroundColor: Colors.white,
@@ -795,7 +795,7 @@ class _TimelineRow extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 6),
           child: MarkdownBody(
             data: entry.text,
-            styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+            styleSheet: markdownStyleSheetOf(context).copyWith(
               p: TextStyle(fontSize: 12, height: 1.55, color: p.ink2),
             ),
           ),

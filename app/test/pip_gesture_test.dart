@@ -7,7 +7,7 @@
 //
 // 两路指针用 tester.startGesture 显式构造（tester.drag 表达不了「拖动中
 // 第二根手指点内容」的并发场景）。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 

@@ -12,7 +12,7 @@
 // 不扫的东西（刻意的）：
 //  * 用户文件名与路径——那是用户数据，不是文案（与「文件选择器保留扩展名」同一条例外）；
 //  * 输入框里的**值**（可能含用户输入的地址）——只扫 placeholder/提示等设计文案。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,13 +22,11 @@ import 'package:nondesign/core/models.dart' as m show Flow;
 import 'package:nondesign/core/platform_capabilities.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
-import 'package:nondesign/core/toast_service.dart';
 import 'package:nondesign/widgets/chat_stream.dart';
 import 'package:nondesign/widgets/command_palette.dart';
 import 'package:nondesign/widgets/docs_view.dart';
 import 'package:nondesign/widgets/hotapp_workspace.dart';
 import 'package:nondesign/widgets/left_panel.dart';
-import 'package:nondesign/widgets/notification_center.dart';
 import 'package:nondesign/widgets/play_view.dart';
 import 'package:nondesign/widgets/portfolio_view.dart';
 import 'package:nondesign/widgets/right_panel.dart';
@@ -224,7 +222,7 @@ AppStore _store({bool project = false}) {
           ),
         ],
       ),
-      Artboard(id: 'detail', name: '详情', width: 390, height: 844, nodes: const []),
+      Artboard(id: 'detail', name: '详情', width: 390, height: 844, nodes: []),
     ],
     flows: const [m.Flow(from: 'home', to: 'detail', trigger: 'tap:cta')],
   );
@@ -380,7 +378,7 @@ void main() {
         }
       });
 
-      testWidgets('浮层：命令面板 / 通知历史 / 设置', (tester) async {
+      testWidgets('浮层：命令面板 / 设置', (tester) async {
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
         final store = _store(project: true);
@@ -427,24 +425,6 @@ void main() {
         await _tick(tester, 200);
         await _tick(tester, 200);
         _expectCopyClean(tester, '$label · 设置');
-      });
-
-      testWidgets('通知历史（四个级别 + 详情）', (tester) async {
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-        final store = _store(project: true);
-        final toasts = ToastService(autoDismiss: false);
-        toasts.success('已保存', '演示项目');
-        toasts.info('已复制路径');
-        toasts.warn('这台设备不支持在文件夹中显示');
-        toasts.error('模型下载失败', '请检查网络后重试');
-        await _pump(
-          tester,
-          size,
-          _host(store, _scaffold(Center(child: NotificationCenter(service: toasts)))),
-        );
-        _expectCopyClean(tester, '$label · 通知历史');
-        toasts.dispose();
       });
     });
   }

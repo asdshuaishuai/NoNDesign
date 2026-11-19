@@ -18,7 +18,7 @@ import 'package:ai_sdk_dart/test.dart';
 // 需要其流片段/结果类型来覆写 doStream（store_test 同款模式的本文件副本）。
 // ignore: depend_on_referenced_packages
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;

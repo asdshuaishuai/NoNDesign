@@ -5,9 +5,11 @@
 /// against, and it must stay importable from unit tests and tools that never
 /// touch the WASM executor.
 ///
-/// The ABI itself is documented in `AGENTS.md § 引擎 ABI` and implemented on
-/// the Python reference host (`server/engine.py`). Everything here mirrors that
-/// file; when the engine adds an export, update [kSessionExports] /
+/// The ABI itself is documented in `AGENTS.md § 引擎 ABI`. These constants were
+/// ported from the retired Python reference host (`server/engine.py`, removed
+/// with the de-Python migration, batch 15 — see
+/// `docs/plan-dart-agent-migration.md` and git history); this file is now the
+/// only living copy. When the engine adds an export, update [kSessionExports] /
 /// [kSessionInExports] and the sync probe together.
 library;
 
@@ -18,7 +20,8 @@ import 'dart:convert';
 // ---------------------------------------------------------------------------
 
 /// Slots are pushed in 4-byte little-endian chunks: `LE u32 value` +
-/// `u32 valid-length` (1..4). `server/engine.py::_slot` is the reference.
+/// `u32 valid-length` (1..4). Layout follows the retired
+/// `server/engine.py::_slot` (historical reference; file removed 2026-11-18).
 const int kEngineSlotChunkBytes = 4;
 
 /// Engine strings are `[len@ptr-4][UTF-16LE@ptr]`; the length field carries a
@@ -138,8 +141,9 @@ const List<String> kSessionInExports = <String>[
   'session_tap_in',
 ];
 
-/// Envelope sessions that return a mutated canonical document. Mirrors
-/// `SESSION_MUTATING` in `server/engine.py` — the host writes the returned
+/// Envelope sessions that return a mutated canonical document. Ported from the
+/// retired `SESSION_MUTATING` table in `server/engine.py` (file removed with
+/// the de-Python migration) — the host writes the returned
 /// `mbt` back into the session cache so the next caller hits the same handle.
 ///
 /// `session_history` is included even though `init`/`commit`/`log` return no
@@ -292,27 +296,10 @@ class EngineCallFailure implements Exception {
   String toString() => detail.isEmpty ? code : '$code: $detail';
 }
 
-// ---------------------------------------------------------------------------
-// Envelope helpers
-// ---------------------------------------------------------------------------
-
-/// True when an engine envelope reports success.
-bool engineEnvelopeOk(Map<String, dynamic> envelope) => envelope['ok'] == true;
-
-/// The canonical document carried by a mutating envelope, if any.
-String? engineEnvelopeCanonical(Map<String, dynamic> envelope) {
-  final value = envelope['mbt'];
-  return value is String && value.isNotEmpty ? value : null;
-}
-
-/// The `error` code of a failed envelope (never user-facing).
-String? engineEnvelopeError(Map<String, dynamic> envelope) {
-  final value = envelope['error'];
-  return value is String && value.isNotEmpty ? value : null;
-}
-
-/// Normalises a raw engine reply the way `server/engine.py::_parse` does:
-/// an empty pointer is `engine_empty_result`, a non-JSON body is
+/// Normalises a raw engine reply the way the retired
+/// `server/engine.py::_parse` did (historical source; file removed with the
+/// de-Python migration): an empty pointer is `engine_empty_result`, a non-JSON
+/// body is
 /// `engine_non_json` with the first 400 characters preserved, and a JSON
 /// scalar/array is wrapped as `{ok: true, data: …}`.
 Map<String, dynamic> parseEngineEnvelope(String raw) {

@@ -1,7 +1,11 @@
-# 待修复 UI 问题（用户实测，2026-11-18）
+# UI 修复台账（已完结 2026-11-18）
 
-> 迁移工作流（去 Python 化 + 文案人性化）结束后修复。全域审查工作流必须把这两条当作
-> **已确认的高优先问题**，不得降级为风格偏好。
+> **状态：已全部修复并验证，本文件只留作历史记录**（见下文「修复记录」）。
+> 头部的下列指令已失效，审查/修复工作流**不要再**把它当作开放问题或高优先
+> 项重复认领：
+>
+> > ~~迁移工作流（去 Python 化 + 文案人性化）结束后修复。全域审查工作流必须把这两条当作
+> > **已确认的高优先问题**，不得降级为风格偏好。~~（历史指令，2026-11-18 修复后失效）
 
 ## UI-1 桌面主页默认不显示右侧栏
 
@@ -54,42 +58,48 @@
 
 未覆盖：本机屏幕锁定，未能抓取运行中窗口的实机截图；主页无右栏与两 tab 由 widget 测试锚定。
 
-## 架构裁决（用户 2026-11-18，已实施）
+## 架构裁决（用户 2026-11-18；本段实施细节已被 2026-11-19 裁决取代）
+
+> ⚠️ **历史批注（2026-11-19）**：本段描述的中性模块入口实现已被后续裁决推翻——
+> 提交 **84ad0c4**「项目落地直接进所属工作区（删除模块选择界面）」删除了 hub 与
+> ProjectHubView（`store._projectLandingView` 已不存在，新建/打开项目直进所属
+> 工作区）；提交 **9f17c0b** 撤掉了 ⌘5–⌘7 直跳键（全库 `app/lib` 已无 Digit5–7
+> 处理器）。现行规则见 AGENTS.md「工作台切换 = 项目切换」：工作台跟项目走，
+> 切换入口是顶栏项目下拉。下文按当时事实保留，仅 ⌘5/⌘6 表述作废。
 
 设计 / 热应用 / 3D / 视频 = **四个相互独立的模块**；NaN（chat agent）可以控制每个模块；
 唯一的模块间关联是 **设计 → 热应用**（可以从设计生成热应用）。设计与 3D、视频无关联。
 
-实施内容：
+实施内容（历史）：
 
-- **项目落地不默认设计**：`store._projectLandingView` —— 桌面壳（macOS/Windows/Linux）
-  新建/打开项目落在中性模块入口 `hub`（ProjectHubView：四个模块卡片 + NaN 提示）；
-  移动端壳保持设计工作面。运行完成后跳设计画布展示结果是显式行为，保留。
-- **设计工具条解耦**：设计画布工具条只保留热应用入口（设计 → 热应用是唯一合法关联）；
-  3D / 视频入口在主页工作台与全局 ⌘5/⌘6 快捷键，不再挂在设计工具条上。
+- **项目落地不默认设计**（已被 84ad0c4 取代）：`store._projectLandingView` —— 桌面壳
+  （macOS/Windows/Linux）新建/打开项目落在中性模块入口 `hub`（ProjectHubView：四个模块
+  卡片 + NaN 提示）；移动端壳保持设计工作面。运行完成后跳设计画布展示结果是显式行为，
+  保留。
+- **设计工具条解耦**（⌘5/⌘6 表述已随 9f17c0b 作废）：设计画布工具条只保留热应用入口
+  （设计 → 热应用是唯一合法关联）；3D / 视频入口只在主页工作台与顶栏项目下拉
+  （原写法「全局 ⌘5/⌘6 快捷键」已删）。
 - **发布资产修复（实测发现）**：`assets/three/`（3D 预览模板 + three.module.js）与
   `assets/a2ui_web/`（A2UI 官方 Web 渲染器页面）此前未声明进 `flutter.assets`，
   release 包里 3D 工作台报「预览文件缺失」、A2UI Web 卡不可用。已加入 pubspec 并验证
   3D 规范 → 生成 → WebView 渲染全链可用。
 
-验证：`flutter analyze` 0 error/warning；`flutter test` 820 项全绿（含新增
-project_hub_test：桌面落 hub / hub 卡片进入对应模块 / 移动端行为不变）。
+验证（历史）：`flutter analyze` 0 error/warning；当时 `flutter test` 820 项全绿。
+> ⚠️ 该计数含已删除的 project_hub_test（hub 随 84ad0c4 退场，测试一并删除，
+> `grep -rn "project_hub" app/lib app/test` 现为零命中）；820 已不代表当前测试总数，
+> 引用本段数字时以当时批次为准，不要当作现行基线。
 
 ## 新能力：由产品原型生成可验证的热应用（2026-11-18，已实施）
 
-设计 → 热应用是唯一允许的模块间关联；本能力把它做成一等能力并加上**确定性验证**：
+> **本文已迁出**：完整规格（服务面、字节级覆盖验证、verified 如实上报、入口与
+> 失败语义）现维护在 [docs/hotapp-from-prototype.md](hotapp-from-prototype.md)，
+> 请以那份文档为准。要点回顾：设计 → 热应用是一等能力，生成结果做**字节级
+> 覆盖验证**，验证未过时如实上报 `verified=false` 不冒充成功；入口在热应用
+> 工作台顶栏「由原型生成」按钮（2026-11-19 起唯一化，设计画布工具条只留
+> 进入热应用工作台的入口，见 hotapp-from-prototype.md §4）。agent 工具
+> `hotapp_from_prototype` **尚未实施**（待加
+> AgentWorkspaceServices/RPC 面，见新文档「后续」一节）。
 
-- 服务面 `HotAppService.generateFromPrototype`：输入画板清单 + 跳转清单 + 规范文档，
-  提示词要求逐屏 `<section data-screen="<id>">`、逐连线 `data-nav="<to>"`、
-  本机数据走 `window.NoN.db`、零外链全内联。
-- **覆盖验证是字节级检查，不是模型自评**：逐画板查段落、逐连线查 from 段落内的
-  `data-nav` 目标；结构门（离线/零外链/CSP）仍由 NonAppLibrary.install 把关。
-- 结果如实上报：验证未过时应用仍入库（结构门已过、不回滚），但 `verified=false`
-  并给出缺失项人话摘要；UI 不冒充成功。
-- 入口：设计画布工具条「由原型生成热应用」（设计视图内，紧邻热应用入口）；
-  store 路径 `generateHotAppFromPrototype`（应用名由项目名派生并去重，成功/部分成功
-  都会切到热应用工作台打开新应用）。
-- 后续：agent 工具 `hotapp_from_prototype`（需给 AgentWorkspaceServices/RPC 面
-  加方法，涉及 api.dart 远端实现与 rpc_methods 宿主，单独一批做）。
-
-验证：hotapp_local_test 新增 3 例（全量覆盖 verified=true / 缺画板如实上报 /
-缺连线如实上报），全量 `flutter test` 823 项全绿，analyze 0 error/warning。
+验证记录（历史，2026-11-18）：hotapp_local_test 新增 3 例（全量覆盖
+verified=true / 缺画板如实上报 / 缺连线如实上报），全量 `flutter test` 823 项
+全绿，analyze 0 error/warning。

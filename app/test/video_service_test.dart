@@ -38,8 +38,8 @@ Map<String, dynamic> _science({
       'laws': <String>['定律一'],
       'assumptions': <String>['假设一'],
       'facts': <String>['事实一'],
-      if (params != null) 'params': params,
-      if (formulas != null) 'formulas': formulas,
+      'params': ?params,
+      'formulas': ?formulas,
     };
 
 Map<String, dynamic> _screenplay({List<dynamic>? beats}) => <String, dynamic>{

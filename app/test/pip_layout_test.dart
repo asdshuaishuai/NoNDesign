@@ -6,7 +6,7 @@
 //  * 『全屏』铺满堆叠区、『✕』收回浮窗，最大化态不记忆到下一次打开；
 //  * 浮窗 rect 持久化到 SharedPreferences：重启恢复（含拖动后的新几何）；
 //  * 390×844 / 844×390 / 768×1024 三档开浮窗都没有 RenderFlex 溢出。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';

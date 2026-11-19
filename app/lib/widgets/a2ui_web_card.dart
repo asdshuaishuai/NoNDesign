@@ -1,6 +1,9 @@
 // 官方 A2UI Web 渲染器的 WebView 承载（spike；决策记录见
 // docs/plan-a2ui-web-spike.md）。
 //
+// ⚠ 当前无生产接线：仅 test/a2ui_web_spike_test.dart 引用本卡片，产品主路径
+// 仍是原生 a2ui_card。保留作 .nonapp 跨端备选，启用前需补生产接入点。
+//
 // 页面来自 third_party/a2ui_web 的打包产物（app/assets/a2ui_web/index.html）：
 // 官方 @a2ui/web_core + @a2ui/lit 把 A2UI v1.0 surface 画成自包含 HTML，
 // CSP 只经 <meta> 注入、connect-src 'none'、零 CDN。本文件是 Dart 侧唯一
@@ -23,7 +26,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:webview_flutter/webview_flutter.dart';
 

@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:provider/provider.dart';
 
@@ -103,7 +103,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       return;
     }
     try {
-      final agents = await api.acpAgents(probe: true).timeout(const Duration(seconds: 50));
+      // probe:true 只绕过上次检测缓存，不会真启动任何智能体验证协议；
+      // 静态检测（目录扫描 + PATH 解析）通常几秒内完成，20s 是宽裕上限。
+      final agents = await api.acpAgents(probe: true).timeout(const Duration(seconds: 20));
       if (mounted) {
         setState(() {
           _acpAgents = agents;
@@ -112,7 +114,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       }
     } catch (e) {
       // 失败显性呈现（_acp 顶部错误行 + 重试），不静默吞掉——原始错误只进日志。
-      debugPrint('[settings] external agent probe failed: $e');
+      debugPrint('[settings] external agent detect failed: $e');
       if (mounted) setState(() => _acpError = '检测没有完成，请稍后重试');
     }
   }
@@ -830,7 +832,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   Widget _appearance(BuildContext context, AppStore store) {
     final p = context.palette;
-    // 「主面」只在聊天优先壳（手机四向、iPad 竖屏）生效；桌面/iPad 横屏是
+    // 「主面」只在聊天优先壳（手机——锁竖屏、iPad 竖屏）生效；桌面/iPad 横屏是
     // 工作区优先壳，主面由壳层裁决（Welcome / Workspace），不展示无效开关。
     final size = MediaQuery.sizeOf(context);
     final hostOs = switch (Theme.of(context).platform) {
@@ -1648,16 +1650,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             store,
             a.id,
             a.name,
-            a.probeState == 'probing' ? '协议探测中…' : a.note,
+            a.note,
             a.selectable,
             a.grayed,
-            a.probeState == 'probing'
-                ? '探测中'
-                : a.probeState == 'verified'
-                    ? '已验证'
-                    : a.installed
-                        ? '已安装'
-                        : '未安装',
+            a.installed ? '已安装' : '未安装',
           ),
         const SizedBox(height: 10),
         Text('检测基于本机已安装的智能体；部分适配器需要先全局安装。'

@@ -61,7 +61,7 @@ Map<String, Object?> _manifest({
       'renderer': renderer,
       'createdAt': createdAt,
       'minAppVersion': '0.1.0',
-      if (brief != null) 'brief': brief,
+      'brief': ?brief,
     };
 
 List<int> _htmlPackage({String name = 'demo-app', String marker = 'library-marker'}) => _zip({
