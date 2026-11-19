@@ -28,6 +28,7 @@ import 'package:nondesign/core/api.dart';
 import 'package:nondesign/core/capability.dart';
 import 'package:nondesign/core/dart_agent.dart';
 import 'package:nondesign/core/figma_export.dart';
+import 'package:nondesign/core/hotapp_service.dart' show PrototypeLinkSpec, PrototypeScreenSpec;
 import 'package:nondesign/core/models.dart';
 
 /// 多轮脚本化模型（与 dart_agent_test 的 _ScriptedModel 同构）。
@@ -90,6 +91,9 @@ class _FakeEngine implements LocalEngine {
     <String, dynamic>{'id': '__seed', 'width': 24, 'height': 24, 'nodes': 0},
     <String, dynamic>{'id': 'empty', 'width': 390, 'height': 844, 'nodes': 1},
   ];
+
+  /// session_flows 返回的跳转清单（默认空；from-prototype 测试会注入）。
+  List<Map<String, dynamic>> flows = <Map<String, dynamic>>[];
 
   @override
   bool get isReady => ready;
@@ -166,7 +170,7 @@ class _FakeEngine implements LocalEngine {
           'data': boards.map((b) => Map<String, dynamic>.from(b)).toList(),
         };
       case 'session_flows':
-        return <String, dynamic>{'ok': true, 'data': <dynamic>[]};
+        return <String, dynamic>{'ok': true, 'data': flows.map((f) => Map<String, dynamic>.from(f)).toList()};
       case 'session_query_nodes':
         return <String, dynamic>{
           'ok': true,
@@ -347,6 +351,32 @@ class _FakeWorkspace implements AgentWorkspaceServices {
   Future<Map<String, dynamic>> hotAppInspect(String name) async {
     calls.add('hotapp_inspect:$name');
     return <String, dynamic>{'ok': true, 'app': name};
+  }
+
+  List<PrototypeScreenSpec>? lastFromPrototypeScreens;
+  List<PrototypeLinkSpec>? lastFromPrototypeFlows;
+  String? lastFromPrototypeMbt;
+  bool fromPrototypeVerified = true;
+
+  @override
+  Future<Map<String, dynamic>> hotAppFromPrototype({
+    required String name,
+    required String prototypeMbt,
+    required List<PrototypeScreenSpec> screens,
+    required List<PrototypeLinkSpec> flows,
+  }) async {
+    calls.add('hotapp_from_prototype:$name');
+    lastFromPrototypeScreens = screens;
+    lastFromPrototypeFlows = flows;
+    lastFromPrototypeMbt = prototypeMbt;
+    return <String, dynamic>{
+      'ok': true,
+      'app': name,
+      'bytes': 140,
+      'screens': screens.length,
+      'flows': flows.length,
+      'verified': fromPrototypeVerified,
+    };
   }
 
   @override
@@ -776,6 +806,80 @@ void main() {
           'figma_export',
         ]),
       );
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('hotapp_from_prototype：设计→热应用链路（提取屏/跳转 + 验证结果如实上报）', () async {
+      final engine = _FakeEngine()
+        ..flows = <Map<String, dynamic>>[
+          <String, dynamic>{'from': 'home', 'to': 'empty', 'trigger': 'tap'},
+        ];
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      final result = await runDartAgent(
+        request: _buildRequest(engine),
+        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
+          <LanguageModelV4ContentPart>[
+            mockToolCall(
+              toolName: 'hotapp_from_prototype',
+              input: <String, dynamic>{'name': 'proto-demo'},
+            ),
+          ],
+          <LanguageModelV4ContentPart>[
+            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '原型已转热应用'}),
+          ],
+        ]),
+        bridge: LocalEngineGate(engine),
+        workspace: workspace,
+        onEvent: events.add,
+      );
+
+      expect(result.ok, isTrue);
+      expect(workspace.calls, contains('hotapp_from_prototype:proto-demo'));
+      // 屏提取：__seed 剔除，home + empty 保留；跳转来自 session_flows。
+      final protoScreens = workspace.lastFromPrototypeScreens;
+      expect(protoScreens?.map((s) => s.id).toList(), <String>['home', 'empty']);
+      expect(workspace.lastFromPrototypeFlows, hasLength(1));
+      expect(workspace.lastFromPrototypeFlows?.single.to, 'empty');
+      // 原型文档随调用下发（截断上限 12000 与 store 路径一致）。
+      expect(workspace.lastFromPrototypeMbt, isNotNull);
+      expect(workspace.lastFromPrototypeMbt!.length, lessThanOrEqualTo(12000));
+
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'hotapp_from_prototype',
+      );
+      expect(end['ok'], isTrue);
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('hotapp_from_prototype：画布没有原型 → prototype_empty 人话，不打服务', () async {
+      final engine = _FakeEngine()..boards.clear();
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      await runDartAgent(
+        request: _buildRequest(engine),
+        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
+          <LanguageModelV4ContentPart>[
+            mockToolCall(
+              toolName: 'hotapp_from_prototype',
+              input: <String, dynamic>{'name': 'proto-demo'},
+            ),
+          ],
+          <LanguageModelV4ContentPart>[
+            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '停'}),
+          ],
+        ]),
+        bridge: LocalEngineGate(engine),
+        workspace: workspace,
+        onEvent: events.add,
+      );
+
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'hotapp_from_prototype',
+      );
+      expect(end['ok'], isFalse);
+      expect(end['error'], 'prototype_empty');
+      expect(end['message'], '画布上还没有原型，先生成原型再转热应用');
+      expect(workspace.calls.where((c) => c.startsWith('hotapp_from_prototype')), isEmpty,
+          reason: '没有原型就不该打到服务');
     }, timeout: const Timeout(Duration(minutes: 2)));
 
     test('服务失败码 → tool_end.message 人话（原始码保留）', () async {

@@ -265,6 +265,8 @@ String toolLabel(String tool) {
       return '热应用 · 精修';
     case 'hotapp_inspect':
       return '热应用 · 查看';
+    case 'hotapp_from_prototype':
+      return '热应用 · 由原型生成';
     case 'video_review':
       return '视频 · 对照检查';
     case 'video_render':
@@ -328,6 +330,8 @@ String toolFailureMessage(String? rawError) {
       return '模型文件校验失败，已删除，请重试';
     case 'nonapp_unsupported_version':
       return '应用版本过新，请更新本应用';
+    case 'prototype_empty':
+      return '画布上还没有原型，先生成原型再转热应用';
     case 'doc_kind_must_be_prd_or_ui':
       return '文档类型不对，请重试';
     case 'doc_not_written':
@@ -414,6 +418,16 @@ abstract class AgentWorkspaceServices {
   Future<Map<String, dynamic>> hotAppGenerate({required String name, required String brief});
   Future<Map<String, dynamic>> hotAppRefine({required String name, required String instruction});
   Future<Map<String, dynamic>> hotAppInspect(String name);
+
+  /// 设计 → 热应用（唯一允许的模块间关联）：由原型生成**可验证**的热应用。
+  /// 屏与跳转由调用方从原型提取；生成后跑确定性覆盖验证（每屏 data-screen、
+  /// 每条连线 data-nav），结果如实带 verified / 未通过项。
+  Future<Map<String, dynamic>> hotAppFromPrototype({
+    required String name,
+    required String prototypeMbt,
+    required List<PrototypeScreenSpec> screens,
+    required List<PrototypeLinkSpec> flows,
+  });
 
   // -- 视频（批次 08；渲染只在桌面） --
   Future<Map<String, dynamic>> videoReview({
@@ -686,6 +700,42 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         'brief': app.brief,
         'bytes': app.payloadBytes,
         if (surface != null) 'surfaceNodes': surface.length,
+      };
+    } catch (error) {
+      return _failure('hotapp_failed', hotAppFailureMessage(_hotAppFailure(error)), '$error');
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> hotAppFromPrototype({
+    required String name,
+    required String prototypeMbt,
+    required List<PrototypeScreenSpec> screens,
+    required List<PrototypeLinkSpec> flows,
+  }) async {
+    try {
+      final service = await _hotAppFactory();
+      final result = await service.generateFromPrototype(
+        name: name,
+        config: HotAppLlmConfig(
+          model: model,
+          baseUrl: baseUrl,
+          apiKey: apiKey,
+          thinkingLevel: thinkingLevel,
+        ),
+        prototypeMbt: prototypeMbt,
+        screens: screens,
+        flows: flows,
+      );
+      return <String, dynamic>{
+        'ok': true,
+        'app': result.app.name,
+        'title': result.app.title,
+        'bytes': result.app.payloadBytes,
+        'screens': screens.length,
+        'flows': flows.length,
+        'verified': result.verified,
+        if (!result.verified) 'failures': result.failureSummary,
       };
     } catch (error) {
       return _failure('hotapp_failed', hotAppFailureMessage(_hotAppFailure(error)), '$error');
@@ -1350,6 +1400,9 @@ generate_page, do not describe a canvas prototype.
   (create from a one-line brief, then pass by pass; report the new scene length after each pass).
 - Hot app: hotapp_list / hotapp_generate / hotapp_refine / hotapp_inspect
   (single-file HTML app with local data; verify it before claiming done).
+- Design → hot app: hotapp_from_prototype (the sanctioned cross-module link). When the user
+  wants the canvas prototype as a runnable app, call it — screens and flows are extracted
+  from the prototype automatically and the result reports verified or what is missing.
 - Video: video_review
   (code-driven animation: a timeline script + spec; frames are generated from formulas,
   nothing is rasterized to a video file). The workspace plays the animation live.
@@ -1409,6 +1462,8 @@ String composeDartInstructions({
         '- 3D scenes: three_list / three_create / three_status / three_pass / '
             'three_continue / three_feedback',
         '- Hot apps: hotapp_list / hotapp_generate / hotapp_refine / hotapp_inspect',
+        '- Design → hot app: hotapp_from_prototype (builds from the canvas prototype; '
+        'reports verified coverage)',
         '- Video: video_review (code-driven animation, played live; no export)',
         '- App packages: nonapp_list / nonapp_inspect',
         '- Figma: figma_export (pass an absolute folder path)',
@@ -1468,6 +1523,8 @@ String composeDartInstructions({
       '- 3D scenes: three_list / three_create / three_status / three_pass / '
           'three_continue / three_feedback',
       '- Hot apps: hotapp_list / hotapp_generate / hotapp_refine / hotapp_inspect',
+        '- Design → hot app: hotapp_from_prototype (builds from the canvas prototype; '
+        'reports verified coverage)',
       '- Video: video_review (code-driven animation, played live; no export)',
       '- App packages: nonapp_list / nonapp_inspect',
       '- Figma: figma_export (pass an absolute folder path)',
@@ -2686,6 +2743,72 @@ ToolSet _buildTools(_Ctx ctx) {
         },
         const <String>['name'],
         (args) => workspace.hotAppInspect(str(args, 'name')),
+      );
+      addWorkspaceTool(
+        'hotapp_from_prototype',
+        'Generate a verifiable hot app FROM the current design prototype — the sanctioned '
+            'design→hot-app link. Screens and navigation flows are extracted automatically '
+            'from the prototype on the canvas; after generation a deterministic coverage '
+            'check verifies every screen (data-screen) and every link (data-nav), so the '
+            'result honestly reports verified=true or what is missing. Use it when the '
+            'user wants a runnable app version of the prototype. Requires the canvas to '
+            'have at least one real screen.',
+        const <String, dynamic>{
+          'name': {
+            'type': 'string',
+            'description': 'lowercase ASCII app name (a-z0-9_-); pick a fresh name, '
+                'existing names are refused',
+          },
+        },
+        const <String>['name'],
+        (args) async {
+          final bridge = ctx.bridge;
+          if (bridge == null || ctx.mbt.trim().isEmpty) {
+            return <String, dynamic>{
+              'ok': false,
+              'error': 'prototype_empty',
+              'message': toolFailureMessage('prototype_empty'),
+            };
+          }
+          final screens = <PrototypeScreenSpec>[];
+          final flows = <PrototypeLinkSpec>[];
+          try {
+            final boards = await bridge.session(ctx.mbt, 'session_list_artboards');
+            for (final board in _listOf(boards['data'])) {
+              if (board is! Map) continue;
+              final id = _s(board['id']);
+              if (id.isEmpty || id == '__seed') continue;
+              screens.add(PrototypeScreenSpec(id: id, title: _s(board['name'])));
+            }
+            final fs = await bridge.session(ctx.mbt, 'session_flows');
+            for (final f in _listOf(fs['data'])) {
+              if (f is! Map) continue;
+              flows.add(PrototypeLinkSpec(from: _s(f['from']), to: _s(f['to'])));
+            }
+          } catch (error) {
+            return <String, dynamic>{
+              'ok': false,
+              'error': 'engine_unavailable',
+              'message': toolFailureMessage('engine_unavailable'),
+              'detail': '$error',
+            };
+          }
+          if (screens.isEmpty) {
+            return <String, dynamic>{
+              'ok': false,
+              'error': 'prototype_empty',
+              'message': toolFailureMessage('prototype_empty'),
+            };
+          }
+          // 与 store 路径同一上限：超长原型只给摘要面，屏/跳转已结构化提取。
+          final doc = ctx.mbt.length > 12000 ? ctx.mbt.substring(0, 12000) : ctx.mbt;
+          return workspace.hotAppFromPrototype(
+            name: str(args, 'name'),
+            prototypeMbt: doc,
+            screens: screens,
+            flows: flows,
+          );
+        },
       );
 
       addWorkspaceTool(
