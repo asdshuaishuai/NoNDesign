@@ -1064,7 +1064,11 @@ void main() {
 
       socket.destroy();
 
-      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      // CI 实测偶发：对端被 destroy 后，循环回环上的写不一定在第一个
+      // 2×keepAlive（200ms）内报错——有的内核把写成功吞掉，要等下一个
+      // keep-alive 才暴露。这里给足 20s 窗口（仍是有限等待，不会挂死测试），
+      // 只断言「最终会被 keep-alive 写期限取消」这条语义。
+      final deadline = DateTime.now().add(const Duration(seconds: 20));
       while (!token.isCancelled && DateTime.now().isBefore(deadline)) {
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
