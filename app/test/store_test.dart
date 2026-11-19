@@ -1104,6 +1104,44 @@ void main() {
       expect(AppStore().recoveryDir, AppPaths.stateRoot());
     });
 
+    test('ask 卡运行中点选：入队不丢，本轮收尾自动续跑（一轮收一个）', () async {
+      final h = _localStore();
+      h.store.settings.apiKey = ''; // 续跑的一轮会在前置门快速失败
+      h.store
+        ..ready = true
+        ..hasProject = true;
+      h.store.agentBusy = true;
+
+      // 运行中点两个选项：都不立刻起 run，也不进气泡。
+      await h.store.handleChatAction('订阅与用量运营', {'question': '业务线'});
+      await h.store.handleChatAction('销售/CRM 漏斗', {'question': '业务线'});
+      expect(
+        h.store.chatMessages.where((m) => m.kind == chatKindUser),
+        isEmpty,
+        reason: '忙时选择先排队，不写气泡',
+      );
+
+      // 本轮收尾（finally 同路径）：先入队的先续跑。
+      h.store.agentBusy = false;
+      h.store.continueQueuedChatAction();
+      final first = h.store.chatMessages.where((m) => m.kind == chatKindUser).toList();
+      expect(first, hasLength(1));
+      expect(first.single.text, '选择：订阅与用量运营');
+
+      // 续跑的那轮结束后再收下一个（顺序 FIFO）。
+      for (var i = 0; i < 50 && h.store.agentBusy; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      h.store.agentBusy = false;
+      h.store.continueQueuedChatAction();
+      final second = h.store.chatMessages.where((m) => m.kind == chatKindUser).toList();
+      expect(second, hasLength(2));
+      expect(second.last.text, '选择：销售/CRM 漏斗');
+      for (var i = 0; i < 50 && h.store.chatActive; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+
     test('A2UI 选择动作只把人话写进用户气泡', () async {
       final h = _localStore();
       h.store.settings.apiKey = ''; // 本轮 run 会在前置门快速失败
