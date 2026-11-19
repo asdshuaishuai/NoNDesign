@@ -216,14 +216,17 @@ jobs:
           channel: stable
 
       # 上游 wasm_run 包的 dev_dependencies 带 wasm_run_example（path 依赖环
-      # 撞 hosted wasm_run，version solving 必死）——先把这两行摘掉再解析；
-      # build.rs 只读锁里的 flutter_rust_bridge 版本，不需要 example。
+      # 撞 hosted wasm_run）——先摘掉这两行。pub get 对包本体的解析成功并
+      # 写出 pubspec.lock 后，还会对 example/ 目录做一次解析并因残余环报错
+      # （本地 pinned-tag 复现实证：exit 1 但 lock 完整、含 flutter_rust_bridge
+      # 条目）——所以 pub get 容错，只验 lock 在场。
       - name: dart pub get（生成 packages/wasm_run/pubspec.lock）
         shell: bash
         run: |
           sed -i'' -e '/^  wasm_run_example:/,+1d' packages/wasm_run/pubspec.yaml 2>/dev/null \
             || sed -i '/^  wasm_run_example:/,+1d' packages/wasm_run/pubspec.yaml
-          (cd packages/wasm_run && dart pub get)
+          (cd packages/wasm_run && dart pub get) || true
+          grep -q "flutter_rust_bridge" packages/wasm_run/pubspec.lock
           test -f packages/wasm_run/pubspec.lock
 
       - name: 安装 Rust 工具链
