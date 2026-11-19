@@ -108,7 +108,9 @@ class _NonAppState extends State<NonApp> with WidgetsBindingObserver {
         final store = context.read<AppStore>();
         // 响应式字号：手机 +10% / 平板 +5% / 桌面 1.0（渲染期统一缩放，
         // 字号声明仍守 8 档字阶）。系统文字大小一并尊重，钳 1.0–1.3。
-        return withResponsiveTextScale(
+        return DefaultTextStyle(
+            style: platformDefaultTextStyle,
+            child: withResponsiveTextScale(
           context,
           // 通知宿主（批次 04）挂在整个路由树之上：对话框/设置/命令面板之上
           // 也能看到通知，且不依赖 Scaffold / ScaffoldMessenger。
@@ -174,7 +176,8 @@ class _NonAppState extends State<NonApp> with WidgetsBindingObserver {
               ),
             ),
           ),
-        );
+        ),
+      );
       },
       // 应用级 ExcludeSemantics：Flutter macOS 引擎的无障碍桥在 macOS 27.2
       // 上被 AX 客户端激活后，逐帧语义更新经 AccessibilityBridgeMac 触发

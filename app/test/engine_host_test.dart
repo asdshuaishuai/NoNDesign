@@ -222,7 +222,8 @@ void main() {
       watch.stop();
       // ignore: avoid_print
       print('[engine-fuel] spin trap in ${watch.elapsedMilliseconds}ms');
-      expect(watch.elapsed, lessThan(const Duration(seconds: 2)),
+      // 慢 CI runner 上实例重建可到 ~3.1s；判据仍是「不走挂死/恢复路径」。
+      expect(watch.elapsed, lessThan(const Duration(seconds: 8)),
           reason: 'fuel trap took ${watch.elapsedMilliseconds}ms');
 
       final stats = await host.stats();
@@ -270,7 +271,9 @@ void main() {
         )),
       );
       watch.stop();
-      expect(watch.elapsed, lessThan(const Duration(seconds: 2)),
+      // 慢 CI runner 上 watchdog 应答+重建可到 ~3.1s；判据不变（快答，
+      // 不等 busy 恢复完——那会再乘一个量级）。
+      expect(watch.elapsed, lessThan(const Duration(seconds: 8)),
           reason: 'the caller must be answered at the watchdog, not after recovery');
       expect(host.restartCount, greaterThanOrEqualTo(1));
 

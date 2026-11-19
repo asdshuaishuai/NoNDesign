@@ -52,6 +52,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   String? _remoteMessage;
   // 步数输入控制器：initState 赋值（字段初始化器访问不到局部 store）。
   late final TextEditingController _stepsController;
+  final TextEditingController _customModelController = TextEditingController();
+  // 自定义端点开关：开 = baseUrl 可编辑（兼容网关 / 中转）；关 = 内置只读。
+  // 初值由「当前端点 ≠ 内置」派生（initState 尾部，2026-11-19 移动适配）。
+  bool _customEndpoint = false;
   final _stepsFocus = FocusNode();
   bool _stepsSavedFlash = false;
 
@@ -78,7 +82,22 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     _remoteMessage = store.remoteStatus.connected ? store.remoteStatus.message : null;
     _stepsController = TextEditingController(text: store.settings.maxSteps.toString());
     _stepsFocus.addListener(() { if (mounted) setState(() {}); });
+    _customEndpoint = _hasLegacyEndpoint(store);
     _loadAcpAgents();
+  }
+
+  /// 自定义端点开关切换：开 = 当前值保持可编辑；关 = 恢复内置端点并落盘。
+  Future<void> _setCustomEndpoint(bool value, AppStore store) async {
+    setState(() => _customEndpoint = value);
+    if (!value) {
+      final builtin = _endpointForProvider(store, store.settings.providerId);
+      if (builtin.isNotEmpty) {
+        store.settings.baseUrl = builtin;
+        _baseController.text = builtin;
+      }
+    }
+    await store.saveSettings();
+    if (mounted) setState(() {});
   }
 
   /// 显式保存按钮（用户点名）：把步数输入框的当前值提交并给出 ✓ 反馈。
@@ -127,6 +146,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     _remoteTokenController.dispose();
     _stepsController.dispose();
     _stepsFocus.dispose();
+    _customModelController.dispose();
     super.dispose();
   }
 
@@ -333,19 +353,77 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           // 模型行紧贴服务商下方：点按打开底部选择面板（搜索/更新/勾选）。
           _labeled(context, '模型', _modelRow(context, store, keyName: 'settings-model-row')),
           const SizedBox(height: 10),
-          _labeled(context, '端点（内置只读）', TextField(
-            key: const ValueKey('settings-endpoint'),
-            controller: _baseController,
-            readOnly: true,
-            style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink2),
-            decoration: InputDecoration(
-              hintText: '内置端点',
-              contentPadding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
-              suffixIcon: Icon(Icons.lock_outline, size: 13, color: p.ink4),
-            ),
+          // 端点：默认内置只读；打开「自定义端点」后可编辑（兼容网关 / 中转）。
+          // 自定义态由「当前端点 ≠ 内置」派生（旧自定义端点自动落在自定义态）。
+          _labeled(context, '端点', Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                key: const ValueKey('settings-endpoint'),
+                controller: _baseController,
+                readOnly: !_customEndpoint,
+                style: TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'Menlo',
+                    color: _customEndpoint ? p.ink : p.ink2),
+                decoration: InputDecoration(
+                  hintText: _customEndpoint
+                      ? 'https://your-gateway.example/v1'
+                      : '内置端点',
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
+                  suffixIcon: _customEndpoint
+                      ? IconButton(
+                          visualDensity: VisualDensity.compact,
+                          icon: Icon(Icons.restart_alt, size: 14, color: p.ink4),
+                          tooltip: '恢复内置端点',
+                          onPressed: () => _setCustomEndpoint(false, store),
+                        )
+                      : Icon(Icons.lock_outline, size: 13, color: p.ink4),
+                ),
+                onChanged: (v) => store.settings.baseUrl = _trimEndpoint(v),
+                onSubmitted: (v) async {
+                  store.settings.baseUrl = _trimEndpoint(v);
+                  await store.saveSettings();
+                },
+                onTapOutside: (_) async {
+                  store.settings.baseUrl = _trimEndpoint(_baseController.text);
+                  await store.saveSettings();
+                },
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _customEndpoint
+                          ? '自定义端点已生效（兼容网关 / 中转）；点 🔄 恢复内置端点'
+                          : '端点为内置只读；打开自定义端点可接入兼容网关 / 中转',
+                      style: TextStyle(fontSize: 11, color: p.ink3),
+                    ),
+                  ),
+                  Text('自定义端点',
+                      style: TextStyle(fontSize: 11, color: p.ink3)),
+                  const SizedBox(width: 4),
+                  Switch.adaptive(
+                    key: const ValueKey('settings-endpoint-custom'),
+                    value: _customEndpoint,
+                    activeTrackColor: p.accent,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onChanged: (v) => _setCustomEndpoint(v, store),
+                  ),
+                ],
+              ),
+            ],
           )),
-          if (_hasLegacyEndpoint(store))
-            _legacyEndpointNotice(context, store, keyName: 'settings-legacy-endpoint'),
+          if (_customEndpoint)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '自定义端点请自行保证与所选模型的服务协议兼容。',
+                style: TextStyle(fontSize: 11, height: 1.4, color: p.ink4),
+              ),
+            ),
           const SizedBox(height: 12),
           _labeled(context, 'API Key（只存本机）', TextField(
             controller: _keyController,
@@ -761,6 +839,38 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                             },
                           ),
                   ),
+                  // 自定义模型 ID：清单外的模型也能用（服务商自定义模型/新上线
+                  // 未收录），输入 ID 直接生效——与自定义端点同一开放度。
+                  Padding(
+                    key: const ValueKey('model-picker-custom'),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _customModelController,
+                            style: TextStyle(fontSize: 13, color: p.ink),
+                            decoration: InputDecoration(
+                              hintText: '自定义模型 ID…',
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 12),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: BorderSide(color: p.line),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          onPressed: () =>
+                              _useCustomModel(ctx, store, setSheet),
+                          child: const Text('使用', style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               );
             },
@@ -776,45 +886,19 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     if (mounted) setState(() {});
   }
 
-  /// 旧自定义端点提示：显示当前值来自旧设置，并给一键重置（不静默锁死）。
-  Widget _legacyEndpointNotice(BuildContext context, AppStore store,
-      {required String keyName}) {
-    final p = context.palette;
-    return Padding(
-      key: ValueKey(keyName),
-      padding: const EdgeInsets.only(top: 8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: p.warn.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: p.warn.withValues(alpha: 0.28)),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.info_outline, size: 14, color: p.warn),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text('旧自定义端点：当前地址不是这个服务商的内置端点。',
-                  style: TextStyle(fontSize: 11, height: 1.4, color: p.warn)),
-            ),
-            TextButton(
-              key: ValueKey('$keyName-reset'),
-              onPressed: () async {
-                store.settings.baseUrl = _endpointForProvider(store, store.settings.providerId);
-                _baseController.text = store.settings.baseUrl;
-                await store.saveSettings();
-                if (mounted) setState(() {});
-              },
-              child: const Text('重置为内置端点', style: TextStyle(fontSize: 11)),
-            ),
-          ],
-        ),
-      ),
-    );
+  /// 面板内「自定义模型 ID」：输入即生效（清单外模型），落盘后关面板。
+  Future<void> _useCustomModel(
+      BuildContext sheetCtx, AppStore store, StateSetter setSheet) async {
+    final id = _customModelController.text.trim();
+    if (id.isEmpty) return;
+    store.settings.modelId = id;
+    await store.saveSettings();
+    if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+    if (mounted) setState(() {});
   }
 
-  List<String> _levels(ModelInfo model) {    final out = <String>{'auto'};
+  List<String> _levels(ModelInfo model) {
+    final out = <String>{'auto'};
     for (final opt in model.reasoningOptions) {
       if (opt is Map) {
         if (opt['type'] == 'effort' && opt['values'] is List) {
@@ -1222,10 +1306,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('手机连接这台电脑',
+                    Text('局域网远程',
                         style: TextStyle(fontSize: mobile ? 14 : 12, fontWeight: FontWeight.w600, color: p.ink)),
                     const SizedBox(height: 2),
-                    Text('开启后，手机与 iPad 可以连到本机执行；关闭时不对外开放连接。',
+                    Text('开启后，同一局域网内的手机 / iPad 直连本机执行任务；本机不对公网开放。',
                         style: TextStyle(fontSize: mobile ? 11 : 9, height: 1.4, color: p.ink4)),
                   ],
                 ),
@@ -1236,6 +1320,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 onChanged: busy
                     ? null
                     : (value) async {
+                        // 局域网远程语义（用户裁决 2026-11-19）：开启即对
+                        // 局域网开放，不再要求单独开「允许局域网访问」。
+                        if (value) await store.setDesktopHostAllowLan(true);
                         await store.setDesktopHostEnabled(value);
                         if (mounted) setState(() {});
                       },
@@ -1956,42 +2043,43 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         _mCard(context, title: '模型', children: [
           _modelRow(context, store, keyName: 'settings-m-model-row', mobile: true),
         ]),
-        _mCard(context, title: '端点（内置只读）',
-            helper: '内置服务商端点来自随包清单，固定不可改动。', children: [
+        _mCard(context, title: '端点',
+            helper: _customEndpoint
+                ? '自定义端点已生效（兼容网关 / 中转）。'
+                : '内置端点来自随包清单；打开自定义端点可接入兼容网关 / 中转。', children: [
           TextField(
             key: const ValueKey('settings-m-endpoint'),
             controller: _baseController,
-            readOnly: true,
-            style: TextStyle(fontSize: 13, fontFamily: 'Menlo', color: p.ink),
+            readOnly: !_customEndpoint,
+            style: TextStyle(
+                fontSize: 13,
+                fontFamily: 'Menlo',
+                color: _customEndpoint ? p.ink : p.ink2),
             decoration: _mDecoration(context,
-                hint: '内置端点',
-                suffix: Icon(Icons.lock_outline, size: 18, color: p.ink4)),
+                hint: _customEndpoint ? 'https://your-gateway.example/v1' : '内置端点',
+                suffix: _customEndpoint
+                    ? IconButton(
+                        tooltip: '恢复内置端点',
+                        onPressed: () => _setCustomEndpoint(false, store),
+                        icon: Icon(Icons.restart_alt, size: 18, color: p.ink4))
+                    : Icon(Icons.lock_outline, size: 18, color: p.ink4)),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: Text('自定义端点',
+                    style: TextStyle(fontSize: 12, color: p.ink2)),
+              ),
+              Switch.adaptive(
+                key: const ValueKey('settings-m-endpoint-custom'),
+                value: _customEndpoint,
+                activeTrackColor: p.accent,
+                onChanged: (v) => _setCustomEndpoint(v, store),
+              ),
+            ],
           ),
         ]),
-        if (_hasLegacyEndpoint(store))
-          KeyedSubtree(
-            key: const ValueKey('settings-m-legacy-endpoint'),
-            child: _mCard(context,
-                title: '旧自定义端点',
-                helper: '当前地址不是这个服务商的内置端点，保存时会沿用旧地址。',
-                children: [
-                  SizedBox(
-                    width: double.infinity,
-                    height: 44,
-                    child: OutlinedButton(
-                      key: const ValueKey('settings-m-legacy-endpoint-reset'),
-                      onPressed: () async {
-                        store.settings.baseUrl =
-                            _endpointForProvider(store, store.settings.providerId);
-                        _baseController.text = store.settings.baseUrl;
-                        await store.saveSettings();
-                        if (mounted) setState(() {});
-                      },
-                      child: const Text('重置为内置端点', style: TextStyle(fontSize: 14)),
-                    ),
-                  ),
-                ]),
-          ),
         _mCard(context, title: 'API Key（只存本机）', helper: '仅保存在本机设置中，不上传。', children: [
           TextField(
             key: const ValueKey('settings-m-apikey'),

@@ -144,9 +144,107 @@ jobs:
           retention-days: 14
 
   # Windows 安装包：Flutter Release 目录 → Inno Setup → setup.exe。
+  # Windows 本地引擎冒烟：在真实 Windows runner 上加载 wasm_run DLL 并跑
+  # 引擎契约（用户实测 v0.1.0 exe 构建原型报「需要设计服务」——本地引擎
+  # 在 Windows 上没起来，但桌面/移动测试都没覆盖 Windows DLL 加载路径；
+  # 这个 job 就是那条路的地面真相）。libs 已入库（third_party/wasm_run/
+  # libs），hook 离线取本地副本，不依赖网络。
+  windows-engine-smoke:
+    name: windows-engine-smoke (DLL load + wasm contract)
+    needs: windows-engine-dll
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # 真因 2026-11-19：上游预编译的 Windows 资产是 wasmi 后端（无 SIMD），
+      # 编译不了带 SIMD 的引擎 wasm（SIMD support is not enabled）。smoke
+      # 用 windows-engine-dll 自建的 wasmtime DLL 覆盖 vendored 裸名文件。
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm_run_dart-windows-x64
+          path: artifact
+
+      - name: 覆盖 vendored 执行器（wasmi → wasmtime）
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $src = "artifact\wasm_run_dart-x86_64-pc-windows-msvc.dll"
+          $dst = "third_party\wasm_run\libs\wasm_run_dart-dynamic-x86_64-pc-windows-msvc"
+          if (-not (Test-Path $src)) { throw "artifact 里没有 $src" }
+          Copy-Item $src $dst -Force
+          $hash = (Get-FileHash $dst -Algorithm SHA256).Hash.ToLower()
+          Write-Host "vendored executor sha256: $hash"
+
+      - name: flutter pub get
+        working-directory: app
+        run: flutter pub get
+
+      - name: 引擎宿主 + 契约冒烟（真实 DLL 加载）
+        working-directory: app
+        run: flutter test --no-pub test/engine_host_test.dart test/engine_contract_test.dart
+
+  # Windows 引擎执行器自建（真因 2026-11-19，CI smoke 实证）：上游 wasm_run
+  # v0.2.0 的 Windows 预编译资产是 wasmi 后端——wasmi 没有 SIMD，引擎 wasm
+  # 一编译就「SIMD support is not enabled」，这就是 Windows 上设计引擎起不
+  # 来的源头（macOS/Linux 资产是 wasmtime，不受影响）。这里从上游源码按
+  # pinned tag 自建默认 features 的 DLL（wasmtime 后端、含 SIMD），供 smoke
+  # 验证与 Windows 安装包覆盖；产物附为 artifact，验证通过后把字节与
+  # sha256 固定回 vendored 库 + fetch 脚本（维护者动作）。
+  windows-engine-dll:
+    name: windows-engine-dll (build wasmtime executor)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: 检出上游 wasm_run（pinned tag）
+        uses: actions/checkout@v4
+        with:
+          repository: juancastillo0/wasm_run
+          ref: wasm_run-v0.2.0
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: wasm_run-dll-${{ runner.os }}-wasmtime-v0.2.0
+
+      - name: 构建 wasmtime 后端 DLL（默认 features 含 simd）
+        run: cargo build --release -p wasm_run_dart
+
+      - name: 归档产物 + sha256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dll = "target\release\wasm_run_dart.dll"
+          if (-not (Test-Path $dll)) { throw "DLL 未产出：$dll" }
+          Copy-Item $dll wasm_run_dart-x86_64-pc-windows-msvc.dll -Force
+          $hash = (Get-FileHash "wasm_run_dart-x86_64-pc-windows-msvc.dll" -Algorithm SHA256).Hash.ToLower()
+          "$hash  wasm_run_dart-x86_64-pc-windows-msvc.dll" | Out-File -Encoding ascii wasm_run_dart.dll.sha256
+          Write-Host "sha256: $hash"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm_run_dart-windows-x64
+          path: |
+            wasm_run_dart-x86_64-pc-windows-msvc.dll
+            wasm_run_dart.dll.sha256
+          if-no-files-found: error
+
   windows-release:
     name: windows-release (x64 setup.exe)
-    needs: gate
+    needs: [gate, windows-engine-dll]
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -157,6 +255,25 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+
+      # 安装包必须带 wasmtime 执行器（上游 Windows 资产是 wasmi，引擎起不
+      # 来，见 windows-engine-dll 注释）——native-asset hook 从 vendored
+      # 裸名文件拷 wasm_run_dart.dll 进包，覆盖这一份即可换掉整条链。
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm_run_dart-windows-x64
+          path: artifact
+
+      - name: 覆盖 vendored 执行器（wasmi → wasmtime）
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $src = "artifact\wasm_run_dart-x86_64-pc-windows-msvc.dll"
+          $dst = "third_party\wasm_run\libs\wasm_run_dart-dynamic-x86_64-pc-windows-msvc"
+          if (-not (Test-Path $src)) { throw "artifact 里没有 $src" }
+          Copy-Item $src $dst -Force
+          $hash = (Get-FileHash $dst -Algorithm SHA256).Hash.ToLower()
+          Write-Host "vendored executor sha256: $hash"
 
       - name: 读取版本
         id: version
@@ -205,6 +322,18 @@ jobs:
           $resolved = (Resolve-Path -LiteralPath $out).Path
           Write-Host "Release 目录: $resolved"
           "release_dir=$resolved" >> $env:GITHUB_OUTPUT
+
+      - name: 校验引擎动态库随包（缺失 = 本地引擎起不来）
+        shell: pwsh
+        run: |
+          $dll = Join-Path "${{ steps.winout.outputs.release_dir }}" "wasm_run_dart.dll"
+          if (-not (Test-Path -LiteralPath $dll)) {
+            Write-Host "::error::Release 目录缺 wasm_run_dart.dll —— 本地引擎在 Windows 上无法启动"
+            Get-ChildItem -LiteralPath "${{ steps.winout.outputs.release_dir }}" |
+              Select-Object -ExpandProperty Name
+            exit 1
+          }
+          Write-Host "engine dll ok: $dll ($((Get-Item $dll).Length) bytes)"
 
       - name: 安装 Inno Setup
         run: choco install innosetup --yes --no-progress

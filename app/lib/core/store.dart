@@ -613,6 +613,16 @@ class AppStore extends ChangeNotifier {
       service = await EngineService.start(wasmBytes: bytes, componentsSnapshot: snapshot);
     } catch (e) {
       service = EngineService.unavailable('$e');
+      // Windows 诊断（2026-11-19）：启动失败原因落盘 + 挂到服务上，
+      // 用户侧 toast 的技术详情能直接看到真因（dll 缺失 / wasm 校验等）。
+      try {
+        final logsDir = Directory('${AppPaths.dataRoot().path}/logs');
+        await logsDir.create(recursive: true);
+        await File('${logsDir.path}/engine-start.log').writeAsString(
+          '${DateTime.now().toIso8601String()}  $e\n',
+          mode: FileMode.append,
+        );
+      } catch (_) {}
     }
     engine = service;
     local = LocalCore(
@@ -1134,6 +1144,9 @@ class AppStore extends ChangeNotifier {
   }
 
   /// True when at least one runtime can answer engine calls right now.
+  /// 本地引擎启动失败的真实原因（null = 正常或未尝试）。
+  String? get engineStartupError => engine?.startupError;
+
   bool get engineReady => api?.isReady ?? false;
 
   /// True when a "连接桌面" runtime is configured (and, in production, probed
@@ -3220,7 +3233,10 @@ class AppStore extends ChangeNotifier {
     // 只有设计画布的 BUILD 需要设计引擎；3D/视频/热应用是本地服务，
     // workspace 模式不因引擎缺失而拒绝。
     if (localRuntime && mode == 'build' && !engineReady) {
-      _toastWarn('构建原型需要设计服务，请先连接桌面或稍后重试');
+      _toastWarn(
+        '构建原型需要设计服务，请先连接桌面或稍后重试',
+        '本地引擎没有就绪：${engineStartupError ?? '原因未记录（详见 logs/engine-start.log）'}',
+      );
       return false;
     }
     if (localRuntime) {

@@ -170,6 +170,15 @@ Future<void> _search(WidgetTester tester, String query) async {
   }
 }
 
+/// 断言侧同样轮询：过滤链（防抖 → 检索 → setState）在 CI 慢机上可能比
+/// 固定帧数慢一拍（shelf_search_test 曾因此偶红）。等到 finder 消失或帧
+/// 预算耗尽——耗尽后由调用处的 expect 报出终态，不在 helper 里吞失败。
+Future<void> _waitForGone(WidgetTester tester, Finder finder) async {
+  for (var i = 0; i < 30 && finder.evaluate().isNotEmpty; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+
 void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
@@ -211,6 +220,7 @@ void main() {
     expect(find.text('scene-c'), findsOneWidget);
 
     await _search(tester, '语义探针');
+    await _waitForGone(tester, find.text('frames.mp4'));
 
     expect(index.queries, ['语义探针']);
     expect(find.text('热应用甲'), findsOneWidget);
@@ -226,6 +236,7 @@ void main() {
 
     // 视频条目的说明是「视频」：子串兜底要连说明一起匹配。
     await _search(tester, '视频');
+    await _waitForGone(tester, find.text('热应用甲'));
 
     expect(find.byKey(const ValueKey('shelf-search-note')), findsOneWidget);
     expect(find.text('frames.mp4'), findsOneWidget);
@@ -238,6 +249,7 @@ void main() {
     await _pumpAt(tester, _view(searchIndex: index), 402, store: _store());
 
     await _search(tester, '3D');
+    await _waitForGone(tester, find.text('热应用甲'));
 
     expect(tester.takeException(), isNull);
     expect(find.text('scene-c'), findsOneWidget);
@@ -250,6 +262,7 @@ void main() {
     await _pumpAt(tester, _view(searchIndex: index), 402, store: _store());
 
     await _search(tester, '不存在的作品');
+    await _waitForGone(tester, find.text('热应用甲'));
 
     expect(find.byKey(const ValueKey('shelf-search-empty')), findsOneWidget);
     expect(find.text('没有匹配的作品'), findsOneWidget);
@@ -261,6 +274,7 @@ void main() {
     await _pumpAt(tester, _view(searchIndex: index), 402, store: _store());
 
     await _search(tester, '语义探针');
+    await _waitForGone(tester, find.text('热应用甲'));
     expect(find.text('热应用甲'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('shelf-search-clear')));
@@ -285,6 +299,7 @@ void main() {
     expect(find.text('design-lab'), findsOneWidget);
 
     await _search(tester, 'hotapp');
+    await _waitForGone(tester, find.text('design-lab'));
     expect(find.text('design-lab'), findsNothing);
     expect(find.byKey(const ValueKey('shelf-search-empty')), findsOneWidget);
   });

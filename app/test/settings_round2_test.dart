@@ -410,7 +410,7 @@ void main() {
     await _openSettings(tester, store, _desktop, platform: TargetPlatform.macOS);
     await _openAgent(tester, _desktop);
 
-    expect(find.text('手机连接这台电脑'), findsOneWidget);
+    expect(find.text('局域网远程'), findsOneWidget);
     expect(find.text('http://127.0.0.1:1234'), findsOneWidget);
     expect(find.text('tok-9'), findsOneWidget);
     expect(find.text('本机地址（手机需开启局域网访问）'), findsOneWidget);
@@ -571,7 +571,7 @@ void main() {
     expect(find.byKey(const ValueKey('settings-m-remote-test')), findsOneWidget);
   });
 
-  testWidgets('旧自定义端点：显式提示 + 重置为内置端点（桌面）', (tester) async {
+  testWidgets('旧自定义端点：自动落入自定义态，可恢复内置端点（桌面）', (tester) async {
     final store = _TestStore()
       ..ready = true
       ..registry = _registry()
@@ -579,27 +579,36 @@ void main() {
     store.settings.baseUrl = 'https://proxy.example.com/v1';
 
     await _openSettings(tester, store, _padLandscape);
-    expect(find.byKey(const ValueKey('settings-legacy-endpoint')), findsOneWidget);
-    expect(find.text('旧自定义端点：当前地址不是这个服务商的内置端点。'), findsOneWidget);
+    // 旧自定义端点自动派生为自定义态：开关打开、端点可编辑。
+    final customSwitch = find.byKey(const ValueKey('settings-endpoint-custom'));
+    expect(customSwitch, findsOneWidget);
+    expect(
+      tester.widget<Switch>(customSwitch).value,
+      isTrue,
+    );
 
-    await tester.tap(find.text('重置为内置端点'));
+    await tester.tap(find.byTooltip('恢复内置端点'));
     await tester.pump(const Duration(milliseconds: 120));
     expect(store.settings.baseUrl, 'https://api.deepseek.com');
-    expect(find.byKey(const ValueKey('settings-legacy-endpoint')), findsNothing);
+    expect(
+      tester.widget<Switch>(customSwitch).value,
+      isFalse,
+      reason: '恢复内置后回到只读内置态',
+    );
     expect(store.saves, 1);
   });
 
-  testWidgets('旧自定义端点：手机端同样提示并可重置', (tester) async {
+  testWidgets('自定义端点开关：打开后端点可编辑，关闭恢复内置（手机）', (tester) async {
     final store = _TestStore()
       ..ready = true
       ..registry = _registry()
       ..settings = AppSettings(providerId: 'deepseek', modelId: 'deepseek-chat');
-    store.settings.baseUrl = 'https://proxy.example.com/v1';
 
     await _openSettings(tester, store, _phoneSmall);
     await _openModels(tester, _phoneSmall);
+    final customSwitch = find.byKey(const ValueKey('settings-m-endpoint-custom'));
     await tester.scrollUntilVisible(
-      find.byKey(const ValueKey('settings-m-legacy-endpoint-reset')),
+      customSwitch,
       240,
       scrollable: find
           .descendant(
@@ -609,8 +618,15 @@ void main() {
           .first,
     );
     await tester.pump(const Duration(milliseconds: 120));
-    expect(find.byKey(const ValueKey('settings-m-legacy-endpoint')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('settings-m-legacy-endpoint-reset')));
+
+    // 默认只读内置态 → 打开开关进入自定义态 → 关闭恢复内置。
+    expect(tester.widget<Switch>(customSwitch).value, isFalse);
+    await tester.tap(customSwitch);
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(tester.widget<Switch>(customSwitch).value, isTrue);
+    expect(store.saves, greaterThanOrEqualTo(1));
+
+    await tester.tap(find.byTooltip('恢复内置端点'));
     await tester.pump(const Duration(milliseconds: 120));
     expect(store.settings.baseUrl, 'https://api.deepseek.com');
     expect(tester.takeException(), isNull);

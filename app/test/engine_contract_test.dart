@@ -478,7 +478,11 @@ void main() {
         )),
       );
       watch.stop();
-      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+      // 判据是「trap 快速失败并重建，不挂到看门狗（30s）」；2s 曾在慢 CI
+      // runner 上被实例重建（spawn+compile+instantiate ≈3.1s）击穿，8s 仍
+      // 与挂死路径有量级差。
+      expect(watch.elapsed, lessThan(const Duration(seconds: 8)),
+          reason: 'fuel trap took ${watch.elapsedMilliseconds}ms');
       expect(core.stats().instanceGeneration, greaterThan(1));
       expect(await core.rawCall('busy', <Object?>[3]), 0);
     });

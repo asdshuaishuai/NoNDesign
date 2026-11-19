@@ -452,9 +452,13 @@ class AcpPathResolver {
   }
 
   /// 目录全量探测（不 spawn，只看可启动形态）。
-  Future<List<AcpAgentAvailability>> detect() async {
+  ///
+  /// [catalog] 缺省 = 全局 [acpCatalog]；测试/注入运行时传私有表以封闭断言。
+  Future<List<AcpAgentAvailability>> detect({
+    List<AcpCatalogEntry>? catalog,
+  }) async {
     final out = <AcpAgentAvailability>[];
-    for (final entry in acpCatalog) {
+    for (final entry in catalog ?? acpCatalog) {
       final resolved = await resolveCandidate(entry);
       String? cliPath;
       for (final candidate in entry.candidates) {
