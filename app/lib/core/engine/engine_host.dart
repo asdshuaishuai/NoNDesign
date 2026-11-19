@@ -119,12 +119,36 @@ abstract final class EngineLibraryResolver {
     var dir = start;
     for (var depth = 0; depth < 6; depth++) {
       final candidate = File('${dir.path}/third_party/wasm_run/libs/wasm_run_dart-dynamic-$target');
-      if (candidate.existsSync()) return candidate.path;
+      if (candidate.existsSync()) {
+        // Windows 的 LoadLibrary 对裸名路径自动补 `.dll` 再查找（找不到即
+        // error 126），vendored 文件又按上游裸名冻结落盘——垫一份带后缀的
+        // 临时副本再加载。生产包不走这里：native-asset 机制（hook/build.dart）
+        // 已把同一份拷成 wasm_run_dart.dll 放进应用目录，bundle 候选先命中。
+        if (!Platform.isWindows) return candidate.path;
+        return _stageWindowsDll(candidate, target);
+      }
       final parent = dir.parent;
       if (parent.path == dir.path) break;
       dir = parent;
     }
     return null;
+  }
+
+  /// Windows 专用：裸名 vendored 库 → 带 `.dll` 后缀的临时副本。
+  ///
+  /// 每次解析都重拷（约 8MB、每次进程只发生一次）：内容总是最新，免去
+  /// 「引擎升版后临时副本滞留旧文件」的一致性陷阱。副本在系统临时目录，
+  /// 由操作系统回收。
+  static String? _stageWindowsDll(File source, String target) {
+    try {
+      final staging = Directory('${Directory.systemTemp.path}/wasm_run_dart-staged');
+      staging.createSync(recursive: true);
+      final staged = File('${staging.path}/wasm_run_dart-$target.dll');
+      source.copySync(staged.path);
+      return staged.path;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Maps the current process ABI to the vendored executor file suffix.
