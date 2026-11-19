@@ -170,12 +170,17 @@ Future<void> _search(WidgetTester tester, String query) async {
   }
 }
 
-/// 断言侧同样轮询：过滤链（防抖 → 检索 → setState）在 CI 慢机上可能比
-/// 固定帧数慢一拍（shelf_search_test 曾因此偶红）。等到 finder 消失或帧
-/// 预算耗尽——耗尽后由调用处的 expect 报出终态，不在 helper 里吞失败。
+/// 断言侧同样轮询，且必须给真实异步让路（2026-11-19 CI 实证）：条目装载
+/// 是真实 IO（zip 解压/目录扫描），假时钟 pump 推进不了它；装载回调完成
+/// 时还会 `setState(_hitIds = null)` 重置一次过滤。runAsync 把控制权交还
+/// 真实事件循环让 IO 落定，再 pump 让 UI 消化——finder 消失或预算耗尽，
+/// 耗尽后由调用处的 expect 报出终态，不在 helper 里吞失败。
 Future<void> _waitForGone(WidgetTester tester, Finder finder) async {
-  for (var i = 0; i < 30 && finder.evaluate().isNotEmpty; i++) {
-    await tester.pump(const Duration(milliseconds: 50));
+  for (var i = 0; i < 30; i++) {
+    if (finder.evaluate().isEmpty) return;
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pump();
   }
 }
 

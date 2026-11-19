@@ -214,15 +214,15 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
 
-      # 上游是 melos/workspace 结构：根 pub get 才能解析全部包；万一根
-      # 不是 workspace，就退回包目录自己解析。build.rs 只认包内 pubspec.lock。
+      # 上游 wasm_run 包的 dev_dependencies 带 wasm_run_example（path 依赖环
+      # 撞 hosted wasm_run，version solving 必死）——先把这两行摘掉再解析；
+      # build.rs 只读锁里的 flutter_rust_bridge 版本，不需要 example。
       - name: dart pub get（生成 packages/wasm_run/pubspec.lock）
         shell: bash
         run: |
-          dart pub get > /dev/null 2>&1 || true
-          if [ ! -f packages/wasm_run/pubspec.lock ]; then
-            (cd packages/wasm_run && dart pub get)
-          fi
+          sed -i'' -e '/^  wasm_run_example:/,+1d' packages/wasm_run/pubspec.yaml 2>/dev/null \
+            || sed -i '/^  wasm_run_example:/,+1d' packages/wasm_run/pubspec.yaml
+          (cd packages/wasm_run && dart pub get)
           test -f packages/wasm_run/pubspec.lock
 
       - name: 安装 Rust 工具链
