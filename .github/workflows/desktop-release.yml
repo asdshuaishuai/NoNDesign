@@ -203,31 +203,21 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - name: 检出上游 wasm_run（pinned tag）
+      # 主分支而非 v0.2.0 tag（2026-11-19 本地实证）：app 解析的 flutter_rust_bridge
+      # 是 Dart 2.12（v2），vendored 执行器（可用的 mac 版）带 v2 多包绑定
+      # 前缀（frb_get_rust_content_hash 等）——只有 main 的 FRB v2 预生成
+      # frb_generated.rs 提供它们；tag 上的 FRB v1 build.rs 会重新生成旧符号
+      # 面（无前缀）且其 dart format 调用在新 dart 上崩。main 无 build.rs，
+      # 纯 cargo build。sha pinned。
+      - name: 检出上游 wasm_run（pinned main commit）
         uses: actions/checkout@v4
         with:
           repository: juancastillo0/wasm_run
-          ref: wasm_run-v0.2.0
+          ref: 23e36bdf111b3eca55bece5c6dd5a1364d26a0a3
 
-      - name: 安装 Dart（FRB codegen 的 build.rs 要读 pubspec.lock）
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-
-      # 上游 wasm_run 包的 dev_dependencies 带 wasm_run_example（path 依赖环
-      # 撞 hosted wasm_run）——先摘掉这两行。pub get 对包本体的解析成功并
-      # 写出 pubspec.lock 后，还会对 example/ 目录做一次解析并因残余环报错
-      # （本地 pinned-tag 复现实证：exit 1 但 lock 完整、含 flutter_rust_bridge
-      # 条目）——所以 pub get 容错，只验 lock 在场。
-      - name: dart pub get（生成 packages/wasm_run/pubspec.lock）
+      - name: 选择 wasmtime 后端（含 SIMD；上游 config_api.sh）
         shell: bash
-        run: |
-          sed -i'' -e '/^  wasm_run_example:/,+1d' packages/wasm_run/pubspec.yaml 2>/dev/null \
-            || sed -i '/^  wasm_run_example:/,+1d' packages/wasm_run/pubspec.yaml
-          (cd packages/wasm_run && dart pub get) || true
-          grep -q "flutter_rust_bridge" packages/wasm_run/pubspec.lock
-          test -f packages/wasm_run/pubspec.lock
+        run: bash scripts/config_api.sh wasmtime
 
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
@@ -239,7 +229,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: wasm_run-dll-${{ runner.os }}-wasmtime-v0.2.0
+          key: wasm_run-dll-${{ runner.os }}-wasmtime-main-23e36bdf
 
       - name: 构建 wasmtime 后端 DLL（默认 features 含 simd）
         run: cargo build --release -p wasm_run_dart
