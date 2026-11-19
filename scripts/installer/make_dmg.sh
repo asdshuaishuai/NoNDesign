@@ -224,13 +224,28 @@ fi
 echo "==> 生成 DMG（卷标: ${VOLUME_NAME}）"
 # 先做可读写镜像：卷图标除了 .VolumeIcon.icns 文件，还需要卷根带有
 # 「自定义图标」Finder 标记；只读压缩镜像无法再改这个标记。
+# hdiutil create 的「Resource busy」是已知瞬态（ Spotlight/索引服务抢占
+# 新建文件所致，2026-11-19 CI 实证）——带退避重试，本地同样受益。
 rm -f "$DMG_PATH" "$RW_DMG"
-hdiutil create \
-  -volname "$VOLUME_NAME" \
-  -srcfolder "$STAGE_DIR" \
-  -ov \
-  -format UDRW \
-  "$RW_DMG"
+dmg_created=0
+for attempt in 1 2 3 4 5; do
+  if hdiutil create \
+    -volname "$VOLUME_NAME" \
+    -srcfolder "$STAGE_DIR" \
+    -ov \
+    -format UDRW \
+    "$RW_DMG"; then
+    dmg_created=1
+    break
+  fi
+  echo "==> hdiutil create 第 ${attempt} 次失败（已知瞬态），2 秒后重试"
+  rm -f "$RW_DMG"
+  sleep 2
+done
+if [ "$dmg_created" -ne 1 ]; then
+  echo "error: hdiutil create 连续 5 次失败" >&2
+  exit 1
+fi
 
 if [ -f "$STAGE_DIR/.VolumeIcon.icns" ] && command -v SetFile >/dev/null 2>&1; then
   echo "==> 写入卷图标标记"
