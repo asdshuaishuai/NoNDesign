@@ -518,6 +518,20 @@ const Map<String, String> builtInBaseUrls = {
 String builtInBaseUrlFor(String providerId) =>
     builtInBaseUrls[providerId] ?? builtInBaseUrls['openai'] ?? '';
 
+/// agent 循环的「无限步骤」哨兵：远高于任何真实会话的步数。
+///
+/// 选择有限大数而不是 0/负数：ai_sdk 的 `maxSteps` 语义是「最多循环几次」，
+/// 0 等于不执行；哨兵值让循环实际永不因步数耗尽而停（真正的边界仍是
+/// 模型上下文与用户取消）。1,048,576 步按每步 1 秒计约 12 天。
+const int agentUnlimitedSteps = 1 << 20;
+
+/// 把设置里的步数换算成 agent 循环实际使用的预算。
+///
+/// 无限哨兵原样放行；普通值沿用 server 的 `max(4, min(600, max_steps))`。
+int agentStepBudget(int requested) => requested >= agentUnlimitedSteps
+    ? agentUnlimitedSteps
+    : requested.clamp(4, 600);
+
 class AppSettings {
   String providerId;
   String modelId;
@@ -525,6 +539,9 @@ class AppSettings {
   String apiKey;
   String thinkingLevel;
   int maxSteps;
+  /// 无限步骤：开启后 agent 循环不设步数上限（仍可随时取消）。
+  /// [maxSteps] 保留为关闭后的回退值，界面上也不丢用户填过的数。
+  bool unlimitedSteps;
   String theme;
   /// 外部智能体（ACP）：null 或空 = NaN 内置管线；否则发给该 ACP agent。
   String? acpAgentId;
@@ -575,6 +592,7 @@ class AppSettings {
     this.apiKey = '',
     this.thinkingLevel = 'auto',
     this.maxSteps = 300,
+    this.unlimitedSteps = false,
     this.theme = 'dark',
     this.acpAgentId,
     this.acpAgentName,
@@ -596,6 +614,9 @@ class AppSettings {
         // 默认内置；旧存档的 `dart`/未知值归一 local，显式 `server` 保留。
         _agentRuntime = normalizeAgentRuntime(agentRuntime);
 
+  /// 实际发给 agent 循环的步数上限：无限开关打开时用哨兵值。
+  int get effectiveMaxSteps => unlimitedSteps ? agentUnlimitedSteps : maxSteps;
+
   Map<String, dynamic> toJson() => {
         'providerId': providerId,
         'modelId': modelId,
@@ -603,6 +624,7 @@ class AppSettings {
         'apiKey': apiKey,
         'thinkingLevel': thinkingLevel,
         'maxSteps': maxSteps,
+        'unlimitedSteps': unlimitedSteps,
         'theme': theme,
         'acpAgentId': acpAgentId,
         'acpAgentName': acpAgentName,
@@ -628,6 +650,7 @@ class AppSettings {
         apiKey: (m['apiKey'] ?? '').toString(),
         thinkingLevel: (m['thinkingLevel'] ?? 'auto').toString(),
         maxSteps: (m['maxSteps'] is num) ? (m['maxSteps'] as num).toInt() : 300,
+        unlimitedSteps: m['unlimitedSteps'] == true,
         theme: (m['theme'] ?? 'dark').toString(),
         acpAgentId: m['acpAgentId']?.toString(),
         acpAgentName: m['acpAgentName']?.toString(),

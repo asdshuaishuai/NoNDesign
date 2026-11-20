@@ -2182,13 +2182,16 @@ Future<DartAgentResult> runDartAgent({
             // maxSteps 是「一次 streamText 内允许的模型步数」。设置值（常见
             // 500）在推理模型上等于无上限：一步一轮 20-70s，几十轮就爆表。
             // 按模式收紧到产品需要的轮数（用户设置只在其下生效）。
-            maxSteps: request.maxSteps
-                .clamp(4, switch (request.mode) {
-                  'plan' => 12,
-                  'refine' => 20,
-                  'workspace' => 25,
-                  _ => 40,
-                }),
+            // 例外：unlimitedSteps 的哨兵值原样放行（用户显式要求不限步数，
+            // 真正的边界是上下文与取消），不要被模式上限夹掉。
+            maxSteps: request.maxSteps >= agentUnlimitedSteps
+                ? agentUnlimitedSteps
+                : request.maxSteps.clamp(4, switch (request.mode) {
+                    'plan' => 12,
+                    'refine' => 20,
+                    'workspace' => 25,
+                    _ => 40,
+                  }),
             tools: tools,
             abortSignal: abortSignal,
             timeout: timeout == null ? null : TimeoutConfiguration(total: timeout),

@@ -2,6 +2,11 @@
 
 > 批次 01 建立（2026-11-18）。本文记录：为什么 vendored、vendored 了什么、怎么校验、
 > 实测证据、以及仍未验证 / 明确做不到的部分。
+>
+> **退役方向（2026-11-20 方案定稿，未施工）**：wasm 宿主将改为**渲染引擎自己的
+> classic wasm + JS 宿主跑在跨平台 WebView 里**，wasm_run 分四批退役（B1–B4），
+> 见 [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) §2。在 B4 落地前，
+> 本文仍是现状契约；退役时整体归档并在本文件头部标注日期。
 
 ## 1. 结论速览
 

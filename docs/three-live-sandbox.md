@@ -1,5 +1,10 @@
 # 3D 沙箱执行面：vendored three-live 与双执行路径（批次 06；three-live 1.4.0 于 2026-11-19 引入，991afe2）
 
+> **WebView 迁移注记（2026-11-20 方案定稿，未施工）**：应用内 WebView 将从
+> `webview_flutter`（仅 macOS/iOS）迁到 `webview_all`（全平台，含 Windows/Linux），
+> 见 [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) §1。本文描述的
+> 沙箱契约、CSP 边界与双执行路径不变；迁移只换宿主库，不改 three-live 资产。
+
 3D 工作台的执行面在 docs/ 里此前没有正式文档，契约只散落在代码注释里；本文把
 **vendored 资产范围、双执行路径、CSP 放宽清单与安全边界、画廊组件来源**收拢到一处。
 实现位置：`app/lib/core/three_service.dart`（服务面与预览组装）、

@@ -11,6 +11,10 @@
 > `flutter build macos --release` + `scripts/wf/check_desktop_release.dart`。
 > 涉及「与 Python 宿主对拍」的条目改为「与既有 Dart golden / 引擎探针对拍」。
 >
+> **对账注记（2026-11-20）**：文中 `webview_flutter` 相关条目是迁移前的旧清单；
+> WebView 选型已由 [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) §1
+> 裁为 `webview_all`，采纳清单施工时以新方案为准。
+>
 > **决策记录（2026-11-17）**：① MediaPipe for Flutter —— **采纳，只引入基础 task 能力**
 > （视觉 / 文本 / 检索，见 N6）；**端侧 LLM（LiteRT-LM / Gemma）暂不考虑**（难度大，用户决策）；
 > ② Genkit Dart 1.0 —— **不引入**，维持原判定（见 §2）。

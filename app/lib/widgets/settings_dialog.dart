@@ -534,25 +534,28 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                                   ? p.accent.withValues(alpha: 0.55)
                                   : p.line),
                         ),
-                        child: TextField(
-                          controller: _stepsController,
-                          focusNode: _stepsFocus,
-                          textAlign: TextAlign.center,
-                          textAlignVertical: TextAlignVertical.center,
-                          style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink),
-                          decoration: const InputDecoration(
-                            isCollapsed: true,
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.zero,
-                          ),
-                          onChanged: (v) async {
-                            final n = int.tryParse(v);
-                            if (n == null) return;
-                            store.settings.maxSteps = n.clamp(4, 600);
-                            await store.saveSettings();
-                          },
-                          onSubmitted: (_) => _saveSteps(),
-                        ),
+                        child: store.settings.unlimitedSteps
+                            ? Text('∞',
+                                style: TextStyle(fontSize: 12, fontFamily: 'Menlo', color: p.ink2))
+                            : TextField(
+                                controller: _stepsController,
+                                focusNode: _stepsFocus,
+                                textAlign: TextAlign.center,
+                                textAlignVertical: TextAlignVertical.center,
+                                style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink),
+                                decoration: const InputDecoration(
+                                  isCollapsed: true,
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                                onChanged: (v) async {
+                                  final n = int.tryParse(v);
+                                  if (n == null) return;
+                                  store.settings.maxSteps = n.clamp(4, 600);
+                                  await store.saveSettings();
+                                },
+                                onSubmitted: (_) => _saveSteps(),
+                              ),
                       ),
                       const SizedBox(width: 6),
                       // 显式保存（用户点名「不然感觉没生效」）：点击提交
@@ -1647,6 +1650,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             children: [
               Expanded(child: _labeled(context, '最大步数', TextFormField(
                 initialValue: store.settings.maxSteps.toString(),
+                enabled: !store.settings.unlimitedSteps,
                 style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink),
                 onChanged: (v) async {
                   final n = int.tryParse(v);
@@ -1665,6 +1669,28 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 readOnly: true,
                 style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink3),
               ))),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('无限步骤', style: TextStyle(fontSize: 12, color: p.ink)),
+                  const SizedBox(height: 2),
+                  Text('不设步数上限，长任务可以一直执行；仍可随时停止。',
+                      style: TextStyle(fontSize: 11, height: 1.4, color: p.ink3)),
+                ]),
+              ),
+              const SizedBox(width: 10),
+              Switch.adaptive(
+                value: store.settings.unlimitedSteps,
+                onChanged: (v) async {
+                  store.settings.unlimitedSteps = v;
+                  await store.saveSettings();
+                  if (mounted) setState(() {});
+                },
+              ),
             ],
           ),
           const SizedBox(height: 14),
@@ -1989,7 +2015,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             icon: Icons.smart_toy_outlined,
             title: '智能体',
             subtitle:
-                '${store.settings.agentRuntime == agentRuntimeServer ? '连接桌面' : '内置智能体'} · 最大步数 ${store.settings.maxSteps}',
+                '${store.settings.agentRuntime == agentRuntimeServer ? '连接桌面' : '内置智能体'} · ${store.settings.unlimitedSteps ? '无限步骤' : '最大步数 ${store.settings.maxSteps}'}',
             onTap: () => setState(() => _mobileSection = 'agent')),
         _mSectionTile(context,
             id: 'appearance',
@@ -2412,6 +2438,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 child: TextField(
                   key: const ValueKey('settings-m-steps'),
                   controller: _stepsController,
+                  enabled: !store.settings.unlimitedSteps,
                   keyboardType: TextInputType.number,
                   style: TextStyle(fontSize: 15, fontFamily: 'Menlo', color: p.ink),
                   decoration: _mDecoration(context, hint: '300'),
@@ -2440,6 +2467,26 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('无限步骤', style: TextStyle(fontSize: 15, color: p.ink)),
+                const SizedBox(height: 2),
+                Text('不设步数上限，长任务可以一直执行；仍可随时停止。',
+                    style: TextStyle(fontSize: 12, height: 1.4, color: p.ink3)),
+              ]),
+            ),
+            const SizedBox(width: 10),
+            Switch.adaptive(
+              value: store.settings.unlimitedSteps,
+              onChanged: (v) async {
+                store.settings.unlimitedSteps = v;
+                await store.saveSettings();
+                if (mounted) setState(() {});
+              },
+            ),
+          ]),
           const SizedBox(height: 12),
           Row(children: [
             Text('项目位置', style: TextStyle(fontSize: 13, color: p.ink3)),

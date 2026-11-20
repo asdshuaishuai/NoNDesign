@@ -3385,7 +3385,7 @@ class AppStore extends ChangeNotifier {
           baseUrl: base,
           apiKey: settings.apiKey,
           thinkingLevel: settings.thinkingLevel,
-          maxSteps: settings.maxSteps,
+          maxSteps: settings.effectiveMaxSteps,
           contextWindow: selected?.context,
           // workspace 模式把用户选的工作台告诉循环（提示词与工具分流都靠它）。
           workspaceHint: mode == 'workspace' ? workspaceMode : '',
@@ -3409,8 +3409,9 @@ class AppStore extends ChangeNotifier {
         // streamText 的 TimeoutConfiguration.total 是整轮 run（含全部工具
         // 循环）的硬死线，不是单请求超时。推理模型（如 step-5-preview）单轮
         // 流式推理就要 1-5 分钟，一轮 run 常含 3-5 轮工具循环，10 分钟会烧穿
-        // （TimeoutException → failed）。30 分钟对齐深度 run 的实际上界。
-        timeout: const Duration(minutes: 30),
+        // （TimeoutException → failed）。30 分钟对齐深度 run 的实际上界；
+        // 无限步骤（unlimitedSteps）同时解除总时长上限，仍可用停止按钮取消。
+        timeout: settings.unlimitedSteps ? null : const Duration(minutes: 30),
         onEvent: (ev) {
           if (!events.isClosed) events.add(ev);
         },
@@ -3606,7 +3607,7 @@ class AppStore extends ChangeNotifier {
       'api_key': settings.apiKey,
       'protocol': selected.protocol,
       'thinking_level': settings.thinkingLevel,
-      'max_steps': settings.maxSteps,
+      'max_steps': settings.effectiveMaxSteps,
       'session_key': projectPath ?? projectName,
       'context_window': selected.context,
       'workspace_hint': normalizeWorkspaceMode(settings.chatWorkspaceMode),

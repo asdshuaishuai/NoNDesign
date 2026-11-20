@@ -5,6 +5,11 @@
 > `.nonapp` 跨端备选保留，未接入任何产品路径（`a2ui_web_card.dart` 当前零引用）。
 > 产物与构建脚本：`third_party/a2ui_web/`、`app/assets/a2ui_web/`；Dart 接入边界：
 > `app/lib/widgets/a2ui_web_card.dart`；契约测试：`app/test/a2ui_web_spike_test.dart`。
+>
+> **对账注记（2026-11-20）**：本文关于「webview_flutter 只有 macOS/iOS/Android」
+> 的平台覆盖判断**以当时为准**；同日定稿的
+> [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) §1 将 WebView 换成
+> `webview_all`（全平台，含 Windows/Linux，未施工），届时该限制消失。
 
 ## 0. 结论先行
 
