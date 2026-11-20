@@ -6,6 +6,9 @@
 >
 > 维护规则：**新增/改名/状态变化必须同步本索引**；文档之间不复制事实，
 > 只做链接（move, not copy）。每个文档头部必须写状态行（格式见 §4）。
+>
+> **方向以 [vision.md](vision.md) 为主**；`docs/research/` 下的调研只作制作参考，
+> 不反过来定义方向。
 
 ## 1. 文档分层
 
@@ -51,7 +54,7 @@
 | --- | --- | --- |
 | [plan-creative-workbench.md](plan-creative-workbench.md) | **方案定稿，未施工** | 全局交互（右 chat + 执行/结果双面）、设计验证式原型绑定、3D 建模、视频导演台/剧本/双风格/TTS/配乐联动、强绑定强规范框架、施工批次 0–8 |
 | [plan-music-module.md](plan-music-module.md) | **方案定稿，未施工** | 音乐（编曲）模块：score.json、五线谱编辑器、Web Audio 编译播放、music_* 工具面 |
-| [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) | **方案定稿（2026-11-20 重设）** | WebView 现状 = `webview_flutter` + `webview_windows`（Windows WebView2，已落地）；`webview_all` 不采用（备选）；wasm 宿主 → 渲染引擎 wasm SDK 跑进 WebView（待排期，Linux 除外）；flutter_scene 本周期不采用 |
+| [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) | **方案定稿（2026-11-20）** | WebView **目标 = `webview_all` 全平台**（含 Linux/OHOS）；当前 `webview_flutter` + `webview_windows` 为过渡/参考；wasm 宿主 → 渲染引擎 wasm SDK 跑进 WebView（Linux 过渡期保留原生）；flutter_scene 本周期不采用 |
 | [plan-flutter-3.50-adoption.md](plan-flutter-3.50-adoption.md) | backlog（待排期） | Flutter 3.50 采纳清单 |
 
 ### 1.5 历史快照 / 审查（只读，不作为待办）
@@ -92,7 +95,7 @@
 | 2026-11-20 | 3D = **建模**工作台（three.js；大纲/视口/检查器 + scene.json） | 方案定稿 | plan-creative-workbench §4 |
 | 2026-11-20 | 全局交互：右 chat 唯一对话面；工作台只做执行过程面 + 结果面 | 方案定稿 | plan-creative-workbench §2 |
 | 2026-11-20 | 音乐为第五个独立模块（只做编曲） | 方案定稿 | plan-music-module |
-| 2026-11-20 | **WebView 重设：保留 `webview_flutter`（macOS/iOS/Android）+ `webview_windows`（Windows WebView2）；`webview_all` 不采用（备选）**；Linux 仍无应用内 WebView | **已落地（用户实现 `ea64874`/`5ac91fc`）** | plan-cross-platform-runtime §1 |
+| 2026-11-20 | **WebView 目标 = `webview_all` 全平台**（macOS/iOS/Android/Windows/Linux/OHOS）；当前 `webview_flutter` + `webview_windows`（Windows WebView2）为**过渡/参考**；批次 A stash 待恢复 | 方案定稿；Windows 过渡已落地 | plan-cross-platform-runtime §1 |
 | 2026-11-20 | **wasm → 渲染引擎 wasm SDK 跑进 WebView**；wasm_run 分四批退役 | 方案定稿，未施工 | plan-cross-platform-runtime §2 |
 | 2026-11-20 | **flutter_scene 本周期不用于 3D 工作台**（pre-1.0；缺建模交互层；three.js 已够用） | 裁决（可重估：≥1.0 后） | plan-cross-platform-runtime §3 |
 | 2026-11-20 | 设置新增**无限步骤**（`unlimitedSteps` 哨兵，解除 4–600 步数上限与 10 分钟总时长） | **已实施**（`1259def`） | AGENTS.md · Agent 层约定 |
@@ -103,8 +106,8 @@
 ## 3. 文档之间的依赖关系（施工顺序）
 
 ```
-plan-cross-platform-runtime §1（WebView 现状：webview_flutter + webview_windows）
-        │  Windows 已解锁；Linux 仍无内嵌 WebView（缺口）
+plan-cross-platform-runtime §1（WebView 目标：webview_all 全平台）
+        │  过渡期：webview_flutter + webview_windows；Linux 由 webview_all 补齐
         ├──> plan-creative-workbench §2（执行/结果双面）
         ├──> plan-creative-workbench §4（3D 建模视口，three.js）
         ├──> plan-creative-workbench §5（视频导演台 / Phaser）
@@ -143,5 +146,6 @@ plan-cross-platform-runtime §1（WebView 现状：webview_flutter + webview_win
 ---
 
 最后对账：2026-11-20（与 `AGENTS.md`、`vision.md`、三份方案、五份已实施契约头部交叉核对；
-已合并用户实现（workspace 生成链路 + Windows WebView2），三分支统一到 `5ac91fc`；
-`webview_all` 批次 A 已 stash、不合并）。
+已合并用户实现（workspace 生成链路 + Windows WebView2），三分支统一到 `6c05b0e`；
+WebView **目标仍是 `webview_all` 全平台**，Windows `webview_windows` 作过渡/参考；
+批次 A 已 stash、待恢复）。

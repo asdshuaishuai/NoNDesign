@@ -8,8 +8,9 @@
 >
 > **对账注记（2026-11-20）**：本文关于「webview_flutter 只有 macOS/iOS/Android」
 > 的平台覆盖判断**以当时为准**；同日合并的用户实现已让 Windows 的 3D/热应用预览走
-> `webview_windows`（WebView2），Linux 仍无内嵌 WebView；`webview_all` 全量替换评估后
-> **不采用**（见 [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) §1）。
+> `webview_windows`（WebView2），Linux 仍无内嵌 WebView。**WebView 目标仍是
+> `webview_all` 全平台**（批次 A stash 待恢复），见
+> [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) §1。
 
 ## 0. 结论先行
 
