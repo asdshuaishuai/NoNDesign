@@ -324,6 +324,11 @@ class WebViewEngineHost implements EngineBackend {
         await _restart('engine call timed out');
         return _failure(EngineErrorCode.timeout, 'engine call timed out');
       } catch (error) {
+        // The JS host converts engine traps into JSON envelopes, so anything
+        // thrown here is a transport/protocol failure (page reload, WebView
+        // process death, malformed result). Rebuild the session before the
+        // next call instead of leaving a half-dead bridge behind.
+        await _restart('bridge error: $error');
         return _failure(errorCode ?? EngineErrorCode.trap, '$error');
       }
     });
@@ -343,6 +348,7 @@ class WebViewEngineHost implements EngineBackend {
         await _restart('engine call timed out');
         return _failure(EngineErrorCode.timeout, 'engine call timed out');
       } catch (error) {
+        await _restart('bridge error: $error');
         return _failure(EngineErrorCode.trap, '$error');
       }
     });
