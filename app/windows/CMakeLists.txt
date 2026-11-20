@@ -32,6 +32,14 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+# webview_windows 0.4.x 的 C++ 用 <experimental/coroutine>（MSVC /await）。
+# VS2022（MSVC 14.3x/14.4x）默认只报 deprecation 警告；VS2026（MSVC 14.5x）
+# 把它升级成 STL1011 硬错误，CI windows-release 直接编译失败（2026-11-20 实证）。
+# 官方错误信息给出的开关就是这个 define；本地 VS2022 不受影响。
+if (MSVC)
+  add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+endif()
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by
