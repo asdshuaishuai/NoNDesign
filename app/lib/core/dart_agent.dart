@@ -1685,7 +1685,7 @@ Future<DartAgentResult> runDartAgent({
         model: model,
         instructions: instructions,
         prompt: prompt,
-        maxSteps: request.maxSteps.clamp(4, 600), // server: max(4, min(600, max_steps))
+        maxSteps: agentStepBudget(request.maxSteps),
         tools: tools,
         abortSignal: abortSignal,
         timeout: timeout == null ? null : TimeoutConfiguration(total: timeout),

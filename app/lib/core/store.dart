@@ -3166,7 +3166,7 @@ class AppStore extends ChangeNotifier {
           baseUrl: base,
           apiKey: settings.apiKey,
           thinkingLevel: settings.thinkingLevel,
-          maxSteps: settings.maxSteps,
+          maxSteps: settings.effectiveMaxSteps,
           contextWindow: selected?.context,
           // workspace 模式把用户选的工作台告诉循环（提示词与工具分流都靠它）。
           workspaceHint: mode == 'workspace' ? workspaceMode : '',
@@ -3187,7 +3187,9 @@ class AppStore extends ChangeNotifier {
         // 测试注入 scripted mock；生产恒 null（OpenAIProvider 直连）。
         modelOverride: debugAgentModelOverride,
         abortSignal: _dartAgentCancel,
-        timeout: const Duration(minutes: 10),
+        // 无限步骤同时解除总时长上限（仍可用停止按钮取消）；否则 10 分钟
+        // 会在步数上限之前先到期，无限步骤形同虚设。
+        timeout: settings.unlimitedSteps ? null : const Duration(minutes: 10),
         onEvent: (ev) {
           if (!events.isClosed) events.add(ev);
         },
@@ -3360,7 +3362,7 @@ class AppStore extends ChangeNotifier {
       'api_key': settings.apiKey,
       'protocol': selected.protocol,
       'thinking_level': settings.thinkingLevel,
-      'max_steps': settings.maxSteps,
+      'max_steps': settings.effectiveMaxSteps,
       'session_key': projectPath ?? projectName,
       'context_window': selected.context,
       'workspace_hint': normalizeWorkspaceMode(settings.chatWorkspaceMode),
