@@ -618,9 +618,11 @@ class AppStore extends ChangeNotifier {
 
   /// Whether phones/tablets may run the in-process engine.
   ///
-  /// Hard default: no. `WasmRuntimeGate.mobileLocalEngineEnabled` flips only
-  /// after `integration_test/wasm_spike_test.dart` records passing p95 /
-  /// memory / fuel evidence on real devices.
+  /// Mobile is allowed by default now that the engine runs in the WebView
+  /// (classic wasm + SIMD). The old `wasmi has no SIMD` blocker is gone; a
+  /// device whose WebView cannot boot the artifact degrades to "连接桌面"
+  /// with the real reason, and `NONDESIGN_MOBILE_LOCAL_ENGINE=false` restores
+  /// the hard gate.
   bool get _localEngineAllowed {
     if (!(Platform.isIOS || Platform.isAndroid)) return true;
     return WasmRuntimeGate.mobileLocalEngineEnabled;
@@ -650,11 +652,15 @@ class AppStore extends ChangeNotifier {
       } catch (_) {
         // Missing/corrupt snapshot: the live registry still works.
       }
-      service = await EngineService.start(wasmBytes: bytes, componentsSnapshot: snapshot);
+      // Full-platform path: classic wasm in an offscreen WebView. The native
+      // wasm_run host remains a fallback only; `runtime.runtime` records which
+      // one actually served the session.
+      service = await EngineService.startAuto(wasmBytes: bytes, componentsSnapshot: snapshot);
+      debugPrint('[engine] runtime: ${service.runtime ?? service.startupError}');
     } catch (e) {
       service = EngineService.unavailable('$e');
-      // Windows 诊断（2026-11-19）：启动失败原因落盘 + 挂到服务上，
-      // 用户侧 toast 的技术详情能直接看到真因（dll 缺失 / wasm 校验等）。
+      // 启动失败原因落盘 + 挂到服务上，用户侧 toast 的技术详情能直接看到
+      // 真因（WebView 缺失 / wasm 校验 / 平台注册失败等）。
       try {
         final logsDir = Directory('${AppPaths.dataRoot().path}/logs');
         await logsDir.create(recursive: true);

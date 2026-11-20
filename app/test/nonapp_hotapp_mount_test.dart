@@ -11,9 +11,9 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+import 'package:webview_all/webview_all.dart';
+import 'package:webview_platform_interface/webview_platform_interface.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
 import 'package:nondesign/core/hotapp_service.dart';
 import 'package:nondesign/core/nonapp_cache.dart';

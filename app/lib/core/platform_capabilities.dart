@@ -73,8 +73,10 @@ class PlatformCapabilities {
   /// No share plugin is bundled — do not pretend otherwise.
   bool get supportsShareSheet => false;
 
-  /// `webview_flutter` has no Linux/Windows implementation.
-  bool get supportsInAppWebView => !(os == HostOs.linux || os == HostOs.windows) && !isWeb;
+  /// `webview_all` covers every app target: Android WebView, WKWebView
+  /// (iOS/macOS), WebView2 (Windows), WebKitGTK (Linux), ArkWeb (OHOS).
+  /// Only a Web build has no native WebView.
+  bool get supportsInAppWebView => !isWeb;
 
   /// `sqlite3_flutter_libs` ships native libraries for the five app targets.
   bool get supportsAppDatabase => !isWeb;

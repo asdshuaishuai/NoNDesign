@@ -18,12 +18,20 @@
 ///    and [probeAvailability] tells the capability hub exactly why.
 library;
 
+// The backend factory is a closure supplied by `start`/`startAuto`; a private
+// named parameter (`this._backendFactory`) would leak into call syntax.
+// ignore_for_file: prefer_initializing_formals
+
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import '../capability.dart';
+import 'engine_backend.dart';
 import 'engine_host.dart';
 import 'engine_types.dart';
+import 'webview_engine_host.dart';
 
 /// Engine facade for one application process.
 class EngineService {
@@ -31,27 +39,28 @@ class EngineService {
     this._host,
     this._componentsSnapshot,
     this._startupError, {
-    this._wasmBytes,
-    this._hostOptions,
-  });
+    // Named differently from the private field on purpose: this is a factory,
+    // not a value callers pass through, and a private named parameter would
+    // leak into the invocation syntax.
+    Future<EngineBackend> Function()? backendFactory,
+  }) : _backendFactory = backendFactory;
 
   /// Builds a service over [host] (or over nothing when startup failed).
   factory EngineService(
-    EngineHost? host, {
+    EngineBackend? host, {
     List<dynamic>? componentsSnapshot,
     String? startupError,
   }) =>
       EngineService._(host, componentsSnapshot, startupError);
 
-  EngineHost? _host;
+  EngineBackend? _host;
   final List<dynamic>? _componentsSnapshot;
   String? _startupError;
   bool _disposed = false;
 
-  /// The artifact and options of a failed first start: kept so [retryEngine]
-  /// can attempt the start again instead of being a permanent no-op.
-  final Uint8List? _wasmBytes;
-  final EngineHostOptions? _hostOptions;
+  /// Re-creates the same backend kind after a failed first start. `null` for
+  /// services built in tests over a supplied host.
+  final Future<EngineBackend> Function()? _backendFactory;
   Future<bool>? _retryFuture;
 
   /// Starts a real host from the bundled artifact bytes.
@@ -66,28 +75,70 @@ class EngineService {
     EngineHostOptions options = const EngineHostOptions(),
     List<dynamic>? componentsSnapshot,
   }) async {
+    Future<EngineBackend> factory() => EngineHost.start(wasmBytes: wasmBytes, options: options);
     try {
-      final host = await EngineHost.start(wasmBytes: wasmBytes, options: options);
+      final host = await factory();
       return EngineService._(
         host,
         componentsSnapshot,
         null,
-        wasmBytes: wasmBytes,
-        hostOptions: options,
+        backendFactory: factory,
       );
     } catch (error) {
       return EngineService._(
         null,
         componentsSnapshot,
         '$error',
+        backendFactory: factory,
+      );
+    }
+  }
+
+  /// Starts the full-platform engine: classic wasm in an offscreen WebView.
+  ///
+  /// The WebView host is the production path on every app target. If the host
+  /// cannot be created — no WebView, missing WebKitGTK, a corrupted artifact —
+  /// the service falls back to the native `wasm_run` host so the app still
+  /// opens; the failure is logged with its real reason and `runtime` exposes
+  /// which path won. Tests should keep using [start] (pure Dart, no display).
+  static Future<EngineService> startAuto({
+    required Uint8List wasmBytes,
+    EngineHostOptions options = const EngineHostOptions(),
+    List<dynamic>? componentsSnapshot,
+    bool preferWebView = true,
+  }) async {
+    if (!preferWebView || kIsWeb) {
+      return start(
         wasmBytes: wasmBytes,
-        hostOptions: options,
+        options: options,
+        componentsSnapshot: componentsSnapshot,
+      );
+    }
+    Future<EngineBackend> webFactory() =>
+        WebViewEngineHost.start(wasmBytes: wasmBytes, options: options);
+    try {
+      final host = await webFactory();
+      return EngineService._(
+        host,
+        componentsSnapshot,
+        null,
+        backendFactory: webFactory,
+      );
+    } catch (error) {
+      options.onLog?.call(
+        '[engine] WebView host unavailable ($error); falling back to wasm_run',
+      );
+      // Fall back to the native host, but keep the native factory for retries.
+      return start(
+        wasmBytes: wasmBytes,
+        options: options,
+        componentsSnapshot: componentsSnapshot,
       );
     }
   }
 
   /// Wraps an existing host (tests, or a host the caller already owns).
-  static EngineService withHost(EngineHost host, {List<dynamic>? componentsSnapshot}) =>
+  static EngineService withHost(EngineBackend host, {List<dynamic>? componentsSnapshot}) =>
       EngineService(host, componentsSnapshot: componentsSnapshot);
 
   /// A service that is known to be unavailable, with the reason preserved.
@@ -273,19 +324,17 @@ class EngineService {
   /// Retries a failed startup (e.g. after the user fixed a missing file).
   ///
   /// A live host recovers through its own restart path. A service whose
-  /// *first* start failed keeps the artifact bytes and options, so this
-  /// re-runs [EngineHost.start] instead of returning false forever — the
-  /// retry ability the old code only advertised in this doc comment.
+  /// *first* start failed keeps the artifact bytes and the backend factory, so
+  /// this re-runs the same kind of host instead of returning false forever.
   Future<bool> retryEngine() async {
     if (_disposed) return false;
     final host = _host;
     if (host != null) return host.retry();
     final pending = _retryFuture;
     if (pending != null) return pending;
-    final bytes = _wasmBytes;
-    final options = _hostOptions;
-    if (bytes == null || options == null) return false;
-    final future = _retryStart(bytes, options);
+    final factory = _backendFactory;
+    if (factory == null) return false;
+    final future = _retryStart(factory);
     _retryFuture = future;
     try {
       return await future;
@@ -294,9 +343,9 @@ class EngineService {
     }
   }
 
-  Future<bool> _retryStart(Uint8List bytes, EngineHostOptions options) async {
+  Future<bool> _retryStart(Future<EngineBackend> Function() factory) async {
     try {
-      final host = await EngineHost.start(wasmBytes: bytes, options: options);
+      final host = await factory();
       if (_disposed) {
         await host.dispose();
         return false;

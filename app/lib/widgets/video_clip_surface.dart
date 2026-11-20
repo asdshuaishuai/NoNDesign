@@ -25,8 +25,8 @@ import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+import 'package:webview_all/webview_all.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
 import '../core/platform_capabilities.dart';
 import '../core/theme.dart';
@@ -340,8 +340,8 @@ class VideoClipWebPlayback extends VideoClipPlayback {
   }
 
   void _ensureWebViewPlatform() {
-    // webview_flutter 无 endorsed macOS 实现：首次使用前幂等注册 WebKit。
-    // 守卫同时看 instance——测试注入 fake 平台后不得被真注册覆盖。
+    // webview_all 的 WKWebView 平台在插件注册中自动就绪；测试环境保留幂等
+    // 注册兜底。守卫同时看 instance——测试注入 fake 平台后不得被真注册覆盖。
     if ((Platform.isMacOS || Platform.isIOS) && WebViewPlatform.instance == null) {
       WebKitWebViewPlatform.registerWith();
     }

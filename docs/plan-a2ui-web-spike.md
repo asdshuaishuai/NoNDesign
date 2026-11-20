@@ -6,10 +6,11 @@
 > 产物与构建脚本：`third_party/a2ui_web/`、`app/assets/a2ui_web/`；Dart 接入边界：
 > `app/lib/widgets/a2ui_web_card.dart`；契约测试：`app/test/a2ui_web_spike_test.dart`。
 >
-> **对账注记（2026-11-20）**：本文关于「webview_flutter 只有 macOS/iOS/Android」
-> 的平台覆盖判断**以当时为准**；同日合并的用户实现已让 Windows 的 3D/热应用预览走
-> `webview_windows`（WebView2），Linux 仍无内嵌 WebView。**WebView 目标仍是
-> `webview_all` 全平台**（批次 A stash 待恢复），见
+> **对账注记（2026-11-20 晚更新）**：本文关于「webview_flutter 只有
+> macOS/iOS/Android」的平台覆盖判断**是当时的事实**；当晚批次 A 已把全部应用内
+> WebView 统一到 `webview_all`（含 Windows WebView2、Linux WebKitGTK、Android），
+> 因此「平台覆盖」已不再是 Web 渲染器的劣势项。本文其余结论（默认仍走原生
+> `a2ui_flutter`）不变。见
 > [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) §1。
 
 ## 0. 结论先行

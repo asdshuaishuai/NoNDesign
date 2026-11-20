@@ -14,8 +14,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 // 平台接口桩直接从平台接口库取（测试专用传递依赖）。
 // ignore: depend_on_referenced_packages
-import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+import 'package:webview_platform_interface/webview_platform_interface.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
 import 'package:nondesign/core/capability_hub.dart';
 import 'package:nondesign/core/models.dart';

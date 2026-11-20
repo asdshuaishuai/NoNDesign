@@ -16,10 +16,9 @@
 /// 按资源键读取渲染，点开即真实运行。
 ///
 /// 平台矩阵（唯一判据是 [PlatformCapabilities]，不再自己嗅探平台）：
-///  * 内嵌 3D 预览：macOS/iOS/Android 走 webview_flutter；Windows 走 WebView2
-///    （[ThreeWinPreview]）；Linux 没有内嵌预览。移动端还额外受
+///  * 内嵌 3D 预览与 ThreeUI 组件画廊统一走 `webview_all`（macOS/iOS WKWebView、
+///    Windows WebView2、Linux WebKitGTK、Android WebView）；移动端还额外受
 ///    [ThreeWebViewGate] 约束（file:// 模块脚本未验证前不启用）；
-///  * ThreeUI 组件画廊仍走 webview_flutter（Windows 尚未桥接，点开时诚实提示）；
 ///  * 「在文件夹中显示」只在桌面三平台出现。
 library;
 
@@ -31,8 +30,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+import 'package:webview_all/webview_all.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
 import '../core/platform_capabilities.dart';
 import '../core/store.dart';
@@ -42,7 +41,6 @@ import '../core/three_lint.dart';
 import '../core/three_service.dart';
 import '../core/toast_service.dart';
 import 'common.dart';
-import 'three_preview_win.dart';
 
 /// 移动端内嵌 3D 预览的启用门。
 ///
@@ -65,7 +63,7 @@ abstract final class ThreeWebViewGate {
       !host.isMobile || mobileFileModulesVerified;
 }
 
-/// webview_flutter 无 endorsed macOS 实现——首次使用前幂等注册 WebKit。
+/// webview_all 的 WKWebView 平台在插件注册中自动就绪；测试环境保留幂等注册兜底。
 bool _wkRegistered = false;
 
 /// 测试注入：平台矩阵的确定性覆盖（测试机恒为 macOS，造不出 Linux/Windows
@@ -100,12 +98,6 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   bool _specDirty = false;
   bool _busy = false;
   WebViewController? _controller;
-  // Windows WebView2 预览：控制器由 [ThreeWinPreview] 自己持有；工作台只保存
-  // 本轮宿主页路径 / 版本与初始化失败态（失败降级成浏览器兜底面）。
-  final _winPreviewKey = GlobalKey<ThreeWinPreviewState>();
-  String _winHtmlPath = '';
-  int _winGeneration = 0;
-  bool _winInitFailed = false;
   String _lastError = '';
   // 预览不可用/加载失败的可读占位（非空时预览区整块替换）。
   String _loadError = '';
@@ -122,7 +114,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   String _serviceError = '';
   // 预览就绪态：截图 / 四方位取证只在页面**真的跑起来**后可用。判据是预览页
   // 自带的 metrics 桥（首帧后主动上报，此后每 2s 一次）。**不要换成
-  // setOnPageFinished**：webview_flutter 平台接口基类的 setOnPageFinished 直接
+  // setOnPageFinished**：webview_all 平台接口基类的 setOnPageFinished 直接
   // throw UnimplementedError，而 NavigationDelegate 构造器会同步调用它。
   bool _previewReady = false;
   // ThreeUI 组件画廊：清单从应用资源读（失败不空屏，显示可重试的人话）。
@@ -171,21 +163,15 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
 
   String get _sceneJs => _snapshot?.sceneJs ?? '';
 
-  /// webview_flutter 只覆盖 android/ios/macos：ThreeUI 组件画廊与移动端 3D
-  /// 预览走这条；Linux 没有内嵌预览。移动端另受 [ThreeWebViewGate] 约束。
+  /// webview_all 覆盖全部应用目标（WKWebView / WebView2 / WebKitGTK /
+  /// Android WebView）；移动端另受 [ThreeWebViewGate] 约束。
   /// 测试用 [debugThreeWebViewSupported] 覆盖。
   bool get _webViewSupported =>
       debugThreeWebViewSupported ??
       (_host.supportsInAppWebView && ThreeWebViewGate.allowsLocalPreview(_host));
 
-  /// Windows 的 3D 场景预览走 WebView2（webview_windows），与 webview_flutter
-  /// 的平台矩阵并行；系统缺 WebView2 运行时由预览面降级成浏览器兜底。
-  bool get _windowsPreviewSupported =>
-      _host.os == HostOs.windows && (debugThreeWebViewSupported ?? true);
-
-  /// 3D 场景预览是否有内嵌执行面（任一实现可用即可）。
-  bool get _scenePreviewSupported =>
-      _webViewSupported || _windowsPreviewSupported;
+  /// 3D 场景预览的内嵌执行面。
+  bool get _scenePreviewSupported => _webViewSupported;
 
   @override
   void initState() {
@@ -296,8 +282,6 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       _project = name;
       _snapshot = null;
       _controller = null;
-      _winHtmlPath = '';
-      _winInitFailed = false;
       _previewReady = false;
       _lastError = '';
       _loadError = '';
@@ -788,7 +772,6 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _specDirty = false;
         _loadError = '';
         _loadDetail = '';
-        _winInitFailed = false;
         _errorKey = '';
         _errorText = '';
         _errorDetail = '';
@@ -846,7 +829,6 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _specDirty = false;
         _loadError = '';
         _loadDetail = '';
-        _winInitFailed = false;
         _errorKey = '';
         _errorText = '';
         _errorDetail = '';
@@ -901,18 +883,6 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     // 准备预览是异步写盘：期间切了项目就不再挂旧项目的页面（否则新项目
     // 的预览会闪回旧内容）。
     if (!mounted || project != _project) return;
-    if (_windowsPreviewSupported) {
-      // WebView2 面由 [ThreeWinPreview] 初始化并加载；版本号换新即重载同一
-      // 宿主页（preparePreview 已把新页面写到 bundle.htmlPath）。
-      setState(() {
-        _winHtmlPath = bundle.htmlPath;
-        _winGeneration++;
-        _winInitFailed = false;
-        _loadError = '';
-        _loadDetail = '';
-      });
-      return;
-    }
     final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel('NON3D', onMessageReceived: _onBridgeMessage)
@@ -950,54 +920,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     }
   }
 
-  /// Windows 预览页的桥消息：WebView2 宿主消息 → 与 webview_flutter 的
-  /// JavaScriptChannel 同一条处理链（error / metrics / screenshot）。
-  void _onWindowsBridge(String text) {
-    unawaited(_onBridgeMessage(JavaScriptMessage(message: text)));
-  }
-
-  /// WebView2 初始化失败（常见：系统缺 WebView2 运行时）：降级成可操作面
-  /// （浏览器打开 / 定位文件 / 重试），不留在「准备预览…」当作终态。
-  void _onWindowsUnavailable(String detail) {
-    _previewReady = false;
-    if (!mounted) return;
-    setState(() {
-      _winInitFailed = true;
-      _loadError = '';
-      _loadDetail = detail;
-    });
-  }
-
-  void _onWindowsLoadFailed(String detail) {
-    _setLoadError('预览加载失败，请重试', detail);
-  }
-
-  /// 用系统浏览器打开当前项目的预览文件（Windows 初始化失败时的兜底）。
-  Future<void> _openPreviewInBrowser() async {
-    final project = _project;
-    final service = _service;
-    if (_host.os != HostOs.windows || project == null || service == null) return;
-    final path = service.previewHtmlPath(project);
-    if (!File(path).existsSync()) {
-      _toasts.warn('预览文件还没有准备好');
-      return;
-    }
-    try {
-      await Process.run('cmd', ['/c', 'start', '', path]);
-    } catch (error) {
-      debugPrint('[three] open preview externally failed: $error');
-      _toasts.warn('没能打开预览', '请检查系统默认浏览器。');
-    }
-  }
-
-  /// 截图 / 四方位取证：按当前执行面把脚本送进预览页。
+  /// 截图 / 四方位取证：把脚本送进预览页。
   void _runPreviewScript(String script) {
-    if (_windowsPreviewSupported) {
-      final preview = _winPreviewKey.currentState;
-      if (preview == null) return;
-      unawaited(preview.runJavaScript(script));
-      return;
-    }
     unawaited(_controller?.runJavaScript(script));
   }
 
@@ -1017,7 +941,6 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     setState(() {
       _loadError = '';
       _loadDetail = '';
-      _winInitFailed = false;
     });
     await _mountPreview();
   }
@@ -1219,7 +1142,6 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       _snapshot = null;
       _loadError = '';
       _loadDetail = '';
-      _winInitFailed = false;
       // 项目边界复位规范编辑守卫：A 项目未保存的编辑不能带进 B。
       _specDirty = false;
       if (draft != null && draft.isNotEmpty) {
@@ -1275,8 +1197,6 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _previewReady = false;
           _loadError = '';
           _loadDetail = '';
-          _winHtmlPath = '';
-          _winInitFailed = false;
           _lastError = '';
           _face = 'preview';
         });
@@ -1654,40 +1574,12 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         onCopy: _copy,
         onReveal: _host.supportsRevealInFolder ? _revealProject : null,
       );
-    } else if (_windowsPreviewSupported && _winInitFailed) {
-      // WebView2 没初始化起来（常见：系统缺运行时）：保留浏览器 / 文件管理器
-      // 两条出路，装好运行时也能就地重试。
-      preview = _PreviewUnsupportedPane(
-        projectDir: _service?.projectDir(_project!).path ?? '',
-        previewPath: _service?.previewHtmlPath(_project!) ?? '',
-        host: _host,
-        title: '这台电脑暂时不能内嵌显示 3D 预览',
-        preferred: '可以先用系统浏览器打开预览。',
-        // 原始诊断只进折叠的「技术详情」：缺 WebView2 运行时这类原因用户
-        // 需要能拿去查，但不能直接摆上屏。
-        detail: _loadDetail,
-        onCopy: _copy,
-        onReveal: _host.supportsRevealInFolder ? _revealProject : null,
-        onOpenExternally: _openPreviewInBrowser,
-        onRetry: _retryPreview,
-      );
     } else if (_loadError.isNotEmpty) {
       preview = _PreviewErrorPane(
         message: _loadError,
         detail: _loadDetail,
         onRetry: _retryPreview,
       );
-    } else if (_windowsPreviewSupported) {
-      preview = _winHtmlPath.isEmpty
-          ? Center(child: Text('准备预览…', style: TextStyle(fontSize: 12, color: p.ink3)))
-          : ThreeWinPreview(
-              key: _winPreviewKey,
-              htmlPath: _winHtmlPath,
-              generation: _winGeneration,
-              onBridge: _onWindowsBridge,
-              onUnavailable: _onWindowsUnavailable,
-              onLoadFailed: _onWindowsLoadFailed,
-            );
     } else if (_controller == null) {
       preview = Center(child: Text('准备预览…', style: TextStyle(fontSize: 12, color: p.ink3)));
     } else {
@@ -2336,10 +2228,6 @@ class _PreviewUnsupportedPane extends StatelessWidget {
     required this.preferred,
     required this.onCopy,
     required this.onReveal,
-    this.title = '这台设备不能内嵌显示 3D 预览',
-    this.onOpenExternally,
-    this.onRetry,
-    this.detail = '',
   });
 
   final String projectDir;
@@ -2349,17 +2237,8 @@ class _PreviewUnsupportedPane extends StatelessWidget {
   final Future<void> Function(String text, String done) onCopy;
   final Future<void> Function()? onReveal;
 
-  /// 标题按失败面区分：设备本身没有内嵌预览 vs 内嵌预览这次没起来。
-  final String title;
-
-  /// 用系统浏览器打开预览文件（Windows 初始化失败时的兜底）。
-  final Future<void> Function()? onOpenExternally;
-
-  /// 就地重试（装好运行时后不用退出工作台）。
-  final Future<void> Function()? onRetry;
-
-  /// 原始诊断（只进折叠的「技术详情」；人话在上面的 [preferred] 里）。
-  final String detail;
+  /// 设备本身没有内嵌预览时的固定标题。
+  String get title => '这台设备不能内嵌显示 3D 预览';
 
   @override
   Widget build(BuildContext context) {
@@ -2388,13 +2267,6 @@ class _PreviewUnsupportedPane extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
-            if (onOpenExternally != null)
-              FilledButton.icon(
-                key: const ValueKey('three-preview-open-external'),
-                onPressed: () => onOpenExternally!(),
-                icon: const Icon(Icons.open_in_new, size: 14),
-                label: const Text('用浏览器打开'),
-              ),
             OutlinedButton.icon(
               key: const ValueKey('three-preview-copy-path'),
               onPressed: projectDir.isEmpty ? null : () => onCopy(projectDir, '已复制项目路径'),
@@ -2414,13 +2286,6 @@ class _PreviewUnsupportedPane extends StatelessWidget {
                 icon: const Icon(Icons.folder_open_outlined, size: 14),
                 label: const Text('在文件夹中显示'),
               ),
-            if (onRetry != null)
-              OutlinedButton.icon(
-                key: const ValueKey('three-preview-retry'),
-                onPressed: () => onRetry!(),
-                icon: const Icon(Icons.refresh, size: 14),
-                label: const Text('重试'),
-              ),
           ]),
           if (projectDir.isNotEmpty) ...[
             const SizedBox(height: 10),
@@ -2429,15 +2294,6 @@ class _PreviewUnsupportedPane extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5)),
           ],
-          if (detail.trim().isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: _TechDetails(
-                detail: detail,
-                palette: p,
-                bodyKey: const ValueKey('three-preview-unsupported-detail'),
-              ),
-            ),
         ]),
       ),
     );

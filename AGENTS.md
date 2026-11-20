@@ -17,22 +17,27 @@ AI 原生创作工作台。**一句话 → 产品需求设计文档 → 完整�
 **文档入口（2026-11-20 起）**：[docs/README.md](docs/README.md) 是文档总纲——
 文档分层、决策台账、状态口径与施工顺序都在那里。当前**未施工**的方案线：
 `docs/plan-creative-workbench.md`（交互升级 + 四模块 + 强绑定强规范）、
-`docs/plan-music-module.md`（音乐/编曲）、
-`docs/plan-cross-platform-runtime.md`（WebView 目标 webview_all 全平台；Windows 过渡
-webview_windows；引擎 wasm SDK；flutter_scene 裁决）。
+`docs/plan-music-module.md`（音乐/编曲）。
+**已落地**：`docs/plan-cross-platform-runtime.md`（批次 A/B1：webview_all 全平台 +
+引擎 classic wasm 进离屏 WebView；wasm_run 仅兜底；flutter_scene 不采用）。
 方案文档写的是目标态，不要当作现状引用；两者冲突时以文档总纲的决策台账为准。
 
 ## 架构边界（改代码前先读）
 
 ```
 app/                 Flutter UI + 原生画布 + Dart 本地核心
-  lib/core/engine/   MoonViz classic wasm 宿主（wasm_run FFI / isolate 队列）
+  lib/core/engine/   MoonViz 引擎宿主：
+                     · webview_engine_host.dart + assets/engine/engine_web_host.js
+                       （**主路径**：classic wasm 跑在离屏 webview_all 会话里）
+                     · engine_host.dart / engine_worker.dart（wasm_run 兜底）
+                     · engine_backend.dart（两者同一接口，EngineService 面向它编程）
   lib/core/          DDP / 项目库 / 3D / 热应用 / 视频 / 内置智能体 / 设置
   lib/core/remote/   「连接桌面」协议、token、方法表、Dart RPC 宿主
   lib/widgets/       壳层（ChatPiPShell / DesktopShell）、工作台、画布、设置
   assets/            engine 产物、components 快照、models.json、3D/视频示例
 engine/              moonviz.wasm + components.json + manifest（构建源）
-third_party/wasm_run/ vendored wasm 执行器（桌面动态库 / 移动 native 资产）
+scripts/engine_web_probe.mjs  经典 wasm JS 宿主的 Node 契约探针（与 WebView 同字节）
+third_party/wasm_run/ vendored wasm 执行器（**仅兜底路径**；主路径不加载）
 scripts/             开发期同步 / 对拍 / 发布检查（不参与运行时）
 figma-plugin/        Figma 双向插件
 plugins/             独立插件资产（视频制作说明）
@@ -44,13 +49,24 @@ plugins/             独立插件资产（视频制作说明）
   （AgentGate）都必须经引擎校验后回写同一份文档；`.ddp` 只是它的认证加密容器。
 - **Dart 不解释视觉语义**：只渲染引擎返回的 `artboards[].nodes[]`/`svg`、发送 op、
   展示事件。不要在 Dart 里"顺手"改布局/属性——变更必须回到引擎。
-- **引擎宿主只有一处**：`app/lib/core/engine/`（`engine_host.dart` 负责 isolate 与
-  看门狗，`engine_worker.dart` 负责 `_in` 槽 ABI / UTF-16 读 / 会话缓存 / fuel）。
+- **引擎宿主只有一处**：`app/lib/core/engine/`。`EngineService` 面向
+  `EngineBackend` 编程，生产默认 `WebViewEngineHost`（classic wasm 的 JS 宿主跑在
+  离屏 `webview_all` 会话里），`EngineHost`（wasm_run isolate）只作启动失败兜底。
+  `engine_worker.dart` 的 `_in` 槽 ABI / UTF-16 读 / 会话缓存是 JS 宿主
+  `assets/engine/engine_web_host.js` 的对照实现，两边改一处必须改另一处并跑
+  `scripts/engine_web_probe.mjs`。
   画布与内置智能体共用同一个 `EngineService`；不要旁路直写 mbt。
+- **运行时决策（2026-11-20）**：引擎提供两种 wasm SDK——classic（WASM MVP、0 imports、
+  `_in` 槽 ABI，任何 WebView 都能跑，**主路径**）与 wasm-gc（≈90KB、JS String Builtins，
+  需 Chrome 119+/Safari 18.2+，**不作为全平台基线**，只保留为未来 V8 快路径）。
+  WebView 内 JS 调用不能从 Dart 中断，但跑在平台 Web 进程而非 Flutter UI isolate；
+  看门狗超时即销毁并重建离屏会话。**不要**把引擎调用搬回 UI isolate，也不要恢复
+  「原生 wasmtime + 平台动态库」作为主路径。
 - **两道门是不同的门**：画布走 `apply_human_op_in`，智能体走 `apply_agent_op_in`
   （`gate:'agent'`）。只读命令走 session/检视路由，绝不能进变更路径。
-- **移动端本地引擎默认关闭**：`WasmRuntimeGate.mobileLocalEngineEnabled` 只有在真机
-  p95 / 内存 / fuel 验收通过后才允许打开；未通过时移动端只能「连接桌面」。
+- **移动端本地引擎默认开启**（2026-11-20 起）：classic wasm 跑在 iOS/Android 的
+  WebView 里，旧「wasmi 无 SIMD」阻塞已消失；WebView 启动失败时如实降级为
+  「连接桌面」并保留真因。`NONDESIGN_MOBILE_LOCAL_ENGINE=false` 可强制关回旧门。
 - **可选「连接桌面」**：客户端只允许 `/v1/health`、`/v1/capabilities`、`/v1/rpc`
   契约（`remote_desktop_client.dart`）；桌面宿主默认关闭、默认 loopback、token 必填，
   LAN 必须显式开关。**没有免鉴权模式、没有固定端口、没有端口文件。**
@@ -107,22 +123,22 @@ plugins/             独立插件资产（视频制作说明）
 
 | 能力 | macOS / Windows / Linux | iPhone / iPad | Android |
 | --- | --- | --- | --- |
-| 画布 / 设计校验（本地引擎） | ✅ 进程内 wasm | ⚠️ 默认关闭，真机 spike 通过才开 | ⚠️ 同左（构建目前受阻） |
+| 画布 / 设计校验（本地引擎） | ✅ classic wasm 跑在离屏 WebView | ✅ 同左（真机 smoke 待补） | ✅ 同左（真机 smoke 待补） |
 | 项目保存 / 打开（DDP） | ✅ | ✅ | ✅ |
-| 内置智能体（Dart 循环） | ✅ | ✅（文档/PLAN 无需引擎；画布 op 需引擎或连接桌面） | ✅ |
-| 3D 工作台 | ✅（应用内 WebView） | 连接桌面后可看；本机预览降级 | 连接桌面；WebView 待验证 |
-| 热应用 / `.nonapp` | ✅（Windows：WebView2 应用内预览，2026-11-20；数据库桥应用暂走浏览器打开） | ✅ 本地库/查看；本地数据库依赖平台绑定 | ✅ 本地库；构建待验证 |
-| 视频工作台 | ✅ 代码动画实时播放 + 编辑/对照 + NaN 生成项目（`video_create` 落盘） | 同左（纯 Dart 矢量逐帧） | 同左 |
+| 内置智能体（Dart 循环） | ✅ | ✅（文档/PLAN 无需引擎；画布 op 用本地 WebView 引擎） | ✅ |
+| 3D 工作台 | ✅（webview_all：WKWebView / WebView2 / WebKitGTK） | 本机预览受 `ThreeWebViewGate` 门控（待真机验收） | 同左 |
+| 热应用 / `.nonapp` | ✅（webview_all 统一应用内预览；数据库桥走 JS channel） | ✅ 本地库/查看；本地数据库依赖平台绑定 | ✅ 本地库；构建待验证 |
+| 视频工作台 | ✅ 代码动画全平台；mp4 产物内嵌播放随 webview_all 全平台（编码器随 WebView 运行时） | 同左（纯 Dart 矢量逐帧） | 同左 |
 | 外部智能体（ACP） | ✅ | ❌ 设计禁用 | ❌ |
 | 连接桌面（客户端） | ✅ 可填地址/连接码 | ✅ | ✅ |
 | 连接桌面（桌面宿主） | ✅ 设置卡启停/地址/连接码 | — | — |
 | 系统分享 / 导出面板 | ❌ 未装插件 | ❌ | ❌ |
 
-> 上表描述**当前实现**（2026-11-20）。WebView **目标仍是 `webview_all` 全平台**
-> （含 Linux/OHOS）；当前 Windows 的 `webview_windows`（WebView2）与 macOS/iOS/Android 的
-> `webview_flutter` 是**过渡/参考实现**，批次 A 已 stash、待恢复。wasm 宿主行仍待迁移：
-> 引擎 wasm SDK 跑进 WebView 后 iOS/Android 的本地引擎路径重新评估。台账见
-> [docs/README.md](docs/README.md) §2，细节见
+> 上表描述**当前实现**（2026-11-20 晚）。WebView 已统一到 `webview_all`（macOS/iOS
+> WKWebView、Windows WebView2、Linux WebKitGTK、Android WebView；OHOS 的离屏会话
+> 尚未实现，见已知限制）。本地引擎已切到**引擎 classic wasm + JS 宿主**，wasm_run
+> 仅启动失败兜底；`EngineService.startAuto` 选路，`runtime.runtime == 'webview'`
+> 即主路径命中。台账见 [docs/README.md](docs/README.md) §2，细节见
 > [docs/plan-cross-platform-runtime.md](docs/plan-cross-platform-runtime.md)。
 
 ## 常用命令
@@ -134,6 +150,8 @@ flutter analyze --no-pub
 flutter test
 flutter run -d macos
 flutter build macos --release
+# 真 WebView 引擎 smoke（WKWebView；Windows/Linux 用同一用例在对应机器跑）
+flutter test integration_test/engine_webview_test.dart -d macos
 
 # 发布包桌面状态（构建后；批次 15 新增）
 cd ..
@@ -143,6 +161,7 @@ dart run scripts/wf/check_desktop_release.dart \
 # 开发期同步（可选，不参与运行时）
 python3 scripts/sync_engine.py        # 校验/下载 wasm，真机 render 探针
 python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/models.json
+node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebView 同字节）
 ```
 
 `scripts/wf/test.sh` 只跑 `flutter test`；Python 回归锚点已随 `server/` 删除，
@@ -150,14 +169,18 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
 
 ## 引擎 ABI（不要凭猜测改）
 
+- 权威产物：`app/assets/engine/moonviz.wasm`（classic，WASM MVP、0 imports、
+  `memory` 导出）。**两份同构实现必须同步改**：`engine_worker.dart`（wasm_run 兜底
+  / 纯 Dart 测试）与 `assets/engine/engine_web_host.js`（生产 WebView 主路径）。
 - 写方向：`in/arg/arg2` 三槽，UTF-8 分块（每块小端 4 字节 + 有效长度），调用
-  `*_in()` 变体。唯一实现是 `engine_worker.dart` 的槽写入；不要在别处复制。
+  `*_in()` 变体。JS 宿主在 WebView 内部本地循环，不逐块过 Dart 桥。
 - 读方向：引擎返回字符串指针，布局 `[len@ptr-4][UTF-16LE@ptr]`；UTF-16 读必须处理
-  代理对，且 `memory.grow` 后旧 `WasmMemory.view` 失效（用前重取）。
-- 每次调用都要重设 fuel/看门狗；trap 后丢弃 session 并重建实例。Dart 不能中断
-  同步 wasm 调用——没有 fuel 的执行器拒绝启动（`requireEngineAbi` 门）。
+  代理对，且 `memory.grow` 后旧 `WasmMemory.view` / `DataView` 失效（用前重取）。
+- **fuel 只存在于 wasm_run 兜底**；WebView 没有 fuel。看门狗超时 = 销毁离屏会话 +
+  重建，不能从 Dart 中断 JS 调用；trap 后同样弃 session 重建实例。
 - 会话 API 按 canonical 文本键控；变更信封的 `mbt` 必须回写缓存。任何 trap/腐坏读
-  都弃缓存。
+  都弃缓存。JS 宿主的会话集合（handle-only / special / mutating / unsupported）
+  与 `engine_types.dart` 逐项对齐，改一处必须改另一处。
 - `list_components` 用 `app/assets/engine/components.json` 快照；`list_templates`
   直接问引擎。快照与 wasm 活注册表的一致性由 `scripts/sync_engine.py` 探针逐 id 对账。
 - 引擎自渲染 SVG 是内容层唯一真源：画布/演示的内容层用引擎返回的 `svg`，
@@ -262,13 +285,12 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
   不要手写 `SingleActivator(meta:true)` 或散落硬编码 ⌘ 标签。
 - 演示模式：进入态判定必须在 `mode=m` 赋值**前**捕获；起始板 = 交互根；前进导航
   统一走 `playGo` 单点收口；热区清单 = 出边 flow ∪ 引擎 interactions 导出。
-- 平台壳：macOS 为主开发目标。**Windows 的 3D / 热应用预览走 WebView2**
-  （`webview_windows`，`three_preview_win.dart` / `hotapp_preview_win.dart`）；
-  Linux 无应用内 WebView（预览降级为浏览器/路径）。视频工作台的矢量代码动画
-  全平台一致（纯 Dart 逐帧）；**mp4 产物内嵌播放仍只在 macOS/iOS/Android**
-  （`VideoPlayerSurface` 按能力矩阵判平台，Windows/Linux 是路径行降级）。
-  **WebView 目标仍是 `webview_all` 全平台**（批次 A 已 stash、待恢复）；Windows 当前的
-  `webview_windows` 是过渡/参考实现，Linux 缺口由 `webview_all` 补齐。
+- 平台壳：macOS 为主开发目标。**所有应用内 WebView 统一走 `webview_all`**
+  （macOS/iOS WKWebView、Windows WebView2、Linux WebKitGTK、Android WebView）：
+  3D 预览、热应用、视频播放和个人资料页共用同一套 `WebViewController`；
+  不要再新增 `Platform.isWindows` 的 WebView 分支或第二套 WebView 依赖。
+  视频工作台的矢量代码动画全平台一致（纯 Dart 逐帧）；mp4 内嵌播放随
+  `webview_all` 全平台，能否解码取决于系统 WebView 自带编码器。
   见 `docs/plan-cross-platform-runtime.md` §1。
 - macOS Runner 已关闭 App Sandbox（本地文件 + `~/.nondesign`）；不要随手加回 sandbox
   而不补 network client / app container。
@@ -326,7 +348,8 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
 
 ## 已知限制（v0.1，2026-11-18 清理后）
 
-- **Windows 执行器 = wasmtime 50 + pulley 解释器（本地构建，2026-11-20）**：
+- **Windows 执行器 = wasmtime 50 + pulley 解释器（仅 wasm_run 兜底，2026-11-20）**：
+  生产主路径已不走它（classic wasm 在 WebView2 里执行）；下面记录保留，供兜底排障：
   原生 Cranelift 陷阱传输在 cdylib+宿主（dart/flutter_tester）环境必然
   `panic in a function that cannot unwind` abort（wasmtime 20/26/30/50 ×
   rustc 1.90/1.100 实测；纯 Rust exe 全部正常，属 Windows cdylib 平台缺陷）。
@@ -358,17 +381,23 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
 - **视频是代码动画**（用户裁决 2026-11-18）：时间线脚本 + 规范编译成算式，
   逐帧 `frameSvg(t)` 在应用内实时播放，全平台同一套行为；**成片导出暂时屏蔽**
   （`VideoService` 渲染代码保留，界面无入口）。既有 mp4 产物仍由艺术架播放。
-- 移动端本地引擎默认关闭；iOS/Android 是否启用取决于真机 wasm spike 证据。
+- 移动端本地引擎默认开启（WebView 内 classic wasm）；iOS/Android 真机 smoke 与
+  p95 证据仍待补，失败时如实回落「连接桌面」。
+- **OHOS 离屏 WebView 缺口**：`webview_all_ohos` 目前没有 `supportsOffscreenWebViews`
+  实现，OHOS 上 `startAuto` 会回落到 wasm_run（若该目标没有执行器则 engine_unavailable）；
+  补法是等上游实现或给 OHOS 走隐藏 `WebViewWidget` 宿主。
+- **Windows/Linux WebView 引擎尚未本机真机复验**：macOS WKWebView 已由
+  `integration_test/engine_webview_test.dart` 实跑通过；Windows WebView2 / Linux
+  WebKitGTK 采用同一 `OffscreenWebViewSession` 契约，需在对应机器上跑同一测试。
 - Android debug APK 构建链已修复（`MainActivity.kt` 非空收窄，1fa3a78），可
   产出 debug APK（本会话未复跑 build 复证产物）；本机无 Android 设备/AVD，
   arm64 wasmtime 加载与 `_in` ABI 的真机验收仍未完成。
 - 外部智能体（ACP）桌面独占；移动端按设计禁用。
-- **Windows 预览已应用内**：3D / 热应用走 WebView2（`webview_windows`）；
-  Linux 仍无应用内 WebView（降级浏览器/路径）。视频 mp4 产物内嵌播放仍只在
-  macOS/iOS/Android，Windows/Linux 是「复制路径/在文件夹中显示」降级面
-  （`shelf_video_player_test.dart` 按能力矩阵分平台断言）。WebView **目标仍是
-  `webview_all` 全平台**（批次 A stash 待恢复）；Windows 的 `webview_windows` 是过渡/
-  参考，Linux 缺口由 `webview_all` 补齐（见 `docs/plan-cross-platform-runtime.md` §1）。
+- **应用内 WebView 已统一**：3D / 热应用 / 视频 / 资料页共用 `webview_all`
+  （macOS/iOS WKWebView、Windows WebView2、Linux WebKitGTK、Android WebView）；
+  旧的 `webview_windows` 依赖与 `*_preview_win.dart` 已删除。视频 mp4 产物内嵌
+  播放的可用性取决于系统 WebView 编码器；失败仍保留「复制路径/在文件夹中显示」
+  降级面（`shelf_video_player_test.dart` 按能力矩阵断言）。
 - API Key 明文存本机 `SharedPreferences`（并镜像 `~/.nondesign/settings.json`）；
   Keychain 未接。
 

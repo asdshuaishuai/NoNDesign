@@ -12,8 +12,7 @@
 ///  * 数据桥只碰当前应用自己的数据库（[HotAppDb] 的 SQL 门）。
 ///
 /// 平台矩阵（唯一判据是 [PlatformCapabilities]）：
-///  * 应用内预览需要 `webview_flutter`（macOS/iOS/Android 有，Linux/Windows
-///    没有）——没有 WebView 的桌面明示「用浏览器打开」，不留在空白页；
+///  * 应用内预览走 `webview_all`（macOS/iOS/Windows/Linux/Android 全平台）；
 ///  * 「在文件夹中显示」只在桌面三平台出现；
 ///  * 导出需要保存对话框（桌面）；手机上明示需要电脑。
 library;
@@ -27,10 +26,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:provider/provider.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-
-import 'hotapp_preview_win.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+import 'package:webview_all/webview_all.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
 import '../core/app_paths.dart';
 import '../core/hotapp_db.dart';
@@ -46,7 +43,7 @@ import 'common.dart';
 import 'nonapp_import.dart';
 import 'nonapp_viewer.dart';
 
-/// webview_flutter 没有 endorsed macOS 实现——首次使用前幂等注册 WebKit。
+/// webview_all 的 WKWebView 平台在插件注册中自动就绪；测试环境保留幂等注册兜底。
 bool _wkRegistered = false;
 
 /// 作品集「打开」直载：切视图前设置，工作台 initState/监听消费后清空
@@ -125,14 +122,8 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
   /// 应用列表缓存：run 结束/切应用时重扫；切换入口直接复用，不再二次扫盘。
   List<LibraryApp> _appList = const [];
 
-  /// Windows WebView2 预览的换代号：同一路径的文件被原地重写时，
-  /// `HotappWinPreview` 的 `didUpdateWidget` 看不出路径变化，需要换实例重载。
-  int _previewEpoch = 0;
-
-  /// 最近一次写出的预览文件（Windows WebView2 / 浏览器逃生口共用）。
+  /// 最近一次写出的预览文件（内嵌预览 / 浏览器逃生口共用）。
   String? _previewPath;
-  Future<String?>? _winPreviewFuture;
-  int _winPreviewFutureEpoch = -1;
 
   final _refineCtl = TextEditingController();
   final List<String> _notes = [];
@@ -443,9 +434,8 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       } else {
         _controller = null;
       }
-      // Windows WebView2：同一缓存路径被原地重写（精修/重新生成）时，预览
-      // 组件看不出路径变化；换代号强制换实例重新加载，避免停在旧页面。
-      _previewEpoch++;
+      // 同一缓存路径被原地重写（精修/重新生成）时，预览组件看不出路径变化；
+      // 刷新控制器实例，避免停在旧页面。
       setState(() {});
     } on NonAppException catch (error) {
       debugPrint('[hotapp] mount rejected: $error');
@@ -538,7 +528,6 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     _previewPath = path;
     _dbUnavailable = true;
     _dbFailure = null;
-    _previewEpoch++;
     if (_host.supportsInAppWebView) {
       _controller = _newController()..loadFile(path);
     } else {
@@ -666,9 +655,6 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
   /// 丢弃当前预览文件引用（删除/外部清空/退出临时预览）。
   void _dropPreviewPath() {
     _previewPath = null;
-    _winPreviewFuture = null;
-    _winPreviewFutureEpoch = -1;
-    _previewEpoch++;
   }
 
   // -- 用户动作 -------------------------------------------------------------
@@ -1045,7 +1031,6 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
         setState(() {
           _entry = entry;
           _previewPath = path;
-          _previewEpoch++;
           if (_host.supportsInAppWebView) {
             _controller = _newController()..loadFile(path);
           }
@@ -1130,7 +1115,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     }
   }
 
-  /// 复制预览文件路径（Windows WebView2 失败时的降级出口之一：不白屏，
+  /// 复制预览文件路径（内嵌预览不可用时的降级出口之一：不白屏，
   /// 用户至少能把文件拿到浏览器/文件夹里打开）。
   Future<void> _copyPreviewPath() async {
     final path = _previewPath ??
@@ -1477,66 +1462,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     ]);
   }
 
-  /// Windows WebView2 预览面：路径解析 + 组件挂载 + 浏览器逃生口。
-  ///
-  /// 预览文件在 `_mountSaved` 里已写好（[_previewPath]）时直接用，避免每次
-  /// 重建都重新读页面/重写缓存；没有时按需解析一次。解析 future 按换代号
-  /// 缓存，rebuild 不会把「正在打开…」闪成新的一轮。
-  Widget _windowsPreview(NonPalette p) {
-    final epoch = _previewEpoch;
-    if (_winPreviewFuture == null || _winPreviewFutureEpoch != epoch) {
-      _winPreviewFutureEpoch = epoch;
-      _winPreviewFuture = _previewPath == null
-          ? (_app == null ? Future.value(_offlinePath) : _previewPathFor(_app))
-          : Future<String?>.value(_previewPath);
-    }
-    return FutureBuilder<String?>(
-      future: _winPreviewFuture,
-      builder: (context, snap) {
-        if (snap.connectionState != ConnectionState.done) {
-          return Center(
-            child: Text('正在打开…', style: TextStyle(fontSize: 12, color: p.ink3)),
-          );
-        }
-        final path = snap.data;
-        if (path == null) return _browserFallbackBox(p);
-        return Stack(children: [
-          Positioned.fill(
-            child: HotappWinPreview(
-              // 同一路径的缓存文件被原地重写（精修/重新生成）时换实例重载。
-              key: ValueKey('hotapp-win-preview-$epoch'),
-              htmlPath: path,
-              onOpenExternal: _openExternally,
-              onCopyPath: _copyPreviewPath,
-              onRevealInFolder: _host.supportsRevealInFolder ? _revealApp : null,
-            ),
-          ),
-          Positioned(
-            top: 8,
-            right: 8,
-            child: Material(
-              color: p.panel.withValues(alpha: 0.9),
-              borderRadius: BorderRadius.circular(8),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: _openExternally,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.open_in_new, size: 14, color: p.ink3),
-                    const SizedBox(width: 5),
-                    Text('浏览器打开', style: TextStyle(fontSize: 11, color: p.ink3)),
-                  ]),
-                ),
-              ),
-            ),
-          ),
-        ]);
-      },
-    );
-  }
-
-  /// 浏览器兜底占位（Linux / WebView2 缺失 / 路径解析失败时）。
+  /// 浏览器兜底占位（Web 构建 / 路径解析失败时）。
   Widget _browserFallbackBox(NonPalette p) {
     return Center(
       child: SingleChildScrollView(
@@ -1586,13 +1512,6 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       );
     }
     if (!_host.supportsInAppWebView) {
-      // Windows：WebView2（webview_windows）应用内预览（2026-11-20）——
-      // 加载与浏览器同款的缓存预览文件。数据库桥（webview_flutter JS
-      // channel 语义）暂未在 WebView2 侧桥接：预览右上保留「浏览器打开」
-      // 逃生口，数据库家族应用仍可一键外部打开（不静默降级）。
-      if (_host.os == HostOs.windows) {
-        return _windowsPreview(p);
-      }
       return _browserFallbackBox(p);
     }
     if (_entry?.isA2ui == true) {

@@ -9,15 +9,16 @@
 //    不开这两个参数视频会被自动播放策略静默拦住（真机黑屏的根因）；
 //  ④ 主帧加载失败 → 覆盖层「无法播放」+ 复制路径（失败不是死端）；
 //  ⑤ 默认创作面（代码动画）不创建 WebView（工作台测试无需平台桩）；
-//  ⑥ 平台判定只认能力矩阵：Windows 能力矩阵 → 不建 WebView、路径行降级；
-//    「macOS 播放面」用例显式注入 macos host，Windows 宿主上也拿到 WebKit 参数。
+//  ⑥ 平台判定只认能力矩阵：Windows 能力矩阵同样建 WebView（webview_all →
+//    WebView2）；「macOS 播放面」用例显式注入 macos host，Windows 宿主上也拿到
+//    WebKit 参数。
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 // ignore: depend_on_referenced_packages
-import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+import 'package:webview_platform_interface/webview_platform_interface.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
 import 'package:nondesign/core/capability_hub.dart';
 import 'package:nondesign/core/platform_capabilities.dart';
@@ -241,17 +242,17 @@ void main() {
     expect(find.text('复制路径'), findsOneWidget);
   });
 
-  testWidgets('Windows 能力矩阵：不创建 WebView，降级为路径提示', (tester) async {
+  testWidgets('Windows 能力矩阵：同样创建 WebView（webview_all 全平台）', (tester) async {
     final fake = await _installFake();
     await _pump(
       tester,
       _wrap(const VideoPlayerSurface(path: _mp4, host: _windowsHost)),
     );
 
-    // 生产裁决：Windows/Linux 没有应用内 WebView，不假装能播。
-    expect(fake.lastController, isNull);
-    expect(find.text('当前平台不支持应用内视频播放'), findsOneWidget);
-    expect(find.textContaining(_mp4), findsWidgets);
+    // webview_all 在 Windows 用 WebView2：平台矩阵不再把 Windows 降级。
+    expect(fake.lastController, isNotNull);
+    expect(find.text('当前平台不支持应用内视频播放'), findsNothing);
+    expect(find.textContaining(_mp4), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

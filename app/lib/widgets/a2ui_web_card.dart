@@ -28,7 +28,7 @@ import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_all/webview_all.dart';
 
 import '../core/theme.dart';
 
@@ -150,7 +150,7 @@ bool a2uiWebNavigationAllowed(String url) {
       scheme == 'blob';
 }
 
-/// 生产实现：webview_flutter 的 WebViewController。
+/// 生产实现：webview_all 的 WebViewController。
 class WebViewA2uiPage implements A2uiWebPage {
   WebViewA2uiPage() {
     _controller

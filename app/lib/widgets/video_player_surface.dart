@@ -10,9 +10,8 @@
 ///
 /// 自动播放硬前提（真机黑屏的根因）：WebKitWebViewControllerCreationParams
 /// 的默认值是 `mediaTypesRequiringUserAction = {audio, video}` +
-/// `allowsInlineMediaPlayback = false`（webview_flutter_wkwebview
-/// 3.27.2 webkit_webview_controller.dart:73-77）——不显式放开这两个参数，
-/// 媒体会被自动播放策略静默拦住（页面加载成功但永远不播）。
+/// `allowsInlineMediaPlayback = false`（webview_all_wkwebview 同源实现）——
+/// 不显式放开这两个参数，媒体会被自动播放策略静默拦住（页面加载成功但永远不播）。
 ///
 /// 平台判定只认能力矩阵（唯一的平台事实源）：构造参数与 WebKit 注册都按
 /// [VideoPlayerSurface.host] 的 [PlatformCapabilities] 判定，不在本文件里
@@ -24,8 +23,8 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+import 'package:webview_all/webview_all.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
 import '../core/platform_capabilities.dart';
 import '../core/theme.dart';
@@ -56,8 +55,8 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
   /// 平台矩阵（唯一判据来源）。
   PlatformCapabilities get _capabilities => widget.host ?? PlatformCapabilities.current();
 
-  /// webview_flutter 只覆盖 android/ios/macos；Linux/Windows 没有 WebView
-  /// 实现——那两平台降级为路径提示（信息行仍可复制路径/定位文件）。
+  /// webview_all 覆盖全部应用目标（WKWebView / WebView2 / WebKitGTK /
+  /// Android WebView）；只有 Web 构建没有原生 WebView。
   bool get _webViewSupported => _capabilities.supportsInAppWebView;
 
   /// 媒体走 WebKit（macOS/iOS）：WebKit 平台注册与创建参数都按它判定。
@@ -109,9 +108,10 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
   }
 
   WebViewController _createController() {
-    // webview_flutter 无 endorsed macOS 实现：首次使用前幂等注册 WebKit。
-    // 守卫同时看 instance——测试注入 fake 平台后不得被真注册覆盖
-    //（真 WKWebView 控制器在 flutter test 里构造即 UnimplementedError）。
+    // webview_all 的 WKWebView 平台在 Flutter 插件注册中自动就绪；测试环境
+    // 没有注册表，仍保留幂等注册兜底。守卫同时看 instance——测试注入 fake
+    // 平台后不得被真注册覆盖（真 WKWebView 控制器在 flutter test 里构造即
+    // UnimplementedError）。
     if (_usesWebKit && !_wkRegistered && WebViewPlatform.instance == null) {
       WebKitWebViewPlatform.registerWith();
       _wkRegistered = true;

@@ -14,12 +14,12 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_all/webview_all.dart';
 // 平台类（PlatformWebViewController/PlatformNavigationDelegate/PlatformWebViewWidget）
-// 不经 webview_flutter 主库 re-export——桩直接从平台接口库取（测试专用传递依赖）。
+// 不经 webview_all 主库 re-export——桩直接从平台接口库取（测试专用传递依赖）。
 // ignore: depend_on_referenced_packages
-import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+import 'package:webview_platform_interface/webview_platform_interface.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
 import 'package:nondesign/core/capability_hub.dart';
 import 'package:nondesign/core/models.dart';
@@ -504,51 +504,26 @@ void main() {
 
   // ---- 平台矩阵 ----
 
-  testWidgets('Windows：预览走 WebView2 面；初始化失败给浏览器兜底', (tester) async {
-    // 测试进程没有 WebView2 原生实现：用平台通道桩模拟「系统缺运行时」，
-    // 让 initialize 快速失败（无桩时通道调用在 widget 测试里永远挂起）。
-    const channel = MethodChannel('io.jns.webview.win');
-    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(channel, (call) async {
-      if (call.method == 'initialize') {
-        throw PlatformException(code: 'webview2_unavailable', message: 'missing runtime');
-      }
-      return null;
-    });
-    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-
+  testWidgets('Windows：预览走统一 WebView 面（webview_all → WebView2）', (tester) async {
     final fixture = await _seedProject();
     final store = _store(os: HostOs.windows);
+    final fake = _FakeWebViewPlatform()..install();
+    addTearDown(() => WebViewPlatform.instance = WebKitWebViewPlatform());
     addTearDown(() => threeLoadOnOpen = null);
 
     await _pumpAt(tester, _host(store, fixture.service), const Size(1440, 900));
     threeLoadOnOpen = 'saturn-demo';
     await tester.pumpWidget(_host(store, fixture.service, gen: 1));
-    // 预览面挂载是异步的（写宿主页 → 建 WebView2 → 初始化失败上报），
-    // 多泵几帧让这条链走完。
+    // 预览面挂载是异步的（写宿主页 → 建控制器 → loadFile）。
     for (var i = 0; i < 8; i++) {
       await tester.pump(const Duration(milliseconds: 50));
     }
 
-    // 初始化失败必须落 Windows 专属兜底面（浏览器打开 / 文件夹 / 重试），
-    // 既不能退回「这台设备不能内嵌显示」的终态，也不能误构造 webview_flutter
-    // 控制器。
-    expect(find.byType(WebViewWidget), findsNothing);
-    expect(find.text('这台设备不能内嵌显示 3D 预览'), findsNothing);
-    expect(find.text('这台电脑暂时不能内嵌显示 3D 预览'), findsOneWidget);
-    expect(find.text('用浏览器打开'), findsOneWidget);
-    expect(find.text('在文件夹中显示'), findsOneWidget);
-    expect(find.text('重试'), findsOneWidget);
-    expect(find.byKey(const ValueKey('three-preview-unsupported')), findsOneWidget);
-
-    // 缺 WebView2 的原始诊断不静默丢弃：一句人话在上，原始原因折叠在
-    // 「技术详情」里（能力缺失不得静默）。
-    expect(find.text('技术详情'), findsOneWidget);
-    expect(find.byKey(const ValueKey('three-preview-unsupported-detail')), findsNothing);
-    await tester.tap(find.text('技术详情'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('three-preview-unsupported-detail')), findsOneWidget);
-    expect(find.textContaining('webview2_unavailable'), findsWidgets);
+    // Windows 不再走独立 WebView2 组件：与 macOS/Linux/Android 同一条
+    // WebViewController 路径，平台差异由 webview_all 吸收。
+    expect(fake.lastController, isNotNull);
+    expect(find.byType(WebViewWidget), findsOneWidget);
+    expect(find.byKey(const ValueKey('three-preview-unsupported')), findsNothing);
   });
 
   testWidgets('没有 WebView 的平台：不构造控制器，给可复制路径的降级面', (tester) async {

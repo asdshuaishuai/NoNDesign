@@ -8,7 +8,7 @@
 // res-2 截图/四方位门：旧判据只有 `_project != null`——预览失败（_loadError）
 //   或 controller 未挂载时按钮仍可点，点了是带 ?. 守卫的静默 no-op。新判据 =
 //   预览页就绪（预览页 300ms 后主动上报的 metrics 桥；**不用 onPageFinished**：
-//   webview_flutter 平台基类 setOnPageFinished 直接 throw UnimplementedError，
+//   webview_all 平台基类 setOnPageFinished 直接 throw UnimplementedError，
 //   NavigationDelegate 构造器会同步调用它）。两条 UI 路径都断言：landscape 的
 //   _TopBtn 与 portrait 的 PopupMenuItem。
 //
@@ -22,10 +22,10 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-// 平台类不经 webview_flutter 主库 re-export——桩直接从平台接口库取。
+// 平台类不经 webview_all 主库 re-export——桩直接从平台接口库取。
 // ignore: depend_on_referenced_packages
-import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+import 'package:webview_platform_interface/webview_platform_interface.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
 import 'package:nondesign/core/capability_hub.dart';
 import 'package:nondesign/core/models.dart';

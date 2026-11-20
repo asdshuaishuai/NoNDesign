@@ -19,8 +19,8 @@ import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+import 'package:webview_all/webview_all.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
 import 'package:nondesign/core/three_service.dart';
 
@@ -64,7 +64,7 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('file:// 自包含预览页能执行渲染库并渲染土星场景', (tester) async {
-    // macOS 没有 endorsed 的 WebView 实现，需要显式注册（与工作台同一路径）。
+    // webview_all 在真实运行时由插件注册表就绪；测试环境保留显式注册兜底。
     if (Platform.isMacOS && WebViewPlatform.instance == null) {
       WebKitWebViewPlatform.registerWith();
     }

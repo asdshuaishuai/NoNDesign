@@ -1,6 +1,6 @@
 // 本地预览载荷的缓存（file:// WebView 的执行面）。
 //
-// WebView 没有「内存 html」路径（loadHtmlString 在 webview_flutter 的平台
+// WebView 没有「内存 html」路径（loadHtmlString 在 webview_all 的平台
 // 实现里并不暴露），所以预览必须落成文件再 `loadFile`。缓存根：
 //   - 桌面：`~/.nondesign/nonapp_cache`（HOME 缺失时回落系统临时目录）
 //   - iOS / Android：**应用支持目录**（path_provider）——不再用

@@ -3,10 +3,11 @@
 > 批次 01 建立（2026-11-18）。本文记录：为什么 vendored、vendored 了什么、怎么校验、
 > 实测证据、以及仍未验证 / 明确做不到的部分。
 >
-> **退役方向（2026-11-20 方案定稿，未施工）**：wasm 宿主将改为**渲染引擎自己的
-> classic wasm + JS 宿主跑在跨平台 WebView 里**，wasm_run 分四批退役（B1–B4），
-> 见 [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) §2。在 B4 落地前，
-> 本文仍是现状契约；退役时整体归档并在本文件头部标注日期。
+> **现状（2026-11-20 晚更新）**：生产主路径已切到**渲染引擎自己的 classic wasm +
+> JS 宿主跑在跨平台 WebView 里**（`WebViewEngineHost` + `engine_web_host.js`），
+> 见 [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) §2。wasm_run
+> 只剩**启动失败兜底**与纯 Dart 契约测试使用；B4（移除 `third_party/wasm_run`）待
+> Windows/Linux/移动真机复验后执行。本文以下内容仍是兜底路径的现状契约。
 
 ## 1. 结论速览
 
@@ -15,9 +16,9 @@
 | 宿主（macOS arm64, wasmtime 14.0.4）加载 `moonviz.wasm` 并驱动 `_in` ABI | **已实测通过**（`test/wasm_run_spike_test.dart`） |
 | 15 个目标平台的预编译动态库入库（sha256 固定） | **已完成**（`bash scripts/fetch_wasm_run_libs.sh --check` 全绿） |
 | 离线构建（不访问 GitHub / pub.dev） | **已实测**：macOS debug 与 iOS `--no-codesign` 均构建通过、日志零下载；wasm_run hook 只从 `third_party/wasm_run/libs/` 拷贝，sqlite3 改用系统库（见 §9/§5.4） |
-| iOS 本地引擎 | **不可行（已实测）**：wasmi 0.31 不支持 SIMD，MoonViz 模块含 SIMD 指令 → iOS 只能「连接桌面」，见 §7.1 |
+| iOS 本地引擎 | **wasm_run 不可行（已实测）**：wasmi 0.31 不支持 SIMD；但 2026-11-20 起主路径改为 WKWebView 里的 classic wasm（Safari 16.4+ 支持 SIMD），iOS 本地引擎改由 WebView 宿主承担 |
 | Android 本地引擎 | **运行未验证，打包已可见**：`MainActivity.kt` 的类型错误修复后，工作树已有 debug APK 产物（本轮未重跑构建）；APK 内 `lib/arm64-v8a/libwasm_run_dart.so` 与 `assets/engine/moonviz.wasm` 均在位。但当前无 Android 设备/AVD，**wasmtime arm64 加载与 `_in` ABI 未在设备上跑过** |
-| 移动端默认启用本地引擎 | **否**（`WasmRuntimeGate.mobileLocalEngineEnabled = false`） |
+| 移动端默认启用本地引擎 | **是**（2026-11-20 起 `mobileLocalEngineEnabled` 默认 true，由 WebView 宿主执行；wasm_run 兜底仍不支持 iOS） |
 
 ## 2. 为什么必须 vendored
 

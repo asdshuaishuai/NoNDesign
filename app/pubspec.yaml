@@ -44,8 +44,11 @@ dependencies:
   markdown: ^7.3.1
   shared_preferences: ^2.5.6
   flutter_svg: ^2.4.0
-  webview_flutter: ^4.14.1
-  webview_flutter_wkwebview: ^3.27.2
+  # 全平台 WebView：Android WebView / iOS+macOS WKWebView / Windows WebView2 /
+  # Linux WebKitGTK 4.1 / OHOS ArkWeb；API 与 webview_flutter 兼容。
+  webview_all: ^1.5.2
+  # 视频自动播放需要的 WK 专属创建参数由平台包导出；直接 import 必须显式依赖。
+  webview_all_wkwebview: ^1.5.2
   # `.nonapp` 单文件包（zip 容器）的读取：只用 ZipDecoder，pure Dart、无平台
   # 通道。**4.x 是 mediapipe_core 的硬约束**（0.2/0.3 都要求 archive ^4.2.0），
   # 3.6.1 与它无解；ZipDecoder.decodeBytes 在 4.x 仍可用（N6 mediapipe 集成的硬前置，
@@ -87,7 +90,6 @@ dependencies:
   # 应用数据目录（缓存/数据库/日志），从传递依赖提升为直接依赖：
   # 批次 07/08 的离线缓存与本地库都要自己决定落盘位置。
   path_provider: ^2.1.6
-  webview_windows: ^0.4.0
 
 # sqlite3 3.x 的构建 hook 默认从 GitHub 下载预编译库（离线构建会失败）。
 # 改为使用系统自带的 SQLite（macOS/iOS/Linux/Android 都有），构建全程离线。
@@ -124,9 +126,9 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   # webview 测试替身直接 import 的平台接口（nonapp_hotapp_mount_test /
-  # nonapp_offline_test）；此前只作为 webview_flutter 的传递依赖存在，
-  # depend_on_referenced_packages 需显式声明（测试专用 → dev_dependencies）。
-  webview_flutter_platform_interface: ^2.15.1
+  # nonapp_offline_test / three_workspace_test / shelf_video_player_test）；
+  # webview_all 的平台接口与 webview_flutter 同形（测试专用 → dev_dependencies）。
+  webview_platform_interface: ^1.5.2
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

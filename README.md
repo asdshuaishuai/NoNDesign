@@ -4,8 +4,9 @@ AI-native 创作工作台：**一句话 → 产品需求设计文档 → 完整�
 还能做 3D 场景、代码动画视频与带本地数据库的 NaN 热应用。
 
 - **桌面端**：Flutter 3.50（macOS 主目标；iOS/Android/Linux/Windows 平台壳已就位）
-- **本地核心**：Dart 进程内跑 MoonViz classic wasm 引擎（`wasm_run` FFI 宿主）、
-  纯 Dart DDP1/DDP2、项目库、3D / 热应用 / 视频工作台
+- **本地核心**：MoonViz classic wasm 引擎跑在**离屏 `webview_all` 会话**里
+  （macOS/iOS WKWebView、Windows WebView2、Linux WebKitGTK、Android WebView；
+  wasm_run 仅启动失败兜底）、纯 Dart DDP1/DDP2、项目库、3D / 热应用 / 视频工作台
 - **内置智能体**：Dart 工具循环（`ai_sdk_dart` 直连当前服务商），画布变更仍经引擎门
 - **可选「连接桌面」**：桌面 App 内的 Dart RPC 宿主（`/v1/health`、`/v1/capabilities`、
   `/v1/rpc`），默认关闭、默认只听 loopback、token 必填
@@ -99,8 +100,8 @@ app/                 Flutter 应用
   assets/            engine 产物、components 快照、models.json、3D/视频示例
   test/              flutter test（含 acceptance_local_core_test）
 engine/              moonviz.wasm + components.json + manifest（构建源）
-scripts/             开发期同步/对拍工具（sync_engine / sync_models / wf）
-third_party/wasm_run/ vendored wasm 执行器（桌面动态库、移动 native 资产）
+scripts/             开发期同步/对拍工具（sync_engine / sync_models / wf / engine_web_probe）
+third_party/wasm_run/ vendored wasm 执行器（**仅兜底路径**；主路径不加载）
 figma-plugin/        Figma 双向插件
 plugins/             独立插件资产（视频制作说明等）
 ```
@@ -142,8 +143,11 @@ token。
   默认仍不监听。动态验证可覆盖「默认无监听」与显式开启后的 health/rpc。
 - 视频成片导出暂时屏蔽（渲染代码保留、界面无入口）；现行视频面为代码动画 + 动效合成
   （见 `docs/video-clip-contract.md`），既有 mp4 仍由艺术架播放。
-- Linux/Windows 没有应用内 WebView 实现；3D/热应用预览降级为浏览器或路径。
-- Android 构建已可产出 debug APK；本机无设备/AVD，arm64 本地引擎真机验收未完成。
+- 应用内 WebView 已统一到 `webview_all`（含 Linux/Windows）；3D/热应用/视频预览
+  走同一条 `WebViewController` 路径，Windows 专属预览分支已删除。
+- Android 构建已可产出 debug APK；本机无设备/AVD，WebView 本地引擎真机验收未完成。
+- Windows WebView2 / Linux WebKitGTK 的离屏引擎宿主与 macOS 共用契约，需在对应
+  机器跑 `integration_test/engine_webview_test.dart` 复验。
 
 ## 版本
 

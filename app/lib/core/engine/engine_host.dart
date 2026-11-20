@@ -26,6 +26,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'engine_backend.dart';
 import 'engine_types.dart';
 import 'engine_worker.dart';
 
@@ -192,7 +193,7 @@ abstract final class EngineLibraryResolver {
 /// One instance per app. Every method returns an engine envelope
 /// (`{ok: bool, …}`) — transport failures are enveloped too, never thrown, so
 /// callers (store, agent loop) have a single error shape to handle.
-class EngineHost {
+class EngineHost implements EngineBackend {
   EngineHost._(this._wasmBytes, this._options);
 
   final Uint8List _wasmBytes;
@@ -236,19 +237,24 @@ class EngineHost {
   }
 
   /// Runtime facts once the host is ready.
+  @override
   EngineRuntimeInfo? get runtime => _runtime;
 
   /// Why the host failed to start, if it did (`null` when healthy).
+  @override
   String? get startupError => _startupError;
 
   /// Number of isolate respawns (watchdog kills + crashes).
+  @override
   int get restartCount => _restartCount;
 
   /// True when calls can be served (worker alive and initialised).
+  @override
   bool get isReady => _worker != null && _startupError == null && !_disposed;
 
   /// Clears a recorded startup failure and tries to bring the worker back.
   /// Returns whether the host is usable afterwards.
+  @override
   Future<bool> retry() async {
     if (_disposed) return false;
     _startupError = null;
@@ -526,12 +532,15 @@ class EngineHost {
     return <String, dynamic>{'ok': false, 'error': EngineErrorCode.emptyResult};
   }
 
+  @override
   Future<Map<String, dynamic>> render(String mbt) =>
       _envelopeCall(EngineWorkerProtocol.opRender, <String, dynamic>{'mbt': mbt});
 
+  @override
   Future<Map<String, dynamic>> validate(String mbt) =>
       _envelopeCall(EngineWorkerProtocol.opValidate, <String, dynamic>{'mbt': mbt});
 
+  @override
   Future<Map<String, dynamic>> apply(String mbt, String op, {String gate = 'human'}) =>
       _envelopeCall(EngineWorkerProtocol.opApply, <String, dynamic>{
         'mbt': mbt,
@@ -539,6 +548,7 @@ class EngineHost {
         'gate': gate,
       });
 
+  @override
   Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) =>
       _envelopeCall(EngineWorkerProtocol.opSession, <String, dynamic>{
         'mbt': mbt,
@@ -546,6 +556,7 @@ class EngineHost {
         'arg': ?arg,
       });
 
+  @override
   Future<Map<String, dynamic>> generate(
     String mbt,
     String intent,
@@ -559,6 +570,7 @@ class EngineHost {
         'spec': spec,
       });
 
+  @override
   Future<Map<String, dynamic>> tap(String mbt, String artboard, double x, double y) =>
       _envelopeCall(EngineWorkerProtocol.opTap, <String, dynamic>{
         'mbt': mbt,
@@ -567,6 +579,7 @@ class EngineHost {
         'y': y,
       });
 
+  @override
   Future<Map<String, dynamic>> constrain(String mbt, String artboard, String intent) =>
       _envelopeCall(EngineWorkerProtocol.opConstrain, <String, dynamic>{
         'mbt': mbt,
@@ -574,6 +587,7 @@ class EngineHost {
         'intent': intent,
       });
 
+  @override
   Future<Map<String, dynamic>> event(String mbt, String artboard, String spec) =>
       _envelopeCall(EngineWorkerProtocol.opEvent, <String, dynamic>{
         'mbt': mbt,
@@ -581,11 +595,13 @@ class EngineHost {
         'spec': spec,
       });
 
+  @override
   Future<Map<String, dynamic>> exportHtml(String mbt) =>
       _envelopeCall(EngineWorkerProtocol.opExportHtml, <String, dynamic>{'mbt': mbt});
 
   /// `list_templates` / `list_themes` / `list_ops` / `list_tokens` /
   /// `list_components`.
+  @override
   Future<Map<String, dynamic>> listing(String functionName) =>
       _envelopeCall(EngineWorkerProtocol.opListing, <String, dynamic>{'fn': functionName});
 
@@ -611,6 +627,7 @@ class EngineHost {
   }
 
   /// Diagnostic counters (memory, generation, traps, session cache).
+  @override
   Future<EngineStats> stats() async {
     final reply = await _call(EngineWorkerProtocol.opStats);
     final info = reply[EngineWorkerProtocol.info];
@@ -619,6 +636,7 @@ class EngineHost {
   }
 
   /// Forces an instance rebuild (memory released, session evicted).
+  @override
   Future<EngineStats> recycle() async {
     final reply = await _call(EngineWorkerProtocol.opRecycle);
     final info = reply[EngineWorkerProtocol.info];
@@ -641,6 +659,7 @@ class EngineHost {
   }
 
   /// The engine's `version_info` envelope.
+  @override
   Future<Map<String, dynamic>> version() => _call(EngineWorkerProtocol.opVersion).then((reply) {
         final envelope = reply[EngineWorkerProtocol.envelope];
         if (envelope is Map) return Map<String, dynamic>.from(envelope);
@@ -648,6 +667,7 @@ class EngineHost {
       });
 
   /// Stops the worker and fails any in-flight call.
+  @override
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;

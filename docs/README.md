@@ -47,6 +47,7 @@
 | [plan-chat-stream-shell.md](plan-chat-stream-shell.md) | 已实施（2026-11-17） | Chat Stream 主体 + 艺术架 + 画中画工作区 |
 | [plan-dart-agent-migration.md](plan-dart-agent-migration.md) | 已实施（2026-11-18） | 去 Python：Dart Agent 循环迁移 |
 | [plan-a2ui-web-spike.md](plan-a2ui-web-spike.md) | spike 完成（未接产品） | 官方 A2UI Web 渲染器可行性 |
+| [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) | **已落地（批次 A+B1，2026-11-20）**；B2–B4 待真机/退役 | WebView 统一 `webview_all`；引擎 classic wasm + JS 宿主跑进离屏 WebView；wasm_run 仅兜底；flutter_scene 不采用 |
 
 ### 1.4 方案线（**未施工**，施工前不得当作现状）
 
@@ -54,7 +55,6 @@
 | --- | --- | --- |
 | [plan-creative-workbench.md](plan-creative-workbench.md) | **方案定稿，未施工** | 全局交互（右 chat + 执行/结果双面）、设计验证式原型绑定、3D 建模、视频导演台/剧本/双风格/TTS/配乐联动、强绑定强规范框架、施工批次 0–8 |
 | [plan-music-module.md](plan-music-module.md) | **方案定稿，未施工** | 音乐（编曲）模块：score.json、五线谱编辑器、Web Audio 编译播放、music_* 工具面 |
-| [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) | **方案定稿（2026-11-20）** | WebView **目标 = `webview_all` 全平台**（含 Linux/OHOS）；当前 `webview_flutter` + `webview_windows` 为过渡/参考；wasm 宿主 → 渲染引擎 wasm SDK 跑进 WebView（Linux 过渡期保留原生）；flutter_scene 本周期不采用 |
 | [plan-flutter-3.50-adoption.md](plan-flutter-3.50-adoption.md) | backlog（待排期） | Flutter 3.50 采纳清单 |
 
 ### 1.5 历史快照 / 审查（只读，不作为待办）
@@ -95,8 +95,8 @@
 | 2026-11-20 | 3D = **建模**工作台（three.js；大纲/视口/检查器 + scene.json） | 方案定稿 | plan-creative-workbench §4 |
 | 2026-11-20 | 全局交互：右 chat 唯一对话面；工作台只做执行过程面 + 结果面 | 方案定稿 | plan-creative-workbench §2 |
 | 2026-11-20 | 音乐为第五个独立模块（只做编曲） | 方案定稿 | plan-music-module |
-| 2026-11-20 | **WebView 目标 = `webview_all` 全平台**（macOS/iOS/Android/Windows/Linux/OHOS）；当前 `webview_flutter` + `webview_windows`（Windows WebView2）为**过渡/参考**；批次 A stash 待恢复 | 方案定稿；Windows 过渡已落地 | plan-cross-platform-runtime §1 |
-| 2026-11-20 | **wasm → 渲染引擎 wasm SDK 跑进 WebView**；wasm_run 分四批退役 | 方案定稿，未施工 | plan-cross-platform-runtime §2 |
+| 2026-11-20 | **WebView 统一 `webview_all` 全平台**（macOS/iOS WKWebView、Windows WebView2、Linux WebKitGTK、Android WebView）；旧 `webview_flutter` / `webview_windows` 与 Windows 专属预览已删除 | **已实施（批次 A）**；Windows/Linux 真机复验待补 | plan-cross-platform-runtime §1 |
+| 2026-11-20 | **wasm 主路径 = 引擎 classic wasm + JS 宿主跑进离屏 WebView**；wasm-gc 只作未来快路径；wasm_run 降为启动失败兜底 | **已实施（批次 B1，macOS WKWebView 实跑通过）**；B4 退役待 B2/B3 | plan-cross-platform-runtime §2 |
 | 2026-11-20 | **flutter_scene 本周期不用于 3D 工作台**（pre-1.0；缺建模交互层；three.js 已够用） | 裁决（可重估：≥1.0 后） | plan-cross-platform-runtime §3 |
 | 2026-11-20 | 设置新增**无限步骤**（`unlimitedSteps` 哨兵，解除 4–600 步数上限与 10 分钟总时长） | **已实施**（`1259def`） | AGENTS.md · Agent 层约定 |
 | 2026-11-19 | 工作台切换 = 项目切换；手机锁竖屏、平板跟随旋转；通知中心退役 | 已实施 | AGENTS.md · 产品裁决 |
@@ -106,13 +106,13 @@
 ## 3. 文档之间的依赖关系（施工顺序）
 
 ```
-plan-cross-platform-runtime §1（WebView 目标：webview_all 全平台）
-        │  过渡期：webview_flutter + webview_windows；Linux 由 webview_all 补齐
+plan-cross-platform-runtime §1（已落地：webview_all 全平台）
+        │  wasm 主路径同步切换：classic wasm + JS 宿主跑进离屏 WebView（§2）
         ├──> plan-creative-workbench §2（执行/结果双面）
         ├──> plan-creative-workbench §4（3D 建模视口，three.js）
         ├──> plan-creative-workbench §5（视频导演台 / Phaser）
         │          └──> plan-music-module（§5.5 配乐联动依赖音乐模块）
-        └──> plan-cross-platform-runtime §2（引擎 wasm SDK 跑进 WebView）
+        └──> wasm_run B4 退役（待 Windows/Linux/移动真机复验）
 ```
 
 * 音乐模块与视频引擎互不阻塞；**视频→音乐联动（批次 7）必须等音乐模块批次 1–4 完成**。
@@ -145,7 +145,7 @@ plan-cross-platform-runtime §1（WebView 目标：webview_all 全平台）
 
 ---
 
-最后对账：2026-11-20（与 `AGENTS.md`、`vision.md`、三份方案、五份已实施契约头部交叉核对；
-已合并用户实现（workspace 生成链路 + Windows WebView2），三分支统一到 `6c05b0e`；
-WebView **目标仍是 `webview_all` 全平台**，Windows `webview_windows` 作过渡/参考；
-批次 A 已 stash、待恢复）。
+最后对账：2026-11-20（与 `AGENTS.md`、`vision.md`、四份方案、已实施契约头部交叉核对；
+**批次 A（webview_all 全平台）+ B1（classic wasm WebView 宿主）已落地**；
+macOS WKWebView 真实集成测试通过；Windows/Linux/移动真机复验与 wasm_run B4 退役
+仍是未清项；OHOS 离屏 WebView 缺口已登记）。

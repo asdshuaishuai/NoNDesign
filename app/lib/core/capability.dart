@@ -236,11 +236,14 @@ class WasmRuntimeGate {
 
   /// Whether phones/tablets may run the engine locally.
   ///
-  /// Hard default: false. Flip only with recorded spike evidence
-  /// (`docs/wasm-run-vendoring.md` § verification).
+  /// Enabled by default since the engine moved into the WebView (classic wasm
+  /// + SIMD): the old blocker — wasmi on iOS has no SIMD — no longer applies.
+  /// The spike budgets above stay as the health bar; a host that cannot boot
+  /// degrades honestly to "连接桌面" instead of pretending to work. Set
+  /// `NONDESIGN_MOBILE_LOCAL_ENGINE=false` to force the old gate.
   static const bool mobileLocalEngineEnabled = bool.fromEnvironment(
     'NONDESIGN_MOBILE_LOCAL_ENGINE',
-    defaultValue: false,
+    defaultValue: true,
   );
 }
 

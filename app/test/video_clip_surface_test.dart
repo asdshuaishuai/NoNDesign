@@ -264,7 +264,7 @@ void main() {
           height: 360,
           child: VideoClipSurface(
             clip: _clip(),
-            host: PlatformCapabilities.forOs(HostOs.linux),
+            host: PlatformCapabilities.forOs(HostOs.web, isWeb: true),
           ),
         ),
       ));

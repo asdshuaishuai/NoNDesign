@@ -18,8 +18,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+import 'package:webview_platform_interface/webview_platform_interface.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
 import 'package:nondesign/core/capability_hub.dart';
 import 'package:nondesign/core/hotapp_service.dart';
@@ -30,7 +30,6 @@ import 'package:nondesign/core/nonapp_package.dart';
 import 'package:nondesign/core/platform_capabilities.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
-import 'package:nondesign/widgets/hotapp_preview_win.dart';
 import 'package:nondesign/widgets/hotapp_workspace.dart';
 
 String _html(String marker) =>
@@ -395,10 +394,12 @@ void main() {
     expect(fake.lastController?.loadedFiles ?? const <String>[], isEmpty);
   });
 
-  testWidgets('Windows：预览路径不可用时保留浏览器/路径降级面（不静默白屏）',
+  testWidgets('无内嵌 WebView 的宿主：预览路径不可用时保留浏览器/路径降级面（不静默白屏）',
       (tester) async {
     _setPhone(tester);
-    final caps = CapabilityHub(platform: PlatformCapabilities.forOs(HostOs.windows));
+    final caps = CapabilityHub(
+      platform: PlatformCapabilities.forOs(HostOs.web, isWeb: true),
+    );
     final appStore = AppStore(capabilities: caps)..ready = true;
     appStore.settingsMirrorDir = temp.path;
     final lib = _AgentLibrary(root: Directory('${temp.path}/hotapps'));
@@ -415,9 +416,7 @@ void main() {
     expect(find.text('这台电脑暂时不能在应用内预览'), findsOneWidget);
     expect(find.text('用浏览器打开'), findsWidgets);
     expect(find.text('复制文件路径'), findsOneWidget,
-        reason: 'Windows 降级面必须给出浏览器/路径两条可执行出路');
-    expect(find.byType(HotappWinPreview), findsNothing,
-        reason: '路径解析失败时不应挂 WebView2（会白屏）');
+        reason: '降级面必须给出浏览器/路径两条可执行出路');
     expect(find.text('这个应用的内容读不出来'), findsOneWidget,
         reason: '原始读失败仍以人话告知');
   });
