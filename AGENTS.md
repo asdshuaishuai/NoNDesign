@@ -2,11 +2,19 @@
 
 AI 原生创作工作台。**一句话 → 产品需求设计文档 → 完整可交互原型**；同一工作台
 还能做 3D 场景、代码动画视频与带本地数据库的 NaN 热应用。
+（2026-11-20 方案线：定位升级为「创意工作台」并加入音乐/编曲，未施工，见文档总纲。）
 
 **技术栈（用户决策，2026-11-13 / 2026-11-18）：Flutter 3.50 + 纯 Dart 本地核心。
 没有 Python 服务、没有固定端口、没有端口文件。Python 只保留为开发期同步工具
 （`scripts/sync_engine.py` / `scripts/sync_models.py`），不参与应用运行时。
 不要重新引入 Bun、Tauri 或任何 JS 前端运行时。**
+
+**文档入口（2026-11-20 起）**：[docs/README.md](docs/README.md) 是文档总纲——
+文档分层、决策台账、状态口径与施工顺序都在那里。当前**未施工**的方案线：
+`docs/plan-creative-workbench.md`（交互升级 + 四模块 + 强绑定强规范）、
+`docs/plan-music-module.md`（音乐/编曲）、
+`docs/plan-cross-platform-runtime.md`（webview_all / 引擎 wasm SDK / flutter_scene 裁决）。
+方案文档写的是目标态，不要当作现状引用；两者冲突时以文档总纲的决策台账为准。
 
 ## 架构边界（改代码前先读）
 
@@ -98,6 +106,12 @@ plugins/             独立插件资产（视频制作说明）
 | 连接桌面（桌面宿主） | ✅ 设置卡启停/地址/连接码 | — | — |
 | 系统分享 / 导出面板 | ❌ 未装插件 | ❌ | ❌ |
 
+> 上表描述**当前实现**（2026-11-20）。同日定稿的全平台运行时方案（未施工）会改变
+> WebView / wasm 宿主两行：`webview_all` 让 Windows/Linux 也具备应用内 WebView，
+> 引擎 wasm SDK 跑进 WebView 后 iOS/Android 的本地引擎路径重新评估。台账见
+> [docs/README.md](docs/README.md) §2，细节见
+> [docs/plan-cross-platform-runtime.md](docs/plan-cross-platform-runtime.md)。
+
 ## 常用命令
 
 ```bash
@@ -151,6 +165,9 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
 - 上下文分层：静态指令 → 项目地图 → 设计规范/文档 → 会话记忆 + 最新 state；
   稳定前缀不要插入时间戳/随机序，变更走追加式 state 卡。
 - 取消：`CancellationToken`；取消后也必须发终态事件。
+- 步数预算：`AppSettings.effectiveMaxSteps` 是唯一来源；`unlimitedSteps` 打开时使用
+  `agentUnlimitedSteps` 哨兵（1<<20）并解除本地 run 的 10 分钟总时长（取消仍有效）。
+  不要在循环、设置 UI 或远程参数里写死 600。
 
 ## DDP
 
@@ -175,7 +192,9 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
   不要手写 `SingleActivator(meta:true)` 或散落硬编码 ⌘ 标签。
 - 演示模式：进入态判定必须在 `mode=m` 赋值**前**捕获；起始板 = 交互根；前进导航
   统一走 `playGo` 单点收口；热区清单 = 出边 flow ∪ 引擎 interactions 导出。
-- 平台壳：macOS 为主开发目标；Linux/Windows 无应用内 WebView（3D/热应用预览降级）。
+- 平台壳：macOS 为主开发目标；Linux/Windows 目前无应用内 WebView（3D/热应用/视频播放
+  降级）。**计划中**：`webview_all` 全平台替换，见
+  `docs/plan-cross-platform-runtime.md` §1（方案定稿；批次 A 工作区已改、未提交）。
 - macOS Runner 已关闭 App Sandbox（本地文件 + `~/.nondesign`）；不要随手加回 sandbox
   而不补 network client / app container。
 
@@ -226,10 +245,12 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
   产出 debug APK（本会话未复跑 build 复证产物）；本机无 Android 设备/AVD，
   arm64 wasmtime 加载与 `_in` ABI 的真机验收仍未完成。
 - 外部智能体（ACP）桌面独占；移动端按设计禁用。
-- 3D/热应用在 Linux/Windows 没有应用内 WebView，预览降级为浏览器或路径。
+- 3D/热应用在 Linux/Windows 没有应用内 WebView，预览降级为浏览器或路径
+  （全平台 WebView 替换方案见 `docs/plan-cross-platform-runtime.md` §1，未施工）。
 - API Key 明文存本机 `SharedPreferences`（并镜像 `~/.nondesign/settings.json`）；
   Keychain 未接。
 
 ## 版本
 
-`VERSION` = `0.1.0`（唯一版本源；`app/pubspec.yaml` 同步）。
+`VERSION` = `0.1.0`（唯一版本源；`app/pubspec.yaml` 同步）。文档状态见
+[docs/README.md](docs/README.md)（已实施 / 方案定稿 / 历史快照三态总纲）。

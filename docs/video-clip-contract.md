@@ -1,5 +1,10 @@
 # 动效合成（HTML/CSS/JS 短片）契约 v1
 
+> 状态：**v1 契约生效中**。2026-11-20 方案新增第三渲染面「引擎短片」（Phaser 3，
+> 剧本 JSON 编译，见 [plan-creative-workbench.md](plan-creative-workbench.md) §5.0），
+> 施工后另立 `docs/video-engine-contract.md`；本文的两种渲染面、`ND.scene` 纯函数
+> 纪律与桥消息契约保持不变。
+
 视频工作台从「Dart 逐帧矢量」升级为两种渲染面并存：
 
 | 渲染面 | 内容层 | 适合 |

@@ -3,6 +3,10 @@
 > 状态：**方案定稿，待施工**。本文覆盖全局交互升级与四个工作台的能力/联动裁决；
 > 音乐模块的技术面（谱面/合成/编译器）以 [plan-music-module.md](plan-music-module.md) 为准。
 > 施工按 §7 分批，每批完成回填落地锚点。
+>
+> 相关文档：[README.md](README.md)（总纲）· [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md)
+> （全平台 WebView 是本方案工作台 UI 的前置；wasm 宿主迁移互不阻塞）·
+> [video-clip-contract.md](video-clip-contract.md)（现有 v1 短片契约；§5.0 的引擎短片是第三渲染面）。
 
 ## 0. 用户裁决汇总（2026-11-20，全部有效）
 
