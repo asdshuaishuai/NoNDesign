@@ -55,15 +55,19 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 
+import 'agent_model_middleware.dart';
 import 'api.dart';
 import 'figma_export.dart';
 import 'hotapp_service.dart';
 import 'models.dart';
 import 'nonapp_library.dart';
 import 'three_service.dart';
+import 'video_project.dart';
+import 'video_samples.dart';
 import 'video_service.dart';
 
 // ============================================================
@@ -101,6 +105,172 @@ Map<String, Map<String, dynamic>>? thinkingProviderOptions(String level) {
     'openai': <String, dynamic>{'reasoning_effort': effort},
   };
 }
+
+/// 线上方言裁决：MiniMax「自适应思考」模型（M3.x）强制开启思考，
+/// `thinking.type=disabled`/`reasoning.effort=none` 会被 400 拒绝
+/// （"requires adaptive thinking"）。实测同一请求单轮耗时：
+/// auto ≈ 60–163 s、low ≈ 19.5 s、medium ≈ 34 s、high ≈ 103 s——
+/// auto 的默认思考预算把每一轮都拖到分钟级，一轮 run 十几轮直接爆表。
+/// 因此 `auto`/`off`/`none`/`minimal`/空 一律落线为 `low`；显式档位
+/// （low/medium/high/xhigh/max）原样透传，尊重用户选择。
+Map<String, Map<String, dynamic>>? providerThinkingOptions(DartAgentRequest request) {
+  final base = request.baseUrl.toLowerCase();
+  final model = request.model.toLowerCase();
+  // StepFun step_plan 实测（2026-11-20）：auto 70s/轮、medium 33s/轮、
+  // low 47s、minimal 58s。auto 同样吃满思考预算，落线 medium。
+  final stepFun = base.contains('stepfun') || model.startsWith('step-');
+  if (stepFun) {
+    final level = request.thinkingLevel.trim();
+    const neutral = <String>{'', 'auto', 'off', 'none'};
+    final effort = neutral.contains(level)
+        ? 'medium'
+        : (level == 'minimal' ? 'medium' : level);
+    final safe = _reasoningEffortLevels.contains(effort) ? effort : 'medium';
+    return <String, Map<String, dynamic>>{
+      'openai': <String, dynamic>{'reasoning_effort': safe},
+    };
+  }
+  final miniMax = base.contains('minimax') || model.startsWith('minimax');
+  if (!miniMax) return thinkingProviderOptions(request.thinkingLevel);
+  final level = request.thinkingLevel.trim();
+  const light = <String>{'', 'auto', 'off', 'none', 'minimal'};
+  final effort = light.contains(level) ? 'low' : level;
+  final safe = _reasoningEffortLevels.contains(effort) ? effort : 'low';
+  return <String, Map<String, dynamic>>{
+    'openai': <String, dynamic>{'reasoning_effort': safe},
+  };
+}
+
+// ============================================================
+// LLM 错误分类与自动重试（agent 自己的等待重试）
+// ============================================================
+
+/// 把 LLM 请求异常归成稳定错误码。
+///
+/// 有意的 dynamic 抽取（`AiApiCallError.statusCode`）：ai_sdk_provider 是
+/// 传递依赖（未入 pubspec，见 runDartAgent 的同款注释），不 import 其类型。
+/// 返回值：
+/// - `llm_http_<status>`——服务端返回了非 2xx（含 401/429/5xx）；
+/// - `llm_timeout`——请求超时（TimeoutException，含 SDK OperationScope 死线）；
+/// - `llm_no_such_tool`——模型调了不存在的工具（StepFun 空名方言的兜底）；
+/// - `llm_network`——连接层失败（dio / socket / TLS）；
+/// - 其余原样返回（未知异常，交给通用文案）。
+String classifyLlmError(Object e) {
+  if (e is TimeoutException) return 'llm_timeout';
+  try {
+    final dynamic d = e;
+    final status = d.statusCode;
+    if (status is int && status >= 100) return 'llm_http_$status';
+    // AiApiCallError 有时把状态码藏在 cause（DioException.response）里。
+    final dynamic cause = d.cause;
+    final dynamic inner = cause?.response?.statusCode;
+    if (inner is int && inner >= 100) return 'llm_http_$inner';
+  } catch (_) {
+    // 不是带 statusCode 的类型，走字符串面分类。
+  }
+  final s = e.toString();
+  if (s.startsWith('AiNoSuchToolError') || s.contains('unknown tool')) {
+    return 'llm_no_such_tool';
+  }
+  const transportMarkers = <String>[
+    'DioException', 'SocketException', 'HandshakeException',
+    'ClientException', 'HttpException', 'Connection error',
+    'Connection refused', 'Connection closed', 'Connection reset',
+    'Connection was closed', 'Network is unreachable', 'Connection timed out',
+    'Broken pipe', 'Stream has been aborted',
+  ];
+  for (final m in transportMarkers) {
+    if (s.contains(m)) return 'llm_network';
+  }
+  return s;
+}
+
+/// 瞬时故障才值得等待重试：网络层失败、限流/网关类 HTTP 码、超时。
+bool isRetryableLlmError(String code) {
+  if (code == 'llm_timeout' || code == 'llm_network') return true;
+  // 模型捏造工具名（拼错/近义变体）：重试一轮通常自愈。
+  if (code == 'llm_no_such_tool') return true;
+  if (code.startsWith('llm_http_')) {
+    final status = int.tryParse(code.substring('llm_http_'.length));
+    return status != null &&
+        const <int>{408, 425, 429, 500, 502, 503, 504}.contains(status);
+  }
+  return false;
+}
+
+/// 重试策略（用户裁决 2026-11-20）：瞬时故障最多重试 10 次，每次等待
+/// 30 秒，绝不第一下就判死——模型服务中途断连/限流是常态，硬失败会把
+/// 已经做了大半的 run 整个作废。
+const int llmRetryMaxRetries = 10;
+const int llmRetryWaitSeconds = 30;
+
+/// 测试注入：把 30 秒等待压到毫秒级（生产恒 null）。
+@visibleForTesting
+List<int>? debugRetryWaitsOverride;
+
+int llmRetryWaitFor(int attempt) {
+  final override = debugRetryWaitsOverride;
+  if (override != null && override.isNotEmpty) {
+    return override[attempt.clamp(0, override.length - 1)];
+  }
+  return llmRetryWaitSeconds;
+}
+
+/// 断线续跑的指令：告诉模型「上一步中断，从当前状态接着做」，不重复已完成。
+String _continuationPrompt(String mode) => switch (mode) {
+      'plan' => 'The previous reply was interrupted by a network error. The docs written '
+          'so far are attached above. Continue: write only the missing docs '
+          '(write_doc prd/ui, write_design_spec as needed), then finish.',
+      'workspace' => 'The previous reply was interrupted by a network error. The workspace '
+          'state so far is shown above. Continue the task from there: inspect current '
+          'state first if unsure, then finish the remaining work and call finish.',
+      _ => 'The previous reply was interrupted by a network error. The canvas already '
+          'contains the progress shown above. Continue from there: do NOT redo existing '
+          'screens; generate only the missing pages, wires and fixes, then call finish.',
+    };
+
+/// `llm_no_such_tool` 的重试轮提示：明确列出本轮可用的工具名。
+///
+/// 背景：模型把工具名拼错/捏造时 SDK 直接抛 `AiNoSuchToolError`，整轮
+/// 重发同一条 prompt 往往还会再错一次。把可用工具清单带进 prompt，让模型
+/// 从清单里挑正确名字——这是工具修复（self-heal）的提示词一侧。
+String _noSuchToolRetryPrompt(String prompt, ToolSet tools) {
+  final names = tools.keys.toList()..sort();
+  return '$prompt\n\n[RETRY] Your previous reply called a tool that does not exist. '
+      'Available tools: ${names.join(', ')}. '
+      'Call EXACTLY one of them (spelling matters; do not invent names), then continue '
+      'the task, or call finish with the result so far.';
+}
+
+/// 失败详情（只进折叠的「技术详情」）：provider 的 status/响应体/上游
+/// 异常是排查线上方言的唯一线索——`AiApiCallError: openai API error`
+/// 这种脱敏字符串对上 MiniMax 的 400 毫无信息量（2026-11-20 实测）。
+String llmErrorDetail(Object e) {
+  final base = e.toString();
+  try {
+    final dynamic d = e;
+    final status = d.statusCode;
+    final body = d.responseBody;
+    final cause = d.cause;
+    final bits = <String>[
+      if (status != null) 'status=$status',
+      if (body != null && '$body'.trim().isNotEmpty) 'body=${'$body'}',
+      if (cause != null && '$cause'.trim().isNotEmpty) 'cause=$cause',
+    ];
+    if (bits.isEmpty) return base;
+    return '$base | ${bits.join(' | ')}';
+  } catch (_) {
+    return base;
+  }
+}
+
+/// 本轮交付水位：prd/ui 长度 + ops 数 + 引擎/工作区调用数。
+///
+/// 失败时水位前移说明这一轮已有工具/文档真实落地——自动重试会重复执行
+/// 已生效的操作，这种情况绝不重试，直接浮出错误（配好人话文案）。
+String _deliveryWatermark(_Ctx ctx) =>
+    '${ctx.docs['prd']?.length ?? 0}|${ctx.docs['ui']?.length ?? 0}|'
+    '${ctx.ops.length}|${ctx.remoteCalls}';
 
 // ============================================================
 // 引擎门桥（唯一写路径）
@@ -267,6 +437,12 @@ String toolLabel(String tool) {
       return '热应用 · 查看';
     case 'hotapp_from_prototype':
       return '热应用 · 由原型生成';
+    case 'video_create':
+      return '视频 · 新建';
+    case 'video_list':
+      return '视频';
+    case 'video_sample':
+      return '视频 · 示例';
     case 'video_review':
       return '视频 · 对照检查';
     case 'video_render':
@@ -298,12 +474,23 @@ String _modeLabel(String mode) => switch (mode) {
 /// `mbt_gate_block` → 这次改动未通过设计校验；
 /// `render_failed` → 预览生成失败；`download_failed` → 模型下载失败；
 /// `sha256_mismatch` → 模型文件校验失败，已删除，请重试；
-/// `nonapp_unsupported_version` → 应用版本过新，请更新本应用。
+/// `nonapp_unsupported_version` → 应用版本过新，请更新本应用；
+/// `llm_http_<status>` → 按 401/403、404、429、5xx 分档；
+/// `llm_timeout` / `llm_network` / `llm_no_such_tool` → 各自的人话。
 ///
 /// 复合错误（`engine_generate_failed:…`）只取冒号前的基码；未知码回落
 /// 「这次操作没有成功，请重试」——原始码只进折叠的技术详情。
 String toolFailureMessage(String? rawError) {
   final code = normalizedErrorCode(rawError);
+  if (code.startsWith('llm_http_')) {
+    final status = int.tryParse(code.substring('llm_http_'.length));
+    if (status == 401 || status == 403) return '模型服务认证失败，请检查 API Key';
+    if (status == 404) return '模型或服务地址不存在，请检查模型设置';
+    if (status == 429) return '模型服务正忙，请稍等片刻再试';
+    if (status == 402) return '模型服务额度不足，请充值或换一个模型';
+    if (status != null && status >= 500) return '模型服务暂时不可用，请稍后重试';
+    return '模型这次没有响应，请稍后重试';
+  }
   switch (code) {
     case 'engine_unavailable':
       return '设计服务暂时不可用，请稍后重试';
@@ -368,12 +555,46 @@ String toolFailureMessage(String? rawError) {
       return '参数格式不对，请重试';
     case 'llm_error':
       return '模型这次没有响应，请稍后重试';
+    case 'llm_timeout':
+      return '这次操作耗时过长，已安全停止';
+    case 'llm_network':
+      return '连不上模型服务，请检查网络后重试';
+    case 'llm_no_such_tool':
+      return '模型调用了一个不可用的操作，请重试';
     case 'three_unavailable':
       return '3D 场景需要先连接桌面';
+    case 'three_failed':
+      return '3D 场景这次没有完成，请重试';
     case 'hotapp_unavailable':
       return '热应用需要先连接桌面';
+    case 'hotapp_failed':
+      return '热应用这次没有完成，请重试';
     case 'video_unavailable':
       return '视频工作区需要先连接桌面';
+    case 'video_failed':
+      return '视频这次没有完成，请重试';
+    // 视频生成落盘（video_create）的稳定失败码：每一码都有一句可执行的人话
+    // （docs/copy-glossary.md：不出现裸代号；原始诊断只进技术详情）。
+    case 'video_invalid_name':
+      return '视频名只能用字母、数字、下划线和连字符';
+    case 'video_project_exists':
+      return '已经有同名视频了，换一个名字再新建（已生成的视频不会被覆盖）';
+    case 'video_no_project':
+      return '没有找到这个视频项目';
+    case 'video_spec_missing':
+      return '这份脚本还缺一份说明规范，先补齐规范再新建';
+    case 'video_spec_invalid':
+      return '说明规范不完整，请按模板补齐后再试';
+    case 'video_timeline_invalid':
+      return '脚本格式不对，请检查括号、引号与逗号';
+    case 'video_no_scenes':
+      return '脚本里还没有任何场景';
+    case 'video_no_frames':
+      return '所有场景的时长都是 0，算不出画面';
+    case 'video_io_error':
+      return '视频项目没有保存成功，请检查磁盘空间后重试';
+    case 'video_sample_missing':
+      return '内置示例没能加载，请重新安装应用';
     case 'video_render_unavailable':
       return '视频导出只在电脑上可用';
     case 'video_export_disabled':
@@ -391,9 +612,22 @@ String toolFailureMessage(String? rawError) {
       return figmaFailureMessage('figma_write_failed');
     case 'figma_directory_required':
       return '先选一个导出位置再试';
+    case 'ask_user_invalid':
+      return '选项没有准备好，请重试';
+    case 'ask_user_unavailable':
+      // 旧「钉死工作台拒答」的码（2026-11-20 用户裁决变更后不再产生）。
+      // 历史事件可能仍带它：映射人话，绝不回显裸代号。
+      return '可以继续问：这个工作台里的内容决策不受限制';
     case 'acp_desktop_only':
       return '外部智能体只在电脑上可用';
     default:
+      // 工作台服务的细分失败码统一带模块前缀（`three_invalid_name` /
+      // `hotapp_name_taken` / `video_expr_syntax_error` …）：按模块自己的
+      // 人话表映射，避免每加一个码就漏一句文案。
+      if (code.startsWith('video_')) return videoFailureMessage(code.substring(6));
+      if (code.startsWith('three_')) return threeFailureMessage(ThreeFailure(code.substring(6)));
+      if (code.startsWith('hotapp_')) return hotAppFailureMessage(HotAppFailure(code.substring(7)));
+      if (code.startsWith('nonapp_')) return '应用包这次没有完成，请重试';
       return '这次操作没有成功，请重试';
   }
 }
@@ -459,6 +693,23 @@ abstract class AgentWorkspaceServices {
     Map<String, dynamic>? spec,
   });
 
+  /// 视频是**代码动画**（用户裁决 2026-11-18）：时间线脚本 + 规范预校验后
+  /// 落盘成工作台项目（[VideoProjectStore]），逐帧现算、在工作台里实时播放；
+  /// 不落 mp4。这三个方法就是「生成有落地」的接口面：
+  ///  * [videoSample] —— 内置示例的完整 timeline + spec JSON（模型学格式的
+  ///    唯一途径）；
+  ///  * [videoList] —— 生成项目 + 内置示例清单（先看现状再决定新建/改写）；
+  ///  * [videoCreate] —— 先过 [VideoDocument.build] 预校验再写盘，失败不留
+  ///    半成品目录，返回片长/帧数。
+  Future<Map<String, dynamic>> videoCreate({
+    required String name,
+    required Map<String, dynamic> timeline,
+    Map<String, dynamic>? spec,
+    String title = '',
+  });
+  Future<Map<String, dynamic>> videoList();
+  Future<Map<String, dynamic>> videoSample({int index = 0});
+
   // -- 应用包（批次 07） --
   Future<Map<String, dynamic>> nonAppList();
   Future<Map<String, dynamic>> nonAppInspect(String name);
@@ -484,11 +735,13 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
     Future<HotAppService> Function()? hotAppFactory,
     Future<NonAppLibrary> Function()? nonAppFactory,
     VideoService? video,
+    VideoProjectStore? videoProjects,
     FigmaExporter? figma,
   })  : _threeFactory = threeFactory ?? (() => ThreeService.open()),
         _hotAppFactory = hotAppFactory ?? (() => HotAppService.open()),
         _nonAppFactory = nonAppFactory ?? (() => NonAppLibrary.open()),
         _video = video ?? VideoService.instance,
+        _videoProjects = videoProjects ?? VideoProjectStore.instance,
         _figma = figma ?? FigmaExporter();
 
   final String model;
@@ -500,6 +753,10 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
   final Future<HotAppService> Function() _hotAppFactory;
   final Future<NonAppLibrary> Function() _nonAppFactory;
   final VideoService _video;
+
+  /// 视频生成项目的本地库（工作台与工具共用同一存储；测试注入临时根）。
+  final VideoProjectStore _videoProjects;
+
   final FigmaExporter _figma;
 
   ThreeLlmConfig get _threeConfig => ThreeLlmConfig(
@@ -539,7 +796,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         ],
       };
     } catch (error) {
-      return _failure('three_failed', threeFailureMessage(error), '$error');
+      return _failure(_threeCode(error), threeFailureMessage(error), '$error');
     }
   }
 
@@ -559,7 +816,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         'spec': snapshot.spec,
       };
     } catch (error) {
-      return _failure('three_failed', threeFailureMessage(error), '$error');
+      return _failure(_threeCode(error), threeFailureMessage(error), '$error');
     }
   }
 
@@ -578,7 +835,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         'sceneChars': snapshot.sceneJs.length,
       };
     } catch (error) {
-      return _failure('three_failed', threeFailureMessage(error), '$error');
+      return _failure(_threeCode(error), threeFailureMessage(error), '$error');
     }
   }
 
@@ -596,7 +853,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         'current': result.state['current'],
       };
     } catch (error) {
-      return _failure('three_failed', threeFailureMessage(error), '$error');
+      return _failure(_threeCode(error), threeFailureMessage(error), '$error');
     }
   }
 
@@ -612,7 +869,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         'done': result.done,
       };
     } catch (error) {
-      return _failure('three_failed', threeFailureMessage(error), '$error');
+      return _failure(_threeCode(error), threeFailureMessage(error), '$error');
     }
   }
 
@@ -633,7 +890,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         'attempts': result.attempts,
       };
     } catch (error) {
-      return _failure('three_failed', threeFailureMessage(error), '$error');
+      return _failure(_threeCode(error), threeFailureMessage(error), '$error');
     }
   }
 
@@ -657,7 +914,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         ],
       };
     } catch (error) {
-      return _failure('hotapp_failed', hotAppFailureMessage(_hotAppFailure(error)), '$error');
+      return _hotAppFailureEnvelope(error);
     }
   }
 
@@ -676,7 +933,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         'bytes': app.payloadBytes,
       };
     } catch (error) {
-      return _failure('hotapp_failed', hotAppFailureMessage(_hotAppFailure(error)), '$error');
+      return _hotAppFailureEnvelope(error);
     }
   }
 
@@ -699,7 +956,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         'bytes': app.payloadBytes,
       };
     } catch (error) {
-      return _failure('hotapp_failed', hotAppFailureMessage(_hotAppFailure(error)), '$error');
+      return _hotAppFailureEnvelope(error);
     }
   }
 
@@ -722,7 +979,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         if (surface != null) 'surfaceNodes': surface.length,
       };
     } catch (error) {
-      return _failure('hotapp_failed', hotAppFailureMessage(_hotAppFailure(error)), '$error');
+      return _hotAppFailureEnvelope(error);
     }
   }
 
@@ -758,12 +1015,24 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         if (!result.verified) 'failures': result.failureSummary,
       };
     } catch (error) {
-      return _failure('hotapp_failed', hotAppFailureMessage(_hotAppFailure(error)), '$error');
+      return _hotAppFailureEnvelope(error);
     }
   }
 
   static HotAppFailure? _hotAppFailure(Object error) =>
       error is HotAppFailure ? error : HotAppFailure('store_error', '$error');
+
+  /// 热应用失败信封：错误码带 `hotapp_` 模块前缀（`hotapp_name_taken` …），
+  /// 文案由模块自己的人话表产出；未知异常仍回 `hotapp_failed`。
+  static Map<String, dynamic> _hotAppFailureEnvelope(Object error) {
+    final failure = _hotAppFailure(error);
+    final code = failure == null ? 'hotapp_failed' : 'hotapp_${failure.code}';
+    return _failure(code, hotAppFailureMessage(failure), '$error');
+  }
+
+  /// 3D 失败信封：同理，`three_invalid_name` / `three_blocked` 等带模块前缀。
+  static String _threeCode(Object error) =>
+      error is ThreeFailure ? 'three_${error.code}' : 'three_failed';
 
   // -- 视频 -----------------------------------------------------------------
 
@@ -808,11 +1077,163 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
     } catch (error) {
       final rejected = error is VideoRejected ? error : null;
       return _failure(
-        rejected?.code ?? 'video_failed',
+        rejected == null ? 'video_failed' : 'video_${rejected.code}',
         videoFailureMessage(error),
         '$error',
       );
     }
+  }
+
+  /// 内置示例的片长/帧率（示例文本是金标准；坏示例按「读不出来」处理）。
+  static ({double seconds, int fps}) _sampleTiming(VideoSampleInfo sample) {
+    try {
+      final document = VideoDocument.fromScripts(
+        timelineJson: sample.timelineJson,
+        specJson: sample.specJson,
+      );
+      return (seconds: document.totalSeconds, fps: document.fps);
+    } catch (_) {
+      return (seconds: 0.0, fps: 30);
+    }
+  }
+
+  /// 示例 JSON 的上下文防爆上限：超过就截断（内置三个示例都在上限内）。
+  static const int _videoSampleJsonLimit = 24000;
+
+  static String _capVideoJson(String text) =>
+      text.length <= _videoSampleJsonLimit
+          ? text
+          : '${text.substring(0, _videoSampleJsonLimit)}\n…[truncated]';
+
+  @override
+  Future<Map<String, dynamic>> videoCreate({
+    required String name,
+    required Map<String, dynamic> timeline,
+    Map<String, dynamic>? spec,
+    String title = '',
+  }) async {
+    try {
+      final snapshot = await _videoProjects.create(
+        name: name,
+        timeline: timeline,
+        spec: spec,
+        title: title,
+      );
+      return <String, dynamic>{
+        'ok': true,
+        'video': snapshot.name,
+        'title': snapshot.title,
+        'seconds': snapshot.document.totalSeconds,
+        'frames': snapshot.document.frameCount(),
+      };
+    } on VideoProjectFailure catch (error) {
+      final code = 'video_${error.code}';
+      return _failure(code, toolFailureMessage(code), error.technical);
+    } catch (error) {
+      return _failure(
+        'video_io_error',
+        toolFailureMessage('video_io_error'),
+        '$error',
+      );
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoList() async {
+    final List<VideoProjectEntry> projects;
+    try {
+      projects = await _videoProjects.list();
+    } on VideoProjectFailure catch (error) {
+      final code = 'video_${error.code}';
+      return _failure(code, toolFailureMessage(code), error.technical);
+    } catch (error) {
+      return _failure(
+        'video_io_error',
+        toolFailureMessage('video_io_error'),
+        '$error',
+      );
+    }
+    final videos = <Map<String, dynamic>>[];
+    for (final entry in projects) {
+      videos.add(<String, dynamic>{
+        'name': entry.name,
+        'title': entry.title.isEmpty ? entry.name : entry.title,
+        'seconds': entry.seconds,
+        'frames': (entry.seconds * entry.fps).floor(),
+        'builtin': false,
+        if (entry.corrupt) 'corrupt': true,
+      });
+    }
+    for (var i = 0; i < videoSamples.length; i++) {
+      final sample = videoSamples[i];
+      final timing = _sampleTiming(sample);
+      videos.add(<String, dynamic>{
+        'name': sample.id,
+        'title': sample.label,
+        'note': sample.note,
+        'seconds': timing.seconds,
+        'frames': (timing.seconds * timing.fps).floor(),
+        'builtin': true,
+        'index': i,
+      });
+    }
+    return <String, dynamic>{'ok': true, 'videos': videos, 'count': videos.length};
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoSample({int index = 0}) async {
+    if (videoSamples.isEmpty) {
+      return _failure(
+        'video_sample_missing',
+        toolFailureMessage('video_sample_missing'),
+      );
+    }
+    // 越界不报错：回落第一个示例（模型通常只是忘了下标）。
+    final i = (index >= 0 && index < videoSamples.length) ? index : 0;
+    final sample = videoSamples[i];
+    final Map<String, dynamic> timeline;
+    final Map<String, dynamic> spec;
+    final ({double seconds, int fps}) timing;
+    try {
+      final decodedTimeline = jsonDecode(sample.timelineJson);
+      final decodedSpec = jsonDecode(sample.specJson);
+      if (decodedTimeline is! Map || decodedSpec is! Map) {
+        throw const FormatException('示例根节点必须是对象');
+      }
+      timeline = Map<String, dynamic>.from(decodedTimeline);
+      spec = Map<String, dynamic>.from(decodedSpec);
+      timing = _sampleTiming(sample);
+    } catch (error) {
+      return _failure(
+        'video_sample_missing',
+        toolFailureMessage('video_sample_missing'),
+        '$error',
+      );
+    }
+    final sampleTimeline = _capVideoJson(sample.timelineJson);
+    final sampleSpec = _capVideoJson(sample.specJson);
+    return <String, dynamic>{
+      'ok': true,
+      'index': i,
+      'count': videoSamples.length,
+      'name': sample.id,
+      'label': sample.label,
+      'note': sample.note,
+      'seconds': timing.seconds,
+      'fps': timing.fps,
+      'timeline': timeline,
+      'spec': spec,
+      'specName': sample.specName,
+      // 原文同时给一份（模型对整个文件形状（含字段顺序外的写法）更敏感）。
+      'timelineJson': sampleTimeline,
+      'specJson': sampleSpec,
+      'timelineChars': sampleTimeline.length,
+      'specChars': sampleSpec.length,
+      'guide': 'Use this sample as the shape reference. Then call '
+          'video_create {name, timeline, spec, title}: name is ASCII a-z0-9_- and '
+          'must be new; timeline/spec are pre-validated and written to the video '
+          'workspace (played live, no file export). Review with video_review.',
+    };
   }
 
   // -- 应用包 ---------------------------------------------------------------
@@ -1185,13 +1606,22 @@ String _preview(Object? value, [int limit = 360]) {
   return raw.length <= limit ? raw : '${raw.substring(0, limit)}…';
 }
 
-/// 工具入参进轨迹前的裁剪（长源码/整篇文档不进 tool_start 标题）。
+/// 工具入参进轨迹前的裁剪（长源码/整篇文档/嵌套时间线不进 tool_start 标题）。
+///
+/// 视频/热应用工具的参数可以带整份时间线或规范（KB 级）：`tool_start` 事件
+/// 只需给用户一条可读标题，嵌套对象/数组压成形状摘要，避免事件流被撑爆。
 Map<String, dynamic> _shortArgs(Map<String, dynamic> args) => <String, dynamic>{
-      for (final entry in args.entries)
-        entry.key: entry.value is String && (entry.value as String).length > 120
-            ? '${(entry.value as String).substring(0, 120)}…'
-            : entry.value,
+      for (final entry in args.entries) entry.key: _shortArgValue(entry.value),
     };
+
+Object? _shortArgValue(Object? value) {
+  if (value is String) {
+    return value.length > 120 ? '${value.substring(0, 120)}…' : value;
+  }
+  if (value is Map) return '<object ${value.length} keys>';
+  if (value is List) return '<list ${value.length}>';
+  return value;
+}
 
 String _truncate(String text, int limit) =>
     text.isEmpty ? '' : (text.length <= limit ? text : '${text.substring(0, limit)}\n…[truncated]');
@@ -1319,8 +1749,16 @@ appear live. You design the experience, not a pile of boxes.
 3. Use the project design spec on every generate_page call.
 4. Generate one page per screen: generate_page {intent, name, spec}. Do NOT hand-place a whole
    screen — the engine picks a template, applies the spec, self-repairs and scores.
+   BATCH YOUR TURNS (latency matters): submit up to 4 generate_page calls in ONE assistant
+   turn (parallel tool calls) instead of one per turn — the engine commits them in order.
+   Same for flows: wire all screens in one turn. Keep the screen list lean: 3–5 screens is
+   a complete prototype for a normal brief; do not exceed 6 unless the brief demands it.
    EMPTY CANVAS (0 boards): the FIRST canvas action MUST be generate_page — design_op and
    inspect cannot run before the first board exists; retrying them only burns steps.
+   OP BUDGET PER SCREEN: after generate_page, you may hand-place at most 3 design_op
+   refinements on that screen (real copy / one CTA / one row). If a screen needs more,
+   regenerate it with a clearer intent instead of stacking ops — hundreds of tiny ops
+   are slow and fragile.
    READ THE ENVELOPE: `autofix{fixes,detail}` is what the engine already healed; `missing[]`
    is what the page type expects but lacks — materialize it with `autofill <ab>` (idempotent)
    or place the blocks yourself; `skipped[]` are combined-intent segments that matched no page
@@ -1335,9 +1773,10 @@ appear live. You design the experience, not a pile of boxes.
    EVERY screen except the entry/home gets a visible back affordance: place a back node in
    the top bar — place <ab> button back - 16 52 44 32 text="←" (id MUST contain "back") —
    so demo mode can navigate back via the engine builtin-back resolution.
-7. Verify before finishing, per page: inspect {kind:"critique"} (9 dimensions incl. norms),
-   run `fix <ab>` on every page that has debt, then inspect {kind:"lint"} and re-critique to
-   confirm the debt is cleared. `fix` IS the engine's debt auto-fix (the 自动修复 capability):
+7. Verify before finishing: batch the checks into ONE turn — inspect {kind:"critique"} once per
+   page in the same turn (9 dimensions incl. norms), then `fix <ab>` in the next turn only for
+   pages that reported debt, and confirm with one lint pass for all pages. Do not alternate
+   critique/fix page by page — each turnaround costs a full model round. `fix` IS the engine's debt auto-fix (the 自动修复 capability):
    it inserts missing 1px row dividers, settles padding/radius/touch/contrast/overlap debt
    deterministically — a page with fixable debt left is unfinished, never finish on a
    critique you did not act on.
@@ -1438,15 +1877,31 @@ generate_page, do not describe a canvas prototype.
 - Design → hot app: hotapp_from_prototype (the sanctioned cross-module link). When the user
   wants the canvas prototype as a runnable app, call it — screens and flows are extracted
   from the prototype automatically and the result reports verified or what is missing.
-- Video: video_review
-  (code-driven animation: a timeline script + spec; frames are generated from formulas,
-  nothing is rasterized to a video file). The workspace plays the animation live.
+- Video: video_list / video_sample / video_create / video_review
+  Video is a CODE-DRIVEN ANIMATION: a timeline script (scenes of vector elements whose
+  x/y/w/... can be formula-driven by t/T) plus a spec (kind science or screenplay).
+  There is NO video-file export — the workspace compiles the formulas and plays the
+  animation live. Work order: video_sample first (index 0-2) to copy the exact JSON
+  shape → video_create {name, timeline, spec, title} to WRITE the project to disk
+  (name ASCII a-z0-9_-, must be new; the document is pre-validated before anything
+  is written) → video_review to mechanically check the same timeline before finish.
+  video_list shows generated projects plus the built-in samples (builtin=true).
 - App packages: nonapp_list / nonapp_inspect (read-only inventory).
 - Figma: figma_export (only when explicitly asked, absolute folder path).
 
+## Asking the user
+- ask_user works in every run, including a workspace pinned by the user. Use it for
+  content / direction decisions inside this workspace (tone, structure, which story
+  beat, level of detail …) whenever the answer genuinely changes the work.
+- Set `switch_to` ONLY when the request truly belongs to a DIFFERENT workspace
+  (e.g. the brief is an interactive app but this run is a video animation): the user's
+  pick then really switches workspace and the run continues there. Never use switch_to
+  for content decisions, and never ask just to re-confirm the workspace you are in.
+
 ## Discipline
 - Call a workspace tool in the first turn. Prose alone delivers nothing.
-- One module per task. If the request clearly belongs to another workspace, use ask_user.
+- One module per task. If the request clearly belongs to another workspace, use ask_user
+  (with switch_to) instead of silently doing the wrong thing.
 - Report what changed in one line; reply in the user's language.''';
 
 const String _staticFooter = '''## Engine facts
@@ -1454,6 +1909,9 @@ const String _staticFooter = '''## Engine facts
 - Read-only commands are NOT accepted by design_op; use inspect/read_mbt instead.
 - A rejected op returns ok:false with an error. Read it, adjust, retry once.
 - Never invent components or template ids. Use the registries below.
+- The tool list above is EXHAUSTIVE. Never invent tool names (there is no
+  delete-artboard tool): deleting/cleaning empty artboards happens automatically
+  after the run. Do what you can with the listed tools, then call finish.
 
 ## Response style
 - Be concise. One short plan line, then act.
@@ -1499,7 +1957,8 @@ String composeDartInstructions({
         '- Hot apps: hotapp_list / hotapp_generate / hotapp_refine / hotapp_inspect',
         '- Design → hot app: hotapp_from_prototype (builds from the canvas prototype; '
         'reports verified coverage)',
-        '- Video: video_review (code-driven animation, played live; no export)',
+        '- Video: video_list / video_sample / video_create / video_review '
+            '(code-driven animation: sample → create on disk → review; no file export)',
         '- App packages: nonapp_list / nonapp_inspect',
         '- Figma: figma_export (pass an absolute folder path)',
         '',
@@ -1534,6 +1993,8 @@ String composeDartInstructions({
   final docText = docBits.isEmpty
       ? '(no product docs yet — derive screens from the brief)'
       : docBits.join('\n\n');
+  final wsTarget = workspaceHint.trim().isEmpty ? 'auto' : workspaceHint.trim();
+  final wsPinned = mode == 'workspace' && wsTarget != 'auto';
   return [
     static,
     '',
@@ -1555,16 +2016,27 @@ String composeDartInstructions({
     '',
     if (hasWorkspaceTools) ...<String>[
       '## WORKSPACE TOOLS (this device)',
+      // wsTarget/wsPinned：workspaceHint 由 runDartAgent 传入（用户在主页
+      // 选定的目标工作台；auto 交给模型判断）。
       '- 3D scenes: three_list / three_create / three_status / three_pass / '
           'three_continue / three_feedback',
       '- Hot apps: hotapp_list / hotapp_generate / hotapp_refine / hotapp_inspect',
         '- Design → hot app: hotapp_from_prototype (builds from the canvas prototype; '
         'reports verified coverage)',
-      '- Video: video_review (code-driven animation, played live; no export)',
+      '- Video: video_list / video_sample / video_create / video_review '
+          '(code-driven animation: sample → create on disk → review; no file export)',
       '- App packages: nonapp_list / nonapp_inspect',
       '- Figma: figma_export (pass an absolute folder path)',
-      'Non-canvas work goes through these; canvas changes still go through design_op / '
-          'generate_page.',
+      'This run works only inside the target workspace: canvas editing tools are not '
+          'available here. hotapp_from_prototype may READ the current prototype '
+          '(screens and links) when converting it into an app.',
+      if (wsPinned)
+        'This run is PINNED to the $wsTarget workspace by the user. Execute with the $wsTarget '
+            'tools only. Do not ask which workspace to use and do not suggest switching unless '
+            'the request truly belongs to another workspace (switch_to is for that only). If '
+            'the request does not fit this workspace, say so honestly in the finish summary. '
+            'ask_user still works here: use it freely for content/direction decisions inside '
+            'this workspace; only a workspace change needs switch_to.',
       '',
     ],
     '---',
@@ -1634,9 +2106,11 @@ Future<DartAgentResult> runDartAgent({
   final emit = onEvent ?? (_) {};
   final ctx = _Ctx(
     request: request,
-    // plan 不给引擎面（server 同构）；workspace 模式也不给——3D/视频/热应用
-    // 不走设计画布，引擎面只会让模型误改 canonical。
-    bridge: request.mode == 'plan' || request.mode == 'workspace' ? null : bridge,
+    // plan 不给引擎面（server 同构）。workspace 保留只读桥：3D/视频/热应用
+    // 不改画布，但 hotapp_from_prototype（设计→热应用）需要读当前原型的
+    // 画板与连线（2026-11-20：此前置 null 让该工具恒报 prototype_empty）。
+    // 画布写工具仍由 _buildTools 按模式关掉。
+    bridge: request.mode == 'plan' ? null : bridge,
     workspace: request.mode == 'plan' ? null : workspace,
     emit: emit,
   );
@@ -1677,42 +2151,151 @@ Future<DartAgentResult> runDartAgent({
 
     final usage = _RoundUsage();
 
-    Future<void> consume(String prompt) async {
+    Future<void> consume(String prompt,
+        {String? instructionsOverride, int continuation = 0}) async {
       // dynamic 是有意的：测试注入 scripted mock 不经 ai_sdk_provider 的
       // 直接依赖（pubspec 未声明，隐式传递依赖不 import 其类型）。
-      final dynamic model = modelOverride ?? provider!.call(request.model);
-      final result = await streamText(
-        model: model,
-        instructions: instructions,
-        prompt: prompt,
-        maxSteps: request.maxSteps.clamp(4, 600), // server: max(4, min(600, max_steps))
-        tools: tools,
-        abortSignal: abortSignal,
-        timeout: timeout == null ? null : TimeoutConfiguration(total: timeout),
-        providerOptions: thinkingProviderOptions(request.thinkingLevel),
-        onChunk: (chunk) {
-          if (chunk is StreamTextReasoningChunk) {
-            if (chunk.delta.isNotEmpty) emit({'type': 'thinking_delta', 'text': chunk.delta});
-          } else if (chunk is StreamTextTextChunk) {
-            if (chunk.text.isNotEmpty) {
-              ctx.textParts.add(chunk.text);
-              emit({'type': 'assistant_delta', 'text': chunk.text});
-            }
+      // 生产路径套 StreamToolNameGuard：StepFun step_plan 流式把工具名只放
+      // 首个 delta、后续 delta 重复 name:""，SDK 逐 delta 覆盖会把真名覆盖
+      // 成空 → AiNoSuchToolError 打死整轮（见 agent_model_middleware.dart）。
+      // 测试注入的 scripted mock 保持原样（覆写 doStream 的形状自持）。
+      final dynamic model = modelOverride ??
+          wrapLanguageModel(
+            model: provider!.call(request.model),
+            middleware: StreamToolNameGuard(knownTools: tools.keys.toSet()),
+          );
+      // 等待重试（瞬时故障自愈）：网络抖动 / 限流 / 网关 5xx / 超时——
+      // agent 不直接判死，按退避等待后原样重发这一轮。交付水位前移则
+      // 不重试（工具已真实落地，重复执行会双写画布/文档）。
+      final watermark = _deliveryWatermark(ctx);
+      // 本轮实际下发 prompt：工具名拼错（llm_no_such_tool）重试时会在原
+      // prompt 后追加可用工具清单，让模型从清单里挑正确的名字（自愈而不是
+      // 原样重发）；其余重试仍原样重发。
+      var roundPrompt = prompt;
+      for (var attempt = 0; ; attempt++) {
+        final roundSw = Stopwatch()..start();
+        try {
+          final result = await streamText(
+            model: model,
+            instructions: instructionsOverride ?? instructions,
+            prompt: roundPrompt,
+            // maxSteps 是「一次 streamText 内允许的模型步数」。设置值（常见
+            // 500）在推理模型上等于无上限：一步一轮 20-70s，几十轮就爆表。
+            // 按模式收紧到产品需要的轮数（用户设置只在其下生效）。
+            maxSteps: request.maxSteps
+                .clamp(4, switch (request.mode) {
+                  'plan' => 12,
+                  'refine' => 20,
+                  'workspace' => 25,
+                  _ => 40,
+                }),
+            tools: tools,
+            abortSignal: abortSignal,
+            timeout: timeout == null ? null : TimeoutConfiguration(total: timeout),
+            providerOptions: providerThinkingOptions(request),
+            onChunk: (chunk) {
+              if (chunk is StreamTextReasoningChunk) {
+                if (chunk.delta.isNotEmpty) emit({'type': 'thinking_delta', 'text': chunk.delta});
+              } else if (chunk is StreamTextTextChunk) {
+                if (chunk.text.isNotEmpty) {
+                  ctx.textParts.add(chunk.text);
+                  emit({'type': 'assistant_delta', 'text': chunk.text});
+                }
+              }
+            },
+          );
+          await result.text; // 等整轮（含工具循环）结束
+          try {
+            final steps = await result.steps;
+            final total = await result.totalUsage;
+            usage.add(
+              steps.length,
+              total?.inputTokens.total ?? 0,
+              total?.outputTokens.total ?? 0,
+              total?.inputTokens.cacheRead ?? 0,
+            );
+          } catch (_) {
+            // usage 是遥测不是正确性：终态兜底（abort 路径 futures 会抛）。
           }
-        },
-      );
-      await result.text; // 等整轮（含工具循环）结束
-      try {
-        final steps = await result.steps;
-        final total = await result.totalUsage;
-        usage.add(
-          steps.length,
-          total?.inputTokens.total ?? 0,
-          total?.outputTokens.total ?? 0,
-          total?.inputTokens.cacheRead ?? 0,
-        );
-      } catch (_) {
-        // usage 是遥测不是正确性：终态兜底（abort 路径 futures 会抛）。
+          assert(() {
+            // ignore: avoid_print
+            print('[agent] round done in ${roundSw.elapsedMilliseconds}ms '
+                '(mode=${request.mode}, attempt=$attempt)');
+            return true;
+          }());
+          return;
+        } catch (e) {
+          assert(() {
+            // ignore: avoid_print
+            print('[agent] round failed in ${roundSw.elapsedMilliseconds}ms '
+                '(mode=${request.mode}, attempt=$attempt): $e');
+            return true;
+          }());
+          if (abortSignal?.isCancelled == true) rethrow;
+          final code = classifyLlmError(e);
+          // 共 10 次重试（首轮失败后还能再试 10 次），每次 30 秒。
+          const maxAttempts = llmRetryMaxRetries + 1;
+          final delivered = _deliveryWatermark(ctx) != watermark;
+          if (attempt >= maxAttempts - 1 || !isRetryableLlmError(code)) {
+            rethrow;
+          }
+          // 已交付（画布/文档已有真实进展）+ 瞬时故障：续跑而不是重发——
+          // 重建新鲜上下文（项目地图/文档按当前状态重算），让模型从断点
+          // 接着做完；最多 2 次，绝不无限续。
+          if (delivered) {
+            if (continuation >= llmRetryMaxRetries) rethrow;
+            final freshMap = ctx.bridge == null
+                ? ''
+                : await _guard(() => composeProjectMap(ctx.bridge!, ctx.mbt),
+                    fallback: '');
+            final freshTemplates = ctx.bridge == null
+                ? const <dynamic>[]
+                : await _guard(() => ctx.bridge!.templates(),
+                    fallback: const <dynamic>[]);
+            final freshComponents = ctx.bridge == null
+                ? const <dynamic>[]
+                : await _guard(() => ctx.bridge!.components(),
+                    fallback: const <dynamic>[]);
+            final contInstructions = composeDartInstructions(
+              mode: request.mode,
+              projectMap: freshMap,
+              designSpec: ctx.designSpec,
+              docs: ctx.docs,
+              templates: freshTemplates,
+              components: freshComponents,
+              hasWorkspaceTools: ctx.workspace != null,
+              workspaceHint: request.workspaceHint,
+            );
+            final wait = llmRetryWaitFor(continuation);
+            emit({
+              'type': 'note',
+              'label': 'NaN 断线续跑',
+              'detail': '模型连接中断，$wait 秒后带着当前进度继续'
+                  '（第 ${continuation + 1} 次，已完成的内容保留）',
+            });
+            await Future<void>.delayed(Duration(seconds: wait));
+            if (abortSignal?.isCancelled == true) rethrow;
+            return consume(
+              _continuationPrompt(request.mode),
+              instructionsOverride: contInstructions,
+              continuation: continuation + 1,
+            );
+          }
+          final wait = llmRetryWaitFor(attempt);
+          // 工具名拼错：重试轮把可用工具清单追加进 prompt（自愈而不是原样
+          // 重发）；其它瞬时故障仍是原样重发。
+          roundPrompt = code == 'llm_no_such_tool'
+              ? _noSuchToolRetryPrompt(prompt, tools)
+              : prompt;
+          emit({
+            'type': 'note',
+            'label': 'NaN 等待重试',
+            'detail': '模型刚才没有响应，$wait 秒后自动重试'
+                '（第 ${attempt + 1} 次，共 ${maxAttempts - 1} 次机会）',
+          });
+          await Future<void>.delayed(Duration(seconds: wait));
+          if (abortSignal?.isCancelled == true) rethrow;
+        }
       }
     }
 
@@ -1807,13 +2390,53 @@ Future<DartAgentResult> runDartAgent({
     );
   } catch (e) {
     final cancelled = abortSignal?.isCancelled == true;
-    final raw = cancelled ? 'cancelled' : e.toString();
+    // error 带分类码（供文案映射），detail 保留原始异常（技术详情）。
+    final code = cancelled ? 'cancelled' : classifyLlmError(e);
+    // PLAN 文档三件套已齐时的收尾笔误（finish 拼成近义名 → 撞
+    // llm_no_such_tool，重试后仍错）：交付物已落地，按完成收尾——终态
+    // 判定看交付物，不因收尾客套步骤把已成功的 run 判死（2026-11-20
+    // 四模块回归实测：PRD/UI/规范全 ✓ 后 finish 拼错 → 整轮 failed）。
+    final docsDelivered = request.mode == 'plan' &&
+        _allTruthy([ctx.docs['prd'], ctx.docs['ui']]);
+    // build/refine/workspace：画布/工作区已有真实调用（remoteCalls>0）同样
+    // 视为已交付——收尾笔误不把做了实事的 run 判死。
+    final workDelivered = ctx.remoteCalls > 0;
+    if (!cancelled &&
+        code == 'llm_no_such_tool' &&
+        (docsDelivered || workDelivered)) {
+      // usage 统计在 try 作用域内，此处兜底空遥测（failed 路径同款）。
+      emit({
+        'type': 'done',
+        'text': ctx.summary.isNotEmpty
+            ? ctx.summary
+            : (ctx.textParts.join().isNotEmpty
+                ? ctx.textParts.join()
+                : '文档已交付'),
+        if (ctx.mbt.isNotEmpty) 'mbt_b64': base64Encode(utf8.encode(ctx.mbt)),
+        'ops': List<String>.from(ctx.ops),
+        'docs': ctx.docs,
+        'designSpec': ctx.designSpec,
+        'usage': const <String, dynamic>{},
+        'stopReason': 'done',
+        'cleanup': List<String>.from(ctx.cleanup),
+      });
+      return DartAgentResult(
+        ok: true,
+        stopReason: 'done',
+        mbt: ctx.mbt,
+        docs: ctx.docs,
+        designSpec: ctx.designSpec,
+        ops: ctx.ops,
+        remoteCalls: ctx.remoteCalls,
+        usage: const {},
+      );
+    }
     emit({
       'type': 'failed',
-      'error': raw,
+      'error': code,
       // 用户可见的一句话；原始异常只进 error/detail（折叠的技术详情）。
-      'message': cancelled ? '已取消这一轮' : toolFailureMessage(raw),
-      'detail': raw,
+      'message': cancelled ? '已取消这一轮' : toolFailureMessage(code),
+      'detail': llmErrorDetail(e),
       if (ctx.mbt.isNotEmpty) 'mbt_b64': base64Encode(utf8.encode(ctx.mbt)),
       'docs': ctx.docs,
       'text': ctx.textParts.join(),
@@ -2114,7 +2737,11 @@ Map<String, String> _strArgs(Object? input) =>
 ///
 /// 只使用官方 basic 目录组件（Text / Button / Column），按钮动作是协议
 /// 标准的 `event` 形状——渲染器与 `.nonapp` 查看器走同一条 A2UI 路径。
-List<Object?> _askUserSurface({required String question, required List<String> options}) {
+List<Object?> _askUserSurface({
+  required String question,
+  required List<String> options,
+  String switchTo = '',
+}) {
   final surfaceId = 'ask-${DateTime.now().microsecondsSinceEpoch}';
   final components = <Map<String, Object?>>[
     {
@@ -2135,7 +2762,10 @@ List<Object?> _askUserSurface({required String question, required List<String> o
       'action': {
         'event': {
           'name': options[i],
-          'context': {'question': question},
+          'context': {
+            'question': question,
+            if (switchTo.isNotEmpty) 'switch_to': switchTo,
+          },
         },
       },
     });
@@ -2156,6 +2786,19 @@ List<Object?> _askUserSurface({required String question, required List<String> o
 ToolSet _buildTools(_Ctx ctx) {
   final emit = ctx.emit;
   final tools = <String, Tool<dynamic, dynamic>>{};
+
+  // 有真实产出的工作区工具：成功调用会移动交付水位（见 addWorkspaceTool）。
+  const workspaceWriteTools = <String>{
+    'three_create',
+    'three_pass',
+    'three_continue',
+    'three_feedback',
+    'hotapp_generate',
+    'hotapp_refine',
+    'hotapp_from_prototype',
+    'video_create',
+    'figma_export',
+  };
 
   // ---- write_doc（server:406-429）----
   tools['write_doc'] = tool(
@@ -2265,11 +2908,18 @@ ToolSet _buildTools(_Ctx ctx) {
   );
 
   // ---- ask_user（A2UI 交互卡的真实生产者）----
+  // 与常规 agent 循环一致（用户裁决变更 2026-11-20）：ask_user 在所有模式
+  // 都可用，包括用户已经钉死工作台的 workspace run。曾经的「钉死工作台就
+  // 拒答（ask_user_unavailable）」死路已删除——内容/方向决策的确认卡在该
+  // 工作台里同样有价值；只有「真要换工作台」才带 switch_to（store 侧
+  // handleChatAction 会真正切换 chatWorkspaceMode + 视图再续跑）。
   tools['ask_user'] = tool(
     description: 'Show a quick choice card when a product decision materially changes the build '
-        '(layout direction, navigation model, tone). Two to six short options; the user picks '
-        'one and the choice comes back as the next instruction. Do not use it for trivial '
-        'confirmations; keep working when the answer is obvious.',
+        '(layout direction, navigation model, tone, story beat, level of detail). Works in '
+        'EVERY run, including a workspace run pinned by the user: content/direction decisions '
+        'are always fair to ask. Two to six short options; the user picks one and the choice '
+        'comes back as the next instruction. Do not use it for trivial confirmations; keep '
+        'working when the answer is obvious.',
     inputSchema: Schema(
       jsonSchema: {
         'type': 'object',
@@ -2281,6 +2931,14 @@ ToolSet _buildTools(_Ctx ctx) {
             'minItems': 2,
             'maxItems': 6,
           },
+          'switch_to': {
+            'type': 'string',
+            'enum': ['design', 'three', 'video', 'hotapp'],
+            'description': 'Set ONLY when the user must pick another workspace for this request '
+                '(e.g. the brief is an interactive app but this run is pinned to video). '
+                'Value is the workspace the user should switch to. Never set it for '
+                'product/content decisions.',
+          },
         },
         'required': ['question', 'options'],
       },
@@ -2290,6 +2948,7 @@ ToolSet _buildTools(_Ctx ctx) {
       final raw = (input as Map?) ?? const {};
       final question = (raw['question'] ?? '').toString().trim();
       final rawOptions = raw['options'];
+      final switchTo = (raw['switch_to'] ?? '').toString().trim();
       final options = <String>[
         if (rawOptions is List)
           for (final value in rawOptions)
@@ -2312,8 +2971,14 @@ ToolSet _buildTools(_Ctx ctx) {
         });
         return {'ok': false, 'error': 'ask_user_invalid'};
       }
-      final messages = _askUserSurface(question: question, options: options);
-      emit({'type': 'a2ui', 'messages': messages, 'text': question});
+      final messages =
+          _askUserSurface(question: question, options: options, switchTo: switchTo);
+      emit({
+        'type': 'a2ui',
+        'messages': messages,
+        'text': question,
+        if (switchTo.isNotEmpty) 'switch_to': switchTo,
+      });
       emit({
         'type': 'tool_end',
         'tool': 'ask_user',
@@ -2352,8 +3017,9 @@ ToolSet _buildTools(_Ctx ctx) {
     },
   );
 
-  // ---- 以下为非 plan 模式工具（server:270-395 同构：plan 不暴露引擎面）----
-  if (ctx.request.mode != 'plan') {
+  // ---- 以下为设计画布工具（plan / workspace 都不注册：工作区 run 不允许
+  // 改画布，hotapp_from_prototype 走 workspace 工具块单独读取）----
+  if (ctx.request.mode != 'plan' && ctx.request.mode != 'workspace') {
     // ---- generate_page（server:272-312；整屏生成 = 默认建屏路径）----
     tools['generate_page'] = tool(
       description: 'Generate a whole screen from an intent. This is the default build path: '
@@ -2626,329 +3292,417 @@ ToolSet _buildTools(_Ctx ctx) {
         }
       },
     );
+  }
 
-    // ---- 本地工作区工具（3D / 热应用 / 视频 / 应用包 / Figma 导出）----
-    //
-    // 只在宿主注入服务时暴露（手机或未接线的宿主看不到入口，模型不会
-    // 点了没反应）。每个工具的统一纪律：
-    //   tool_start → 服务信封 → tool_end（失败句经 toolFailureMessage 映射，
-    //   原始码只在 error/detail 的技术详情里）。
-    final workspace = ctx.workspace;
-    if (workspace != null) {
-      void addWorkspaceTool(
-        String name,
-        String description,
-        Map<String, dynamic> properties,
-        List<String> required,
-        Future<Map<String, dynamic>> Function(Map<String, dynamic> args) run,
-      ) {
-        tools[name] = tool(
-          description: description,
-          inputSchema: Schema(
-            jsonSchema: {
-              'type': 'object',
-              'properties': properties,
-              if (required.isNotEmpty) 'required': required,
-            },
-            fromJson: (m) => m,
-          ),
-          execute: (input, _) async {
-            final raw = (input as Map?) ?? const {};
-            final args = <String, dynamic>{
-              for (final entry in raw.entries) entry.key.toString(): entry.value,
-            };
-            final sw = Stopwatch()..start();
-            emit({'type': 'tool_start', 'tool': name, 'args': _shortArgs(args)});
-            Map<String, dynamic> out;
-            try {
-              out = await run(args);
-            } catch (error) {
-              out = <String, dynamic>{
-                'ok': false,
-                'error': '${name}_failed',
-                'detail': '$error',
-              };
-            }
-            _emitToolEnd(emit, name, sw, out);
-            return out;
+  // ---- 本地工作区工具（3D / 热应用 / 视频 / 应用包 / Figma 导出）----
+  //
+  // 只在宿主注入服务时暴露（手机或未接线的宿主看不到入口，模型不会
+  // 点了没反应）。每个工具的统一纪律：
+  //   tool_start → 服务信封 → tool_end（失败句经 toolFailureMessage 映射，
+  //   原始码只在 error/detail 的技术详情里）。
+  final workspace = ctx.workspace;
+  if (workspace != null) {
+    void addWorkspaceTool(
+      String name,
+      String description,
+      Map<String, dynamic> properties,
+      List<String> required,
+      Future<Map<String, dynamic>> Function(Map<String, dynamic> args) run,
+    ) {
+      tools[name] = tool(
+        description: description,
+        inputSchema: Schema(
+          jsonSchema: {
+            'type': 'object',
+            'properties': properties,
+            if (required.isNotEmpty) 'required': required,
           },
-        );
-      }
-
-      String str(Map<String, dynamic> args, String key) => (args[key] ?? '').toString();
-
-      addWorkspaceTool(
-        'three_list',
-        'List 3D scene projects on this device (name, current pass, blocked).',
-        const <String, dynamic>{},
-        const <String>[],
-        (_) => workspace.threeList(),
-      );
-      addWorkspaceTool(
-        'three_create',
-        'Start a 3D scene project from a one-line brief: writes the scene spec and the '
-            'layered plan (components + acceptance).',
-        const <String, dynamic>{
-          'name': {'type': 'string', 'description': 'ASCII name (a-z0-9_-)'},
-          'brief': {'type': 'string'},
-        },
-        const <String>['name', 'brief'],
-        (args) => workspace.threeCreate(name: str(args, 'name'), brief: str(args, 'brief')),
-      );
-      addWorkspaceTool(
-        'three_status',
-        'Read one 3D scene project: current pass, blocked state, spec summary.',
-        const <String, dynamic>{
-          'name': {'type': 'string'},
-        },
-        const <String>['name'],
-        (args) => workspace.threeStatus(str(args, 'name')),
-      );
-      addWorkspaceTool(
-        'three_pass',
-        'Generate the current 3D pass (one layer) from the scene spec, then report the '
-            'new scene length so the preview can be checked.',
-        const <String, dynamic>{
-          'name': {'type': 'string'},
-        },
-        const <String>['name'],
-        (args) => workspace.threePass(str(args, 'name')),
-      );
-      addWorkspaceTool(
-        'three_continue',
-        'Accept the current 3D pass (only after it has evidence) and move to the next '
-            'layer; the last pass finishes the scene.',
-        const <String, dynamic>{
-          'name': {'type': 'string'},
-          'summary': {'type': 'string'},
-        },
-        const <String>['name'],
-        (args) => workspace.threeContinue(str(args, 'name'), str(args, 'summary')),
-      );
-      addWorkspaceTool(
-        'three_feedback',
-        'Record feedback for the current 3D pass. kind=error counts a failed attempt '
-            '(blocks after the loop limit); kind=metrics records measurements only.',
-        const <String, dynamic>{
-          'name': {'type': 'string'},
-          'kind': {'type': 'string', 'enum': ['error', 'metrics']},
-          'note': {'type': 'string'},
-        },
-        const <String>['name', 'kind', 'note'],
-        (args) => workspace.threeFeedback(
-          name: str(args, 'name'),
-          kind: str(args, 'kind'),
-          payload: str(args, 'note'),
+          fromJson: (m) => m,
         ),
-      );
-
-      addWorkspaceTool(
-        'hotapp_list',
-        'List installed hot apps (small interactive apps) on this device.',
-        const <String, dynamic>{},
-        const <String>[],
-        (_) => workspace.hotAppList(),
-      );
-      addWorkspaceTool(
-        'hotapp_generate',
-        'Generate a new hot app from a one-line brief: one self-contained offline page '
-            '(no external references) plus its local data store.',
-        const <String, dynamic>{
-          'name': {'type': 'string', 'description': 'lowercase ASCII (a-z0-9_-)'},
-          'brief': {'type': 'string'},
-        },
-        const <String>['name', 'brief'],
-        (args) => workspace.hotAppGenerate(name: str(args, 'name'), brief: str(args, 'brief')),
-      );
-      addWorkspaceTool(
-        'hotapp_refine',
-        'Refine an existing hot app in place (hot update). The old page is replaced only '
-            'after the new one passes validation.',
-        const <String, dynamic>{
-          'name': {'type': 'string'},
-          'instruction': {'type': 'string'},
-        },
-        const <String>['name', 'instruction'],
-        (args) => workspace.hotAppRefine(
-          name: str(args, 'name'),
-          instruction: str(args, 'instruction'),
-        ),
-      );
-      addWorkspaceTool(
-        'hotapp_inspect',
-        'Read one hot app: title, renderer, original brief and payload size.',
-        const <String, dynamic>{
-          'name': {'type': 'string'},
-        },
-        const <String>['name'],
-        (args) => workspace.hotAppInspect(str(args, 'name')),
-      );
-      addWorkspaceTool(
-        'hotapp_from_prototype',
-        'Generate a verifiable hot app FROM the current design prototype — the sanctioned '
-            'design→hot-app link. Screens and navigation flows are extracted automatically '
-            'from the prototype on the canvas; after generation a deterministic coverage '
-            'check verifies every screen (data-screen) and every link (data-nav), so the '
-            'result honestly reports verified=true or what is missing. Use it when the '
-            'user wants a runnable app version of the prototype. Requires the canvas to '
-            'have at least one real screen.',
-        const <String, dynamic>{
-          'name': {
-            'type': 'string',
-            'description': 'lowercase ASCII app name (a-z0-9_-); pick a fresh name, '
-                'existing names are refused',
-          },
-        },
-        const <String>['name'],
-        (args) async {
-          final bridge = ctx.bridge;
-          if (bridge == null || ctx.mbt.trim().isEmpty) {
-            return <String, dynamic>{
-              'ok': false,
-              'error': 'prototype_empty',
-              'message': toolFailureMessage('prototype_empty'),
-            };
-          }
-          final screens = <PrototypeScreenSpec>[];
-          final flows = <PrototypeLinkSpec>[];
+        execute: (input, _) async {
+          final raw = (input as Map?) ?? const {};
+          final args = <String, dynamic>{
+            for (final entry in raw.entries) entry.key.toString(): entry.value,
+          };
+          final sw = Stopwatch()..start();
+          emit({'type': 'tool_start', 'tool': name, 'args': _shortArgs(args)});
+          Map<String, dynamic> out;
           try {
-            final boards = await bridge.session(ctx.mbt, 'session_list_artboards');
-            for (final board in _listOf(boards['data'])) {
-              if (board is! Map) continue;
-              final id = _s(board['id']);
-              if (id.isEmpty || id == '__seed') continue;
-              screens.add(PrototypeScreenSpec(id: id, title: _s(board['name'])));
-            }
-            final fs = await bridge.session(ctx.mbt, 'session_flows');
-            for (final f in _listOf(fs['data'])) {
-              if (f is! Map) continue;
-              flows.add(PrototypeLinkSpec(from: _s(f['from']), to: _s(f['to'])));
-            }
+            out = await run(args);
           } catch (error) {
-            return <String, dynamic>{
+            out = <String, dynamic>{
               'ok': false,
-              'error': 'engine_unavailable',
-              'message': toolFailureMessage('engine_unavailable'),
+              'error': '${name}_failed',
               'detail': '$error',
             };
           }
-          if (screens.isEmpty) {
-            return <String, dynamic>{
-              'ok': false,
-              'error': 'prototype_empty',
-              'message': toolFailureMessage('prototype_empty'),
-            };
+          // 成功的**产出型**工作区调用就是真实交付：记进交付水位（网络中断
+          // 后走「带进度续跑」而不是重发整轮），也让 workspace run 的终态从
+          // text_only 更正为 done（工具确实落地了，不能谎报没做事）。只读
+          // 类（*_list / *_inspect / *_status / video_review）不移动水位。
+          if (out['ok'] != false && workspaceWriteTools.contains(name)) {
+            ctx.remoteCalls += 1;
           }
-          // 与 store 路径同一上限：超长原型只给摘要面，屏/跳转已结构化提取。
-          final doc = ctx.mbt.length > 12000 ? ctx.mbt.substring(0, 12000) : ctx.mbt;
-          return workspace.hotAppFromPrototype(
-            name: str(args, 'name'),
-            prototypeMbt: doc,
-            screens: screens,
-            flows: flows,
-          );
-        },
-      );
-
-      addWorkspaceTool(
-        'video_review',
-        'Mechanical review of a video timeline against its spec (timing, formulas, '
-            'declared symbols). Timeline and spec are JSON objects; no rendering.',
-        const <String, dynamic>{
-          'timeline': {'type': 'object'},
-          'spec': {'type': 'object'},
-        },
-        const <String>['timeline'],
-        (args) {
-          final timeline = args['timeline'];
-          if (timeline is! Map) {
-            return Future.value(<String, dynamic>{
-              'ok': false,
-              'error': 'invalid_args',
-              'message': toolFailureMessage('invalid_args'),
-            });
-          }
-          final spec = args['spec'];
-          return workspace.videoReview(
-            timeline: Map<String, dynamic>.from(timeline),
-            spec: spec is Map ? Map<String, dynamic>.from(spec) : null,
-          );
-        },
-      );
-      addWorkspaceTool(
-        'video_render',
-        'Legacy export entry. Video is code-driven animation played live in the workspace; '
-            'exporting a video file is disabled, so this returns a plain explanation.',
-        const <String, dynamic>{
-          'timeline': {'type': 'object'},
-          'spec': {'type': 'object'},
-        },
-        const <String>['timeline'],
-        (args) {
-          final timeline = args['timeline'];
-          if (timeline is! Map) {
-            return Future.value(<String, dynamic>{
-              'ok': false,
-              'error': 'invalid_args',
-              'message': toolFailureMessage('invalid_args'),
-            });
-          }
-          final spec = args['spec'];
-          return workspace.videoRender(
-            timeline: Map<String, dynamic>.from(timeline),
-            spec: spec is Map ? Map<String, dynamic>.from(spec) : null,
-          );
-        },
-      );
-
-      addWorkspaceTool(
-        'nonapp_list',
-        'List installed app packages (imported or generated) on this device.',
-        const <String, dynamic>{},
-        const <String>[],
-        (_) => workspace.nonAppList(),
-      );
-      addWorkspaceTool(
-        'nonapp_inspect',
-        'Read one app package: title, renderer, original brief and payload size.',
-        const <String, dynamic>{
-          'name': {'type': 'string'},
-        },
-        const <String>['name'],
-        (args) => workspace.nonAppInspect(str(args, 'name')),
-      );
-
-      addWorkspaceTool(
-        'figma_export',
-        'Export every artboard of the current design as a Figma import package: one SVG '
-            'per board plus a node manifest, written to a folder on this device.',
-        const <String, dynamic>{
-          'directory': {
-            'type': 'string',
-            'description': 'Absolute folder path to write the package into',
-          },
-        },
-        const <String>['directory'],
-        (args) async {
-          final candidate = ctx.bridge;
-          EngineRenderBridge? renderer;
-          if (candidate is EngineRenderBridge) renderer = candidate as EngineRenderBridge;
-          if (renderer == null) {
-            return <String, dynamic>{
-              'ok': false,
-              'error': 'figma_unavailable',
-              'message': toolFailureMessage('figma_unavailable'),
-            };
-          }
-          final envelope = await renderer.render(ctx.mbt);
-          final render = RenderEnvelope.fromJson(envelope);
-          return workspace.figmaExport(
-            render: render,
-            directory: str(args, 'directory'),
-          );
+          _emitToolEnd(emit, name, sw, out);
+          return out;
         },
       );
     }
+
+    String str(Map<String, dynamic> args, String key) => (args[key] ?? '').toString();
+
+    addWorkspaceTool(
+      'three_list',
+      'List 3D scene projects on this device (name, current pass, blocked).',
+      const <String, dynamic>{},
+      const <String>[],
+      (_) => workspace.threeList(),
+    );
+    addWorkspaceTool(
+      'three_create',
+      'Start a 3D scene project from a one-line brief: writes the scene spec and the '
+          'layered plan (components + acceptance).',
+      const <String, dynamic>{
+        'name': {'type': 'string', 'description': 'ASCII name (a-z0-9_-)'},
+        'brief': {'type': 'string'},
+      },
+      const <String>['name', 'brief'],
+      (args) => workspace.threeCreate(name: str(args, 'name'), brief: str(args, 'brief')),
+    );
+    addWorkspaceTool(
+      'three_status',
+      'Read one 3D scene project: current pass, blocked state, spec summary.',
+      const <String, dynamic>{
+        'name': {'type': 'string'},
+      },
+      const <String>['name'],
+      (args) => workspace.threeStatus(str(args, 'name')),
+    );
+    addWorkspaceTool(
+      'three_pass',
+      'Generate the current 3D pass (one layer) from the scene spec, then report the '
+          'new scene length so the preview can be checked.',
+      const <String, dynamic>{
+        'name': {'type': 'string'},
+      },
+      const <String>['name'],
+      (args) => workspace.threePass(str(args, 'name')),
+    );
+    addWorkspaceTool(
+      'three_continue',
+      'Accept the current 3D pass (only after it has evidence) and move to the next '
+          'layer; the last pass finishes the scene.',
+      const <String, dynamic>{
+        'name': {'type': 'string'},
+        'summary': {'type': 'string'},
+      },
+      const <String>['name'],
+      (args) => workspace.threeContinue(str(args, 'name'), str(args, 'summary')),
+    );
+    addWorkspaceTool(
+      'three_feedback',
+      'Record feedback for the current 3D pass. kind=error counts a failed attempt '
+          '(blocks after the loop limit); kind=metrics records measurements only.',
+      const <String, dynamic>{
+        'name': {'type': 'string'},
+        'kind': {'type': 'string', 'enum': ['error', 'metrics']},
+        'note': {'type': 'string'},
+      },
+      const <String>['name', 'kind', 'note'],
+      (args) => workspace.threeFeedback(
+        name: str(args, 'name'),
+        kind: str(args, 'kind'),
+        payload: str(args, 'note'),
+      ),
+    );
+
+    addWorkspaceTool(
+      'hotapp_list',
+      'List installed hot apps (small interactive apps) on this device.',
+      const <String, dynamic>{},
+      const <String>[],
+      (_) => workspace.hotAppList(),
+    );
+    addWorkspaceTool(
+      'hotapp_generate',
+      'Generate a new hot app from a one-line brief: one self-contained offline page '
+          '(no external references) plus its local data store.',
+      const <String, dynamic>{
+        'name': {'type': 'string', 'description': 'lowercase ASCII (a-z0-9_-)'},
+        'brief': {'type': 'string'},
+      },
+      const <String>['name', 'brief'],
+      (args) => workspace.hotAppGenerate(name: str(args, 'name'), brief: str(args, 'brief')),
+    );
+    addWorkspaceTool(
+      'hotapp_refine',
+      'Refine an existing hot app in place (hot update). The old page is replaced only '
+          'after the new one passes validation.',
+      const <String, dynamic>{
+        'name': {'type': 'string'},
+        'instruction': {'type': 'string'},
+      },
+      const <String>['name', 'instruction'],
+      (args) => workspace.hotAppRefine(
+        name: str(args, 'name'),
+        instruction: str(args, 'instruction'),
+      ),
+    );
+    addWorkspaceTool(
+      'hotapp_inspect',
+      'Read one hot app: title, renderer, original brief and payload size.',
+      const <String, dynamic>{
+        'name': {'type': 'string'},
+      },
+      const <String>['name'],
+      (args) => workspace.hotAppInspect(str(args, 'name')),
+    );
+    addWorkspaceTool(
+      'hotapp_from_prototype',
+      'Generate a verifiable hot app FROM the current design prototype — the sanctioned '
+          'design→hot-app link. Screens and navigation flows are extracted automatically '
+          'from the prototype on the canvas; after generation a deterministic coverage '
+          'check verifies every screen (data-screen) and every link (data-nav), so the '
+          'result honestly reports verified=true or what is missing. Use it when the '
+          'user wants a runnable app version of the prototype. Requires the canvas to '
+          'have at least one real screen.',
+      const <String, dynamic>{
+        'name': {
+          'type': 'string',
+          'description': 'lowercase ASCII app name (a-z0-9_-); pick a fresh name, '
+              'existing names are refused',
+        },
+      },
+      const <String>['name'],
+      (args) async {
+        final bridge = ctx.bridge;
+        if (bridge == null || ctx.mbt.trim().isEmpty) {
+          return <String, dynamic>{
+            'ok': false,
+            'error': 'prototype_empty',
+            'message': toolFailureMessage('prototype_empty'),
+          };
+        }
+        final screens = <PrototypeScreenSpec>[];
+        final flows = <PrototypeLinkSpec>[];
+        try {
+          final boards = await bridge.session(ctx.mbt, 'session_list_artboards');
+          for (final board in _listOf(boards['data'])) {
+            if (board is! Map) continue;
+            final id = _s(board['id']);
+            if (id.isEmpty || id == '__seed') continue;
+            screens.add(PrototypeScreenSpec(id: id, title: _s(board['name'])));
+          }
+          final fs = await bridge.session(ctx.mbt, 'session_flows');
+          for (final f in _listOf(fs['data'])) {
+            if (f is! Map) continue;
+            flows.add(PrototypeLinkSpec(from: _s(f['from']), to: _s(f['to'])));
+          }
+        } catch (error) {
+          return <String, dynamic>{
+            'ok': false,
+            'error': 'engine_unavailable',
+            'message': toolFailureMessage('engine_unavailable'),
+            'detail': '$error',
+          };
+        }
+        if (screens.isEmpty) {
+          return <String, dynamic>{
+            'ok': false,
+            'error': 'prototype_empty',
+            'message': toolFailureMessage('prototype_empty'),
+          };
+        }
+        // 与 store 路径同一上限：超长原型只给摘要面，屏/跳转已结构化提取。
+        final doc = ctx.mbt.length > 12000 ? ctx.mbt.substring(0, 12000) : ctx.mbt;
+        return workspace.hotAppFromPrototype(
+          name: str(args, 'name'),
+          prototypeMbt: doc,
+          screens: screens,
+          flows: flows,
+        );
+      },
+    );
+
+    addWorkspaceTool(
+      'video_list',
+      'List every video project on this device: generated projects (builtin=false) plus '
+          'the built-in samples (builtin=true with their sample index). Look before you '
+          'create so you do not collide with an existing name.',
+      const <String, dynamic>{},
+      const <String>[],
+      (_) => workspace.videoList(),
+    );
+    addWorkspaceTool(
+      'video_sample',
+      'Return one built-in video sample as the FULL timeline + spec JSON — the '
+          'authoritative format reference for a code-driven animation (scenes, elements, '
+          'formula-driven coordinates, spec kind/params/beats). Call it before you '
+          'video_create; index is 0-based (default 0).',
+      const <String, dynamic>{
+        'index': {
+          'type': 'integer',
+          'description': '0-based built-in sample index (default 0)',
+        },
+      },
+      const <String>[],
+      (args) {
+        final raw = args['index'];
+        final index = raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '') ?? 0;
+        return workspace.videoSample(index: index);
+      },
+    );
+    addWorkspaceTool(
+      'video_create',
+      'Create a code-driven animation project from a timeline script + spec. The document '
+          'is pre-validated (spec kinds, declared symbols, formulas, frame count) BEFORE '
+          'anything is written to disk; on success the project is saved under the video '
+          'workspace and plays live. name is ASCII a-z0-9_- and must be new (existing '
+          'videos are never overwritten); title is optional. There is no video-file export.',
+      const <String, dynamic>{
+        'name': {
+          'type': 'string',
+          'description': 'ASCII project name (a-z0-9_-), must be unique',
+        },
+        'timeline': {
+          'type': 'object',
+          'description': 'Timeline script: fps/width/height/background + scenes[] '
+              'with elements[] (rect/arrow/line/polyline/text/path …)',
+        },
+        'spec': {
+          'type': 'object',
+          'description': 'Spec: kind science (subject/laws/assumptions/facts/params/'
+              'formulas) or screenplay (style/beats/params/formulas)',
+        },
+        'title': {
+          'type': 'string',
+          'description': 'Human-readable title shown in the video workspace',
+        },
+      },
+      const <String>['name', 'timeline'],
+      (args) {
+        final timeline = args['timeline'];
+        final spec = args['spec'];
+        if (timeline is! Map) {
+          return Future.value(<String, dynamic>{
+            'ok': false,
+            'error': 'invalid_args',
+            'message': '时间线格式不对：先看一份完整示例，再按同样结构填写',
+          });
+        }
+        if (spec != null && spec is! Map) {
+          return Future.value(<String, dynamic>{
+            'ok': false,
+            'error': 'invalid_args',
+            'message': '说明规范格式不对：先看一份完整示例，再按同样结构填写',
+          });
+        }
+        return workspace.videoCreate(
+          name: str(args, 'name'),
+          timeline: Map<String, dynamic>.from(timeline),
+          spec: spec is Map ? Map<String, dynamic>.from(spec) : null,
+          title: str(args, 'title'),
+        );
+      },
+    );
+    addWorkspaceTool(
+      'video_review',
+      'Mechanical review of a video timeline against its spec (timing, formulas, '
+          'declared symbols). Timeline and spec are JSON objects; no rendering.',
+      const <String, dynamic>{
+        'timeline': {'type': 'object'},
+        'spec': {'type': 'object'},
+      },
+      const <String>['timeline'],
+      (args) {
+        final timeline = args['timeline'];
+        if (timeline is! Map) {
+          return Future.value(<String, dynamic>{
+            'ok': false,
+            'error': 'invalid_args',
+            'message': toolFailureMessage('invalid_args'),
+          });
+        }
+        final spec = args['spec'];
+        return workspace.videoReview(
+          timeline: Map<String, dynamic>.from(timeline),
+          spec: spec is Map ? Map<String, dynamic>.from(spec) : null,
+        );
+      },
+    );
+    addWorkspaceTool(
+      'video_render',
+      'Legacy export entry. Video is code-driven animation played live in the workspace; '
+          'exporting a video file is disabled, so this returns a plain explanation.',
+      const <String, dynamic>{
+        'timeline': {'type': 'object'},
+        'spec': {'type': 'object'},
+      },
+      const <String>['timeline'],
+      (args) {
+        final timeline = args['timeline'];
+        if (timeline is! Map) {
+          return Future.value(<String, dynamic>{
+            'ok': false,
+            'error': 'invalid_args',
+            'message': toolFailureMessage('invalid_args'),
+          });
+        }
+        final spec = args['spec'];
+        return workspace.videoRender(
+          timeline: Map<String, dynamic>.from(timeline),
+          spec: spec is Map ? Map<String, dynamic>.from(spec) : null,
+        );
+      },
+    );
+
+    addWorkspaceTool(
+      'nonapp_list',
+      'List installed app packages (imported or generated) on this device.',
+      const <String, dynamic>{},
+      const <String>[],
+      (_) => workspace.nonAppList(),
+    );
+    addWorkspaceTool(
+      'nonapp_inspect',
+      'Read one app package: title, renderer, original brief and payload size.',
+      const <String, dynamic>{
+        'name': {'type': 'string'},
+      },
+      const <String>['name'],
+      (args) => workspace.nonAppInspect(str(args, 'name')),
+    );
+
+    addWorkspaceTool(
+      'figma_export',
+      'Export every artboard of the current design as a Figma import package: one SVG '
+          'per board plus a node manifest, written to a folder on this device.',
+      const <String, dynamic>{
+        'directory': {
+          'type': 'string',
+          'description': 'Absolute folder path to write the package into',
+        },
+      },
+      const <String>['directory'],
+      (args) async {
+        final candidate = ctx.bridge;
+        EngineRenderBridge? renderer;
+        if (candidate is EngineRenderBridge) renderer = candidate as EngineRenderBridge;
+        if (renderer == null) {
+          return <String, dynamic>{
+            'ok': false,
+            'error': 'figma_unavailable',
+            'message': toolFailureMessage('figma_unavailable'),
+          };
+        }
+        final envelope = await renderer.render(ctx.mbt);
+        final render = RenderEnvelope.fromJson(envelope);
+        return workspace.figmaExport(
+          render: render,
+          directory: str(args, 'directory'),
+        );
+      },
+    );
   }
 
   // workspace 模式（3D / 视频 / 热应用）只暴露工作区工具与 ask_user：

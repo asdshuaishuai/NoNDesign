@@ -440,7 +440,19 @@ class EngineHost {
       <String, dynamic>{'ok': false, 'error': code, 'detail': detail};
 
   Future<Map<String, dynamic>> _call(String op, [Map<String, dynamic> params = const {}]) {
-    return _enqueue(() async {
+    // 调用追踪（debug 控制台）：wasm 陷阱在 Windows 上是进程级 abort。
+    // entry/done 配对加耗时——done 缺席 + 时长 ≈30s → 看门狗孤儿化原生调用；
+    // done 缺席 + 短时长 → 执行器在调用内 panic（fuel/真陷阱）。
+    // release 零开销（assert 树摇掉）。
+    DateTime? traceStart;
+    assert(() {
+      traceStart = DateTime.now();
+      final tag = '${params['name'] ?? params['fn'] ?? ''}';
+      // ignore: avoid_print
+      print('[engine] call $op $tag');
+      return true;
+    }());
+    final future = _enqueue(() async {
       if (_disposed) {
         return _failure(EngineErrorCode.unavailable, 'engine host disposed');
       }
@@ -485,6 +497,18 @@ class EngineHost {
         return _failure(EngineErrorCode.timeout, detail);
       }
     });
+    assert(() {
+      final start = traceStart;
+      if (start != null) {
+        unawaited(future.whenComplete(() {
+          // ignore: avoid_print
+          print('[engine] done $op in '
+              '${DateTime.now().difference(start).inMilliseconds}ms');
+        }));
+      }
+      return true;
+    }());
+    return future;
   }
 
   /// Unwraps `{ok: true, envelope: …}` replies into the engine envelope.

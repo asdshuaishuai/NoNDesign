@@ -8,7 +8,9 @@
 //    mediaTypesRequiringUserAction={audio,video} + allowsInlineMediaPlayback=false，
 //    不开这两个参数视频会被自动播放策略静默拦住（真机黑屏的根因）；
 //  ④ 主帧加载失败 → 覆盖层「无法播放」+ 复制路径（失败不是死端）；
-//  ⑤ 默认创作面（代码动画）不创建 WebView（工作台测试无需平台桩）。
+//  ⑤ 默认创作面（代码动画）不创建 WebView（工作台测试无需平台桩）；
+//  ⑥ 平台判定只认能力矩阵：Windows 能力矩阵 → 不建 WebView、路径行降级；
+//    「macOS 播放面」用例显式注入 macos host，Windows 宿主上也拿到 WebKit 参数。
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -41,6 +43,9 @@ Widget _wrap(Widget child) => MaterialApp(
     );
 
 // ---- WebView 平台桩（捕获创建参数 / loadRequest / loadFile）----
+
+const _macHost = PlatformCapabilities(os: HostOs.macos);
+const _windowsHost = PlatformCapabilities(os: HostOs.windows);
 
 class _FakeVideoPlatform extends WebViewPlatform {
   _FakeVideoController? lastController;
@@ -211,7 +216,10 @@ void main() {
 
   testWidgets('单独挂播放面：不传任何地址也只读本机文件', (tester) async {
     final fake = await _installFake();
-    await _pump(tester, _wrap(const VideoPlayerSurface(path: _mp4)));
+    await _pump(
+      tester,
+      _wrap(const VideoPlayerSurface(path: _mp4, host: _macHost)),
+    );
 
     expect(fake.lastController, isNotNull);
     expect(fake.lastController!.loadedFiles, [_mp4]);
@@ -220,7 +228,10 @@ void main() {
 
   testWidgets('主帧加载失败：覆盖层「无法播放」+ 复制路径', (tester) async {
     final fake = await _installFake();
-    await _pump(tester, _wrap(const VideoPlayerSurface(path: _mp4)));
+    await _pump(
+      tester,
+      _wrap(const VideoPlayerSurface(path: _mp4, host: _macHost)),
+    );
 
     fake.lastController!.navDelegate!.fireMainFrameError(-1009);
     await tester.pump(const Duration(milliseconds: 50));
@@ -228,5 +239,19 @@ void main() {
     expect(find.byKey(const ValueKey('video-error')), findsOneWidget);
     expect(find.textContaining('无法播放'), findsOneWidget);
     expect(find.text('复制路径'), findsOneWidget);
+  });
+
+  testWidgets('Windows 能力矩阵：不创建 WebView，降级为路径提示', (tester) async {
+    final fake = await _installFake();
+    await _pump(
+      tester,
+      _wrap(const VideoPlayerSurface(path: _mp4, host: _windowsHost)),
+    );
+
+    // 生产裁决：Windows/Linux 没有应用内 WebView，不假装能播。
+    expect(fake.lastController, isNull);
+    expect(find.text('当前平台不支持应用内视频播放'), findsOneWidget);
+    expect(find.textContaining(_mp4), findsWidgets);
+    expect(tester.takeException(), isNull);
   });
 }

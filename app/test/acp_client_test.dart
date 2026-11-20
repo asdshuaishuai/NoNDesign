@@ -139,7 +139,10 @@ void main() {
       final v20 = Directory('${root.path}/.nvm/versions/node/v20.1.0/bin')..createSync(recursive: true);
       File('${v18.path}/fake-cli').writeAsStringSync('#!/bin/sh\n');
       File('${v20.path}/fake-cli').writeAsStringSync('#!/bin/sh\n');
-      await Process.run('chmod', ['+x', '${v18.path}/fake-cli', '${v20.path}/fake-cli']);
+      // chmod 只有 POSIX 有；Windows 的 which() 不依赖可执行位，跳过即可。
+      if (!Platform.isWindows) {
+        await Process.run('chmod', ['+x', '${v18.path}/fake-cli', '${v20.path}/fake-cli']);
+      }
 
       final host = _TestHost();
       final resolver = AcpPathResolver(
@@ -153,9 +156,11 @@ void main() {
         extraDirs: const <String>['/opt/homebrew/bin'],
       );
       final dirs = await scoped.scanDirs();
-      expect(dirs.first, v20.path, reason: 'nvm 新版必须排在旧版前');
-      expect(dirs[1], v18.path);
-      expect(await scoped.which('fake-cli'), '${v20.path}/fake-cli');
+      // Windows 的目录扫描/夹具拼接会产生不同分隔符形态：只比较语义路径。
+      String norm(String path) => path.replaceAll('\\', '/');
+      expect(norm(dirs.first), norm(v20.path), reason: 'nvm 新版必须排在旧版前');
+      expect(norm(dirs[1]), norm(v18.path));
+      expect(norm((await scoped.which('fake-cli'))!), norm('${v20.path}/fake-cli'));
       // 无关解析器仍能工作（不依赖登录 shell）。
       expect(await resolver.scanDirs(), isNotEmpty);
     });

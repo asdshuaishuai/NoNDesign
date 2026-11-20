@@ -9,9 +9,9 @@
 //  4. 生命周期：弹窗期间切走视图（死 State）不 setState、不写全局设置。
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -38,6 +38,32 @@ const Map<String, dynamic> _spec = <String, dynamic>{
   ],
   'acceptance': <String>['行星在场'],
 };
+
+/// NaN 在 run 里新建的第二个项目：独立规范，切项目后界面必须跟着换。
+const Map<String, dynamic> _moonSpec = <String, dynamic>{
+  'title': 'Moon',
+  'summary': '月球地表',
+  'components': <Map<String, dynamic>>[
+    <String, dynamic>{'id': 'moon-surface', 'what': '球体'},
+  ],
+  'acceptance': <String>['月面在场'],
+};
+
+/// 第二个项目的场景代码（断言「切项目后源码/预览真的换了内容」）。
+const String _moonScene = '''
+export default function build(THREE, scene, camera, controls, renderer) {
+  // moon-surface
+  return {};
+}
+''';
+
+/// run 进行中落盘的场景代码（断言「run 里推进的进度能进界面」）。
+const String _runScene = '''
+export default function build(THREE, scene, camera, controls, renderer) {
+  // generated-during-run
+  return {};
+}
+''';
 
 /// 与生产模板同形：两个内联占位 + 一段宿主代码（预览页自包含）。
 const String _previewTemplate = '''
@@ -119,12 +145,30 @@ Future<_Fixture> _seedProject({String name = 'saturn-demo'}) async {
   return _Fixture(root, ThreeService(root: root, llm: _llm(<String>[]), assets: _loadAsset));
 }
 
-AppStore _store() {
-  // 测试宿主是 macOS：平台矩阵显式钉在桌面（flutter_test 默认把
-  // defaultTargetPlatform 当成 android，会把内嵌预览与文件管理器都关掉）。
+/// 在同一个根目录里再造一个「已生成第一层」的项目：模拟 NaN 的
+/// `three_create` → `three_pass` 在本机磁盘上留下的第二个项目。
+Future<void> _seedSecondProject(_Fixture fixture, {String name = 'moon-scene'}) async {
+  final creator = ThreeService(
+    root: fixture.root,
+    llm: _llm(<String>[_fence('json', jsonEncode(_moonSpec))]),
+    assets: _loadAsset,
+  );
+  await creator.newProject(name: name, brief: '月球地表', config: _config);
+  final runner = ThreeService(
+    root: fixture.root,
+    llm: _llm(<String>[_fence('js', _moonScene)]),
+    assets: _loadAsset,
+  );
+  await runner.runPass(name, _config);
+}
+
+AppStore _store({HostOs os = HostOs.macos}) {
+  // 测试宿主默认钉在 macOS 桌面：flutter_test 默认把 defaultTargetPlatform
+  // 当成 android，会把内嵌预览与文件管理器都关掉。Windows 分支测试显式传
+  // HostOs.windows。
   final store = AppStore(
     toasts: ToastService(autoDismiss: false),
-    capabilities: CapabilityHub(platform: PlatformCapabilities.forOs(HostOs.macos)),
+    capabilities: CapabilityHub(platform: PlatformCapabilities.forOs(os)),
   )
     ..ready = true
     ..view = 'plugin:three'
@@ -460,6 +504,53 @@ void main() {
 
   // ---- 平台矩阵 ----
 
+  testWidgets('Windows：预览走 WebView2 面；初始化失败给浏览器兜底', (tester) async {
+    // 测试进程没有 WebView2 原生实现：用平台通道桩模拟「系统缺运行时」，
+    // 让 initialize 快速失败（无桩时通道调用在 widget 测试里永远挂起）。
+    const channel = MethodChannel('io.jns.webview.win');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'initialize') {
+        throw PlatformException(code: 'webview2_unavailable', message: 'missing runtime');
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+    final fixture = await _seedProject();
+    final store = _store(os: HostOs.windows);
+    addTearDown(() => threeLoadOnOpen = null);
+
+    await _pumpAt(tester, _host(store, fixture.service), const Size(1440, 900));
+    threeLoadOnOpen = 'saturn-demo';
+    await tester.pumpWidget(_host(store, fixture.service, gen: 1));
+    // 预览面挂载是异步的（写宿主页 → 建 WebView2 → 初始化失败上报），
+    // 多泵几帧让这条链走完。
+    for (var i = 0; i < 8; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+
+    // 初始化失败必须落 Windows 专属兜底面（浏览器打开 / 文件夹 / 重试），
+    // 既不能退回「这台设备不能内嵌显示」的终态，也不能误构造 webview_flutter
+    // 控制器。
+    expect(find.byType(WebViewWidget), findsNothing);
+    expect(find.text('这台设备不能内嵌显示 3D 预览'), findsNothing);
+    expect(find.text('这台电脑暂时不能内嵌显示 3D 预览'), findsOneWidget);
+    expect(find.text('用浏览器打开'), findsOneWidget);
+    expect(find.text('在文件夹中显示'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+    expect(find.byKey(const ValueKey('three-preview-unsupported')), findsOneWidget);
+
+    // 缺 WebView2 的原始诊断不静默丢弃：一句人话在上，原始原因折叠在
+    // 「技术详情」里（能力缺失不得静默）。
+    expect(find.text('技术详情'), findsOneWidget);
+    expect(find.byKey(const ValueKey('three-preview-unsupported-detail')), findsNothing);
+    await tester.tap(find.text('技术详情'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('three-preview-unsupported-detail')), findsOneWidget);
+    expect(find.textContaining('webview2_unavailable'), findsWidgets);
+  });
+
   testWidgets('没有 WebView 的平台：不构造控制器，给可复制路径的降级面', (tester) async {
     debugThreeWebViewSupported = false;
     addTearDown(() => debugThreeWebViewSupported = null);
@@ -582,6 +673,152 @@ void main() {
     expect(Directory(fixture.projectDir).existsSync(), isFalse);
     expect(find.text('直接制作 3D'), findsOneWidget);
     expect(store.settings.threeProjectName, isEmpty);
+  });
+
+  // ---- NaN 生成后的工作台同步（store → 界面）----
+  //
+  // 用户可见问题：让 NaN 在 3D 工作台生成场景，run 结束提示「3D 工作台已
+  // 更新」，但工作台里没有东西——项目列表不刷新、不切新项目、预览空白。
+  // 根因是工作台只用 context.read 读一次 store，不订阅 threeProjectName /
+  // agentBusy 的变化。下面三条用例分别锁死「空工作台自动打开新项目」「切
+  // 项目刷新进度/预览/列表」「run 中推进 + run 结束重载」。
+
+  testWidgets('NaN 生成后 store 项目名变化：空工作台自动打开新项目并挂载预览', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store();
+    final fake = _FakeWebViewPlatform()..install();
+    addTearDown(() => WebViewPlatform.instance = WebKitWebViewPlatform());
+
+    // 空工作台：没有持久化项目名（用户刚打开 3D 工作台就让 NaN 生成）。
+    await _pumpAt(tester, _host(store, fixture.service), const Size(1440, 900));
+    expect(find.text('直接制作 3D'), findsOneWidget);
+
+    // NaN 的 three_create 成功：tool_end 走 _adoptWorkspaceArtifact，写入
+    // settings.threeProjectName 并 notify。
+    store.setThreeProjectName('saturn-demo');
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(find.text('saturn-demo'), findsWidgets, reason: '工作台必须切到 NaN 新建的项目');
+    expect(find.text('直接制作 3D'), findsNothing);
+    expect(fake.lastController, isNotNull, reason: '切完项目必须挂预览');
+    expect(fake.lastController!.loadedFiles.single, endsWith('/saturn-demo/preview.html'));
+    expect(find.text('占位'), findsOneWidget, reason: '层进度来自磁盘快照');
+  });
+
+  testWidgets('store 切到另一个项目：切项目、刷新列表与层状态、重载预览', (tester) async {
+    final fixture = await _seedProject();
+    await _seedSecondProject(fixture);
+    final store = _store();
+    final pumped = await _pumpProject(tester, store, fixture.service);
+    final firstController = pumped.fake.lastController!;
+    expect(firstController.loadedFiles.single, endsWith('/saturn-demo/preview.html'));
+
+    // NaN 在 run 里改了当前项目 → store 项目名变化 → 工作台必须跟过去，
+    // 而不是停在旧项目/旧预览上。
+    store.setThreeProjectName('moon-scene');
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(find.text('moon-scene'), findsWidgets, reason: '顶栏标题必须换成新项目');
+    final switched = pumped.fake.lastController!;
+    expect(identical(switched, firstController), isFalse, reason: '切项目必须重挂预览控制器');
+    expect(switched.loadedFiles.single, endsWith('/moon-scene/preview.html'));
+
+    // 层状态/场景代码来自磁盘快照：源码面看到的是新项目自己的代码。
+    await tester.tap(find.text('源码'));
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(find.textContaining('moon-surface'), findsWidgets);
+    expect(find.textContaining('场景代码 · '), findsOneWidget, reason: '场景代码长度必须跟着刷新');
+    expect(find.textContaining('planet'), findsNothing, reason: '不得残留旧项目的场景代码');
+
+    // 项目列表也重扫过：弹窗里两个项目都在（NaN 新建的项目不再缺席）。
+    await tester.tap(find.text('项目'));
+    await tester.pumpAndSettle();
+    expect(find.text('3D 项目'), findsOneWidget);
+    expect(find.text('saturn-demo（占位）'), findsOneWidget);
+    expect(find.text('moon-scene（占位）'), findsOneWidget);
+  });
+
+  testWidgets('run 在飞：周期刷新看到磁盘进度；run 结束：强制刷新并重载预览', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store();
+    final pumped = await _pumpProject(tester, store, fixture.service);
+    final beforeRun = pumped.fake.lastController!;
+
+    // run 起点（真实链路 _runDartLoop 会置 agentBusy 并 notify）。
+    store.agentBusy = true;
+    store.notifyListeners();
+    await tester.pump(const Duration(milliseconds: 60));
+
+    // run 中 NaN 的 three_pass 在磁盘上写了新场景代码（工作台还没收到终态）。
+    final runner = ThreeService(
+      root: fixture.root,
+      llm: _llm(<String>[_fence('js', _runScene)]),
+      assets: _loadAsset,
+    );
+    await runner.runPass('saturn-demo', _config);
+
+    // 运行中的节流轮询（600ms 定时 + 500ms 合并窗口）把进度拉进界面。
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.tap(find.text('源码'));
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(find.textContaining('generated-during-run'), findsWidgets,
+        reason: 'run 进行中工作台也要看到场景代码在变（不能空白/永远转圈）');
+
+    // run 终态：agentBusy true→false → 强制刷新 + 重载预览（最后一层不能漏）。
+    store.agentBusy = false;
+    store.notifyListeners();
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump(const Duration(milliseconds: 150));
+
+    final afterRun = pumped.fake.lastController!;
+    expect(identical(afterRun, beforeRun), isFalse, reason: 'run 结束必须重载预览');
+    expect(afterRun.loadedFiles.single, endsWith('/saturn-demo/preview.html'));
+    expect(find.textContaining('generated-during-run'), findsWidgets);
+  });
+
+  testWidgets('run 中刷新不覆盖用户规范草稿；NaN 切项目后草稿按项目保留/恢复', (tester) async {
+    final fixture = await _seedProject();
+    await _seedSecondProject(fixture);
+    final store = _store();
+    final pumped = await _pumpProject(tester, store, fixture.service);
+
+    await tester.tap(find.text('规范'));
+    await tester.pump(const Duration(milliseconds: 60));
+    const draft = '{"title": "user-edit", "components": [{"id": "planet", "what": "球"}]}';
+    await tester.enterText(find.byType(TextField), draft);
+    await tester.pump(const Duration(milliseconds: 40));
+
+    // run 在飞 → 周期刷新读的是磁盘规范，但用户未保存的编辑不能被冲掉。
+    store.agentBusy = true;
+    store.notifyListeners();
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, draft,
+        reason: '刷新不得覆盖用户正在编辑的规范');
+
+    // NaN 切到另一个项目：旧项目未保存的编辑先落草稿。
+    store.setThreeProjectName('moon-scene');
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(store.threeSpecDraft('saturn-demo'), draft);
+
+    store.agentBusy = false;
+    store.notifyListeners();
+    await tester.pump(const Duration(milliseconds: 60));
+
+    // 切回 saturn-demo：草稿恢复，磁盘上的规范没有把用户编辑冲掉。
+    store.setThreeProjectName('saturn-demo');
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.tap(find.text('规范'));
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, draft,
+        reason: '切回来的项目必须恢复自己的未保存草稿');
+    expect(pumped.fake.lastController!.loadedFiles.single, endsWith('/saturn-demo/preview.html'));
   });
 
   // ---- 规范编辑 ----

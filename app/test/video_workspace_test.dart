@@ -14,6 +14,8 @@
 //     设计检查器/不建项目、不继承当前项目；只有显式「返回主页」才离开；
 //  8. 时间轴与生命周期：改帧率总帧数重算（播放按新帧率走表）、切示例换文档
 //     实例（旧计时器与旧帧缓存随旧播放面释放）、320 宽窄屏不溢出。
+import 'dart:io';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -22,6 +24,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
+import 'package:nondesign/core/app_paths.dart';
 import 'package:nondesign/core/capability_hub.dart';
 import 'package:nondesign/core/keys.dart';
 import 'package:nondesign/core/platform_capabilities.dart';
@@ -29,6 +32,8 @@ import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/core/toast_service.dart';
 import 'package:nondesign/core/video_clip.dart';
+import 'package:nondesign/core/video_project.dart';
+import 'package:nondesign/core/video_samples.dart';
 import 'package:nondesign/core/video_service.dart';
 import 'package:nondesign/plugins/registry.dart';
 import 'package:nondesign/widgets/right_panel.dart' show Inspector;
@@ -38,6 +43,10 @@ import 'package:nondesign/widgets/video_player_surface.dart';
 import 'package:nondesign/widgets/video_workspace.dart';
 
 const _mp4 = '/Users/x/Documents/NoNDesign/videos/job-1/frames.mp4';
+
+/// 每个测试一个临时项目根：`AppPaths.projectsRootOverride` 指到这里，
+/// `VideoProjectStore.instance`（路由/const 工作台）也不会扫真实用户目录。
+Directory? _tmpRoot;
 
 /// 可编排的本地服务：示例文档与对照结果都可替换（坏脚本 / 坏规范 / 失败结论）。
 class _FakeVideoService extends VideoService {
@@ -58,16 +67,30 @@ class _FakeVideoService extends VideoService {
       reviewResult ?? super.review(timeline: timeline, spec: spec, samples: samples);
 }
 
+/// 没有任何内置示例的安装形态（资源缺失/裁剪构建）：工作台必须落到空态，
+/// 不能对空列表做 `clamp(0, -1)`。
+class _EmptySamplesVideoService extends VideoService {
+  _EmptySamplesVideoService() : super(host: VideoHost.macos);
+
+  @override
+  List<VideoSampleInfo> get samples => const <VideoSampleInfo>[];
+}
+
 VideoDocument _sampleDoc() => VideoService(host: VideoHost.macos).loadSample(0);
 
 AppStore _store({
   ToastService? toasts,
   HostOs os = HostOs.macos,
-}) =>
-    AppStore(
-      toasts: toasts ?? ToastService(autoDismiss: false),
-      capabilities: CapabilityHub(platform: PlatformCapabilities.forOs(os)),
-    )..ready = true;
+}) {
+  final store = AppStore(
+    toasts: toasts ?? ToastService(autoDismiss: false),
+    capabilities: CapabilityHub(platform: PlatformCapabilities.forOs(os)),
+  )..ready = true;
+  // saveSettings 的镜像目录也指到临时目录：测试不写真实用户目录。
+  final root = _tmpRoot;
+  if (root != null) store.settingsMirrorDir = '${root.path}/state';
+  return store;
+}
 
 Widget _wrap(AppStore store, VideoService service) => ChangeNotifierProvider<AppStore>.value(
       value: store,
@@ -203,12 +226,20 @@ Future<_FakeVideoPlatform> _installFakeWebView() async {
 }
 
 void main() {
-  setUp(() {
+  setUp(() async {
     // setVideoState → saveSettings：无 mock 时 getInstance 抛 MissingPluginException。
     SharedPreferences.setMockInitialValues({});
     videoLoadOnOpen = null;
+    _tmpRoot = await Directory.systemTemp.createTemp('nan-video-ws-test-');
+    AppPaths.projectsRootOverride = _tmpRoot;
   });
-  tearDown(() => videoLoadOnOpen = null);
+  tearDown(() async {
+    videoLoadOnOpen = null;
+    AppPaths.projectsRootOverride = null;
+    final root = _tmpRoot;
+    _tmpRoot = null;
+    if (root != null && root.existsSync()) await root.delete(recursive: true);
+  });
 
   testWidgets('打开即满幅播放面：编辑动作收进工具条，不再常驻侧栏', (tester) async {
     final store = _store();
@@ -243,6 +274,16 @@ void main() {
     expect(find.text('渲染（后台）'), findsNothing);
     expect(find.textContaining('渲染'), findsNothing);
     expect(find.text('在文件夹中显示'), findsNothing);
+  });
+
+  testWidgets('没有任何内置示例：空态 + 人话，不因 clamp(0, -1) 崩', (tester) async {
+    final store = _store();
+    await _pump(tester, store, _EmptySamplesVideoService());
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('还没有视频'), findsOneWidget);
+    expect(find.text('内置示例没能加载，请重新安装应用'), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-animation-surface')), findsNothing);
   });
 
   testWidgets('示例选择：工具条下拉换示例，画面时长跟着换', (tester) async {
@@ -399,6 +440,33 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('video-review-chip')));
     await tester.pumpAndSettle();
     expect(find.textContaining('对照检查通过'), findsWidgets);
+  });
+
+  testWidgets('脚本里出现 1e999：编辑器内干净拒绝，不把底层异常抛给工作台', (tester) async {
+    final store = _store();
+    final service = _FakeVideoService(sample: _sampleDoc());
+    await _pump(tester, store, service);
+
+    await tester.tap(find.widgetWithText(TextButton, '编辑脚本'));
+    await tester.pump(const Duration(milliseconds: 100));
+    final fields = find.byType(TextField);
+    await tester.enterText(
+      fields.at(0),
+      '{"fps": 1e999, "width": 640, "height": 360, "scenes": '
+          '[{"duration": 1.0, "elements": []}]}',
+    );
+    await tester.enterText(
+      fields.at(1),
+      '{"kind": "science", "subject": "小样", "laws": ["x"], '
+          '"assumptions": ["y"], "facts": ["z"]}',
+    );
+    await tester.tap(find.text('检查并载入'));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('还没有视频'), findsOneWidget);
+    expect(find.text('脚本格式不对，请检查括号、引号与逗号'), findsOneWidget);
+    expect(find.text('未通过'), findsOneWidget);
   });
 
   testWidgets('产物模式：videoLoadOnOpen 仍打开 mp4 播放面（既有产物可播）', (tester) async {
@@ -647,6 +715,7 @@ void main() {
   });
 
   _clipModeTests();
+  _projectModeTests();
 }
 
 
@@ -676,9 +745,12 @@ VideoClipInfo _clipInfo(
 
 /// 测试用播放源：不建 WebView，记录 dispose 以便断言「切模式即释放」。
 class _FakeClipPlayback extends VideoClipPlayback {
-  _FakeClipPlayback(this.clip);
+  _FakeClipPlayback(this.clip, {this.loadError = ''});
 
   final VideoClipInfo clip;
+
+  @override
+  final String loadError;
 
   double _t = 0;
   bool _playing = false;
@@ -700,9 +772,6 @@ class _FakeClipPlayback extends VideoClipPlayback {
 
   @override
   bool get ready => true;
-
-  @override
-  String get loadError => '';
 
   @override
   Future<void> play() async {
@@ -901,6 +970,431 @@ void _clipModeTests() {
     expect(find.byKey(const ValueKey('video-clip-transport')), findsOneWidget);
     expect(find.byKey(const ValueKey('video-clip-review-chip')), findsOneWidget);
     expect(find.byKey(const ValueKey('video-clip-add-sample')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('片段切片段：旧播放源当场释放，新片段接手运输条', (tester) async {
+    final store = _store();
+    final service = _FakeVideoService(sample: _sampleDoc());
+    final clips = <VideoClipInfo>[
+      _clipInfo(0, id: 'clip-a', title: '片段 A', duration: 4),
+      _clipInfo(1, id: 'clip-b', title: '片段 B', duration: 7),
+    ];
+    final created = <_FakeClipPlayback>[];
+    await _pumpClips(tester, store, service, clips, (clip) {
+      final playback = _FakeClipPlayback(clip);
+      created.add(playback);
+      return playback;
+    });
+
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('片段 A'));
+    await tester.pumpAndSettle();
+    expect(created, hasLength(1));
+    expect(find.text('00:00.000 / 00:04.000'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('video-clip-play')));
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('片段 B'));
+    await tester.pumpAndSettle();
+
+    expect(created, hasLength(2));
+    expect(created[0].disposed, isTrue, reason: '切片段必须释放旧播放源');
+    expect(created[1].disposed, isFalse);
+    expect(find.text('00:00.000 / 00:07.000'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    // 切回矢量动画：第二个播放源也必须释放。
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('生物 · 细胞有丝分裂'));
+    await tester.pumpAndSettle();
+    expect(created[1].disposed, isTrue);
+    expect(find.byKey(const ValueKey('video-clip-transport')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('再次选择同一片段：换新播放源并清掉旧错误态', (tester) async {
+    final store = _store();
+    final service = _FakeVideoService(sample: _sampleDoc());
+    final clips = <VideoClipInfo>[
+      _clipInfo(0, id: 'clip-a', title: '片段 A', duration: 4),
+    ];
+    final created = <_FakeClipPlayback>[];
+    await _pumpClips(tester, store, service, clips, (clip) {
+      final playback = _FakeClipPlayback(
+        clip,
+        loadError: created.isEmpty ? '动效合成没有启动，可重试' : '',
+      );
+      created.add(playback);
+      return playback;
+    });
+
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('片段 A'));
+    await tester.pumpAndSettle();
+    expect(find.text('动效合成没有启动，可重试'), findsOneWidget);
+
+    // 同一个片段再选一次：旧源（错误态）释放，新源接手，错误面不能留着。
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('片段 A').last);
+    await tester.pumpAndSettle();
+
+    expect(created, hasLength(2));
+    expect(created[0].disposed, isTrue);
+    expect(find.text('动效合成没有启动，可重试'), findsNothing);
+    expect(find.byKey(const ValueKey('video-clip-error')), findsNothing);
+    expect(find.byKey(const ValueKey('video-clip-stage')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('动效合成清单为空：选择器给空态，工作台不崩', (tester) async {
+    final store = _store();
+    final service = _FakeVideoService(sample: _sampleDoc());
+    await _pumpClips(
+      tester,
+      store,
+      service,
+      const <VideoClipInfo>[],
+      (clip) => _FakeClipPlayback(clip),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    expect(find.text('暂无动效合成示例'), findsOneWidget);
+    await tester.tapAt(const Offset(6, 6));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 生成项目（NaN 的 video_create 落盘 → 工作台里真的出现并播放）
+// ---------------------------------------------------------------------------
+
+/// 每个用例独立的生成项目库（临时视频根，不碰真实用户目录）。
+Future<VideoProjectStore> _projectStoreAt() async {
+  final root = _tmpRoot;
+  final videoRoot = Directory(
+    '${root!.path}/video-projects-${DateTime.now().microsecondsSinceEpoch}',
+  );
+  return VideoProjectStore(root: videoRoot);
+}
+
+/// 用内置示例的时间线/规范播一个生成项目（等价于 NaN 的 video_create 落盘）。
+Future<VideoProjectSnapshot> _seedProject(
+  VideoProjectStore store, {
+  required String name,
+  required String title,
+  int sampleIndex = 1,
+}) {
+  final doc = VideoService(host: VideoHost.macos).loadSample(sampleIndex);
+  return store.create(
+    name: name,
+    timeline: doc.timeline,
+    spec: doc.spec.raw,
+    title: title,
+  );
+}
+
+Widget _wrapProjects(
+  AppStore store,
+  VideoService service,
+  VideoProjectStore projectStore,
+) =>
+    ChangeNotifierProvider<AppStore>.value(
+      value: store,
+      child: MaterialApp(
+        theme: AppTheme.build(dark: true),
+        builder: (context, child) =>
+            withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
+        home: Scaffold(
+          body: VideoWorkspace(
+            service: service,
+            projectStore: projectStore,
+            // 动效合成清单注入空表：生成项目用例只管「生成项目」组，不让
+            // 真实 assets 加载把等待时机搅浑。
+            clips: const <VideoClipInfo>[],
+          ),
+        ),
+      ),
+    );
+
+Future<void> _pumpProjects(
+  WidgetTester tester,
+  AppStore store,
+  VideoService service,
+  VideoProjectStore projectStore, {
+  Size size = const Size(1440, 900),
+}) async {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(_wrapProjects(store, service, projectStore));
+  await tester.pump(const Duration(milliseconds: 100));
+  await tester.pump(const Duration(milliseconds: 100));
+}
+
+/// 从播放面里取当前文档（生成项目用例判断「是否真的换成了这一片」）。
+VideoDocument _surfaceDoc(WidgetTester tester) =>
+    tester.widget<VideoAnimationSurface>(find.byType(VideoAnimationSurface)).document;
+
+void _projectModeTests() {
+  testWidgets('生成项目出现在选择器（标题+片长），选中后铺到播放面并写回设置', (tester) async {
+    final projectStore = await _projectStoreAt();
+    final seeded = await _seedProject(
+      projectStore,
+      name: 'nan-demo',
+      title: 'NaN 生成片',
+    );
+    final store = _store();
+    final service = VideoService(host: VideoHost.macos);
+    await _pumpProjects(tester, store, service, projectStore);
+
+    // 默认仍是内置示例（8 秒）。
+    expect(find.text('物理 · 斜面摩擦力'), findsOneWidget);
+    expect(_surfaceDoc(tester).totalSeconds, 8.0);
+
+    // 选择器里「生成项目」与内置示例并列：标题 + 片长。
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    expect(find.text('生成项目'), findsOneWidget);
+    expect(find.text('NaN 生成片'), findsOneWidget);
+    expect(
+      find.text('片长 ${formatVideoTime(seeded.document.totalSeconds)}'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('NaN 生成片'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    // 播放面换成 read() 出来的文档（10 秒片），工具条标题跟着换。
+    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(_surfaceDoc(tester).totalSeconds, seeded.document.totalSeconds);
+    expect(identical(_surfaceDoc(tester), seeded.document), isFalse,
+        reason: 'read 必须重新构建文档，不能复用 create 的内存对象');
+    expect(find.text('NaN 生成片'), findsWidgets);
+    expect(find.byKey(const ValueKey('video-project-delete')), findsOneWidget);
+    expect(store.settings.videoProjectName, 'nan-demo');
+    expect(_lastToastTitle(store), '已打开生成项目「NaN 生成片」');
+
+    // 切回内置示例：设置里的项目名清掉，下次回来续接示例而不是已离开的项目。
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('物理 · 斜面摩擦力'));
+    await tester.pumpAndSettle();
+    expect(store.settings.videoProjectName, isEmpty);
+    expect(_surfaceDoc(tester).totalSeconds, 8.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('NaN 生成完成（store 写 videoProjectName）→ 自动切过去播放', (tester) async {
+    final projectStore = await _projectStoreAt();
+    final store = _store();
+    final service = VideoService(host: VideoHost.macos);
+    await _pumpProjects(tester, store, service, projectStore);
+    final seeded = await _seedProject(
+      projectStore,
+      name: 'nan-run',
+      title: 'NaN 刚生成',
+    );
+
+    // 模拟 root 的 `_adoptWorkspaceArtifact`：video_create 成功 → 写名字 + notify。
+    store.setVideoProjectName('nan-run');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(store.settings.videoProjectName, 'nan-run');
+    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(_surfaceDoc(tester).totalSeconds, seeded.document.totalSeconds);
+    expect(find.text('NaN 刚生成'), findsWidgets);
+    expect(_lastToastTitle(store), contains('NaN 刚生成'));
+    // 列表也刷新了：选择器里已经能再选一次这个项目。
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    expect(find.text('NaN 刚生成'), findsWidgets);
+    await tester.tapAt(const Offset(6, 6));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('run 结束（agentBusy true→false）刷新项目列表：生成中不空白', (tester) async {
+    final projectStore = await _projectStoreAt();
+    final store = _store();
+    final service = VideoService(host: VideoHost.macos);
+    await _pumpProjects(tester, store, service, projectStore);
+
+    // run 在飞；项目落盘了但 run 还没收尾。
+    store.agentBusy = true;
+    store.notifyListeners();
+    await tester.pump();
+    await _seedProject(projectStore, name: 'during-run', title: 'run 中生成');
+
+    // 生成中：列表不空（给可行动空态人话），不因在飞 run 抖动。
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('还没有生成项目 · 在工作区里让 NaN 做一个视频，跑完后会出现在这里'),
+      findsOneWidget,
+    );
+    await tester.tapAt(const Offset(6, 6));
+    await tester.pumpAndSettle();
+
+    // run 收尾：agentBusy true→false → 再刷一次列表，项目现在就出现。
+    store.agentBusy = false;
+    store.notifyListeners();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    expect(find.text('run 中生成'), findsOneWidget);
+    expect(find.text('片长 00:10.000'), findsOneWidget);
+    await tester.tapAt(const Offset(6, 6));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('恢复选中：设置里的项目名在打开工作台时续接，读失败给人话+折叠技术详情', (tester) async {
+    final projectStore = await _projectStoreAt();
+    final seeded = await _seedProject(
+      projectStore,
+      name: 'nan-broken',
+      title: '坏掉的项目',
+    );
+    // 规范被手改坏（文件还在，内容不完整）。
+    File('${seeded.dir}/spec.json').writeAsStringSync('{"kind": "science"}');
+
+    final store = _store();
+    // 模拟上次离开时停在这个项目：名字在设置里。
+    store.settings.videoProjectName = 'nan-broken';
+    final service = VideoService(host: VideoHost.macos);
+    await _pumpProjects(tester, store, service, projectStore);
+
+    expect(find.byKey(const ValueKey('video-project-error')), findsOneWidget);
+    expect(find.text('这个生成项目打不开'), findsOneWidget);
+    expect(find.text('这份视频项目的说明规范不完整，暂时看不了画面'), findsOneWidget);
+    // 裸代号只在折叠的技术详情里，默认不上屏。
+    expect(find.textContaining('spec_invalid'), findsNothing);
+    expect(find.byKey(const ValueKey('video-animation-surface')), findsNothing);
+
+    // 展开技术详情才看到原始诊断。
+    expect(find.text('技术详情'), findsOneWidget);
+    await tester.tap(find.text('技术详情'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('spec_invalid'), findsOneWidget);
+
+    // 重试仍失败（文件确实还坏着），但界面保持可行动、不崩。
+    await tester.tap(find.byKey(const ValueKey('video-project-retry')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(find.byKey(const ValueKey('video-project-error')), findsOneWidget);
+
+    // 回退到内置示例：设置里的项目名清掉，播放面恢复。
+    await tester.tap(find.byKey(const ValueKey('video-project-use-sample')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(store.settings.videoProjectName, isEmpty);
+    expect(_surfaceDoc(tester).totalSeconds, 8.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('删除项目：确认后删目录、回退到内置示例、列表刷新', (tester) async {
+    final projectStore = await _projectStoreAt();
+    final seeded = await _seedProject(
+      projectStore,
+      name: 'nan-del',
+      title: '待删除项目',
+    );
+    final store = _store();
+    store.settings.videoProjectName = 'nan-del';
+    final service = VideoService(host: VideoHost.macos);
+    await _pumpProjects(tester, store, service, projectStore);
+
+    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(_surfaceDoc(tester).totalSeconds, seeded.document.totalSeconds);
+
+    // 第一次点删除后取消：项目与播放都不受影响。
+    await tester.tap(find.byKey(const ValueKey('video-project-delete')));
+    await tester.pumpAndSettle();
+    expect(find.text('删除生成项目'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(Directory(seeded.dir).existsSync(), isTrue);
+    expect(store.settings.videoProjectName, 'nan-del');
+
+    // 确认删除：磁盘目录没了、设置清空、播放面回退示例、列表刷新。
+    await tester.tap(find.byKey(const ValueKey('video-project-delete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('video-project-delete-confirm')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(Directory(seeded.dir).existsSync(), isFalse);
+    expect(store.settings.videoProjectName, isEmpty);
+    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(_surfaceDoc(tester).totalSeconds, 8.0);
+    expect(_lastToastTitle(store), '已删除生成项目「待删除项目」');
+
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    expect(find.text('待删除项目'), findsNothing);
+    expect(find.textContaining('还没有生成项目'), findsOneWidget);
+    await tester.tapAt(const Offset(6, 6));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('坏项目在列表里标 corrupt；选中后给人话而不是裸代号', (tester) async {
+    final projectStore = await _projectStoreAt();
+    final root = await projectStore.resolveRoot();
+    // 元数据坏掉的目录：list 标 corrupt，read 报 no_project。
+    Directory('${root.path}/bad-one').createSync(recursive: true);
+    File('${root.path}/bad-one/video.json').writeAsStringSync('{"title": "坏项目"');
+
+    final store = _store();
+    final service = VideoService(host: VideoHost.macos);
+    await _pumpProjects(tester, store, service, projectStore);
+
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    expect(find.text('bad-one'), findsOneWidget);
+    expect(find.text('打不开 · 文件可能被改动'), findsOneWidget);
+    await tester.tap(find.text('bad-one'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+
+    expect(find.byKey(const ValueKey('video-project-error')), findsOneWidget);
+    expect(find.text('这个视频项目已经不在了，可能已经被删除'), findsOneWidget);
+    expect(find.textContaining('no_project'), findsNothing);
+    expect(find.text('技术详情'), findsOneWidget);
+    await tester.tapAt(const Offset(6, 6));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('没有生成项目时：选择器给可行动空态人话，不出现裸代号', (tester) async {
+    final projectStore = await _projectStoreAt();
+    final store = _store();
+    final service = VideoService(host: VideoHost.macos);
+    await _pumpProjects(tester, store, service, projectStore);
+
+    await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
+    await tester.pumpAndSettle();
+    expect(find.text('生成项目'), findsOneWidget);
+    expect(
+      find.text('还没有生成项目 · 在工作区里让 NaN 做一个视频，跑完后会出现在这里'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('io_error'), findsNothing);
+    await tester.tapAt(const Offset(6, 6));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 }

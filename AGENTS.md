@@ -67,6 +67,12 @@ plugins/             独立插件资产（视频制作说明）
   类型，项目内部不摆工作区切换条；右侧 NaN 窄栏只有 NaN / 检查两个 tab。
   切换入口是顶栏项目下拉（设计项目 / 3D 场景 / 热应用 / 视频 / 新建 / 打开 / 回主页），
   以及主页作品集、艺术架、各工作台自己的项目菜单。没有 ⌘5–⌘7 工作台直跳键。
+- **四工作台外壳统一（用户裁决 2026-11-20）**：设计 / 3D / 视频 / 热应用四个工作区
+  都用同一套 `WorkspaceChrome`（`widgets/workspace_chrome.dart`）：标题栏（项目下拉/
+  设置/主题）+ 左侧图标轨 + 主区 + 底部状态栏；插件工作台内容是主区槽
+  `WorkspaceMainArea`（与设计画布同一内边距/边框语义），插件自己只保留内容顶部
+  46px 工具条。**不要**再给 `plugin:*` 视图裸 `Scaffold` 早退。`play` / `portfolio`
+  仍是全屏早退；手机/iPad 竖屏仍由 `ChatPiPShell` 整屏渲染插件工作台。
 - 断点与判据唯一来源是 `app/lib/core/layout.dart`；`shell_host.dart` 只做路由。
 - 聊天窄栏默认 360、折叠后 44px；窄 PC（<1100）默认折叠，<1024 强制折叠。
 - 设置面板四档（手机 / iPad 竖 / iPad 横 / 桌面）不共用同一套堆叠；内置服务商端点
@@ -91,8 +97,8 @@ plugins/             独立插件资产（视频制作说明）
 | 项目保存 / 打开（DDP） | ✅ | ✅ | ✅ |
 | 内置智能体（Dart 循环） | ✅ | ✅（文档/PLAN 无需引擎；画布 op 需引擎或连接桌面） | ✅ |
 | 3D 工作台 | ✅（应用内 WebView） | 连接桌面后可看；本机预览降级 | 连接桌面；WebView 待验证 |
-| 热应用 / `.nonapp` | ✅ | ✅ 本地库/查看；本地数据库依赖平台绑定 | ✅ 本地库；构建待验证 |
-| 视频工作台 | ✅ 代码动画实时播放 + 编辑/对照 | 同左（纯 Dart 矢量逐帧） | 同左 |
+| 热应用 / `.nonapp` | ✅（Windows：WebView2 应用内预览，2026-11-20；数据库桥应用暂走浏览器打开） | ✅ 本地库/查看；本地数据库依赖平台绑定 | ✅ 本地库；构建待验证 |
+| 视频工作台 | ✅ 代码动画实时播放 + 编辑/对照 + NaN 生成项目（`video_create` 落盘） | 同左（纯 Dart 矢量逐帧） | 同左 |
 | 外部智能体（ACP） | ✅ | ❌ 设计禁用 | ❌ |
 | 连接桌面（客户端） | ✅ 可填地址/连接码 | ✅ | ✅ |
 | 连接桌面（桌面宿主） | ✅ 设置卡启停/地址/连接码 | — | — |
@@ -140,6 +146,56 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
 
 - 循环在 `app/lib/core/dart_agent.dart`；`design_op` 必须经
   `EngineGateBridge`（生产是进程内 `EngineService`，`gate:'agent'`），绝不直写 mbt。
+- 生产 LLM 调用套 `StreamToolNameGuard`（`app/lib/core/agent_model_middleware.dart`）：
+  StepFun step_plan 流式把工具名只放首个 delta、后续 delta 重复 `name:""`，
+  ai_sdk_openai_compatible 逐 delta 覆盖会以空名发出工具调用
+  （`AiNoSuchToolError` 打死整轮）；守护按 toolCallId 回填首个非空名。换 SDK
+  版本时抓包复核该方言是否仍在。
+- **工具修复（tool fix，2026-11-20）**：守护同时做模型笔误的近名修复——先严格同名，
+  再命名规范变体归一（`namespace.tool` 逐段剥前缀 / `tool()` 去括号 / 结尾冒号分号 /
+  前后空白 / 全角折叠 / 大小写 / `_-.` 空格归一），最后编辑距离 ≤4 且唯一最近且
+  公共前缀 ≥2 才改写（宁可不修不可修错）；`llm_no_such_tool` 的等待重试轮会在
+  prompt 顶部追加 `Available tools: …` 清单，让模型从真实工具名里挑正确的，
+  而不是同一错名再撞一次。新增工具/改名时同步 `knownTools` 来源（`_buildTools` keys）。
+- **模型方言（MiniMax）**：M3.x「自适应思考」模型强制开启思考，
+  `thinking.type=disabled` / `reasoning.effort=none` 会 400；且 `auto`
+  默认单轮 60–163 s。`providerThinkingOptions` 把 `auto/off/none/minimal/空`
+  统一落线为 `reasoning_effort: low`（实测 ~19.5 s/轮，工具调用正常），
+  显式档位原样透传。新增 provider 前先抓包/探针确认方言，再写映射。
+- **答题卡纪律（2026-11-20 用户裁决变更）**：`ask_user` 在**所有模式**（含钉死工作台的
+  workspace run）都真能出答题卡——不再有 `ask_user_unavailable` 拒答死路。内容/方向
+  决策照常问；只有「确实需要换到另一个工作台」时才带 `switch_to`（工作台枚举）。
+  用户答案回流 `handleChatAction` 时**真正切换** chatWorkspaceMode + 视图再续跑——
+  答案必须改变执行路径，不是换个措辞再问一遍。选 `design` 时视图回到设计画布
+  （`_switchViewForWorkspace`）。**只有最后一张答题卡可点**（历史卡灰化禁点）；
+  run 中最后一张可点，答案入队等本轮收尾续跑。
+- **工作区产物认领（2026-11-20）**：工作区 run 里成功的 `three_create/three_pass/
+  three_status/three_continue/three_feedback`、`hotapp_generate/refine/inspect/
+  from_prototype`、`video_create` 由 `AppStore._handleAgentEvent` 的
+  `_rememberWorkspaceArtifact`/`_adoptWorkspaceArtifact` 写进
+  `settings.threeProjectName` / `hotappApp` / `videoProjectName` 并 notify；各工作台
+  监听 store 自动切项目/刷新列表/重挂预览。**没有这一步就是「run 说做完了，工作台里
+  没有东西」**。工具失败不认领（失败的项目不存在）。新增产出型工作区工具必须同时
+  接这条链 + `toolLabel`/`toolFailureMessage` 映射。
+- **视频生成工具（2026-11-20）**：视频是代码动画，生成落地面 =
+  `VideoProjectStore`（`core/video_project.dart`，`<项目根>/video/<name>/` 的
+  timeline.json + spec.json + video.json，先过 `VideoDocument.build` 预编译再原子落盘）。
+  工具三件套：`video_sample`（拿 3 个内置示例的完整 timeline+spec JSON 学格式）→
+  `video_create`（name/timeline/spec/title，失败码统一 `video_<code>`）→
+  `video_review`（机械对照）；`video_list` 列生成项目 + 内置示例。**成片导出仍屏蔽**
+  （`video_render` 只回 `video_export_disabled`，不落 mp4）。
+- **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
+  成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
+- **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，
+  正常 run 死线 30 分钟），另有 `debugForceIdle()` 供自动化。
+- LLM 请求失败走「分类 → 等待重试 → 人话文案」三段（`classifyLlmError` /
+  `isRetryableLlmError` / `toolFailureMessage`）：网络（含 `HttpException` /
+  `Connection closed|reset` 断流）、限流（429）、网关 5xx、超时一律最多
+  **10 次重试、每次 30 秒**（用户裁决 2026-11-20；`debugRetryWaitsOverride`
+  供测试压到毫秒）。失败事件 `error` 带分类码、`detail` 保留原始异常。
+- **交付水位前移后断线 → 断线续跑，不重发、不判死**：重建新鲜项目地图/
+  文档上下文（`_continuationPrompt`），让模型从断点接着做完，最多 10 次；
+  已完成内容绝不重复执行也绝不丢弃。
 - `toolLabel()` 是工具名的唯一出口；新增工具必须同时补文案映射与失败码映射。
 - 流式事件面保持稳定：`assistant_text` / `assistant_thinking`（仅文档阶段）/
   `thinking_delta` / `doc_delta` / `tool_start` / `tool_end` / `doc_written` /
@@ -147,7 +203,14 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
   可判——**每条 run 都要有终态**，不能静默结束。
 - 续跑策略：模型只回文本、没有交付文档/画布操作时，自动再跑一轮 nudge；文档阶段仍缺
   文档则报 `doc_not_written`，不伪装成澄清。
-- 工具结果必须整形（剥 mbt/svg、节点/数据截断、追加 `state` 卡），避免吃光上下文。
+- **工具结果必须整形**（剥 mbt/svg、节点/数据截断、追加 `state` 卡），避免吃光上下文。
+- **源码编码纪律（2026-11-20 事故）**：本机 `pwsh` 是 Windows PowerShell 5.1，用
+  `(Get-Content -Raw) | Set-Content/Out-File` 往返 UTF-8 源码会把中文尾字节写成 `?`
+  并偶发吞掉相邻 ASCII（一次 `-replace` 就毁掉 `dart_agent.dart` 757 处中文，全仓测试
+  编译失败）。**禁止用 pwsh 管道重写源码文本**；只允许 `write`/`edit` 工具或显式
+  UTF-8 的 Python/Dart（`encoding='utf-8'`, `newline=''`）。PowerShell 显示中文乱码
+  ≠ 文件损坏，判断一律以严格 UTF-8 解码 / `dart format --output=none` 为准；
+  `dart analyze` 对非法 UTF-8 会误报 No issues，不能当编码校验。
 - 上下文分层：静态指令 → 项目地图 → 设计规范/文档 → 会话记忆 + 最新 state；
   稳定前缀不要插入时间戳/随机序，变更走追加式 state 卡。
 - 取消：`CancellationToken`；取消后也必须发终态事件。
@@ -175,7 +238,11 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
   不要手写 `SingleActivator(meta:true)` 或散落硬编码 ⌘ 标签。
 - 演示模式：进入态判定必须在 `mode=m` 赋值**前**捕获；起始板 = 交互根；前进导航
   统一走 `playGo` 单点收口；热区清单 = 出边 flow ∪ 引擎 interactions 导出。
-- 平台壳：macOS 为主开发目标；Linux/Windows 无应用内 WebView（3D/热应用预览降级）。
+- 平台壳：macOS 为主开发目标。**Windows 的 3D / 热应用预览走 WebView2**
+  （`webview_windows`，`three_preview_win.dart` / `hotapp_preview_win.dart`）；
+  Linux 无应用内 WebView（预览降级为浏览器/路径）。视频工作台的矢量代码动画
+  全平台一致（纯 Dart 逐帧）；**mp4 产物内嵌播放仍只在 macOS/iOS/Android**
+  （`VideoPlayerSurface` 按能力矩阵判平台，Windows/Linux 是路径行降级）。
 - macOS Runner 已关闭 App Sandbox（本地文件 + `~/.nondesign`）；不要随手加回 sandbox
   而不补 network client / app container。
 
@@ -198,8 +265,51 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
   默认无监听、token、限额、SSE 与真客户端全链。
 - **本地集成模式**：`engine/ENGINE_LOCAL`（gitignored）在场时 `sync_engine.py` 可指向
   本地引擎构建；发布构建应锚定仓库自带产物。改引擎版本先跑 sync 再跑全部测试。
+- **工作台链路锚点（2026-11-20）**：`workspace_chrome_test.dart`（四工作台共用外壳；
+  面板/主区/状态栏一致）、`workspace_artifact_adoption_test.dart`（成功工具事件 →
+  `settings.*ProjectName` 认领 + notify）、`video_project_test.dart`（视频项目落盘
+  硬门/原子性/坏项目隔离）、`video_workspace_test.dart`（生成项目自动切换 + 读失败
+  人话）、`hotapp_workspace_agent_test.dart`（热应用自动切应用/精修后按 epoch 重挂
+  WebView2）、`dart_agent_tools_test.dart` 的 `workspace mode tool surface`（workspace
+  run 必须暴露 three_*/video_*/hotapp_*，且不含画布/文档工具）。改这些链路必须同步
+  跑对应锚点。
+- **Windows 逐字节契约（2026-11-20）**：`app/assets/a2ui_web/**` 与
+  `app/test/fixtures/**` 由 `.gitattributes` 钉成 LF，DDP 容器 `.ddp` 标 `-text`
+  二进制——这些是 sha256 / golden 逐字节断言，别再让 `core.autocrlf` 改字节。
+  **`app/assets/three/**` 全部 `-text`**：`three.module.js` 被 `three_service.dart`
+  按 `threeModuleByteLength = 1272972` + sha256 硬校验，CRLF 会让它变 1,326,016 B，
+  Windows 上直接报「预览文件缺失」（2026-11-20 实机复现并修复）；`app/assets/engine/*.wasm`
+  同样 `-text`。新增「哈希/golden/字节锁定产物」目录时同样加 `.gitattributes` 规则。
+- **Windows 真机冒烟（2026-11-20，仓库外 diag/）**：`flutter run -d windows --debug`
+  + VM Service 直驱（`diag/vm_smoke_drive.dart` / `diag/smoke_run.ps1`）在真实应用里
+  依次打开设计/3D/视频/热应用四个工作台并截图，验证「同一套外壳」；`diag/seed_video_project.py`
+  造一个生成项目后视频工作台能显示并逐帧播放（实测 240 帧 / 8s，与 seeded 项目一致）；
+  `diag/vm_three_drive.dart` + `diag/smoke_run3d.ps1` 调 `ThreeService.preparePreview`
+  后 3D 工作台 WebView2 真渲染（这条冒烟就是抓出 three 资源 CRLF 字节漂移的入口）。
+- **Windows 路径/时序纪律（2026-11-20）**：源扫描守卫与路径断言必须先把 `\` 归一
+  成 `/` 再比较（`architecture_guard_test` / `acceptance_local_core_test` /
+  `toast_test` / `project_service_test` 已修）；`wasm_run` 的 Windows 加载器会给
+  无扩展名路径补 `.dll`：wasm-spike 测试在缺 `.dll` 垫片时会把 vendored 库复制到
+  带 `.dll` 的临时路径再加载（工作树里不再要求垫片；本机若放垫片也不计入 15 个
+  vendored 目标库）；RPC 宿主超限请求体先有界排空再回 413；`desktop_rpc_host_test`
+  的「对端消失 → keep-alive 取消」在 Windows loopback 不可观测（测试平台跳过，
+  取消链路由 `agent.cancel` 用例覆盖）。`engine_host_test` 的移动端首帧/p95 预算
+  按桌面原生执行器定，Windows（pulley 解释器）上测试按 ×4 余量判定
+  （`budgetFor()`，只放宽预算不断言语义）。
 
 ## 已知限制（v0.1，2026-11-18 清理后）
+
+- **Windows 执行器 = wasmtime 50 + pulley 解释器（本地构建，2026-11-20）**：
+  原生 Cranelift 陷阱传输在 cdylib+宿主（dart/flutter_tester）环境必然
+  `panic in a function that cannot unwind` abort（wasmtime 20/26/30/50 ×
+  rustc 1.90/1.100 实测；纯 Rust exe 全部正常，属 Windows cdylib 平台缺陷）。
+  vendored DLL 改用 pulley 解释器 target（`config_api.sh wasmtime` +
+  `config.rs` 里 `target("pulley64-unknown-none")`），陷阱回落普通 Rust Err
+  → fuel 看门狗/超时恢复链路可用（engine_host_test 42/42 全绿，含此前在
+  Windows 从未跑通的 fuel spin 用例）。代价 ~5-15x 执行减速，render/apply
+  预算余量充足。DLL sha256 pin 在 `fetch_wasm_run_libs.sh`（07d75e17…）。
+  源码补丁（相对上游 main@23e36bdf）：wasmtime 依赖升级 + WASI 路径移除 +
+  fuel API 迁移（get/set_fuel u64 + 本地记账）+ wasm 执行点 catch_unwind。
 
 - **「连接桌面」宿主已接线**：桌面设置「运行方式」卡内可启停宿主、查看地址与
   一次性连接码、切换 loopback/局域网并轮换连接码（默认关闭/临时端口/token 必须）。
@@ -226,7 +336,10 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
   产出 debug APK（本会话未复跑 build 复证产物）；本机无 Android 设备/AVD，
   arm64 wasmtime 加载与 `_in` ABI 的真机验收仍未完成。
 - 外部智能体（ACP）桌面独占；移动端按设计禁用。
-- 3D/热应用在 Linux/Windows 没有应用内 WebView，预览降级为浏览器或路径。
+- **Windows 预览已应用内**：3D / 热应用走 WebView2（`webview_windows`）；
+  Linux 仍无应用内 WebView（降级浏览器/路径）。视频 mp4 产物内嵌播放仍只在
+  macOS/iOS/Android，Windows/Linux 是「复制路径/在文件夹中显示」降级面
+  （`shelf_video_player_test.dart` 按能力矩阵分平台断言）。
 - API Key 明文存本机 `SharedPreferences`（并镜像 `~/.nondesign/settings.json`）；
   Keychain 未接。
 

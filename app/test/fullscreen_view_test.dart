@@ -2,7 +2,8 @@
 // 依赖平台通道，这里断言结构不变量——与仓库 test_studio 的静态防线同法）。
 //
 // 覆盖 nav-1/nav-2/tests-5/mobile-1 的回归点：
-//  - 无项目时 portfolio / plugin:<id> 仍路由到 Workspace；
+//  - 无项目时 portfolio 仍路由到 Workspace；plugin:<id> 与设计画布共用同一套
+//    外壳（2026-11-20 外壳统一），插件内容进主区、同一 Scaffold 宿主；
 //  - 全屏视图在 Scaffold 内（其 SnackBar 才有 ScaffoldMessenger 宿主）；
 //  - 热应用/作品集顶栏有返回设计出口；
 //  - boot 先读设置再 launch（连接桌面地址赶得上本次启动）；
@@ -14,7 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 String _read(String path) => File(path).readAsStringSync();
 
 void main() {
-  test('Workspace routes portfolio/plugin views without a project, inside Scaffold', () {
+  test('Workspace routes portfolio out of the design chrome; plugin shares the unified chrome', () {
     final ws = _read('lib/widgets/workspace.dart');
     expect(ws.contains("store.view == 'portfolio'"), isTrue);
     expect(
@@ -22,11 +23,21 @@ void main() {
       isTrue,
       reason: 'portfolio 早退必须包 Scaffold（SnackBar 宿主）',
     );
+    // 用户裁决 2026-11-20：插件工作台不再整页替换 Workspace 的 Scaffold，
+    // 而是与设计画布共用同一套外壳（workspace_chrome.dart）——插件内容只是
+    // 主区 `WorkspaceMainArea` 里的内容，仍是同一个 Scaffold 宿主。
     expect(
-      RegExp(r"pluginView != null[\s\S]{0,160}Scaffold").hasMatch(ws),
+      ws.contains('pluginWorkspaceFor(store.view)'),
       isTrue,
-      reason: '插件工作台早退必须包 Scaffold',
+      reason: '插件视图经注册表路由进主区',
     );
+    expect(ws.contains('WorkspaceChrome('), isTrue, reason: '四个工作台共用同一套壳骨架');
+    expect(ws.contains('_center(store, pluginView)'), isTrue, reason: '插件内容是主区内容');
+    final chrome = _read('lib/widgets/workspace_chrome.dart');
+    expect(chrome.contains('WorkspaceMainArea'), isTrue,
+        reason: '插件内容与设计画布共用主区容器');
+    expect(chrome.contains('titleBar'), isTrue, reason: '外壳含标题栏');
+    expect(chrome.contains('statusBar'), isTrue, reason: '外壳含状态栏');
     expect(ws.contains('LayoutBuilder'), isTrue, reason: '窄屏断点');
   });
 

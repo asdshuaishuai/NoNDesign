@@ -5,8 +5,9 @@
 //   * NaN 窄栏里不再有「主页/设计/3D/视频/热应用」切换条；
 //   * 唯一的切换口是顶栏的项目下拉（列出设计项目 / 3D 场景 / 热应用 / 视频），
 //     点一个项目才换工作台；
-//   * 3D / 视频 / 热应用工作台没有设计壳顶栏，它们靠自己的项目菜单与「返回主页」，
-//     不会在项目内部横跳。
+//   * 2026-11-20 外壳统一：3D / 视频 / 热应用工作台复用设计壳的同一套外壳
+//     （顶栏项目下拉 / 左侧图标轨 / 主区 / 状态栏），插件自己的 46px 工具条
+//     保留在内容顶部；但**工作区切换条**仍不存在，项目内部不能横跳。
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -152,14 +153,16 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('3D 工作台里没有设计壳顶栏，也就没有工作区切换入口', (tester) async {
+  testWidgets('3D 工作台复用设计壳顶栏（项目下拉可用，仍无工作区切换条）', (tester) async {
     final store = _store()..view = 'plugin:three';
     store.setThreeProjectName('saturn-demo');
     await _pump(tester, store);
 
-    // 插件工作台整屏渲染自己的顶栏：设计壳的 TitleBar（含项目下拉）不出现。
-    expect(find.byKey(const ValueKey('title-bar-project-menu')), findsNothing);
-    // 右侧 NaN 仍在，但窄栏仍只有 NaN/检查两个 tab。
+    // 用户裁决 2026-11-20：四个工作台外壳完全一致——插件工作台也用设计壳的
+    // TitleBar（项目下拉/设置/主题入口照旧可用），插件自己的 46px 工具条
+    // 只是主区内容顶部的一条工具条，不再独占整页顶栏。
+    expect(find.byKey(const ValueKey('title-bar-project-menu')), findsOneWidget);
+    // 右侧 NaN 仍在，但窄栏仍只有 NaN/检查两个 tab（没有工作区切换条）。
     expect(find.byKey(const ValueKey('desktop-chat-rail')), findsOneWidget);
     expect(find.byKey(const ValueKey('rail-workspace-three')), findsNothing);
     expect(find.byKey(const ValueKey('rail-workspace-design')), findsNothing);

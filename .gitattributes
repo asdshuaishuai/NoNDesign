@@ -1,0 +1,17 @@
+# 让「按字节校验的产物」在所有平台 checkout 后逐字节一致（sha256 清单锁定）。
+# 没有这几行时，Windows + core.autocrlf=true 会把 LF 转成 CRLF，
+# a2ui_web_spike_test / ddp golden / project_service golden 在 Windows 上假红。
+.gitattributes text eol=lf
+app/assets/a2ui_web/** text eol=lf
+app/test/fixtures/** text eol=lf
+
+# DDP 容器是二进制：绝不能参与 EOL 转换（字节即契约，sha256/verbatim 断言）。
+app/test/fixtures/**/*.ddp -text
+
+# 3D 工作台的 vendored 运行时按字节锁定（three_service.dart 的
+# threeModuleByteLength / sha256 是硬校验）：CRLF 会让 1,272,972 B 变成
+# 1,326,016 B，Windows 上 3D 预览直接「预览文件缺失」。全部 -text。
+app/assets/three/** -text
+
+# wasm 二进制同理（字节数与 manifest 对账）。
+app/assets/engine/*.wasm -text

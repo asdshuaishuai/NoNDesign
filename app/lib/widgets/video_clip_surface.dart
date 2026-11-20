@@ -78,8 +78,12 @@ abstract class VideoClipPlayback extends ChangeNotifier {
   int get fps => clipFps;
 
   /// 1 基帧号（0 秒 = 第 1 帧）。
+  ///
+  /// `t` 非有限（页面桥偶发 NaN / 注入源坏值）时按片头处理，避免
+  /// `double.floor()` 在构建期抛底层异常。
   int get frame {
-    final value = (t * fps).floor() + 1;
+    final seconds = t;
+    final value = seconds.isFinite ? (seconds * fps).floor() + 1 : 1;
     return value < 1 ? 1 : value;
   }
 
@@ -122,7 +126,10 @@ class VideoClipWebPlayback extends VideoClipPlayback {
   double get t => _t;
 
   @override
-  double get duration => _duration > 0 ? _duration : clip.duration;
+  double get duration {
+    final value = _duration > 0 ? _duration : clip.duration;
+    return value.isFinite && value > 0 ? value : 0;
+  }
 
   @override
   bool get playing => _playing;
@@ -395,6 +402,11 @@ class _VideoClipSurfaceState extends State<VideoClipSurface> {
   @override
   void initState() {
     super.initState();
+    _bindPlayback();
+  }
+
+  /// 按当前 widget 绑定播放源：注入的归调用方，否则自建 WebView 播放源。
+  void _bindPlayback() {
     final injected = widget.playback;
     if (injected != null) {
       _playback = injected;
@@ -409,18 +421,40 @@ class _VideoClipSurfaceState extends State<VideoClipSurface> {
     _owned = owned;
     _playback = owned;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+      // 播放面可能在挂载前被替换/销毁：作废这次挂载，别把已释放的播放源
+      // 回传给外层运输条。
+      if (!mounted || !identical(_owned, owned)) return;
       widget.onPlaybackChanged?.call(owned);
       owned.attach();
     });
   }
 
-  @override
-  void dispose() {
-    // 只释放自己创建的播放源；注入的归注入方。
+  /// 释放自己创建的播放源；注入的归注入方。
+  void _unbindPlayback() {
     _owned?.dispose();
     _owned = null;
     _playback = null;
+  }
+
+  @override
+  void didUpdateWidget(VideoClipSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final samePlayback = identical(oldWidget.playback, widget.playback);
+    final sameClip = identical(oldWidget.clip, widget.clip);
+    final sameInitialTime = oldWidget.initialTime == widget.initialTime;
+    // 只按「本机能不能内嵌」这一判据比较；平台对象每次新建也不该触发重挂。
+    final sameHost = videoClipWebViewSupported(oldWidget.host) ==
+        videoClipWebViewSupported(widget.host);
+    if (samePlayback && sameClip && sameInitialTime && sameHost) return;
+    // 同一位置换了播放源/片段：旧 WebView 与就绪计时器必须当场释放，
+    // 不能把上一支短片的错误态或已销毁的播放源留在画位上。
+    _unbindPlayback();
+    _bindPlayback();
+  }
+
+  @override
+  void dispose() {
+    _unbindPlayback();
     super.dispose();
   }
 
@@ -584,7 +618,9 @@ class VideoClipTransport extends StatelessWidget {
         child: ListenableBuilder(
           listenable: playback,
           builder: (context, _) {
-            final total = playback.duration > 0 ? playback.duration : 0.001;
+            final rawDuration = playback.duration;
+            final total =
+                rawDuration.isFinite && rawDuration > 0 ? rawDuration : 0.001;
             final value = playback.t.isFinite
                 ? playback.t.clamp(0.0, total).toDouble()
                 : 0.0;

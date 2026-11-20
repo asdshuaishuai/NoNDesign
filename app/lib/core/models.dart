@@ -542,6 +542,9 @@ class AppSettings {
   /// 所以按既有 threeProjectName / hotappApp 的同样做法持久化。
   String videoClipId;
   String videoJob;
+  /// 视频工作台当前**生成项目**名（'' = 不在生成项目上）：NaN 的 `video_create`
+  /// 成功落盘后由 store 写入，工作台据此切到该项目（与 threeProjectName 同理）。
+  String videoProjectName;
   /// 3D 规范手编草稿（项目名 → JSON 文本）：未保存的编辑跨视图保留。
   Map<String, String> threeSpecDrafts;
   /// 「连接桌面」模式：桌面端地址（如 http://192.168.1.5:12345）。
@@ -580,6 +583,7 @@ class AppSettings {
     this.videoSampleIdx = 0,
     this.videoClipId = '',
     this.videoJob = '',
+    this.videoProjectName = '',
     Map<String, String>? threeSpecDrafts,
     this.serverUrl = '',
     String? agentRuntime,
@@ -607,6 +611,7 @@ class AppSettings {
         'videoSampleIdx': videoSampleIdx,
         'videoClipId': videoClipId,
         'videoJob': videoJob,
+        'videoProjectName': videoProjectName,
         'threeSpecDrafts': threeSpecDrafts,
         'serverUrl': serverUrl,
         'agentRuntime': agentRuntime,
@@ -631,6 +636,7 @@ class AppSettings {
         videoSampleIdx: (m['videoSampleIdx'] is num) ? (m['videoSampleIdx'] as num).toInt() : 0,
         videoClipId: (m['videoClipId'] ?? '').toString(),
         videoJob: (m['videoJob'] ?? '').toString(),
+        videoProjectName: (m['videoProjectName'] ?? '').toString(),
         threeSpecDrafts: (m['threeSpecDrafts'] is Map)
             ? Map<String, String>.fromEntries(
                 (m['threeSpecDrafts'] as Map).entries

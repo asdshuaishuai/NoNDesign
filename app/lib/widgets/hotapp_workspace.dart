@@ -25,8 +25,11 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+
+import 'hotapp_preview_win.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import '../core/app_paths.dart';
@@ -113,6 +116,24 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
   HotAppService? _service;
   Future<HotAppService?>? _serviceLoading;
 
+  /// 挂载队列：store 的「切到新应用」通知可能在已有挂载在飞时到达
+  /// （tool_end 立刻 setHotApp，run 结束还会再刷新一次）。直接丢弃会把
+  /// 新预览请求吞掉，工作台停在旧页面。只保留最近一个目标应用。
+  String? _queuedMount;
+  String? _mountingName;
+
+  /// 应用列表缓存：run 结束/切应用时重扫；切换入口直接复用，不再二次扫盘。
+  List<LibraryApp> _appList = const [];
+
+  /// Windows WebView2 预览的换代号：同一路径的文件被原地重写时，
+  /// `HotappWinPreview` 的 `didUpdateWidget` 看不出路径变化，需要换实例重载。
+  int _previewEpoch = 0;
+
+  /// 最近一次写出的预览文件（Windows WebView2 / 浏览器逃生口共用）。
+  String? _previewPath;
+  Future<String?>? _winPreviewFuture;
+  int _winPreviewFutureEpoch = -1;
+
   final _refineCtl = TextEditingController();
   final List<String> _notes = [];
 
@@ -138,7 +159,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     final saved = _storeOf(context).settings.hotappApp;
     if (!consumed && saved.isNotEmpty) {
       _app = saved;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _mountSaved(saved));
+      WidgetsBinding.instance.addPostFrameCallback((_) => _requestMount(saved));
     }
   }
 
@@ -190,6 +211,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       _app = null;
       _entry = null;
       _offlinePath = offline;
+      _queuedMount = null;
       _lastError = '';
       _lastErrorDetail = '';
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -206,7 +228,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
         if (!mounted) return;
         // 持久化推迟到首帧后：构建期 notifyListeners 会触发祖先重建。
         store.setHotApp(pending);
-        _mountSaved(pending);
+        _requestMount(pending);
       });
       return true;
     }
@@ -218,23 +240,83 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
   bool _lastFromPrototypeBusy = false;
   String _lastHotappApp = '';
 
+  /// NaN 的聊天/智能体 run 在飞标记：`agentBusy` true→false 是一次 run 的
+  /// 终态，run 期间可能由 `hotapp_refine` 原地改写了当前应用的页面（应用名
+  /// 不变），只有 run 结束才看得到——必须重挂预览刷新内容。
+  bool _lastAgentBusy = false;
+  bool _lastHotappToolRunning = false;
+
+  /// NaN 当前是否正在通过工具生成/精修热应用（tool_start 到 tool_end 之间）。
+  bool get _agentHotappRunning {
+    if (!store.agentBusy) return false;
+    for (final item in store.timeline) {
+      if (item.kind == 'tool' &&
+          item.running &&
+          (item.tool ?? '').startsWith('hotapp_')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void _onStoreNotify() {
     if (!mounted) return;
     final busy = store.hotappFromPrototypeBusy;
     final app = store.settings.hotappApp;
-    if (busy != _lastFromPrototypeBusy || app != _lastHotappApp) {
-      _lastFromPrototypeBusy = busy;
-      _lastHotappApp = app;
-      setState(() {});
+    final agentBusy = store.agentBusy;
+    final hotappToolRunning = _agentHotappRunning;
+    final visualChange = busy != _lastFromPrototypeBusy ||
+        app != _lastHotappApp ||
+        agentBusy != _lastAgentBusy ||
+        hotappToolRunning != _lastHotappToolRunning;
+    final runEnded = _lastAgentBusy && !agentBusy;
+    final prototypeEnded = _lastFromPrototypeBusy && !busy;
+    _lastFromPrototypeBusy = busy;
+    _lastHotappApp = app;
+    _lastAgentBusy = agentBusy;
+    _lastHotappToolRunning = hotappToolRunning;
+    if (visualChange) setState(() {});
+
+    // 帧内通知不能同步 setState/mount：统一推到帧末。
+    void applySignals() {
+      if (!mounted) return;
+      // 智能体/原型生成把工作台当前应用换成了新名字 → 自动切过去。
+      final switched = app.isNotEmpty && app != _app;
+      if (switched) {
+        _requestMount(app);
+      } else if (app.isEmpty && _app != null && _offlinePath == null) {
+        // 外部清空（应用在别处被删除）：回到空态，不留旧页面。
+        _queuedMount = null;
+        _closeDb();
+        _dropPreviewPath();
+        setState(() {
+          _app = null;
+          _entry = null;
+          _title = '';
+          _controller = null;
+          _lastError = '';
+          _lastErrorDetail = '';
+        });
+      }
+      if (switched || runEnded || prototypeEnded) {
+        // 重扫应用列表（切换入口不接受旧列表）；run/原型生成结束还要
+        // 刷新当前应用的类型/来源徽标并重挂预览。切到新应用时新挂载本身
+        // 就会读入口 + 写预览文件，不用再重载一次。
+        unawaited(_refreshAppList());
+        if (!switched) {
+          final current = _app;
+          if (current != null && _offlinePath == null) _requestMount(current);
+        }
+      }
+      if (_consumeOpenRequests()) setState(() {});
     }
+
     // 构建/布局期回调里 setState 会抛「during build」：推到帧末。
     if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _consumeOpenRequests()) setState(() {});
-      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => applySignals());
       return;
     }
-    if (_consumeOpenRequests()) setState(() {});
+    applySignals();
   }
 
   // -- 数据面 ---------------------------------------------------------------
@@ -325,9 +407,13 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
           return;
         }
         setState(() => _entry = entry);
-        await Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => NonAppA2uiViewer(title: entry.title, messages: messages),
-        ));
+        // 导航跳帧：mount 可能在 async 期间与会话恢复/其它 push 同帧发生，
+        // 直接 push 会撞 Navigator 的 `_debugLocked` 断言（debug 红屏）。
+        await _pushAfterFrame(
+          MaterialPageRoute<void>(
+            builder: (_) => NonAppA2uiViewer(title: entry.title, messages: messages),
+          ),
+        );
         return;
       }
 
@@ -351,11 +437,15 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       _title = entry.brief?.isNotEmpty == true ? entry.brief! : entry.title;
       _dbUnavailable = false;
       _dbFailure = null;
+      _previewPath = path;
       if (_host.supportsInAppWebView) {
         _controller = _newController()..loadFile(path);
       } else {
         _controller = null;
       }
+      // Windows WebView2：同一缓存路径被原地重写（精修/重新生成）时，预览
+      // 组件看不出路径变化；换代号强制换实例重新加载，避免停在旧页面。
+      _previewEpoch++;
       setState(() {});
     } on NonAppException catch (error) {
       debugPrint('[hotapp] mount rejected: $error');
@@ -379,12 +469,76 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     }
   }
 
+  /// 排队挂载：只保留最近一次目标应用，并等当前挂载结束后再消化。
+  ///
+  /// store 的「切到新应用」通知可能在已有挂载在飞时到达；旧的
+  /// `_mountSaved` 开头 `if (_booting) return` 会把这个请求丢掉，工作台就停在
+  /// 旧应用上——这正是「生成完工作台里没有东西」的断点之一。
+  void _requestMount(String name) {
+    if (name.isEmpty) return;
+    if (_mountingName == name) return; // 同一应用已在挂载：等它完成即可
+    _queuedMount = name;
+    unawaited(_drainMountQueue());
+  }
+
+  Future<void> _drainMountQueue() async {
+    if (_booting) return;
+    final name = _queuedMount;
+    if (name == null) return;
+    _queuedMount = null;
+    _mountingName = name;
+    try {
+      await _mountSaved(name);
+    } finally {
+      _mountingName = null;
+      if (mounted && _queuedMount != null) {
+        unawaited(_drainMountQueue());
+      }
+    }
+  }
+
+  /// 重扫本地应用列表（工作台「应用」切换入口的数据面）。
+  ///
+  /// 失败不打断工作台（run 结束是后台刷新）：保留旧列表并记控制台，下一次
+  /// 用户主动打开列表时仍会重新扫。
+  Future<void> _refreshAppList() async {
+    final service = await _ensureService();
+    if (!mounted || service == null) return;
+    try {
+      final apps = await service.list();
+      if (!mounted) return;
+      setState(() => _appList = apps);
+    } catch (error) {
+      debugPrint('[hotapp] list rescan failed: $error');
+    }
+  }
+
+  /// 下一帧再 push：async 回调里直接导航可能落在 Navigator 锁定帧内
+  /// （`!_debugLocked` 断言、debug 红屏）。导航前重查 mounted。
+  Future<void> _pushAfterFrame(Route<void> route) async {
+    final nav = Navigator.of(context);
+    final completer = Completer<void>();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !nav.mounted) {
+        if (!completer.isCompleted) completer.complete();
+        return;
+      }
+      nav.push(route).whenComplete(() {
+        if (!completer.isCompleted) completer.complete();
+      });
+    });
+    WidgetsBinding.instance.scheduleFrame();
+    await completer.future;
+  }
+
   /// 兜底路径：只打开本机缓存文件（没有应用库/数据库）。
   void _mountOffline(String path) {
     _closeDb();
     _entry = null;
+    _previewPath = path;
     _dbUnavailable = true;
     _dbFailure = null;
+    _previewEpoch++;
     if (_host.supportsInAppWebView) {
       _controller = _newController()..loadFile(path);
     } else {
@@ -509,6 +663,14 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     _dbApp = null;
   }
 
+  /// 丢弃当前预览文件引用（删除/外部清空/退出临时预览）。
+  void _dropPreviewPath() {
+    _previewPath = null;
+    _winPreviewFuture = null;
+    _winPreviewFutureEpoch = -1;
+    _previewEpoch++;
+  }
+
   // -- 用户动作 -------------------------------------------------------------
 
   /// 当前设计项目是否已有可转成热应用的原型（画板 ≥ 1）。
@@ -516,6 +678,10 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       store.hasProject && store.render.artboards.any((a) => a.id != '__seed');
 
   bool get _fromPrototypeBusy => store.hotappFromPrototypeBusy;
+
+  /// 工作台处于「有产出在路上」的状态：本地生成/精修、原型生成、或 NaN
+  /// 正在用热应用工具。转圈只在其中任一为真时显示，终态一到全部收掉。
+  bool get _generating => _busy || _fromPrototypeBusy || _agentHotappRunning;
 
   Future<void> _generateFromPrototype() async {
     await store.generateHotAppFromPrototype();
@@ -530,7 +696,8 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       _notes.add('切换到 $name');
     });
     store.setHotApp(name);
-    await _mountSaved(name);
+    // 走挂载队列：切换过程中若 store 再发通知（run 收尾）不会被丢弃。
+    _requestMount(name);
   }
 
   /// 热应用类型徽标：可用应用 / 原型验证（颜色取主题令牌，浅色主题也可读）。
@@ -563,6 +730,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     List<LibraryApp> apps;
     try {
       apps = await service.list();
+      if (mounted) _appList = apps;
     } catch (error) {
       debugPrint('[hotapp] list failed: $error');
       if (mounted) _toasts.error('应用列表没有加载出来', '请稍后重试');
@@ -671,6 +839,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       await service.delete(app);
       if (!mounted) return;
       _closeDb();
+      _dropPreviewPath();
       setState(() {
         _app = null;
         _entry = null;
@@ -821,7 +990,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
         _notes.add('已生成（${entry.payloadBytes} 字节）');
       });
       store.setHotApp(entry.name);
-      await _mountSaved(entry.name);
+      _requestMount(entry.name);
       _toasts.success('热应用已生成', '页面就在本机运行；下方输入框可以继续修改。');
     } on HotAppFailure catch (failure) {
       debugPrint('[hotapp] generate failed: $failure');
@@ -875,6 +1044,8 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
         if (!mounted) return;
         setState(() {
           _entry = entry;
+          _previewPath = path;
+          _previewEpoch++;
           if (_host.supportsInAppWebView) {
             _controller = _newController()..loadFile(path);
           }
@@ -902,6 +1073,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
 
   /// 退出临时预览：回到设计视图（临时打开不持久化）。
   void _exitOffline() {
+    _dropPreviewPath();
     setState(() {
       _offlinePath = null;
       _controller = null;
@@ -914,7 +1086,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
   Future<void> _reloadPreview() async {
     final app = _app;
     if (app == null || _offlinePath != null) return;
-    await _mountSaved(app);
+    _requestMount(app);
   }
 
   /// 没有应用内预览的桌面（Linux/Windows）：用系统浏览器打开预览文件。
@@ -958,6 +1130,26 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     }
   }
 
+  /// 复制预览文件路径（Windows WebView2 失败时的降级出口之一：不白屏，
+  /// 用户至少能把文件拿到浏览器/文件夹里打开）。
+  Future<void> _copyPreviewPath() async {
+    final path = _previewPath ??
+        _offlinePath ??
+        (await _previewPathFor(_app));
+    if (path == null) {
+      _toasts.warn('预览还没有准备好');
+      return;
+    }
+    try {
+      await Clipboard.setData(ClipboardData(text: path));
+      if (!mounted) return;
+      _toasts.info('已复制预览路径', path);
+    } catch (error) {
+      debugPrint('[hotapp] copy path failed: $error');
+      if (mounted) _toasts.warn('没能复制路径', '可以在应用文件夹里直接打开预览文件。');
+    }
+  }
+
   Future<void> _revealApp() async {
     if (!_host.supportsRevealInFolder) {
       _toasts.warn('这台设备不支持在文件夹中显示');
@@ -994,14 +1186,14 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
           icon: Icons.list,
           label: '应用',
           compact: narrow,
-          onTap: _busy ? null : _showAppList,
+          onTap: _generating ? null : _showAppList,
         ),
         _TopBtn(
           icon: Icons.file_open_outlined,
           label: '导入',
           compact: narrow,
           tip: nonAppOpenHint(_host) ?? '打开一个应用包',
-          onTap: _busy ? null : _importApp,
+          onTap: _generating ? null : _importApp,
         ),
         if (_app != null)
           _TopBtn(
@@ -1009,7 +1201,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
             label: '导出',
             compact: narrow,
             tip: _host.isMobile ? '导出到应用文件夹' : '导出为一个应用包文件',
-            onTap: (_canExport && !_busy) ? _exportApp : null,
+            onTap: (_canExport && !_generating) ? _exportApp : null,
           ),
         if (_entry != null && _host.supportsRevealInFolder)
           _TopBtn(
@@ -1023,7 +1215,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
             icon: Icons.delete_outline,
             label: '删除',
             compact: narrow,
-            onTap: _busy ? null : _deleteApp,
+            onTap: _generating ? null : _deleteApp,
           ),
       ];
 
@@ -1061,6 +1253,14 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
         _topBar(p),
         if (_serviceError.isNotEmpty)
           _banner(p, text: _serviceError, onExit: null),
+        // NaN 正在用工具生成/精修热应用：给出可见进度，避免界面看起来
+        // 「点了没反应」；run 终态后横幅与转圈一起消失，不留无终态转圈。
+        if (_agentHotappRunning && !_fromPrototypeBusy)
+          _banner(
+            p,
+            text: 'NaN 正在生成或修改热应用，完成后会自动刷新预览。',
+            onExit: null,
+          ),
         if (_offlinePath != null)
           _banner(
             p,
@@ -1142,37 +1342,37 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
               icon: Icons.fact_check_outlined,
               label: _fromPrototypeBusy ? '生成中…' : '由原型生成',
               tip: _fromPrototypeBusy ? '正在生成，完成会自动切到新应用' : '由当前设计原型生成「原型验证 demo」（逐屏逐跳转验证覆盖）',
-              onTap: (_busy || _fromPrototypeBusy) ? null : _generateFromPrototype,
+              onTap: _generating ? null : _generateFromPrototype,
             ),
-          if (_busy || _fromPrototypeBusy)
+          if (_generating)
             SizedBox(
                 width: 14,
                 height: 14,
                 child: CircularProgressIndicator(strokeWidth: 1.8, color: p.accent)),
           const SizedBox(width: 8),
           if (narrow) ...[
-            _TopBtn(icon: Icons.add, label: '新建', compact: true, onTap: _busy ? null : _create),
+            _TopBtn(icon: Icons.add, label: '新建', compact: true, onTap: _generating ? null : _create),
             if (_app != null)
               _TopBtn(
                 icon: Icons.refresh,
                 label: '重载',
                 compact: true,
-                onTap: (_busy || _offlinePath != null) ? null : _reloadPreview,
+                onTap: (_generating || _offlinePath != null) ? null : _reloadPreview,
               ),
             _TopMenu(items: _secondaryActions(narrow: true)),
           ] else ...[
-            _TopBtn(icon: Icons.add, label: '新建', onTap: _busy ? null : _create),
+            _TopBtn(icon: Icons.add, label: '新建', onTap: _generating ? null : _create),
             if (_app != null)
               _TopBtn(
                 icon: Icons.refresh,
                 label: '重载',
-                onTap: (_busy || _offlinePath != null) ? null : _reloadPreview,
+                onTap: (_generating || _offlinePath != null) ? null : _reloadPreview,
               ),
             if (_app != null)
               _TopBtn(
                 icon: Icons.delete_outline,
                 label: '删除',
-                onTap: _busy ? null : _deleteApp,
+                onTap: _generating ? null : _deleteApp,
               ),
             _TopBtn(
               icon: Icons.file_open_outlined,
@@ -1185,10 +1385,15 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
                 icon: Icons.save_alt,
                 label: '导出',
                 tip: _host.isMobile ? '导出到应用文件夹' : '导出为一个应用包文件',
-                onTap: (_canExport && !_busy) ? _exportApp : null,
+                onTap: (_canExport && !_generating) ? _exportApp : null,
               ),
             if (_app != null)
-              _TopBtn(icon: Icons.list, label: '应用', onTap: _busy ? null : _showAppList),
+              _TopBtn(
+                icon: Icons.list,
+                label: '应用',
+                tip: _appList.isEmpty ? '打开应用列表' : '打开应用列表（${_appList.length} 个）',
+                onTap: _generating ? null : _showAppList,
+              ),
           ],
         ]);
       }),
@@ -1254,8 +1459,8 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
   Widget _body(NonPalette p) {
     if (_app == null && _offlinePath == null) {
       return _EmptyHotApp(
-        onCreate: _busy ? null : _create,
-        onOpenPackage: _busy ? null : _importApp,
+        onCreate: _generating ? null : _create,
+        onOpenPackage: _generating ? null : _importApp,
         hint: nonAppOpenHint(_host),
       );
     }
@@ -1272,6 +1477,107 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     ]);
   }
 
+  /// Windows WebView2 预览面：路径解析 + 组件挂载 + 浏览器逃生口。
+  ///
+  /// 预览文件在 `_mountSaved` 里已写好（[_previewPath]）时直接用，避免每次
+  /// 重建都重新读页面/重写缓存；没有时按需解析一次。解析 future 按换代号
+  /// 缓存，rebuild 不会把「正在打开…」闪成新的一轮。
+  Widget _windowsPreview(NonPalette p) {
+    final epoch = _previewEpoch;
+    if (_winPreviewFuture == null || _winPreviewFutureEpoch != epoch) {
+      _winPreviewFutureEpoch = epoch;
+      _winPreviewFuture = _previewPath == null
+          ? (_app == null ? Future.value(_offlinePath) : _previewPathFor(_app))
+          : Future<String?>.value(_previewPath);
+    }
+    return FutureBuilder<String?>(
+      future: _winPreviewFuture,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return Center(
+            child: Text('正在打开…', style: TextStyle(fontSize: 12, color: p.ink3)),
+          );
+        }
+        final path = snap.data;
+        if (path == null) return _browserFallbackBox(p);
+        return Stack(children: [
+          Positioned.fill(
+            child: HotappWinPreview(
+              // 同一路径的缓存文件被原地重写（精修/重新生成）时换实例重载。
+              key: ValueKey('hotapp-win-preview-$epoch'),
+              htmlPath: path,
+              onOpenExternal: _openExternally,
+              onCopyPath: _copyPreviewPath,
+              onRevealInFolder: _host.supportsRevealInFolder ? _revealApp : null,
+            ),
+          ),
+          Positioned(
+            top: 8,
+            right: 8,
+            child: Material(
+              color: p.panel.withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(8),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: _openExternally,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.open_in_new, size: 14, color: p.ink3),
+                    const SizedBox(width: 5),
+                    Text('浏览器打开', style: TextStyle(fontSize: 11, color: p.ink3)),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+        ]);
+      },
+    );
+  }
+
+  /// 浏览器兜底占位（Linux / WebView2 缺失 / 路径解析失败时）。
+  Widget _browserFallbackBox(NonPalette p) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.open_in_browser_outlined, size: 40, color: p.ink4),
+          const SizedBox(height: 12),
+          Text('这台电脑暂时不能在应用内预览', style: TextStyle(fontSize: 14, color: p.ink2)),
+          const SizedBox(height: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 380),
+            child: Text(
+              '可以用系统浏览器打开预览；文件就在本机，不会上传。',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: p.ink4, height: 1.6),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Wrap(spacing: 10, runSpacing: 8, alignment: WrapAlignment.center, children: [
+            FilledButton.icon(
+              onPressed: _openExternally,
+              icon: const Icon(Icons.open_in_new, size: 16),
+              label: const Text('用浏览器打开'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _copyPreviewPath,
+              icon: const Icon(Icons.copy_all_outlined, size: 16),
+              label: const Text('复制文件路径'),
+            ),
+            if (_host.supportsRevealInFolder)
+              OutlinedButton.icon(
+                onPressed: _revealApp,
+                icon: const Icon(Icons.folder_open_outlined, size: 16),
+                label: const Text('在文件夹中显示'),
+              ),
+          ]),
+        ]),
+      ),
+    );
+  }
+
   /// 没有应用内预览时的诚实占位：可执行的两条出路（浏览器 / 文件夹）。
   Widget _previewFallback(NonPalette p) {
     if (_booting && _lastError.isEmpty) {
@@ -1280,39 +1586,14 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       );
     }
     if (!_host.supportsInAppWebView) {
-      return Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.open_in_browser_outlined, size: 40, color: p.ink4),
-            const SizedBox(height: 12),
-            Text('这台电脑暂时不能在应用内预览', style: TextStyle(fontSize: 14, color: p.ink2)),
-            const SizedBox(height: 6),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
-              child: Text(
-                '可以用系统浏览器打开预览；文件就在本机，不会上传。',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: p.ink4, height: 1.6),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Wrap(spacing: 10, runSpacing: 8, alignment: WrapAlignment.center, children: [
-              FilledButton.icon(
-                onPressed: _openExternally,
-                icon: const Icon(Icons.open_in_new, size: 16),
-                label: const Text('用浏览器打开'),
-              ),
-              if (_host.supportsRevealInFolder)
-                OutlinedButton.icon(
-                  onPressed: _revealApp,
-                  icon: const Icon(Icons.folder_open_outlined, size: 16),
-                  label: const Text('在文件夹中显示'),
-                ),
-            ]),
-          ]),
-        ),
-      );
+      // Windows：WebView2（webview_windows）应用内预览（2026-11-20）——
+      // 加载与浏览器同款的缓存预览文件。数据库桥（webview_flutter JS
+      // channel 语义）暂未在 WebView2 侧桥接：预览右上保留「浏览器打开」
+      // 逃生口，数据库家族应用仍可一键外部打开（不静默降级）。
+      if (_host.os == HostOs.windows) {
+        return _windowsPreview(p);
+      }
+      return _browserFallbackBox(p);
     }
     if (_entry?.isA2ui == true) {
       return Center(
@@ -1322,7 +1603,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
           Text('这个应用以卡片方式打开', style: TextStyle(fontSize: 13, color: p.ink2)),
           const SizedBox(height: 12),
           FilledButton(
-            onPressed: () => _mountSaved(_app!),
+            onPressed: () => _requestMount(_app!),
             child: const Text('再次打开'),
           ),
         ]),
@@ -1345,7 +1626,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
             child: TextField(
               controller: _refineCtl,
               style: TextStyle(fontSize: 12.5, color: p.ink),
-              onSubmitted: _busy ? null : _refine,
+              onSubmitted: _generating ? null : _refine,
               decoration: InputDecoration(
                 hintText: '告诉它怎么改：换成绿色 / 加一个重置按钮 / 动画再快一点…',
                 hintStyle: TextStyle(fontSize: 12, color: p.ink4),
@@ -1359,7 +1640,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
           ),
           const SizedBox(width: 8),
           IconButton.filled(
-            onPressed: _busy ? null : () => _refine(_refineCtl.text),
+            onPressed: _generating ? null : () => _refine(_refineCtl.text),
             icon: const Icon(Icons.arrow_upward, size: 17),
             style: IconButton.styleFrom(backgroundColor: p.accent),
           ),

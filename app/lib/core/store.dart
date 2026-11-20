@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart' show CancellationToken;
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/foundation.dart' show debugPrint, defaultTargetPlatform, kIsWeb, visibleForTesting;
+import 'package:flutter/foundation.dart' show debugPrint, defaultTargetPlatform, kDebugMode, kIsWeb, visibleForTesting;
 import 'package:material_ui/material_ui.dart' hide Flow;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -101,6 +101,34 @@ enum OpenResult { opened, needPassword, cancelled, failed }
 enum UnsavedChoice { save, discard, cancel }
 
 class AppStore extends ChangeNotifier {
+  /// Debug 自动化句柄（仅 debug 构建赋值）：VM Service eval 直驱回归用——
+  /// 四模块同一案例的无人值守验收走这条路，不依赖 UI 点击的坐标/焦点。
+  static AppStore? get debugInstance => kDebugMode ? _debugInstance : null;
+  static AppStore? _debugInstance;
+
+  /// debugRunModule 的终态轮询位：'running' → 'true'/'false'。
+  @visibleForTesting
+  String? debugRunVerdict;
+
+  /// 测试/自动化：直接把一条 agent 事件喂进消费路径（不启动 run）。
+  ///
+  /// 「工作区工具 → 工作台当前项目」的认领逻辑（[_adoptWorkspaceArtifact]）
+  /// 嵌在 [_handleAgentEvent] 里；没有这个缝，单测只能起真 run 才能覆盖，
+  /// 而真 run 会打网络/写用户目录。事件形状按 `dart_agent` 的稳定事件面给。
+  @visibleForTesting
+  Future<void> debugHandleAgentEvent(Map<String, dynamic> event) => _handleAgentEvent(event);
+
+  /// 发起一次模块 run（design 走完整管线，其余走工作区 run）。VM Service
+  /// eval 调用后轮询 [debugRunVerdict] 拿终态——eval 无法直接 await Future。
+  @visibleForTesting
+  void debugRunModule(String mode, String instruction) {
+    debugRunVerdict = 'running';
+    final Future<bool> run = mode == 'design'
+        ? generateFromBrief(instruction)
+        : runWorkspace(instruction, mode: mode);
+    unawaited(run.then((ok) => debugRunVerdict = '$ok'));
+  }
+
   /// [projects], [toasts] and [capabilities] are injectable so tests never
   /// touch the real project folder, the global notification bus or the host
   /// capability matrix.
@@ -120,6 +148,7 @@ class AppStore extends ChangeNotifier {
       api = NoNDesignApi.runtime(local: localCore);
       this.capabilities.update(localCore.engine.probeAvailability());
     }
+    if (kDebugMode) _debugInstance = this;
   }
 
   /// Runtime router: local engine first, connected desktop second.
@@ -342,6 +371,13 @@ class AppStore extends ChangeNotifier {
   /// 内置 Dart 循环（core/dart_agent.dart）在飞请求的本地取消令牌——
   /// dart 运行时无论移动/桌面都无服务器取消端点可调，取消即本地中断。
   CancellationToken? _dartAgentCancel;
+  /// agentBusy 的置位时刻：卡死锁自愈的判据（热重载/进程级中断会跳过
+  /// finally 清理，锁若不灭则之后所有 run 被 2s 静默拒绝——2026-11-20 实测）。
+  DateTime? _agentBusySince;
+  /// 工作区工具产出的「当前项目」：tool_start 记住请求名，tool_end 成功才
+  /// 落进设置（失败的项目不存在，绝不假装工作台已经打开它）。
+  String? _pendingWorkspaceArtifact;
+  String? _pendingWorkspaceName;
   /// 测试注入：Build 循环的模型覆盖（scripted mock），生产恒 null——
   /// runDartAgent 经 OpenAIProvider 直连。
   @visibleForTesting
@@ -881,6 +917,22 @@ class AppStore extends ChangeNotifier {
     await saveSettings();
   }
 
+  /// 按工作台模式切视图：plugin 工作台走各自视图；design/auto 回到设计
+  /// 画布（此前 targetView==null 时视图不动，选「切到设计」会停在工作台里）。
+  void _switchViewForWorkspace(String mode) {
+    final target = normalizeWorkspaceMode(mode);
+    final pluginView = workspaceViewForMode(target);
+    if (pluginView != null) {
+      if (view != pluginView) setView(pluginView);
+      return;
+    }
+    if (view == 'home' || view == 'docs' || view == 'play' || view == 'source') {
+      setView('design');
+    } else if (view.startsWith('plugin:')) {
+      setView('design');
+    }
+  }
+
   /// 工作台模式 → 视图名（`auto`/`design` 没有独立工作台视图）。
   static String? workspaceViewForMode(String mode) {
     switch (normalizeWorkspaceMode(mode)) {
@@ -955,6 +1007,58 @@ class AppStore extends ChangeNotifier {
     setView(target);
   }
 
+  /// 会产出/选中一个具名工作区项目的工具。`tool_start` 的 args 里带 `name`，
+  /// `tool_end` 成功后才把它认作「工作台当前项目」。
+  static bool _isWorkspaceArtifactTool(String tool) {
+    switch (tool) {
+      case 'three_create':
+      case 'three_status':
+      case 'three_pass':
+      case 'three_continue':
+      case 'three_feedback':
+      case 'hotapp_generate':
+      case 'hotapp_refine':
+      case 'hotapp_inspect':
+      case 'hotapp_from_prototype':
+      case 'video_create':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  void _rememberWorkspaceArtifact(Map<String, dynamic> event) {
+    final tool = (event['tool'] ?? '').toString();
+    _pendingWorkspaceArtifact = null;
+    _pendingWorkspaceName = null;
+    if (!_isWorkspaceArtifactTool(tool)) return;
+    final args = event['args'];
+    if (args is! Map) return;
+    final name = (args['name'] ?? '').toString().trim();
+    if (name.isEmpty) return;
+    _pendingWorkspaceArtifact = tool;
+    _pendingWorkspaceName = name;
+  }
+
+  /// 工具成功 → 工作台当前项目跟着换。没有这一步，NaN 说「做完了」时用户
+  /// 看到的工作台还是旧项目/空项目——即「跑完了但里面没有东西」。
+  void _adoptWorkspaceArtifact(Map<String, dynamic> event) {
+    final tool = (event['tool'] ?? '').toString();
+    final pendingTool = _pendingWorkspaceArtifact;
+    final pendingName = _pendingWorkspaceName;
+    if (pendingTool != tool || pendingName == null || pendingName.isEmpty) return;
+    _pendingWorkspaceArtifact = null;
+    _pendingWorkspaceName = null;
+    if (event['ok'] == false) return; // 失败的调用没有产出项目
+    if (tool.startsWith('three_')) {
+      setThreeProjectName(pendingName);
+    } else if (tool.startsWith('hotapp_')) {
+      setHotApp(pendingName);
+    } else if (tool.startsWith('video_')) {
+      setVideoProjectName(pendingName);
+    }
+  }
+
   /// 3D 工作台当前项目名（'' = 无）：跨视图/跨会话续接同一项目
   /// （工作台视图切换即 dispose，内存态不保活）。
   void setThreeProjectName(String name) {
@@ -976,6 +1080,16 @@ class AppStore extends ChangeNotifier {
     if (clipId != null && clipId != settings.videoClipId) settings.videoClipId = clipId;
     if (sampleIdx != null) settings.videoSampleIdx = sampleIdx;
     if (job != null) settings.videoJob = job;
+    saveSettings();
+    notifyListeners();
+  }
+
+  /// 视频工作台当前生成项目名（'' = 无）：NaN 的 `video_create` 成功后写入，
+  /// 工作台据此切到该片并逐帧播放（与 [setThreeProjectName] 同一纪律：
+  /// 工作台视图切换即 dispose，内存态不保活，名字必须持久化）。
+  void setVideoProjectName(String name) {
+    if (settings.videoProjectName == name) return;
+    settings.videoProjectName = name;
     saveSettings();
     notifyListeners();
   }
@@ -1178,6 +1292,13 @@ class AppStore extends ChangeNotifier {
     if (code.contains('unavailable') || code.contains('disconnected')) {
       return '设计服务暂时不可用，请稍后重试';
     }
+    // LLM 分类码（dart_agent.classifyLlmError）对齐 chat 卡的文案。
+    if (code.contains('llm_http_401') || code.contains('llm_http_403')) {
+      return '模型服务认证失败，请检查 API Key';
+    }
+    if (code.contains('llm_http_429')) return '模型服务正忙，请稍等片刻再试';
+    if (code.contains('llm_network')) return '连不上模型服务，请检查网络后重试';
+    if (code.contains('llm_no_such_tool')) return '模型调用了一个不可用的操作，请重试';
     if (code.contains('timeout')) return '操作超时，请重试';
     if (code.contains('not_found') || code.contains('file_not_found')) return '文件不存在或已移动';
     return '操作没有完成，请重试';
@@ -1469,6 +1590,19 @@ class AppStore extends ChangeNotifier {
     if (_editGeneration == approvedAt) return false;
     _toastWarn('项目刚有新的未保存改动，请重新确认后再切换。');
     return true;
+  }
+
+  /// 自动化专用（VM 直驱验收）：跳过「未保存改动」确认框，直接开空白
+  /// 项目。仅 debug 构建可用；生产入口仍走 [newProject] 的确认纪律。
+  @visibleForTesting
+  Future<bool> debugResetProject(String name) async {
+    _clearStaleAgentLock();
+    if (agentBusy) {
+      cancelAgent();
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      debugForceIdle();
+    }
+    return _newProjectNow(name: name, device: 'mobile', empty: true);
   }
 
   Future<bool> newProject({
@@ -2470,6 +2604,7 @@ class AppStore extends ChangeNotifier {
     final agentLabel = (settings.acpAgentName ?? '').trim();
     runId = DateTime.now().microsecondsSinceEpoch % 0x7fffffff;
     agentBusy = true;
+    _agentBusySince = DateTime.now();
     agentPhase = 'external';
     agentError = null;
     agentUserMessage = null;
@@ -2581,7 +2716,47 @@ class AppStore extends ChangeNotifier {
     return success;
   }
 
+  /// 卡死锁自愈：run 的正常时限是 30 分钟（store timeout），超过 35 分钟
+  /// 仍 busy 说明清理路径被跳过（热重载/进程级异常）。此时强制解锁——
+  /// 宁可放开让用户重试，也不把界面永久锁死。
+  static const Duration _staleBusyAfter = Duration(minutes: 35);
+
+  bool get _agentLockStale {
+    final since = _agentBusySince;
+    return agentBusy &&
+        since != null &&
+        DateTime.now().difference(since) > _staleBusyAfter;
+  }
+
+  void _clearStaleAgentLock() {
+    if (!_agentLockStale) return;
+    debugPrint('[store] stale agent lock cleared (busy since $_agentBusySince)');
+    _agentBusySince = null;
+    agentBusy = false;
+    chatActive = false;
+    agentPhase = 'idle';
+    runId = null;
+    _dartAgentCancel = null;
+    _chatCard = null;
+    notifyListeners();
+  }
+
+  /// 测试/自动化：强制解除 busy（仅 debug 构建可用）。
+  @visibleForTesting
+  void debugForceIdle() {
+    _agentBusySince = null;
+    agentBusy = false;
+    chatActive = false;
+    agentPhase = 'idle';
+    runId = null;
+    _dartAgentCancel = null;
+    _chatCard = null;
+    debugRunVerdict = null;
+    notifyListeners();
+  }
+
   Future<bool> generateFromBrief(String brief) async {
+    _clearStaleAgentLock();
     if (agentBusy) return false;
     if (settings.apiKey.trim().isEmpty) {
       _toastWarn('先配置模型，在设置里填入密钥');
@@ -2652,13 +2827,16 @@ class AppStore extends ChangeNotifier {
 
   /// 一轮聊天 run：进度卡入列 → 事件镜像推进 → 终态收尾 + BUILD 成功
   /// 追加产物卡（原型）。
-  Future<bool> _runChatTurn(String brief) async {
+  ///
+  /// [forcePlan]：中断恢复续跑用——planning 阶段断掉（或文档不齐）时重走
+  /// 「先文档后原型」全管线；文档阶段幂等（write_doc 全量覆盖），重跑即补齐。
+  Future<bool> _runChatTurn(String brief, {bool forcePlan = false}) async {
     // 目标工作台：auto/设计走「先文档后原型」的老管线；3D/视频/热应用是
     // 相互独立的模块，直接一次工作区 run（不写 PRD、不碰设计画布）。
     final targetMode = normalizeWorkspaceMode(settings.chatWorkspaceMode);
     final workspaceView = workspaceViewForMode(targetMode);
     final workspaceRun = workspaceView != null;
-    final fresh = !docs.hasContent;
+    final fresh = forcePlan || !docs.hasContent;
     final card = ChatMessage.progress(
       workspaceRun
           ? '在${workspaceModeLabel(targetMode)}工作台执行'
@@ -2718,7 +2896,12 @@ class AppStore extends ChangeNotifier {
       chatActive = false;
       _chatCard = null;
       card.running = false;
-      if (ok && built) {
+      if (ok && built && agentError == 'text_only') {
+        // 模型只回了文字：如实说，不追加产物卡。
+        card.text = '这一轮没有执行操作';
+        card.ok = false;
+        card.detail = failureMessage('text_only');
+      } else if (ok && built) {
         card.text = workspaceRun ? '${workspaceModeLabel(targetMode)}已更新' : '原型已生成';
         if (!workspaceRun) {
           appendChat(ChatMessage.artifact(
@@ -2801,6 +2984,24 @@ class AppStore extends ChangeNotifier {
         card.detail = message is String && message.isNotEmpty
             ? message
             : failureMessage(event['error']);
+        // 终态立即收卡：running 卡停转、在途步骤收尾（此前只写 detail，
+        // 转圈动画要等 finally 才停，视觉上像任务还在跑）。
+        card.running = false;
+        for (final s in card.steps) {
+          if (s.running) {
+            s.running = false;
+            s.ok = false;
+          }
+        }
+      case 'done':
+        // 同 failed：终态即收卡（成功侧在途步骤按成功收尾）。
+        card.running = false;
+        for (final s in card.steps) {
+          if (s.running) {
+            s.running = false;
+            s.ok = true;
+          }
+        }
     }
   }
 
@@ -2815,14 +3016,29 @@ class AppStore extends ChangeNotifier {
     final label = name.trim().isEmpty ? '这个选项' : name.trim();
     final summary = '选择：$label';
     final instruction = context.isEmpty ? summary : '$summary\n${jsonEncode(context)}';
+    // 答题卡带 switch_to：用户选定目标工作台——真正切换（设置+视图）再
+    // 续跑，而不是在当前工作台里换个措辞再问一遍（2026-11-20 用户裁决）。
+    final switchTo = normalizeWorkspaceMode(context['switch_to']?.toString());
     if (agentBusy) {
       _queuedChatActions.add((summary: summary, instruction: instruction));
+      if (switchTo != workspaceModeAuto && switchTo != settings.chatWorkspaceMode) {
+        // 切换立即生效：本轮收尾后续跑时已在目标工作台。
+        await setChatWorkspaceMode(switchTo);
+        _switchViewForWorkspace(switchTo);
+      }
       _toastWarn('已记住「$label」，这一轮结束后自动继续。');
       notifyListeners();
       return;
     }
     appendChat(ChatMessage.user(summary));
     unawaited(_persistChat());
+    if (switchTo != workspaceModeAuto && switchTo != settings.chatWorkspaceMode) {
+      await setChatWorkspaceMode(switchTo);
+      _switchViewForWorkspace(switchTo);
+      // _runChatTurn 按 settings.chatWorkspaceMode 分流——先切再跑。
+      unawaited(_runChatTurn(instruction));
+      return;
+    }
     await _runChatTurn(instruction);
   }
 
@@ -3098,9 +3314,11 @@ class AppStore extends ChangeNotifier {
     // run 起点的 mbt 快照与 server 路径同一纪律：在飞 op 先排空再取快照，
     // 否则终态回来会覆盖掉尚未 _commit 的 op（丢更新）。
     await _opQueue;
+    _clearStaleAgentLock();
     if (agentBusy) return false; // 排队等待期间有并发 run 启动：让位
     runId = DateTime.now().microsecondsSinceEpoch % 0x7fffffff;
     agentBusy = true;
+    _agentBusySince = DateTime.now();
     agentPhase = mode == 'plan' ? 'planning' : mode == 'refine' ? 'refining' : 'building';
     _runInstruction = instruction;
     _runStartedAt = DateTime.now().toIso8601String();
@@ -3152,6 +3370,7 @@ class AppStore extends ChangeNotifier {
 
     var success = false;
     var orphaned = false;
+    String? stopReason;
     final myRun = runId!;
     final events = StreamController<Map<String, dynamic>>();
     try {
@@ -3187,7 +3406,11 @@ class AppStore extends ChangeNotifier {
         // 测试注入 scripted mock；生产恒 null（OpenAIProvider 直连）。
         modelOverride: debugAgentModelOverride,
         abortSignal: _dartAgentCancel,
-        timeout: const Duration(minutes: 10),
+        // streamText 的 TimeoutConfiguration.total 是整轮 run（含全部工具
+        // 循环）的硬死线，不是单请求超时。推理模型（如 step-5-preview）单轮
+        // 流式推理就要 1-5 分钟，一轮 run 常含 3-5 轮工具循环，10 分钟会烧穿
+        // （TimeoutException → failed）。30 分钟对齐深度 run 的实际上界。
+        timeout: const Duration(minutes: 30),
         onEvent: (ev) {
           if (!events.isClosed) events.add(ev);
         },
@@ -3201,9 +3424,25 @@ class AppStore extends ChangeNotifier {
           break;
         }
         await _handleAgentEvent(ev);
-        if (ev['type'] == 'done') success = true;
+        if (ev['type'] == 'done') {
+          success = true;
+          stopReason = ev['stopReason']?.toString();
+        }
       }
       await runFuture; // 循环自身保证终态事件；这里只兜异常
+      // 孤儿化：run 期间项目被切换/新 run 顶替 → 后续事件整流丢弃。此前
+      // 直接返回 false 且不留任何提示（演示时像「点了没反应」），现在如实标注。
+      if (orphaned) {
+        agentError = 'run_orphaned';
+        _toastWarn('这一轮被打断了', '项目已切换或发起了新的任务，已完成的内容已保留');
+      }
+      // text_only：模型只回了文字、零工具/画布/工作区操作。run 本身算跑完
+      // （返回 true 保持既有调用语义），但界面绝不冒充「已更新」——标记
+      // agentError 让聊天卡如实显示，并弹一次可行动的提示。
+      if (!orphaned && success && stopReason == 'text_only') {
+        agentError = 'text_only';
+        _toastWarn('这一轮没有执行任何操作', '换个说法或再试一次');
+      }
       if (!orphaned && success && mode == 'plan' && !hasProject) {
         // 移动 PLAN 成功必须建立最小项目态：否则 hasProject 仍 false，
         // 主界面停在 Welcome、_persistRecovery 早退，文档看不见也救不回。
@@ -3226,6 +3465,10 @@ class AppStore extends ChangeNotifier {
       agentError = e.toString();
       timeline.add(TimelineEntry.finish(false, '运行失败', failureMessage(e)));
     } finally {
+      // 诊断：run 终态行（模式/成功/停止原因/错误码）——排查「跑完但失败」
+      // 时不用再猜是哪一段断的。
+      debugPrint('[agent] run end mode=$mode ok=$success '
+          'stop=${stopReason ?? '-'} error=${agentError ?? '-'}');
       _dartAgentCancel = null;
       _flushStreamAsAssistant();
       _flushThinking();
@@ -3252,6 +3495,7 @@ class AppStore extends ChangeNotifier {
   ///    requested runtime never silently degrades: no desktop means a visible
   ///    failure, not a quiet local rerun.
   Future<bool> _runAgent(String mode, String instruction) async {
+    _clearStaleAgentLock();
     if (agentBusy) return false;
     final localRuntime = settings.agentRuntime != agentRuntimeServer;
     // 只有设计画布的 BUILD 需要设计引擎；3D/视频/热应用是本地服务，
@@ -3297,9 +3541,11 @@ class AppStore extends ChangeNotifier {
     // （丢更新——与 op 队列同一类，只是边界换到 run 起点）。排队中的 op
     // 各自 ≤30s HTTP 超时，这里至多等一条链。
     await _opQueue;
+    _clearStaleAgentLock();
     if (agentBusy) return false; // 排队等待期间有并发 run 启动：让位
     runId = DateTime.now().microsecondsSinceEpoch % 0x7fffffff;
     agentBusy = true;
+    _agentBusySince = DateTime.now();
     agentPhase = mode == 'plan' ? 'planning' : mode == 'refine' ? 'refining' : 'building';
     _runInstruction = instruction;
     _runStartedAt = DateTime.now().toIso8601String();
@@ -3437,6 +3683,7 @@ class AppStore extends ChangeNotifier {
         // 工作区彼此独立：插件工具永不切主面，只有设计工具能把主面带回
         // 设计画布（桌面壳；演示不拽走，手机聊天优先壳不切）。
         followAgentWorkspace((event['tool'] ?? '').toString());
+        _rememberWorkspaceArtifact(event);
         timeline.add(TimelineEntry(
           kind: 'tool',
           tool: (event['tool'] ?? '').toString(),
@@ -3458,6 +3705,7 @@ class AppStore extends ChangeNotifier {
             break;
           }
         }
+        _adoptWorkspaceArtifact(event);
         break;
       case 'a2ui':
         // Real producer path: the agent's ask_user tool emits a v1.0 surface,
@@ -3577,6 +3825,8 @@ class AppStore extends ChangeNotifier {
         break;
       case 'failed':
         agentError = (event['error'] ?? 'failed').toString();
+        // 诊断日志：原始异常只进控制台（用户可见面仍走文案映射）。
+        debugPrint('[agent] failed raw=${event['error']} detail=${event['detail']}');
         final userMessage = event['message'];
         if (userMessage is String && userMessage.isNotEmpty) agentUserMessage = userMessage;
         final partial = event['mbt_b64']?.toString();
@@ -3594,6 +3844,15 @@ class AppStore extends ChangeNotifier {
           }
         }
         if (event['docs'] is Map) docs = Docs.fromJson(event['docs']);
+        // 终态清扫：在途工具行（tool_start 后没有等到 tool_end）按失败收尾，
+        // 不让时间线里留下永远转动的行。
+        for (final item in timeline) {
+          if (item.kind == 'tool' && item.running) {
+            item.running = false;
+            item.ok = false;
+            item.message ??= agentUserMessage;
+          }
+        }
         timeline.add(TimelineEntry.finish(false, 'NaN 异常结束', failureMessage(agentError)));
         break;
       case 'done':
@@ -3612,6 +3871,13 @@ class AppStore extends ChangeNotifier {
           }
         }
         if (event['docs'] is Map) docs = Docs.fromJson(event['docs']);
+        // 终态清扫：在途工具行按成功收尾（同 failed 侧的纪律）。
+        for (final item in timeline) {
+          if (item.kind == 'tool' && item.running) {
+            item.running = false;
+            item.ok = true;
+          }
+        }
         final summary = (event['text'] ?? '').toString();
         timeline.add(TimelineEntry.finish(true, 'NaN 完成', summary));
         // designFromEngine：直接构建（无 PLAN）时规范仍是默认 → 自动从
@@ -3863,6 +4129,10 @@ class AppStore extends ChangeNotifier {
       // 中断运行优先用 partial canonical（构建进度），无则回落已提交 mbt。
       final run = rec['run'];
       final partial = (run is Map ? (run['partialMbt'] ?? '') : '').toString();
+      final runInstruction = (run is Map ? (run['instruction'] ?? '') : '')
+          .toString()
+          .trim();
+      final runPhase = (run is Map ? (run['phase'] ?? '') : '').toString();
       var mbtValue = (rec['mbt'] ?? '').toString();
       if (partial.isNotEmpty) mbtValue = partial;
 
@@ -3892,6 +4162,10 @@ class AppStore extends ChangeNotifier {
         _toastSuccess(hasProject
             ? '已恢复未保存的工作，连接桌面后可继续预览画布'
             : '已恢复未保存的文档');
+        // 续跑（纯文档阶段不依赖引擎）：planning 中断重走文档管线补齐。
+        if (runInstruction.isNotEmpty && runPhase == 'planning') {
+          unawaited(_runChatTurn(runInstruction, forcePlan: true));
+        }
         return;
       }
 
@@ -3918,12 +4192,20 @@ class AppStore extends ChangeNotifier {
       _commit(res, recordHistory: false);
       recovery = null;
       await _clearRecovery();
-      if (run is Map && (run['phase'] ?? '').toString().isNotEmpty) {
-        final phase = (run['phase'] ?? '').toString();
-        final label = switch (phase) { 'planning' => '撰写文档', 'building' => '构建原型', 'refining' => '调整原型', _ => phase };
+      if (runPhase.isNotEmpty) {
+        final label = switch (runPhase) { 'planning' => '撰写文档', 'building' => '构建原型', 'refining' => '调整原型', _ => runPhase };
         _toastSuccess('已恢复中断的$label进度，文档与画布都已保留');
       } else {
         _toastSuccess('已恢复未保存的工作');
+      }
+      // 续跑：recovery 的 run.instruction 是当时的用户指令。planning 断点
+      // （或文档不齐）重走「先文档后原型」；building/refining 断点接着把
+      // 原型跑完（fresh=false → 直接 build 路径）。
+      if (runInstruction.isNotEmpty) {
+        final docsIncomplete =
+            docs.prd.trim().isEmpty || docs.ui.trim().isEmpty;
+        unawaited(_runChatTurn(runInstruction,
+            forcePlan: runPhase == 'planning' || docsIncomplete));
       }
     } catch (e) {
       _toastError('恢复失败，请重试', e);

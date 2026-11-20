@@ -66,7 +66,7 @@ wasm_run_dart-dynamic-armv7-unknown-linux-gnueabihf:c5acb2bacb78a397b10d8f5b5afe
 wasm_run_dart-dynamic-aarch64-unknown-linux-gnu:7b292f2e2ed7edae34de22c8813ac453830e63450b9d1bd2d277f389379964ee
 wasm_run_dart-dynamic-riscv64gc-unknown-linux-gnu:78255e9397080a62f8cfa55d685c26445845ec071943ffd6033205f7f9c02da9
 wasm_run_dart-dynamic-x86_64-unknown-linux-gnu:5a0df6b8992c112a66dca94efeacc87a05ac3c695e2ddf38fea8e32dc47ee05f
-wasm_run_dart-dynamic-x86_64-pc-windows-msvc:d084c6fc24c2c47215343b07aa785a799bc161ce2aae478c13722c61c0361500
+wasm_run_dart-dynamic-x86_64-pc-windows-msvc:07d75e175eb2098457f9258f241b4001ff981fa74a7d966b4b952e468ac9678b
 wasm_run_dart-dynamic-aarch64-pc-windows-msvc:9998fd1553f672a5e81c3771290a65e8138e57e997133f8d3c88fbbb8f15ad61
 "
 
@@ -130,7 +130,7 @@ write_manifest() {
     echo "  \"package\": \"wasm_run\","
     echo "  \"version\": \"${PKG_VERSION}\","
     echo "  \"release_base\": \"${RELEASE_BASE}\","
-    echo "  \"note\": \"Frozen copy of wasm_run ${PKG_VERSION} hook/build.dart assetsSha256. Verified by scripts/fetch_wasm_run_libs.sh --check. EXCEPTION: x86_64-pc-windows-msvc is a LOCAL BUILD (wasmtime backend, wasm_run main@23e36bdf; upstream release asset is wasmi without SIMD and cannot run this app's engine) — see LOCAL_OVERRIDES in scripts/fetch_wasm_run_libs.sh.\","
+    echo "  \"note\": \"Frozen copy of wasm_run ${PKG_VERSION} hook/build.dart assetsSha256. Verified by scripts/fetch_wasm_run_libs.sh --check. EXCEPTION: x86_64-pc-windows-msvc is a LOCAL BUILD (wasmtime 50 + pulley interpreter backend, wasm_run main@23e36bdf + NoNDesign trap-transport patch; upstream release asset is wasmi without SIMD and cannot run this app's engine; native cranelift traps abort cdylib hosts on Windows — pulley interpreter returns traps as plain Rust errors) — see LOCAL_OVERRIDES in scripts/fetch_wasm_run_libs.sh.\","
     echo "  \"assets\": {"
     local first=1
     while IFS=: read -r name hash; do

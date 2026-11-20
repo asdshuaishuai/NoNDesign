@@ -30,6 +30,8 @@ import 'package:nondesign/core/dart_agent.dart';
 import 'package:nondesign/core/figma_export.dart';
 import 'package:nondesign/core/hotapp_service.dart' show PrototypeLinkSpec, PrototypeScreenSpec;
 import 'package:nondesign/core/models.dart';
+import 'package:nondesign/core/video_project.dart';
+import 'package:nondesign/core/video_samples.dart';
 
 /// 多轮脚本化模型（与 dart_agent_test 的 _ScriptedModel 同构）。
 class _ScriptedModel extends MockLanguageModelV4 {
@@ -280,6 +282,41 @@ class _FakeWorkspace implements AgentWorkspaceServices {
   RenderEnvelope? lastRender;
   String? lastDirectory;
 
+  // -- 视频生成落盘（video_sample / video_list / video_create）--
+  String? lastVideoName;
+  Map<String, dynamic>? lastVideoTimeline;
+  Map<String, dynamic>? lastVideoSpec;
+  String? lastVideoTitle;
+  int? lastVideoSampleIndex;
+  Map<String, dynamic> videoCreateResult = <String, dynamic>{
+    'ok': true,
+    'video': 'demo',
+    'title': '示例动画',
+    'seconds': 6.0,
+    'frames': 180,
+  };
+  Map<String, dynamic> videoListResult = <String, dynamic>{
+    'ok': true,
+    'videos': <dynamic>[
+      <String, dynamic>{'name': 'demo', 'title': '示例动画', 'seconds': 6.0, 'builtin': false},
+      <String, dynamic>{
+        'name': 'physics-friction',
+        'title': '物理 · 斜面摩擦力',
+        'seconds': 8.0,
+        'builtin': true,
+        'index': 0,
+      },
+    ],
+  };
+  Map<String, dynamic> videoSampleResult = <String, dynamic>{
+    'ok': true,
+    'index': 0,
+    'count': 3,
+    'name': 'physics-friction',
+    'timeline': <String, dynamic>{'fps': 30, 'scenes': <dynamic>[]},
+    'spec': <String, dynamic>{'kind': 'science'},
+  };
+
   @override
   Future<Map<String, dynamic>> threeList() async {
     calls.add('three_list');
@@ -398,6 +435,40 @@ class _FakeWorkspace implements AgentWorkspaceServices {
   }
 
   @override
+  Future<Map<String, dynamic>> videoCreate({
+    required String name,
+    required Map<String, dynamic> timeline,
+    Map<String, dynamic>? spec,
+    String title = '',
+  }) async {
+    calls.add('video_create:$name');
+    lastVideoName = name;
+    lastVideoTimeline = timeline;
+    lastVideoSpec = spec;
+    lastVideoTitle = title;
+    if (videoCreateResult['ok'] == true) {
+      return <String, dynamic>{
+        ...videoCreateResult,
+        'video': videoCreateResult['video'] ?? name,
+      };
+    }
+    return Map<String, dynamic>.from(videoCreateResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoList() async {
+    calls.add('video_list');
+    return Map<String, dynamic>.from(videoListResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoSample({int index = 0}) async {
+    calls.add('video_sample:$index');
+    lastVideoSampleIndex = index;
+    return Map<String, dynamic>.from(videoSampleResult);
+  }
+
+  @override
   Future<Map<String, dynamic>> nonAppList() async {
     calls.add('nonapp_list');
     return <String, dynamic>{'ok': true, 'apps': <dynamic>[]};
@@ -484,6 +555,9 @@ void main() {
         'ask_user': '向你确认',
         'three_create': '3D 场景 · 新建',
         'hotapp_refine': '热应用 · 精修',
+        'video_create': '视频 · 新建',
+        'video_list': '视频',
+        'video_sample': '视频 · 示例',
         'video_review': '视频 · 对照检查',
         'nonapp_list': '应用包',
         'figma_export': '导出 Figma 包',
@@ -492,6 +566,7 @@ void main() {
       expect(toolLabel('three_future_tool'), '3D 场景');
       expect(toolLabel('hotapp_future_tool'), '热应用');
       expect(toolLabel('video_future_tool'), '视频');
+      expect(toolLabel('video_create'), '视频 · 新建');
       expect(toolLabel('nonapp_future_tool'), '应用包');
       expect(toolLabel('mystery_tool'), '智能体操作');
       // 任何工具标签都不许是裸 snake_case 代号。
@@ -501,6 +576,10 @@ void main() {
         'three_future_tool',
         'hotapp_future_tool',
         'video_future_tool',
+        'video_create',
+        'video_list',
+        'video_sample',
+        'video_review',
         'nonapp_future_tool',
         'mystery_tool',
       ]) {
@@ -524,6 +603,23 @@ void main() {
       expect(toolFailureMessage('generate_multi_too_many:4'), '一次生成的画板数超限：拆成多次 generate_page');
       expect(toolFailureMessage('something_else'), '这次操作没有成功，请重试');
       expect(toolFailureMessage(null), '这次操作没有成功，请重试');
+      // 视频生成落盘（video_create）的失败码：每一码都有人话，无裸代号。
+      expect(toolFailureMessage('video_invalid_name'), '视频名只能用字母、数字、下划线和连字符');
+      expect(toolFailureMessage('video_project_exists'),
+          '已经有同名视频了，换一个名字再新建（已生成的视频不会被覆盖）');
+      expect(toolFailureMessage('video_spec_missing'), '这份脚本还缺一份说明规范，先补齐规范再新建');
+      expect(toolFailureMessage('video_spec_invalid'), '说明规范不完整，请按模板补齐后再试');
+      expect(toolFailureMessage('video_timeline_invalid'), '脚本格式不对，请检查括号、引号与逗号');
+      expect(toolFailureMessage('video_no_scenes'), '脚本里还没有任何场景');
+      expect(toolFailureMessage('video_no_frames'), '所有场景的时长都是 0，算不出画面');
+      expect(toolFailureMessage('video_io_error'), '视频项目没有保存成功，请检查磁盘空间后重试');
+      expect(toolFailureMessage('video_export_disabled'),
+          '视频现在是代码动画，直接在工作台里播放；暂不导出成片');
+      // 细分码按模块自己的人话表分派（three_/hotapp_ 前缀不再落回通用句）。
+      expect(toolFailureMessage('three_invalid_name'), '场景名只能用字母、数字和短横线');
+      expect(toolFailureMessage('three_project_exists'), '已经有同名的 3D 项目了，换个名字再试');
+      expect(toolFailureMessage('hotapp_name_taken'), '已经有同名应用了，换一个名字');
+      expect(toolFailureMessage('hotapp_brief_empty'), '先写一句想要的动画或玩法');
       // 映射结果里不出现裸错误码。
       final bare = RegExp(r'^[a-z0-9]+(_[a-z0-9]+)+$');
       for (final code in <String>[
@@ -533,6 +629,11 @@ void main() {
         'download_failed',
         'sha256_mismatch',
         'nonapp_unsupported_version',
+        'video_invalid_name',
+        'video_project_exists',
+        'video_io_error',
+        'three_invalid_name',
+        'hotapp_name_taken',
         'whatever_code',
       ]) {
         expect(bare.hasMatch(toolFailureMessage(code)), isFalse, reason: code);
@@ -986,6 +1087,285 @@ void main() {
     });
   });
 
+  // 视频「生成有落地」（用户裁决 2026-11-20）：工作台 run 必须能从
+  // video_sample 学到格式 → video_create 落盘 → video_list 看到项目，
+  // 而不是只有内存里的 video_review 校验（关掉 run 什么都不剩）。
+  group('视频生成工具（video_sample → video_create → video_list 接线）', () {
+    test('三个工具进工具面并真执行；video_create 带 name/timeline/spec/title', () async {
+      final engine = _FakeEngine();
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      final model = _ScriptedModel(<List<LanguageModelV4ContentPart>>[
+        <LanguageModelV4ContentPart>[
+          mockToolCall(toolName: 'video_sample', input: <String, dynamic>{'index': 1}),
+        ],
+        <LanguageModelV4ContentPart>[
+          mockToolCall(
+            toolName: 'video_create',
+            input: <String, dynamic>{
+              'name': 'tagline-6s',
+              'timeline': <String, dynamic>{
+                'fps': 30,
+                'width': 1280,
+                'height': 720,
+                'scenes': <dynamic>[
+                  <String, dynamic>{'duration': 6, 'elements': <dynamic>[]},
+                ],
+              },
+              'spec': <String, dynamic>{
+                'kind': 'screenplay',
+                'style': '扁平矢量',
+                'beats': <dynamic>['起', '承'],
+              },
+              'title': '六秒标题动画',
+            },
+          ),
+        ],
+        <LanguageModelV4ContentPart>[
+          mockToolCall(toolName: 'video_list', input: <String, dynamic>{}),
+        ],
+        <LanguageModelV4ContentPart>[
+          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '视频已生成'}),
+        ],
+      ]);
+
+      final result = await runDartAgent(
+        request: _buildRequest(engine),
+        modelOverride: model,
+        bridge: LocalEngineGate(engine),
+        workspace: workspace,
+        onEvent: events.add,
+      );
+
+      expect(result.ok, isTrue);
+      expect(result.stopReason, 'done', reason: '成功落地的工作区调用不是 text_only');
+      expect(
+        workspace.calls,
+        containsAll(<String>['video_sample:1', 'video_create:tagline-6s', 'video_list']),
+      );
+      expect(workspace.lastVideoSampleIndex, 1);
+      expect(workspace.lastVideoName, 'tagline-6s');
+      expect(workspace.lastVideoTimeline?['fps'], 30);
+      expect(workspace.lastVideoSpec?['kind'], 'screenplay');
+      expect(workspace.lastVideoTitle, '六秒标题动画');
+      // video_create 成功信封照常回给模型（片长/帧数是「生成有落地」的证据）。
+      final createEnd = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'video_create',
+      );
+      expect(createEnd['ok'], isTrue);
+      // 轨迹里的入参整形：整份时间线/规范不进 tool_start 事件（防事件流被撑爆）。
+      final createStart = events.firstWhere(
+        (e) => e['type'] == 'tool_start' && e['tool'] == 'video_create',
+      );
+      expect(createStart['args']['name'], 'tagline-6s');
+      expect(createStart['args']['timeline'], '<object 4 keys>');
+      expect(createStart['args']['spec'], '<object 3 keys>');
+      for (final tool in <String>['video_sample', 'video_create', 'video_list']) {
+        final end = events.firstWhere(
+          (e) => e['type'] == 'tool_end' && e['tool'] == tool,
+          orElse: () => <String, dynamic>{},
+        );
+        expect(end['ok'], isTrue, reason: tool);
+      }
+      final names = model.calls.first.tools
+          .whereType<LanguageModelV4FunctionTool>()
+          .map((t) => t.name)
+          .toSet();
+      expect(
+        names,
+        containsAll(<String>['video_create', 'video_list', 'video_sample']),
+      );
+    });
+
+    test('video_create 失败码 → tool_end.message 人话（原始码保留）', () async {
+      final engine = _FakeEngine();
+      final workspace = _FakeWorkspace()
+        ..videoCreateResult = <String, dynamic>{
+          'ok': false,
+          'error': 'video_project_exists',
+          'detail': 'tagline-6s',
+        };
+      final events = <Map<String, dynamic>>[];
+      await runDartAgent(
+        request: _buildRequest(engine),
+        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
+          <LanguageModelV4ContentPart>[
+            mockToolCall(
+              toolName: 'video_create',
+              input: <String, dynamic>{
+                'name': 'tagline-6s',
+                'timeline': <String, dynamic>{'scenes': <dynamic>[]},
+                'spec': <String, dynamic>{'kind': 'screenplay'},
+              },
+            ),
+          ],
+          <LanguageModelV4ContentPart>[
+            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '停'}),
+          ],
+        ]),
+        bridge: LocalEngineGate(engine),
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'video_create',
+      );
+      expect(end['ok'], isFalse);
+      expect(end['error'], 'video_project_exists');
+      expect(end['message'], '已经有同名视频了，换一个名字再新建（已生成的视频不会被覆盖）');
+      expect(end['detail'], 'tagline-6s');
+    });
+
+    test('video_create 的 timeline 不是对象 → invalid_args 人话，不打服务', () async {
+      final engine = _FakeEngine();
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      await runDartAgent(
+        request: _buildRequest(engine),
+        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
+          <LanguageModelV4ContentPart>[
+            mockToolCall(
+              toolName: 'video_create',
+              input: <String, dynamic>{
+                'name': 'bad',
+                'timeline': 'not-an-object',
+              },
+            ),
+          ],
+          <LanguageModelV4ContentPart>[
+            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '停'}),
+          ],
+        ]),
+        bridge: LocalEngineGate(engine),
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'video_create',
+      );
+      expect(end['ok'], isFalse);
+      expect(end['error'], 'invalid_args');
+      expect(end['message'], '时间线格式不对：先看一份完整示例，再按同样结构填写');
+      expect(workspace.calls.where((c) => c.startsWith('video_create')), isEmpty,
+          reason: '参数不对就不该打到服务');
+    });
+  });
+
+  // 真实落地面：LocalWorkspaceServices → VideoProjectStore（先校验后落盘）。
+  group('LocalWorkspaceServices 视频生成（真实项目库）', () {
+    Map<String, dynamic> sampleTimeline(int index) =>
+        Map<String, dynamic>.from(jsonDecode(videoSamples[index].timelineJson) as Map);
+    Map<String, dynamic> sampleSpec(int index) =>
+        Map<String, dynamic>.from(jsonDecode(videoSamples[index].specJson) as Map);
+
+    test('video_sample 给完整示例；video_create 落盘三件套；video_list 含内置+生成', () async {
+      final root = Directory.systemTemp.createTempSync('video-agent-');
+      addTearDown(() {
+        try {
+          root.deleteSync(recursive: true);
+        } catch (_) {}
+      });
+      final services = LocalWorkspaceServices(
+        model: 'm',
+        baseUrl: 'https://example.invalid/v1',
+        apiKey: 'k',
+        videoProjects: VideoProjectStore(root: root),
+      );
+
+      final sampleOut = await services.videoSample(index: 1);
+      expect(sampleOut['ok'], isTrue);
+      expect(sampleOut['count'], videoSamples.length);
+      expect(sampleOut['timeline'], isA<Map>());
+      expect(sampleOut['spec'], isA<Map>());
+      expect((sampleOut['seconds'] as num).toDouble(), greaterThan(0));
+      expect((sampleOut['fps'] as num).toInt(), greaterThan(0));
+
+      final created = await services.videoCreate(
+        name: 'cell-division',
+        timeline: sampleTimeline(1),
+        spec: sampleSpec(1),
+        title: '细胞分裂',
+      );
+      expect(created['ok'], isTrue);
+      expect(created['video'], 'cell-division');
+      expect(created['title'], '细胞分裂');
+      expect((created['seconds'] as num).toDouble(), greaterThan(0));
+      expect((created['frames'] as num).toInt(), greaterThan(0));
+      // 落盘：目录成立且三份文件齐全（关掉 run 之后工作台还能播放）。
+      final dir = Directory('${root.path}/cell-division');
+      expect(dir.existsSync(), isTrue);
+      for (final file in <String>['timeline.json', 'spec.json', 'video.json']) {
+        expect(File('${dir.path}/$file').existsSync(), isTrue, reason: file);
+      }
+
+      final listed = await services.videoList();
+      expect(listed['ok'], isTrue);
+      final videos = (listed['videos'] as List).cast<Map>();
+      expect(
+        videos.any((v) => v['name'] == 'cell-division' && v['builtin'] == false),
+        isTrue,
+      );
+      expect(videos.where((v) => v['builtin'] == true), hasLength(videoSamples.length));
+      expect(videos.map((v) => v['name']), contains('cell-division'));
+    });
+
+    test('失败码稳定：同名 / 非法名 / 缺规范 / 空场景 都是 video_ 前缀 + 人话', () async {
+      final root = Directory.systemTemp.createTempSync('video-agent-');
+      addTearDown(() {
+        try {
+          root.deleteSync(recursive: true);
+        } catch (_) {}
+      });
+      final services = LocalWorkspaceServices(
+        model: 'm',
+        baseUrl: 'https://example.invalid/v1',
+        apiKey: 'k',
+        videoProjects: VideoProjectStore(root: root),
+      );
+
+      final first = await services.videoCreate(
+        name: 'demo',
+        timeline: sampleTimeline(2),
+        spec: sampleSpec(2),
+      );
+      expect(first['ok'], isTrue);
+
+      final duplicate = await services.videoCreate(
+        name: 'demo',
+        timeline: sampleTimeline(2),
+        spec: sampleSpec(2),
+      );
+      expect(duplicate['ok'], isFalse);
+      expect(duplicate['error'], 'video_project_exists');
+      expect(duplicate['message'], contains('同名视频'));
+
+      final badName = await services.videoCreate(
+        name: '有 空格',
+        timeline: sampleTimeline(0),
+        spec: sampleSpec(0),
+      );
+      expect(badName['ok'], isFalse);
+      expect(badName['error'], 'video_invalid_name');
+      expect(badName['message'], contains('视频名只能用字母'));
+
+      final noSpec = await services.videoCreate(
+        name: 'no-spec',
+        timeline: sampleTimeline(0),
+      );
+      expect(noSpec['ok'], isFalse);
+      expect(noSpec['error'], 'video_spec_missing');
+
+      final noScenes = await services.videoCreate(
+        name: 'empty-scenes',
+        timeline: <String, dynamic>{'fps': 30, 'scenes': <dynamic>[]},
+        spec: sampleSpec(0),
+      );
+      expect(noScenes['ok'], isFalse);
+      expect(noScenes['error'], 'video_no_scenes');
+      expect(noScenes['message'], contains('没有任何场景'));
+    });
+  });
+
   group('Figma 导出（本地渲染信封）', () {
     test('逐板 SVG + manifest；不可见节点过滤；文件名清洗', () async {
       final dir = Directory.systemTemp.createTempSync('figma-export-');
@@ -1072,6 +1452,173 @@ void main() {
       );
       expect(empty.error, 'figma_nothing_to_export');
       expect(empty.message, '还没有可以导出的画板');
+    });
+  });
+
+  // 回归（Windows 实测日志 `Step 0 called unknown tool "video_review"`）：
+  // workspace 模式的 run 曾经把工作区工具整块漏注册——设计画布工具块与
+  // 工作区工具块嵌套在同一层 `if`，`mode == 'workspace'` 一刀把两者都关了，
+  // 模型只剩 finish/ask_user/read_docs，调 three_*/video_review 必然
+  // AiNoSuchToolError 打死整轮（3D / 视频两个工作台同时「无工具 → 失败」）。
+  // 这里锚定工作区 run 的工具面：工作区工具在、画布/文档工具不在。
+  group('workspace mode tool surface', () {
+    DartAgentRequest workspaceRequest(String hint) => DartAgentRequest(
+          mode: 'workspace',
+          instruction: '在工作台里做东西',
+          mbt: '',
+          model: 'scripted-model',
+          baseUrl: 'https://example.invalid/v1',
+          apiKey: 'k',
+          workspaceHint: hint,
+        );
+
+    Set<String> toolsOf(LanguageModelV4CallOptions options) => options.tools
+        .whereType<LanguageModelV4FunctionTool>()
+        .map((t) => t.name)
+        .toSet();
+
+    test('3D / 视频 / 热应用工具全部可用，画布与文档工具不可见', () async {
+      final workspace = _FakeWorkspace();
+      final model = _ScriptedModel(<List<LanguageModelV4ContentPart>>[
+        <LanguageModelV4ContentPart>[
+          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '看看工具面'}),
+        ],
+      ]);
+      final result = await runDartAgent(
+        request: workspaceRequest('three'),
+        modelOverride: model,
+        workspace: workspace,
+      );
+      expect(result.ok, isTrue);
+      final names = toolsOf(model.calls.first);
+      expect(
+        names,
+        containsAll(<String>[
+          'three_list',
+          'three_create',
+          'three_status',
+          'three_pass',
+          'three_continue',
+          'three_feedback',
+          'video_create',
+          'video_list',
+          'video_sample',
+          'video_review',
+          'hotapp_generate',
+          'nonapp_list',
+          'figma_export',
+        ]),
+      );
+      for (final canvas in <String>[
+        'design_op',
+        'generate_page',
+        'read_mbt',
+        'inspect',
+        'write_doc',
+        'write_design_spec',
+      ]) {
+        expect(names.contains(canvas), isFalse, reason: '工作区 run 不该暴露 $canvas');
+      }
+    });
+
+    test('3D 工作台 run：three_create 真执行（不再 unknown tool）', () async {
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      final model = _ScriptedModel(<List<LanguageModelV4ContentPart>>[
+        <LanguageModelV4ContentPart>[
+          mockToolCall(
+            toolName: 'three_create',
+            input: <String, dynamic>{'name': 'island', 'brief': '一座浮岛'},
+          ),
+        ],
+        <LanguageModelV4ContentPart>[
+          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '完成'}),
+        ],
+      ]);
+      final result = await runDartAgent(
+        request: workspaceRequest('three'),
+        modelOverride: model,
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      expect(result.ok, isTrue);
+      expect(workspace.calls, contains('three_create:island'));
+      final end = events.firstWhere((e) => e['type'] == 'tool_end' && e['tool'] == 'three_create');
+      expect(end['ok'], isTrue);
+    });
+
+    test('视频工作台 run：video_review 真执行（不再 unknown tool）', () async {
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      final model = _ScriptedModel(<List<LanguageModelV4ContentPart>>[
+        <LanguageModelV4ContentPart>[
+          mockToolCall(
+            toolName: 'video_review',
+            input: <String, dynamic>{
+              'timeline': <String, dynamic>{
+                'width': 1280,
+                'height': 720,
+                'fps': 30,
+                'scenes': <dynamic>[],
+              },
+              'spec': <String, dynamic>{'kind': 'screenplay'},
+            },
+          ),
+        ],
+        <LanguageModelV4ContentPart>[
+          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '完成'}),
+        ],
+      ]);
+      final result = await runDartAgent(
+        request: workspaceRequest('video'),
+        modelOverride: model,
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      expect(result.ok, isTrue);
+      expect(workspace.calls, contains('video_review'));
+      final end = events.firstWhere((e) => e['type'] == 'tool_end' && e['tool'] == 'video_review');
+      expect(end['ok'], isTrue);
+    });
+
+    test('plan 模式工具面不变：注入工作区服务也不暴露工作区/画布写工具', () async {
+      final workspace = _FakeWorkspace();
+      final model = _ScriptedModel(<List<LanguageModelV4ContentPart>>[
+        <LanguageModelV4ContentPart>[
+          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '看工具面'}),
+        ],
+      ]);
+      final planRequest = DartAgentRequest(
+        mode: 'plan',
+        instruction: '写文档',
+        mbt: '',
+        model: 'scripted-model',
+        baseUrl: 'https://example.invalid/v1',
+        apiKey: 'k',
+        workspaceHint: 'video',
+      );
+      await runDartAgent(
+        request: planRequest,
+        modelOverride: model,
+        workspace: workspace,
+        // 工作区工具只在非 plan 暴露（runDartAgent 对 plan 置 null）。
+      );
+      final names = toolsOf(model.calls.first);
+      expect(names, contains('write_doc'));
+      expect(names, contains('write_design_spec'));
+      expect(names, contains('ask_user'));
+      for (final name in <String>[
+        'video_create',
+        'video_list',
+        'video_sample',
+        'video_review',
+        'three_create',
+        'three_list',
+        'design_op',
+        'generate_page',
+      ]) {
+        expect(names.contains(name), isFalse, reason: 'plan 模式不该有 $name');
+      }
     });
   });
 }

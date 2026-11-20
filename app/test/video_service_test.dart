@@ -547,6 +547,78 @@ void main() {
       );
       expect(linear.frameSvg(0.5), contains('x="20.0"'));
     });
+
+    test('frameSvg 越界时间钳到 [0, 片长]：负值/NaN/Infinity 不抛也不闪黑', () {
+      final doc = _doc(
+        timeline: _timeline(
+          scenes: <dynamic>[
+            <String, dynamic>{
+              'duration': 1.0,
+              'elements': <dynamic>[
+                <String, dynamic>{
+                  'type': 'text',
+                  'text': 'hello',
+                  'x': <String, dynamic>{'expr': 't * 100'},
+                  'y': 100,
+                },
+              ],
+            },
+          ],
+        ),
+      );
+      final first = doc.frameSvg(0);
+      final last = doc.frameSvg(1);
+      expect(first, contains('hello'));
+      expect(first, contains('x="0.0"'));
+      expect(last, contains('x="100.0"'));
+
+      // 负时间/NaN 落到片头；超过片长的时刻落到片尾终态（而不是只剩背景）。
+      expect(doc.frameSvg(-3), first);
+      expect(doc.frameSvg(double.nan), first);
+      expect(doc.frameSvg(double.negativeInfinity), first);
+      expect(doc.frameSvg(double.infinity), last);
+      expect(doc.frameSvg(99), last);
+    });
+
+    test('非有限数值（1e999 → Infinity）干净拒绝为 timeline_invalid', () {
+      expect(
+        () => VideoDocument.build(
+          timeline: <String, dynamic>{..._timeline(), 'fps': double.infinity},
+          spec: _science(),
+        ),
+        _rejects('timeline_invalid'),
+      );
+      expect(
+        () => VideoDocument.build(
+          timeline: <String, dynamic>{..._timeline(), 'width': double.infinity},
+          spec: _science(),
+        ),
+        _rejects('timeline_invalid'),
+      );
+      expect(
+        () => VideoDocument.build(
+          timeline: _timeline(
+            scenes: <dynamic>[
+              <String, dynamic>{'duration': double.infinity, 'elements': <dynamic>[]},
+            ],
+          ),
+          spec: _science(),
+        ),
+        _rejects('timeline_invalid'),
+      );
+      // 片长本身有限、但与帧率相乘溢出时也不能让 double.floor() 抛异常。
+      expect(
+        () => VideoDocument.build(
+          timeline: _timeline(
+            scenes: <dynamic>[
+              <String, dynamic>{'duration': 1e308, 'elements': <dynamic>[]},
+            ],
+          ),
+          spec: _science(),
+        ),
+        _rejects('timeline_invalid'),
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -626,6 +698,20 @@ void main() {
       expect(review.ok, isFalse);
       expect(review.problems.single, '这份脚本还缺一份说明规范，先补齐规范再看画面');
       expect(review.output, isNot(contains('spec_missing')));
+    });
+
+    test('非有限时长的对照：一句人话 + 空抽帧，不显示 Infinity 片长', () {
+      final review = reviewVideoScript(
+        timeline: _timeline(scenes: <dynamic>[
+          <String, dynamic>{'duration': double.infinity, 'elements': <dynamic>[]},
+        ]),
+        spec: _science(),
+      );
+      expect(review.ok, isFalse);
+      expect(review.totalSeconds, 0);
+      expect(review.sampleTimes, isEmpty);
+      expect(review.problems.single, videoFailureMessage('timeline_invalid'));
+      expect(review.output, isNot(contains('Infinity')));
     });
   });
 

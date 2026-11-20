@@ -101,7 +101,7 @@ void main() {
   group('engine boundary', () {
     test('package:wasm_run is confined to lib/core/engine/', () {
       for (final file in _dartFiles(libDir)) {
-        final rel = file.path.substring(libDir.path.length + 1);
+        final rel = file.path.substring(libDir.path.length + 1).replaceAll('\\', '/');
         if (_imports(file).any((i) => i.startsWith('package:wasm_run'))) {
           expect(rel.startsWith('core/engine/'), isTrue,
               reason: 'wasm_run must only be imported by the Dart engine host, not $rel');
@@ -113,16 +113,17 @@ void main() {
       final wasm = Directory(appDir.path)
           .listSync(recursive: true)
           .whereType<File>()
-          .where((f) =>
-              f.path.endsWith('.wasm') &&
-              !f.path.contains('/build/') &&
-              !f.path.contains('/.dart_tool/') &&
-              !f.path.contains('/macos/') &&
-              !f.path.contains('/ios/') &&
-              !f.path.contains('/android/') &&
-              !f.path.contains('/linux/') &&
-              !f.path.contains('/windows/'))
-          .map((f) => f.path.substring(appDir.path.length + 1))
+          .map((f) => f.path.replaceAll('\\', '/'))
+          .where((path) =>
+              path.endsWith('.wasm') &&
+              !path.contains('/build/') &&
+              !path.contains('/.dart_tool/') &&
+              !path.contains('/macos/') &&
+              !path.contains('/ios/') &&
+              !path.contains('/android/') &&
+              !path.contains('/linux/') &&
+              !path.contains('/windows/'))
+          .map((path) => path.substring(appDir.path.length + 1))
           .toList();
       expect(wasm, ['assets/engine/moonviz.wasm']);
     });
@@ -198,7 +199,16 @@ void main() {
     test('all 15 target libraries are vendored', () {
       final libs = Directory('${vendor.path}/libs');
       expect(libs.existsSync(), isTrue, reason: 'run scripts/fetch_wasm_run_libs.sh');
-      final names = libs.listSync().whereType<File>().map((f) => f.uri.pathSegments.last).toSet();
+      // Windows 的 LoadLibrary 会给无扩展名路径补 `.dll`：本机额外放了一个
+      // 指向同一字节的 `.dll` 硬链接垫片（开发机加载/真实宿主用），它不是
+      // 第 16 个 vendored 目标库；备份 DLL 同理不计。
+      final canonical = RegExp(r'^wasm_run_dart-dynamic-[a-z0-9_]+(-[a-z0-9_]+)*$');
+      final names = libs
+          .listSync()
+          .whereType<File>()
+          .map((f) => f.uri.pathSegments.last)
+          .where(canonical.hasMatch)
+          .toSet();
       expect(names.length, 15);
       for (final target in [
         'aarch64-apple-darwin',

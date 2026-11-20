@@ -112,10 +112,13 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
       _timer = null;
       _playing = false;
       _loop = widget.loop;
+      _resumeAfterScrub = false;
       _applyFrame(0);
       return;
     }
-    _loop = widget.loop;
+    // 只在父层真的改了 loop 参数时跟随；无关注重建不能把用户手动关掉的
+    // 循环又悄悄打开。
+    if (oldWidget.loop != widget.loop) _loop = widget.loop;
     if (oldWidget.fps != widget.fps) {
       _applyFrame(_t);
       if (_playing) _startTimer();
@@ -154,6 +157,9 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
   }
 
   void _setTime(double t) {
+    // 计时器会在 dispose 时取消；这里再守一道，任何迟到回调都不在已销毁的
+    // State 上 setState。
+    if (!mounted) return;
     setState(() => _applyFrame(t));
     widget.onFrame?.call(_t, _frameIndex);
   }
@@ -184,7 +190,7 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
   }
 
   void _play() {
-    if (_playing) return;
+    if (!mounted || _playing) return;
     setState(() {
       // 停在片尾再点播放：从片头重来，而不是原地不动。
       if (_t >= _duration - 1e-9) _applyFrame(0);
@@ -195,7 +201,7 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
   }
 
   void _pause() {
-    if (!_playing) return;
+    if (!mounted || !_playing) return;
     _timer?.cancel();
     _timer = null;
     setState(() => _playing = false);

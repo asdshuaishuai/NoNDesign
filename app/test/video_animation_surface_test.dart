@@ -240,4 +240,35 @@ void main() {
     await tester.pump();
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('播放中销毁：计时器随 dispose 取消，不在已销毁 State 上 setState', (tester) async {
+    await _pump(tester, VideoAnimationSurface(document: _shortDoc()));
+    await tester.tap(find.byKey(const ValueKey('video-animation-play')));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // 换视图/切项目 = 工作台连同播放面一起销毁；周期计时器必须当场停表。
+    await tester.pumpWidget(_wrap(const SizedBox.shrink()));
+    await tester.pump(const Duration(seconds: 2));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('循环开关不被无关重建重置：用户关掉后父层重建仍保持关闭', (tester) async {
+    final doc = _shortDoc();
+    await _pump(tester, VideoAnimationSurface(document: doc));
+
+    Icon loopIcon() => tester.widget<Icon>(find.descendant(
+          of: find.byKey(const ValueKey('video-animation-loop')),
+          matching: find.byType(Icon),
+        ));
+    expect(loopIcon().icon, Icons.repeat_on_outlined);
+    await tester.tap(find.byKey(const ValueKey('video-animation-loop')));
+    await tester.pump();
+    expect(loopIcon().icon, Icons.repeat_outlined);
+
+    // 同一文档、同一 loop 参数（默认 true）重建：不能把用户的选择覆盖掉。
+    await tester.pumpWidget(_wrap(VideoAnimationSurface(document: doc)));
+    await tester.pump();
+    expect(loopIcon().icon, Icons.repeat_outlined);
+    expect(tester.takeException(), isNull);
+  });
 }

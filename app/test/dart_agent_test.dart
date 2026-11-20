@@ -567,7 +567,8 @@ void main() {
       // 复核、以及 autofill 补缺入口。
       expect(build, contains('autofix{fixes,detail}'));
       expect(build, contains('autofill <ab>'));
-      expect(build, contains('run `fix <ab>` on every page that has debt'));
+      expect(build, contains('BATCH YOUR TURNS'));
+      expect(build, contains('`fix <ab>`'));
       // 页面体检只读面：missing / page_type 必须出现在工具说明里。
       expect(build, contains('missing (what the page type lacks)'));
       expect(dartUserMessage('refine', '改标题'), contains('REFINE the existing document.'));
@@ -591,6 +592,18 @@ void main() {
       expect(out, contains('## TARGET WORKSPACE'));
       expect(out, contains('mode: three'));
       expect(out, contains('three_create'));
+      // 视频「生成有落地」的三件套必须在提示词里：模型要知道先取示例格式、
+      // 再落盘、最后对照检查；成片导出不存在也要明说。
+      expect(out, contains('video_sample'));
+      expect(out, contains('video_create'));
+      expect(out, contains('video_list'));
+      expect(out, contains('NO video-file export'));
+      // 答题卡纪律与常规 agent 循环一致：ask_user 在所有模式可用，钉死
+      // 工作台时只对「真要换工作台」用 switch_to。
+      expect(out, contains('ask_user works in every run'));
+      expect(out, contains('switch_to'));
+      expect(out, isNot(contains('ask_user is not available')));
+      expect(out, isNot(contains('ask_user_unavailable')));
       expect(out, isNot(contains('## PROJECT MAP')));
       expect(out, isNot(contains('PRD (1 chars)')));
       expect(out, isNot(contains('pc_app(PC App)[pc]')));

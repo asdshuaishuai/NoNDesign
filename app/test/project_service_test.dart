@@ -277,7 +277,10 @@ void main() {
       expect(listed.ok, isTrue, reason: listed.error);
       expect(listed.projects.map((e) => e.name), ['newest', 'middle', 'oldest']);
       final first = listed.projects.first;
-      expect(first.path, newest.path);
+      // Windows 上目录扫描返回 `\` 分隔的绝对路径，夹具用 `/` 拼接；
+      // 只比较语义路径，不把平台分隔符写进断言。
+      String norm(String path) => path.replaceAll('\\', '/');
+      expect(norm(first.path), norm(newest.path));
       expect(first.bytes, 3);
       expect(first.modified, closeTo(now.millisecondsSinceEpoch / 1000.0, 2.0));
       expect(first.toJson().keys, containsAll(['path', 'name', 'bytes', 'modified']));

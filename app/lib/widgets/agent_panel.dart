@@ -67,7 +67,12 @@ class _AgentPanelState extends State<AgentPanel> {
 
   Future<void> _send(AppStore store) async {
     final text = _input.text.trim();
-    if (text.isEmpty || store.agentBusy) return;
+    if (text.isEmpty) return;
+    if (store.agentBusy) {
+      // 静默 return 会让用户觉得"点了没反应"；明确提示并保留输入。
+      store.toasts.warn('NaN 正在工作，等这一轮结束再发送。');
+      return;
+    }
     _input.clear();
     // 新一轮消息直达视口下（时间线以 user 行开场），用户上翻过也重新贴上。
     _follow = true;

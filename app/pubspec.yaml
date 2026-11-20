@@ -87,6 +87,7 @@ dependencies:
   # 应用数据目录（缓存/数据库/日志），从传递依赖提升为直接依赖：
   # 批次 07/08 的离线缓存与本地库都要自己决定落盘位置。
   path_provider: ^2.1.6
+  webview_windows: ^0.4.0
 
 # sqlite3 3.x 的构建 hook 默认从 GitHub 下载预编译库（离线构建会失败）。
 # 改为使用系统自带的 SQLite（macOS/iOS/Linux/Android 都有），构建全程离线。

@@ -745,9 +745,14 @@ class VideoDocument {
   }
 
   /// 按 [fps] 计算的帧数（截断，与旧管线一致）。
+  ///
+  /// 片长/帧率异常（非有限或乘积溢出）时返回 0，而不是让
+  /// `double.floor()` 抛底层异常——调用方按「零帧」走干净拒绝。
   int frameCount([int? atFps]) {
     final rate = atFps ?? fps;
-    return (totalSeconds * rate).floor();
+    final frames = totalSeconds * rate;
+    if (!frames.isFinite || frames <= 0) return 0;
+    return frames.floor();
   }
 
   /// 从两份已解析的映射构建。
@@ -790,10 +795,22 @@ class VideoDocument {
     final height = _intOf(tl['height'], 720);
     final fps = _intOf(tl['fps'], 30);
     final totalSeconds = _totalSecondsOf(tl);
+    if (!totalSeconds.isFinite) {
+      // JSON 允许 1e999 这类指数写法（解析成 Infinity）：在进入逐帧渲染前
+      // 干净拒绝，别让 double.floor()/toInt() 的底层异常穿到工作面。
+      throw const VideoRejected('timeline_invalid', '场景时长合计不是有限数值');
+    }
     if (totalSeconds <= 0) {
       throw const VideoRejected('no_frames', 'scenes 时长全为 0');
     }
-    if (fps <= 0 || (totalSeconds * fps).floor() <= 0) {
+    if (fps <= 0) {
+      throw const VideoRejected('no_frames', 'scenes 时长不足一帧');
+    }
+    final frameTotal = totalSeconds * fps;
+    if (!frameTotal.isFinite) {
+      throw const VideoRejected('timeline_invalid', '片长与帧率的乘积超出范围');
+    }
+    if (frameTotal.floor() <= 0) {
       throw const VideoRejected('no_frames', 'scenes 时长不足一帧');
     }
 
@@ -888,6 +905,9 @@ class VideoDocument {
   }
 
   /// 生成第 [tGlobal] 秒的整帧 SVG（确定性：同文档同时间必同字节）。
+  ///
+  /// 时间先钳到 `[0, totalSeconds]`：播放器拖动/浮点累加可能越界，负时间或
+  /// NaN 会让算式给出无意义坐标；越界时刻按片头/片尾终态帧渲染，不闪黑。
   String frameSvg(double tGlobal) {
     final parts = <String>[
       '<svg xmlns="http://www.w3.org/2000/svg" width="$width" height="$height" '
@@ -895,7 +915,14 @@ class VideoDocument {
     ];
     final background = _stringOf(timeline['background'], '#0B0D12');
     parts.add('<rect width="$width" height="$height" fill="$background"/>');
-    var remain = tGlobal;
+    var time = tGlobal;
+    if (time.isNaN || time < 0) {
+      time = 0;
+    } else if (time > totalSeconds) {
+      // 包括 +Infinity：越界时刻按片尾终态帧渲染。
+      time = totalSeconds;
+    }
+    var remain = time;
     for (final scene in _scenes(timeline)) {
       final duration = _doubleOf(scene['duration'], 0.0);
       // 浮点容差：t 恰好等于场景结束时刻仍渲染该场景终态（防边界闪黑）。
@@ -905,9 +932,9 @@ class VideoDocument {
       }
       final sceneBackground = _stringOf(scene['background'], background);
       parts.add('<rect width="$width" height="$height" fill="$sceneBackground"/>');
-      final env = <String, Object>{...this.env, 't': remain, 'T': tGlobal};
+      final env = <String, Object>{...this.env, 't': remain, 'T': time};
       for (final element in _elements(scene)) {
-        parts.add(_elementSvg(element, remain, tGlobal, env));
+        parts.add(_elementSvg(element, remain, time, env));
       }
       break;
     }
@@ -1236,6 +1263,15 @@ VideoReviewResult reviewVideoScript({
   final notes = <String>[];
   final technical = <String>[];
   final total = _totalSecondsOf(timeline);
+  if (!total.isFinite) {
+    return VideoReviewResult(
+      ok: false,
+      totalSeconds: 0,
+      problems: <String>[videoFailureMessage('timeline_invalid')],
+      notes: notes,
+      technical: <String>['timeline_invalid: 场景时长合计不是有限数值'],
+    );
+  }
 
   VideoSpec? parsed;
   try {
@@ -1355,7 +1391,9 @@ String _exprProblem(VideoRejected error) {
 
 /// 在片长内均匀取 [samples] 个时间点（环③材料）。
 List<double> videoSampleTimes(double totalSeconds, {int samples = 6}) {
-  if (samples <= 0 || totalSeconds <= 0) return const <double>[];
+  if (samples <= 0 || !totalSeconds.isFinite || totalSeconds <= 0) {
+    return const <double>[];
+  }
   return <double>[
     for (var i = 0; i < samples; i++)
       double.parse((totalSeconds * i / samples).toStringAsFixed(3)),
@@ -1951,7 +1989,15 @@ double _totalSecondsOf(Map<String, dynamic> timeline) {
 double _doubleOf(Object? value, double fallback) =>
     value is num ? value.toDouble() : fallback;
 
-int _intOf(Object? value, int fallback) => value is num ? value.toInt() : fallback;
+int _intOf(Object? value, int fallback) {
+  if (value is! num) return fallback;
+  // 1e999 之类的 JSON 指数会解析成 Infinity；toInt() 在非有限值上会抛
+  // UnsupportedError——先转成规范的拒绝，别把底层异常交给工作面。
+  if (!value.isFinite || value.abs() > 9007199254740991) {
+    throw const VideoRejected('timeline_invalid', '宽高或帧率不是有限整数值');
+  }
+  return value.toInt();
+}
 
 String _stringOf(Object? value, String fallback) =>
     value is String ? value : fallback;

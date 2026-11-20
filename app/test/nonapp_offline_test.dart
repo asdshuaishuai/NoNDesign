@@ -247,12 +247,13 @@ void main() {
     WebViewPlatform.instance = fake;
   });
 
-  tearDown(() {
+  tearDown(() async {
     WebViewPlatform.instance = WebKitWebViewPlatform();
     NonAppCache.rootOverride = null;
     hotAppLoadOnOpen = null;
     hotAppOfflinePath = null;
-    if (temp.existsSync()) temp.deleteSync(recursive: true);
+    // Windows 上 WebView/临时文件句柄可能晚一点释放：删除失败重试。
+    await _deleteTempWithRetry(temp);
   });
 
   testWidgets('html 包：装进本机库 → file:// 预览一次，CSP 与数据桥先于内容', (tester) async {
@@ -511,4 +512,17 @@ void main() {
       expect(hotAppNavigationAllowed('not a url'), isFalse);
     });
   });
+}
+
+/// Windows 上 sqlite / WebView / 临时文件句柄可能还没释放：删除失败重试几次，
+/// 别让清理步骤把已通过的断言判红。
+Future<void> _deleteTempWithRetry(Directory dir) async {
+  for (var attempt = 0; attempt < 10; attempt++) {
+    try {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+      return;
+    } on FileSystemException {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+  }
 }

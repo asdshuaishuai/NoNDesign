@@ -179,6 +179,11 @@ void _resetGlobals() {
   threeLoadOnOpen = null;
 }
 
+/// 路径比较用：Windows 上目录扫描出来的绝对路径是反斜杠，而测试夹具用
+/// `/` 拼接——两种写法都指同一个文件，断言前统一归一化，别让分隔符差异
+/// 变成假红（本文件在 Windows 门禁要绿）。
+String _normPath(String path) => path.replaceAll('\\', '/');
+
 /// 预置一个可续接的 3D 项目（build-state.json 是 listProjects 的识别依据）。
 void _seedThreeProject(String name) {
   final dir = Directory('${_threeDir.path}/$name')..createSync(recursive: true);
@@ -230,7 +235,9 @@ void main() {
 
     await _openCard(tester, 'frames.mp4');
 
-    expect(videoLoadOnOpen, _videoPath);
+    // mp4 路径通道：目录扫描出来的绝对路径与夹具写法可能只差分隔符。
+    expect(videoLoadOnOpen, isNotNull);
+    expect(_normPath(videoLoadOnOpen!), _normPath(_videoPath));
     expect(store.view, 'plugin:video');
     // 旧实现只弹一条 SnackBar（'视频产物：<path>'）：新实现切视图，不弹。
     expect(find.textContaining('视频产物：'), findsNothing);

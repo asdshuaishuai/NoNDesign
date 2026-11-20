@@ -11,7 +11,9 @@
 //  2. design BUILD：AgentGate 写画布 → render 信封有画板（画布真的生成了）；
 //  3. hotapp workspace：NaN 在热应用工作台里调工具建应用，主面自动切到该工作台；
 //  4. three workspace：NaN 在 3D 工作台里建场景，主面自动切到该工作台；
-//  5. video：代码动画的机械对照可用，导出被明确拒绝（不落 mp4）。
+//  5. video 能力：代码动画的机械对照可用，导出被明确拒绝（不落 mp4）；
+//  6. video workspace：NaN 在视频工作台里生成代码动画项目（video_create 落盘），
+//     主面自动切到视频工作台，工作台当前项目被认领（settings.videoProjectName）。
 //
 // 只读/临时目录：项目库、聊天与进度快照都落临时目录；3D / 热应用产物落在
 // 应用自己的数据目录，测试结束按名字删除。
@@ -33,6 +35,7 @@ import 'package:nondesign/core/project_service.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/three_service.dart';
 import 'package:nondesign/core/toast_service.dart';
+import 'package:nondesign/core/video_project.dart';
 import 'package:nondesign/core/video_service.dart';
 
 import 'fixtures/engine/test_env.dart';
@@ -163,6 +166,9 @@ void main() {
         expect(store.view, 'plugin:hotapp',
             reason: '工具调用后主面应自动切到热应用工作台（实际 ${store.view}）');
         expect(store.settings.chatWorkspaceMode, workspaceModeHotapp);
+        // 产物认领：没有这一步，run 结束界面还停在旧应用/空态（「跑完没东西」）。
+        expect(store.settings.hotappApp, name,
+            reason: '热应用生成成功后工作台应自动切到该应用（实际 ${store.settings.hotappApp}）');
 
         final service = await HotAppService.open();
         final apps = await service.list();
@@ -188,6 +194,9 @@ void main() {
             reason: '3D run 失败：${store.agentError} / ${AppStore.failureMessage(store.agentError)}');
         expect(store.view, 'plugin:three',
             reason: '工具调用后主面应自动切到 3D 工作台（实际 ${store.view}）');
+        // 产物认领：工作台据此自动切到新场景（列表/pass 进度/预览重载都靠它）。
+        expect(store.settings.threeProjectName, name,
+            reason: '3D 生成成功后工作台应自动切到该场景（实际 ${store.settings.threeProjectName}）');
 
         final service = await ThreeService.open();
         final scenes = await service.listProjects();
@@ -227,6 +236,36 @@ void main() {
         // ignore: avoid_print
         print('[acceptance] video OK · seconds=${doc.totalSeconds} frames=${doc.frameCount(10)}');
       }, timeout: const Timeout(Duration(minutes: 2)));
+
+      test('6 video workspace：NaN 生成代码动画项目，主面自动切过去并可直接播放', () async {
+        final h = await _harness();
+        addTearDown(h.dispose);
+        final store = h.store;
+        final name = 'acceptance-anim-${DateTime.now().millisecondsSinceEpoch}';
+
+        final ok = await store.runWorkspace(
+          '做一个 6 秒的产品标语代码动画，名字叫 $name：文字从模糊到清晰，'
+          '背景粒子缓慢流动，结尾出现品牌名「NaN」，节奏干净克制。',
+          mode: workspaceModeVideo,
+        );
+        expect(ok, isTrue,
+            reason: '视频 run 失败：${store.agentError} / ${AppStore.failureMessage(store.agentError)}');
+        expect(store.view, 'plugin:video',
+            reason: '视频 run 的主面应在视频工作台（实际 ${store.view}）');
+        // 产物认领：工作台据此把生成项目置顶并切换播放（此前 run 结束工作台没东西）。
+        expect(store.settings.videoProjectName, name,
+            reason: '视频生成成功后工作台应自动切到该片（实际 ${store.settings.videoProjectName}）');
+
+        final snapshot = await VideoProjectStore.instance.read(name);
+        expect(snapshot.document.totalSeconds, greaterThan(0), reason: '生成项目片长为 0');
+        final frame = snapshot.document.frameSvg(0.5);
+        expect(frame.contains('<svg'), isTrue, reason: '生成项目帧不是矢量算式输出');
+        // ignore: avoid_print
+        print('[acceptance] video workspace OK · video=$name '
+            'seconds=${snapshot.document.totalSeconds} '
+            'frames=${snapshot.document.frameCount()}');
+        await VideoProjectStore.instance.delete(name);
+      }, timeout: const Timeout(Duration(minutes: 12)));
     },
     skip: _enabled ? false : 'REAL_ACCEPTANCE 未开启（--dart-define=REAL_ACCEPTANCE=true）',
   );

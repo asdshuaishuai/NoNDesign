@@ -134,6 +134,23 @@ class MoonVizProbe {
 
   static bool _loaded = false;
   static String? _loadedAs;
+  static String? _stagedWindowsLib;
+
+  /// Windows 的 `LoadLibrary` 只认 `.dll`（无扩展名路径会补 `.dll` 再找），
+  /// 而 vendored 文件名是无扩展名的 target 名。工作树里不保证有 `.dll` 垫片
+  /// （它是本机开发便利，未入库），缺垫片时把 DLL 复制到带 `.dll` 的临时路径
+  /// 再加载——不改变「加载的是哪一份字节」这个契约。
+  static String _windowsLoadPath(File lib) {
+    final dll = File('${lib.path}.dll');
+    if (dll.existsSync()) return dll.path;
+    final cached = _stagedWindowsLib;
+    if (cached != null && File(cached).existsSync()) return cached;
+    final dir = Directory.systemTemp.createTempSync('wasm-run-lib-');
+    final copy = File('${dir.path}/${lib.uri.pathSegments.last}.dll');
+    copy.writeAsBytesSync(lib.readAsBytesSync());
+    _stagedWindowsLib = copy.path;
+    return copy.path;
+  }
 
   /// Initialise the native executor for host tests (desktop).
   ///
@@ -161,9 +178,12 @@ class MoonVizProbe {
         'run: bash scripts/fetch_wasm_run_libs.sh --target $target',
       );
     }
-    await WasmRunLibrary.setUp(lib: ExternalLibrary.open(lib.path));
+    final path = Platform.isWindows && !lib.path.toLowerCase().endsWith('.dll')
+        ? _windowsLoadPath(lib)
+        : lib.path;
+    await WasmRunLibrary.setUp(lib: ExternalLibrary.open(path));
     _loaded = true;
-    _loadedAs = lib.path;
+    _loadedAs = path;
     return _loadedAs;
   }
 

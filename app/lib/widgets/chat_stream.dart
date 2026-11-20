@@ -79,7 +79,8 @@ class _ChatStreamViewState extends State<ChatStreamView> {
   /// 建议 chip / 消息操作条的统一发送出口（与输入框同一条 store 路径）。
   void _sendText(AppStore store, String text) {
     final clean = text.trim();
-    if (clean.isEmpty || store.agentBusy) return;
+    if (clean.isEmpty) return;
+    // busy 交给 store 统一提示（此前在这里静默 return，用户点发送毫无反应）。
     store.sendChat(clean);
   }
 
@@ -405,19 +406,30 @@ class _ChatStreamViewState extends State<ChatStreamView> {
   /// A2UI 交互卡：surface 消息随 ChatMessage 持久化，静态路径渲染（恢复后
   /// 照常可用）。a2ui 包类型不出封装边界——action 经推断型 lambda 适配后
   /// 交给 store.handleChatAction 回流续跑。
+  ///
+  /// 历史答题卡（不是流里最后一张）禁点：旧卡的答案早已过期，可点只会把
+  /// 过期选择重新当指令续跑（2026-11-20 用户反馈）。
   Widget _a2uiCard(AppStore store, ChatMessage m, int index, NonPalette p) {
     final messages = m.a2uiMessages ?? const [];
+    // 只有「最后一张」答题卡可点（且不在 run 中）；历史卡答案早已过期。
+    final a2uiCards = store.chatMessages.where((x) => x.kind == chatKindA2ui).toList();
+    // run 进行中仍可点最后一张（答案会入队，本轮结束自动续跑）；
+    // 只有被新卡顶替的历史卡禁用。
+    final interactive = a2uiCards.isNotEmpty && identical(a2uiCards.last, m);
+    final card = _ChatA2uiCard(
+      key: ValueKey('chat-a2ui-$index'),
+      messages: messages,
+      fallbackText: m.text,
+      onAction: (action) {
+        // action.context 已是 Map<String, dynamic>（a2ui_core 契约）。
+        store.handleChatAction(action.name, action.context);
+      },
+    );
     return Container(
       margin: const EdgeInsets.only(right: 40, bottom: 10),
-      child: A2uiCard.messages(
-        key: ValueKey('chat-a2ui-$index'),
-        messages: messages,
-        onAction: (action) {
-          // action.context 已是 Map<String, dynamic>（a2ui_core 契约）。
-          store.handleChatAction(action.name, action.context);
-        },
-        onError: (_) {},
-      ),
+      child: interactive
+          ? card
+          : AbsorbPointer(absorbing: true, child: Opacity(opacity: 0.55, child: card)),
     );
   }
 
@@ -1116,5 +1128,58 @@ class _InlineCodeBuilder extends MarkdownElementBuilder {
           color: p.ink2,
           backgroundColor: p.panel2,
         ));
+  }
+}
+
+
+/// 答题卡的错误兜底：surface 渲染失败时不留空白——把问题正文以纯文本
+/// 显示出来（演示现场最怕点了没反应/白块）。offlineOnly 关掉网络资源，
+/// 卡片只渲染本地内容。
+class _ChatA2uiCard extends StatefulWidget {
+  const _ChatA2uiCard({
+    super.key,
+    required this.messages,
+    required this.fallbackText,
+    required this.onAction,
+  });
+
+  final List<Object?> messages;
+  final String fallbackText;
+  final void Function(dynamic action) onAction;
+
+  @override
+  State<_ChatA2uiCard> createState() => _ChatA2uiCardState();
+}
+
+class _ChatA2uiCardState extends State<_ChatA2uiCard> {
+  bool _failed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_failed) {
+      final palette = context.palette;
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: palette.panel,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: palette.line),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(widget.fallbackText, style: TextStyle(fontSize: 12.5, color: palette.ink)),
+          const SizedBox(height: 4),
+          Text('选项卡片没有显示出来，可以在输入框直接回复你的选择。',
+              style: TextStyle(fontSize: 11, color: palette.ink4)),
+        ]),
+      );
+    }
+    return A2uiCard.messages(
+      messages: widget.messages,
+      offlineOnly: true,
+      onAction: widget.onAction,
+      onError: (_) {
+        if (mounted) setState(() => _failed = true);
+      },
+    );
   }
 }

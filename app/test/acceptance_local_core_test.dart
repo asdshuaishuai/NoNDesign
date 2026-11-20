@@ -125,7 +125,7 @@ void main() {
       final offenders = <String>[];
       for (final entity in lib.listSync(recursive: true)) {
         if (entity is! File || !entity.path.endsWith('.dart')) continue;
-        final relative = entity.path.substring(lib.path.length + 1);
+        final relative = entity.path.substring(lib.path.length + 1).replaceAll('\\', '/');
         final remoteDir = relative.startsWith('core/remote/');
         final remoteClient = relative == 'core/remote_desktop_client.dart';
         final runtimeRouter = relative == 'core/api.dart';

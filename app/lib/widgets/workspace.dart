@@ -17,6 +17,7 @@ import 'left_panel.dart';
 import 'play_view.dart';
 import 'rail.dart';
 import 'workspace_inspector.dart';
+import 'workspace_chrome.dart';
 import 'settings_dialog.dart';
 import 'status_bar.dart';
 import 'title_bar.dart';
@@ -84,29 +85,31 @@ class _WorkspaceState extends State<Workspace> {
     final p = context.palette;
     // 全屏视图早退只在完整壳里生效：嵌入式宿主（聊天流分栏 / 画中画）里
     // store.view 恒为 'chat'，这些分支不适用。portfolio / play 由 main.dart
-    // 先路由到全屏 Workspace（embedded=false）；plugin:* 不再离开壳——桌面壳
-    // 里它是左侧固定工作区、右侧 NaN 常驻（用户裁决 2026-11-18），手机聊天
-    // 优先壳里由 ChatPiPShell 的 classic face 整屏渲染。
+    // 先路由到全屏 Workspace（embedded=false）。
+    // 插件工作台（`plugin:*`）**不再**在这里早退：四个工作台外壳统一（用户
+    // 裁决 2026-11-20）——3D / 视频 / 热应用与设计共用同一套 TitleBar / 左侧
+    // 图标轨 / 主区 / 状态栏，插件内容只占「设计画布」那块主区（见 _center
+    // 与 workspace_chrome.dart）。桌面壳里它仍是左侧固定工作区、右侧 NaN
+    // 常驻；手机聊天优先壳里由 ChatPiPShell 的 classic face 整屏渲染。
     if (!widget.embedded) {
       if (store.view == 'play') {
         return Scaffold(backgroundColor: p.bg, body: const SafeArea(child: PlayView()));
       }
-      // 作品集/插件工作台：不进设计壳（无项目也可达）。仍包 Scaffold——
-      // 这些视图内的 SnackBar 需要 ScaffoldMessenger 的 Scaffold 祖先
+      // 作品集：不进设计壳（无项目也可达）。仍包 Scaffold——
+      // 视图内的 SnackBar 需要 ScaffoldMessenger 的 Scaffold 祖先
       // （旧实现早退裸视图，debug 断言、release 静默不显示）。
       // SafeArea：移动端状态栏 / Home 指示条不压顶栏与底部操作（真机实证）。
       if (store.view == 'portfolio') {
         return Scaffold(backgroundColor: p.bg, body: const SafeArea(child: PortfolioView()));
       }
-      final pluginView = pluginWorkspaceFor(store.view);
-      if (pluginView != null) {
-        return Scaffold(backgroundColor: p.bg, body: SafeArea(child: pluginView));
-      }
     }
+    // 插件视图在完整壳里进主区；嵌入宿主不路由插件视图（view 恒为 chat）。
+    final pluginView = widget.embedded ? null : pluginWorkspaceFor(store.view);
     return CallbackShortcuts(
       bindings: {
-      // ⌘N/⌘O/⌘S/⌘Z/⌘K 已上移 main.dart 根级 bindings：插件/作品集视图
-      // 不挂载本 CallbackShortcuts，workspace 级绑定在全屏视图不可达。
+      // ⌘N/⌘O/⌘S/⌘Z/⌘K 已上移 main.dart 根级 bindings：portfolio/play 全幅
+      // 视图不挂载本壳，根级绑定是这些视图的唯一来源。插件工作台 2026-11-20
+      // 起与设计共用本壳（外壳统一），这些壳内动作对四个工作台同样可达。
       // 保留的项是设计壳内部动作（设置/快捷键/文档直达原型/导出）。
       // ⇧⌘F：自动修复当前画板（规范/叠放/可读性一次清偿）——deepDesign 的
       // 常驻能力，迁移后一度只剩检查器里的两个小按钮，用户找不到入口。
@@ -145,7 +148,11 @@ class _WorkspaceState extends State<Workspace> {
             builder: (context, constraints) {
               final width = constraints.maxWidth;
               final phone = width < 700;
-              final showLeft = !phone && (!widget.embedded || width >= 760);
+              // 插件视图不挂设计左栏（板/图层/文档/历史都是设计面的内容，
+              // 插件工作台有自己的 46px 工具条管理项目）；左轨保留，四个
+              // 工作台外壳因此一致，插件内容只占「设计画布」那块主区。
+              final showLeft =
+                  !phone && (!widget.embedded || width >= 760) && pluginView == null;
               final wide = width >= (widget.embedded ? 1100 : 1024);
               // 画中画可被缩到 280 高：Rail 是固定 224 的图标列，放不下时
               // 隐藏（画布优先），否则 RenderFlex 溢出。完整壳永不触发。
@@ -156,41 +163,41 @@ class _WorkspaceState extends State<Workspace> {
               // 从嵌入窄轨切回 设计/历史 再恢复。
               final leftPaneSafe = !widget.embedded ||
                   (store.panel != 'docs' && store.panel != 'spec');
-              return Column(
-                children: [
-                  if (!widget.embedded)
-                    TitleBar(
-                      onCommand: _command,
-                      onSettings: _settings,
-                      onNewProject: _newProject,
-                      onOpenProject: () => _openPath(''),
-                      onShortcuts: _shortcuts,
-                      onOpenRecent: (path) => _openPath(path),
-                    ),
-                  Expanded(
-                    child: Row(
-                      children: [
-                        if (showRail)
-                          widget.embedded
-                              ? const _EmbeddedRail()
-                              : Rail(
-                                  // 窄屏没有左栏：点「历史」用底部面板给出
-                                  // 可见结果，而不是只把图标点亮（nav-4）。
-                                  onHistory:
-                                      showLeft ? null : () => _openLeftSheet(context),
-                                ),
-                        if (showLeft && leftPaneSafe) const LeftPanel(),
-                        Expanded(child: _center(store)),
-                        if (wide && widget.showRightPanel) const WorkspaceRightPanel(),
-                      ],
-                    ),
-                  ),
-                  if (!wide && ((!showLeft && leftPaneSafe) || widget.showRightPanel))
-                    _narrowBar(context,
-                        leftAsSheet: !showLeft && leftPaneSafe,
-                        rightAsSheet: widget.showRightPanel),
-                  if (!widget.embedded) StatusBar(onCommand: _command),
-                ],
+              // 窄屏折叠条：左栏收起时给「项目面板」sheet，右栏收起时给
+              // 「NaN 面板」sheet。插件视图没有设计左栏，只保留右栏入口。
+              final leftAsSheet = !showLeft && leftPaneSafe && pluginView == null;
+              final rightAsSheet = widget.showRightPanel;
+              return WorkspaceChrome(
+                titleBar: widget.embedded
+                    ? null
+                    : TitleBar(
+                        onCommand: _command,
+                        onSettings: _settings,
+                        onNewProject: _newProject,
+                        onOpenProject: () => _openPath(''),
+                        onShortcuts: _shortcuts,
+                        onOpenRecent: (path) => _openPath(path),
+                      ),
+                rail: showRail
+                    ? (widget.embedded
+                        ? const _EmbeddedRail()
+                        : Rail(
+                            // 窄屏没有左栏：点「历史」用底部面板给出
+                            // 可见结果，而不是只把图标点亮（nav-4）。
+                            onHistory: showLeft ? null : () => _openLeftSheet(context),
+                          ))
+                    : null,
+                leftPanel: showLeft && leftPaneSafe ? const LeftPanel() : null,
+                main: _center(store, pluginView),
+                rightPanel: wide && widget.showRightPanel ? const WorkspaceRightPanel() : null,
+                narrowBar: !wide && (leftAsSheet || rightAsSheet)
+                    ? _narrowBar(
+                        context,
+                        leftAsSheet: leftAsSheet,
+                        rightAsSheet: rightAsSheet,
+                      )
+                    : null,
+                statusBar: widget.embedded ? null : StatusBar(onCommand: _command),
               );
             },
             ),
@@ -263,7 +270,7 @@ class _WorkspaceState extends State<Workspace> {
     );
   }
 
-  Widget _center(AppStore store) {
+  Widget _center(AppStore store, Widget? pluginView) {
     // 视图切换过渡：fade + 8px 上滑（180ms）。KeyedSubtree 按 view 键控，
     // 同视图内 store 变化不会触发重播。
     return AnimatedSwitcher(
@@ -279,28 +286,33 @@ class _WorkspaceState extends State<Workspace> {
       ),
       child: KeyedSubtree(
         key: ValueKey(store.view),
-        child: switch (store.view) {
-          'docs' => const DocsView(),
-          'source' => const _SourceView(),
-          _ => Column(
-              children: [
-                _BoardTabs(embedded: widget.embedded),
-                Expanded(
-                  // 嵌入宿主且无画板时不吃 CanvasView 的空态卡：那张卡带
-                  // 「先写文档」= setView('docs')（canvas_view.dart:1590），
-                  // 在宿主里点一下同样会把聊天流换掉（review pip-1 同类）。
-                  // 画板条（＋ 新建）仍在，生成入口走聊天。
-                  // 打开的项目没有可用画布（手机离线/预览失败）：不能把
-                  // 空画布显示成「还没有画板」的空项目（审查 depython-1）。
-                  child: store.canvasPreviewUnavailable
-                      ? const _CanvasNeedsDesktopHint()
-                      : widget.embedded && store.render.artboards.isEmpty
-                          ? const _EmbeddedNoBoardHint()
-                          : const CanvasView(),
+        // 插件工作台就是主区内容：与设计画布共用同一个槽位（外壳由
+        // workspace_chrome.dart 统一提供），不再整页替换 Scaffold。
+        // 插件自己的 46px 工具条仍在内容顶部——那是模块自身的面，不重复
+        // 标题栏/状态栏。
+        child: pluginView ??
+            switch (store.view) {
+              'docs' => const DocsView(),
+              'source' => const _SourceView(),
+              _ => Column(
+                  children: [
+                    _BoardTabs(embedded: widget.embedded),
+                    Expanded(
+                      // 嵌入宿主且无画板时不吃 CanvasView 的空态卡：那张卡带
+                      // 「先写文档」= setView('docs')（canvas_view.dart:1590），
+                      // 在宿主里点一下同样会把聊天流换掉（review pip-1 同类）。
+                      // 画板条（＋ 新建）仍在，生成入口走聊天。
+                      // 打开的项目没有可用画布（手机离线/预览失败）：不能把
+                      // 空画布显示成「还没有画板」的空项目（审查 depython-1）。
+                      child: store.canvasPreviewUnavailable
+                          ? const _CanvasNeedsDesktopHint()
+                          : widget.embedded && store.render.artboards.isEmpty
+                              ? const _EmbeddedNoBoardHint()
+                              : const CanvasView(),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-        },
+            },
       ),
     );
   }

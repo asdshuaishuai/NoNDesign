@@ -51,11 +51,14 @@ const int kEngineFuelPerByte = 12000;
 /// must recycle instead of leaking.
 const int kEngineMemoryRecycleBytes = 176 * 1024 * 1024;
 
-/// Wall-clock watchdog for one engine call. The Python host uses an epoch
-/// deadline of 30 s; the Dart host has no epoch interruption, so a watchdog
-/// kills and respawns the worker isolate instead (fuel catches runaways first
-/// where the runtime supports it).
-const Duration kEngineDefaultCallTimeout = Duration(seconds: 30);
+/// Wall-clock watchdog for one engine call. The Dart host has no epoch
+/// interruption, so a watchdog kills and respawns the worker isolate instead
+/// (fuel catches runaways first where the runtime supports it).
+///
+/// Windows 执行器是 pulley 解释器（见 AGENTS.md）：同一调用比 Cranelift
+/// 慢数倍，30 s 会把大文档的 generate/render 误杀成 engine_timeout。
+/// 90 s 只放宽看门狗这一道兜底——真正的失控调用仍由 fuel 第一时间拦住。
+const Duration kEngineDefaultCallTimeout = Duration(seconds: 90);
 
 /// Budgets from the migration plan for enabling the engine *on phones*.
 /// Reaching them does not enable mobile by itself: `WasmRuntimeGate` gates

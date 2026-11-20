@@ -85,8 +85,10 @@ void main() {
     library = await NonAppLibrary.open(root: Directory('${root.path}/hotapps'));
   });
 
-  tearDown(() {
-    if (root.existsSync()) root.deleteSync(recursive: true);
+  tearDown(() async {
+    // Windows 上数据库/临时文件句柄可能晚一点释放：删除失败重试，别让清理把
+    // 已通过的用例判红。
+    await _deleteTempWithRetry(root);
   });
 
   test('安装 html 包：目录 / 清单 / 页面 / 每应用数据库', () async {
@@ -239,4 +241,17 @@ void main() {
     expect([for (final row in tables['rows'] as List) row['name']], isNot(contains('only_a')));
     expect(HotAppDb.openForApp(a.dir).path, isNot(HotAppDb.openForApp(b.dir).path));
   });
+}
+
+/// Windows 上 sqlite / WebView / 临时文件句柄可能还没释放：删除失败重试几次，
+/// 别让清理步骤把已通过的断言判红。
+Future<void> _deleteTempWithRetry(Directory dir) async {
+  for (var attempt = 0; attempt < 10; attempt++) {
+    try {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+      return;
+    } on FileSystemException {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+  }
 }

@@ -205,6 +205,20 @@ void main() {
       expect(find.byKey(const ValueKey('video-clip-loop')), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets('播放源给出非有限时间/时长：运输条按片头/零显示，不抛 floor 异常', (tester) async {
+      final playback = _FakePlayback(duration: double.infinity);
+      playback._t = double.infinity;
+      await _pumpTransport(tester, playback);
+
+      expect(_time(tester), '00:00.000 / 00:00.000');
+      expect(_frame(tester), '帧 1');
+      final slider =
+          tester.widget<Slider>(find.byKey(const ValueKey('video-clip-slider')));
+      expect(slider.max, 0.001, reason: '非有限时长退回最小可拖范围');
+      expect(slider.value, 0.0);
+      expect(tester.takeException(), isNull);
+    });
   });
 
   group('VideoClipSurface', () {
@@ -260,6 +274,32 @@ void main() {
       expect(find.text('这台设备不能内嵌播放动效合成'), findsOneWidget);
       expect(find.text('用电脑上的连接桌面查看'), findsOneWidget);
       expect(find.byKey(const ValueKey('video-clip-surface')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('同一位置换播放源：绑定新源，不把旧错误态留在画位上', (tester) async {
+      final clip = _clip();
+      final broken = _FakePlayback(loadError: '动效合成没有启动，可重试');
+      final healthy = _FakePlayback();
+
+      Widget stage(VideoClipPlayback playback) => _wrap(
+            SizedBox(
+              width: 640,
+              height: 360,
+              child: VideoClipSurface(clip: clip, playback: playback),
+            ),
+          );
+
+      await tester.pumpWidget(stage(broken));
+      await tester.pump();
+      expect(find.text('动效合成没有启动，可重试'), findsOneWidget);
+
+      // 片段没变、State 被复用，只换了注入的播放源：必须跟到新源。
+      await tester.pumpWidget(stage(healthy));
+      await tester.pump();
+      expect(find.text('动效合成没有启动，可重试'), findsNothing);
+      expect(find.byKey(const ValueKey('video-clip-error')), findsNothing);
+      expect(find.byKey(const ValueKey('video-clip-stage')), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });

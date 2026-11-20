@@ -447,20 +447,36 @@ class DesktopRpcHost {
 
   /// Reads the body up to [RpcHostOptions.maxBodyBytes]. Returns null when the
   /// limit is crossed (the caller answers 413 and drops the connection).
+  ///
+  /// 超限后**先把请求体读干净（有界）再回 413**：Windows 的 loopback 上直接
+  /// close 会让客户端只看到 `Connection closed before full header was received`
+  /// （RST 把 413 咽掉），用户/客户端拿不到「负载过大」这句实话。排空上限是
+  /// `limit + 1 MiB`，恶意无限 chunked 体也只会多读这一小段。
   Future<List<int>?> _readBody(HttpRequest request) async {
     final limit = _options.maxBodyBytes;
+    final drainCap = limit + _bodyDrainAllowanceBytes;
     final builder = BytesBuilder(copy: false);
+    var over = false;
+    var drained = 0;
     try {
       await for (final chunk in request) {
+        if (over) {
+          drained += chunk.length;
+          if (drained >= drainCap) break;
+          continue;
+        }
         builder.add(chunk);
-        if (builder.length > limit) return null;
+        if (builder.length > limit) over = true;
       }
     } catch (_) {
       // Client aborted mid-body: treat as an empty/invalid request.
-      return const <int>[];
+      return over ? null : const <int>[];
     }
-    return builder.takeBytes();
+    return over ? null : builder.takeBytes();
   }
+
+  /// 超限请求体的排空预算（见 [_readBody]）。
+  static const int _bodyDrainAllowanceBytes = 1024 * 1024;
 
   /// Writes one streaming reply as SSE, enforcing the idle budget.
   ///

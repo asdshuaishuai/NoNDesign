@@ -16,8 +16,10 @@
 /// 按资源键读取渲染，点开即真实运行。
 ///
 /// 平台矩阵（唯一判据是 [PlatformCapabilities]，不再自己嗅探平台）：
-///  * 内嵌预览需要 WebView 插件（桌面 macOS/iOS/Android 有，Linux/Windows 没有），
-///    移动端还额外受 [ThreeWebViewGate] 约束（file:// 模块脚本未验证前不启用）；
+///  * 内嵌 3D 预览：macOS/iOS/Android 走 webview_flutter；Windows 走 WebView2
+///    （[ThreeWinPreview]）；Linux 没有内嵌预览。移动端还额外受
+///    [ThreeWebViewGate] 约束（file:// 模块脚本未验证前不启用）；
+///  * ThreeUI 组件画廊仍走 webview_flutter（Windows 尚未桥接，点开时诚实提示）；
 ///  * 「在文件夹中显示」只在桌面三平台出现。
 library;
 
@@ -26,6 +28,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -39,6 +42,7 @@ import '../core/three_lint.dart';
 import '../core/three_service.dart';
 import '../core/toast_service.dart';
 import 'common.dart';
+import 'three_preview_win.dart';
 
 /// 移动端内嵌 3D 预览的启用门。
 ///
@@ -96,6 +100,12 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   bool _specDirty = false;
   bool _busy = false;
   WebViewController? _controller;
+  // Windows WebView2 预览：控制器由 [ThreeWinPreview] 自己持有；工作台只保存
+  // 本轮宿主页路径 / 版本与初始化失败态（失败降级成浏览器兜底面）。
+  final _winPreviewKey = GlobalKey<ThreeWinPreviewState>();
+  String _winHtmlPath = '';
+  int _winGeneration = 0;
+  bool _winInitFailed = false;
   String _lastError = '';
   // 预览不可用/加载失败的可读占位（非空时预览区整块替换）。
   String _loadError = '';
@@ -120,6 +130,36 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   String _uiCatalogError = '';
   bool _uiCatalogLoading = false;
 
+  // -- store 同步（NaN 在工作台里生成之后，界面必须跟着磁盘/设置变化） -------
+  //
+  // 工作台视图切换即 dispose，唯一跨实例的状态源是 AppStore：`NaN` 的
+  // `three_*` 工具成功后会写 `settings.threeProjectName` 并 notify（见
+  // AppStore._adoptWorkspaceArtifact）。工作台**必须**订阅这个通知，否则运行
+  // 结束只看到「3D 工作台已更新」，界面却停在旧项目/空项目/旧预览上——这
+  // 就是「run 结束但工作台里没有东西」的根因。
+  //
+  // 同步水位：自己改 store 项目名时先推进水位，避免同一动作被通知回灌成
+  // 「外部切换」重跑一遍（重复读盘 + 重复挂预览会闪）。
+  String _lastStoreProject = '';
+  bool _lastAgentBusy = false;
+
+  /// boot 还没拿到 [ThreeService] 时收到的外部项目名，_boot 完成后接上。
+  String _pendingStoreProject = '';
+
+  /// 运行中的节流轮询：把磁盘进度（当前层 / 场景代码）拉进界面。
+  Timer? _runPoll;
+
+  /// 事件式刷新的 500ms 合并窗口（run 中流式正文每 80ms 就 notify，逐条
+  /// 读盘会让界面抖动）。
+  Timer? _autoRefreshDebounce;
+
+  /// 当前项目的异步读盘序号：切项目后旧项目的迟到快照不得覆盖新项目。
+  int _projectSeq = 0;
+
+  /// 项目列表缓存：store 通知 / run 结束 / 打开项目时重扫；弹窗仍实时读一次
+  /// （列表是磁盘权威，缓存只用于面板与测试观察）。
+  List<ThreeProjectEntry> _projects = const [];
+
   late final AppStore _store = context.read<AppStore>();
   AppStore get store => _store;
 
@@ -131,12 +171,21 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
 
   String get _sceneJs => _snapshot?.sceneJs ?? '';
 
-  /// webview_flutter 只覆盖 android/ios/macos。Linux/Windows 没有 WebView
-  /// 插件（与视频播放面的平台判据同一矩阵）；移动端另受 [ThreeWebViewGate]
-  /// 约束。测试用 [debugThreeWebViewSupported] 覆盖。
+  /// webview_flutter 只覆盖 android/ios/macos：ThreeUI 组件画廊与移动端 3D
+  /// 预览走这条；Linux 没有内嵌预览。移动端另受 [ThreeWebViewGate] 约束。
+  /// 测试用 [debugThreeWebViewSupported] 覆盖。
   bool get _webViewSupported =>
       debugThreeWebViewSupported ??
       (_host.supportsInAppWebView && ThreeWebViewGate.allowsLocalPreview(_host));
+
+  /// Windows 的 3D 场景预览走 WebView2（webview_windows），与 webview_flutter
+  /// 的平台矩阵并行；系统缺 WebView2 运行时由预览面降级成浏览器兜底。
+  bool get _windowsPreviewSupported =>
+      _host.os == HostOs.windows && (debugThreeWebViewSupported ?? true);
+
+  /// 3D 场景预览是否有内嵌执行面（任一实现可用即可）。
+  bool get _scenePreviewSupported =>
+      _webViewSupported || _windowsPreviewSupported;
 
   @override
   void initState() {
@@ -154,6 +203,12 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     final pending = threeLoadOnOpen;
     threeLoadOnOpen = null;
     final saved = pending ?? store.settings.threeProjectName;
+    // 订阅 store：NaN 的 three_* 工具成功后会写 threeProjectName（跨实例的
+    // 唯一通道），run 结束也会 notify——不订阅就永远看不到新项目/新层。
+    _lastStoreProject = store.settings.threeProjectName.trim();
+    _lastAgentBusy = store.agentBusy;
+    store.addListener(_onStoreNotify);
+    if (_lastAgentBusy) _ensureRunPoll();
     // 首帧后再落 store（initState 里 notifyListeners 会在构建期触发祖先重建）。
     WidgetsBinding.instance.addPostFrameCallback((_) => _boot(pending: pending, saved: saved));
   }
@@ -164,8 +219,181 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     // dispose，没有草稿 = 用户手编的内容静默丢失。持久化延后到帧末：
     // dispose 常发生在构建期，notifyListeners 会标记祖先脏。
     _stashDraft(defer: true);
+    _runPoll?.cancel();
+    _runPoll = null;
+    _autoRefreshDebounce?.cancel();
+    _autoRefreshDebounce = null;
+    _store.removeListener(_onStoreNotify);
     _specCtl.dispose();
     super.dispose();
+  }
+
+  // -- store 同步 -----------------------------------------------------------
+
+  /// store 通知入口：判断「外部项目名变了 / run 结束了 / run 在飞」，真正
+  /// 的读盘与界面更新交给下面的异步方法。构建期通知推到帧末再处理
+  /// （构建期 setState 会抛「during build」）。
+  void _onStoreNotify() {
+    if (!mounted) return;
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _applyStoreChange();
+      });
+      return;
+    }
+    _applyStoreChange();
+  }
+
+  void _applyStoreChange() {
+    if (!mounted) return;
+    final name = store.settings.threeProjectName.trim();
+    final busy = store.agentBusy;
+    final nameChanged = name != _lastStoreProject;
+    final runEnded = _lastAgentBusy && !busy;
+    _lastStoreProject = name;
+    _lastAgentBusy = busy;
+    if (busy) {
+      _ensureRunPoll();
+    } else {
+      _stopRunPoll();
+    }
+    // NaN 在 run 里创建/切到另一个 3D 项目：工作台要跟过去（而不是停在旧
+    // 项目/空态上），并重扫列表、按磁盘进度刷新、重挂预览。
+    if (nameChanged && name.isNotEmpty && name != _project) {
+      unawaited(_adoptProject(name));
+      return;
+    }
+    if (runEnded) {
+      // run 终态：强制再刷一次并重载预览——最后一层/最后一段代码可能在
+      // done 之后才落盘，只靠运行中的节流刷新会漏掉「最后一次更新」。
+      unawaited(_reloadCurrent(reloadPreview: true, force: true));
+      return;
+    }
+    if (busy || nameChanged) unawaited(_reloadCurrent());
+  }
+
+  /// 外部指定的项目（NaN 生成成功 / 作品集直载）：切过去、恢复该项目自己
+  /// 的规范草稿、按磁盘进度刷新并重挂预览。旧项目未保存的规范编辑先落草稿。
+  Future<void> _adoptProject(String name) async {
+    if (name.isEmpty) return;
+    final service = _service;
+    if (service == null) {
+      // boot 还在解析服务：先记下，_boot 完成后接上（这次切换不能被吞掉）。
+      _pendingStoreProject = name;
+      return;
+    }
+    if (name == _project) {
+      await _reloadCurrent(force: true);
+      return;
+    }
+    final token = ++_projectSeq;
+    // 旧项目未保存的规范编辑落草稿：帧末写回，避免在 store 通知回调里再次
+    // notifyListeners（重入会让其它监听者收到嵌套通知）。
+    _stashDraft(defer: true);
+    final draft = store.threeSpecDraft(name);
+    if (!mounted || token != _projectSeq) return;
+    setState(() {
+      _project = name;
+      _snapshot = null;
+      _controller = null;
+      _winHtmlPath = '';
+      _winInitFailed = false;
+      _previewReady = false;
+      _lastError = '';
+      _loadError = '';
+      _loadDetail = '';
+      _errorKey = '';
+      _errorText = '';
+      _errorDetail = '';
+      _errorSource = '';
+      // 项目边界复位规范编辑守卫：A 项目未保存的编辑不能带进 B；B 自己的
+      // 未保存草稿要恢复（跨视图/跨 run 都不丢）。
+      _specDirty = false;
+      if (draft != null && draft.isNotEmpty) {
+        _specCtl.text = draft;
+        _specDirty = true;
+      }
+    });
+    await _reloadProjects();
+    if (!mounted || token != _projectSeq) return;
+    await _refresh();
+    if (!mounted || token != _projectSeq) return;
+    await _mountPreview();
+  }
+
+  /// 当前项目按磁盘态刷新（节流）：run 中的通知很密（流式正文每 80ms 就
+  /// 通知），每次都读盘会让界面抖动；500ms 合并窗口内只真正刷一次，定时
+  /// 轮询负责兜底。run 结束用 [force] 立刻刷（最后一层不能被节流吞掉）。
+  Future<void> _reloadCurrent({bool reloadPreview = false, bool force = false}) async {
+    if (!mounted) return;
+    if (!force) {
+      _autoRefreshDebounce ??= Timer(const Duration(milliseconds: 500), () {
+        _autoRefreshDebounce = null;
+        unawaited(_reloadCurrent(force: true));
+      });
+      return;
+    }
+    _autoRefreshDebounce?.cancel();
+    _autoRefreshDebounce = null;
+    if (_service == null || _project == null) {
+      await _reloadProjects();
+      return;
+    }
+    await _refresh();
+    await _reloadProjects();
+    if (reloadPreview && mounted) await _mountPreview();
+  }
+
+  /// run 在飞时每 600ms 拉一次磁盘进度（当前层 / 场景代码），让工作台在
+  /// 生成过程中就往前走，而不是等终态一次性跳变（也别永远转圈）。
+  void _ensureRunPoll() {
+    if (_runPoll != null) return;
+    _runPoll = Timer.periodic(const Duration(milliseconds: 600), (_) {
+      if (!mounted || !store.agentBusy) {
+        _stopRunPoll();
+        return;
+      }
+      unawaited(_reloadCurrent());
+    });
+  }
+
+  void _stopRunPoll() {
+    _runPoll?.cancel();
+    _runPoll = null;
+  }
+
+  /// 重扫项目列表（缓存）：NaN 新建/删除项目后，「项目」菜单不能停在旧列表。
+  Future<void> _reloadProjects() async {
+    final service = _service;
+    if (service == null) return;
+    try {
+      final items = await service.listProjects();
+      if (!mounted) return;
+      // 列表变了才 setState（运行中每 600ms 的轮询不该整树重建）。
+      var same = items.length == _projects.length;
+      if (same) {
+        for (var i = 0; i < items.length; i++) {
+          final a = items[i];
+          final b = _projects[i];
+          if (a.name != b.name || a.current != b.current || a.blocked != b.blocked) {
+            same = false;
+            break;
+          }
+        }
+      }
+      _projects = items;
+      if (!same) setState(() {});
+    } catch (error) {
+      // 列表是旁路缓存：读失败不打断主流程（打开「项目」弹窗仍会实时再读）。
+      debugPrint('[three] list projects failed: $error');
+    }
+  }
+
+  /// 工作台自己改 store 的项目名：先推进水位，避免 store 通知把本次切换
+  /// 当成外部切换再跑一遍（重复读盘 + 重复挂预览会闪）。
+  void _setStoreProject(String name) {
+    _lastStoreProject = name;
+    store.setThreeProjectName(name);
   }
 
   Future<void> _boot({required String? pending, required String saved}) async {
@@ -190,18 +418,32 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     }
     _service = service;
     unawaited(_loadUiCatalog());
-    if (saved.isNotEmpty) {
-      _project = saved;
-      final draft = store.threeSpecDraft(saved);
+    unawaited(_reloadProjects());
+    // boot 期间 store 可能已经收到外部项目名（NaN 正在 run 并且刚建好项目）：
+    // 打开工作台的瞬间就以它为准，不要停在旧项目上。作品集直载（pending）
+    // 优先级最高。
+    final external = _pendingStoreProject.isNotEmpty
+        ? _pendingStoreProject
+        : store.settings.threeProjectName.trim();
+    _pendingStoreProject = '';
+    final wanted = pending != null ? saved : (external.isNotEmpty ? external : saved);
+    if (pending != null && store.settings.threeProjectName.trim() != pending) {
+      _setStoreProject(pending);
+    }
+    if (wanted.isNotEmpty) {
+      final token = ++_projectSeq;
+      _project = wanted;
+      final draft = store.threeSpecDraft(wanted);
       if (draft != null && draft.isNotEmpty) {
         _specCtl.text = draft;
         _specDirty = true; // listener 已置位；显式声明防快照覆盖
       }
-      if (pending != null) store.setThreeProjectName(pending);
       await _refresh();
-      if (!mounted) return;
+      if (!mounted || token != _projectSeq) return;
       await _mountPreview();
     }
+    _lastAgentBusy = store.agentBusy;
+    if (store.agentBusy) _ensureRunPoll();
     if (mounted) setState(() {});
   }
 
@@ -225,7 +467,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     if (service == null || project == null) return;
     try {
       final snapshot = await service.readProject(project);
-      if (!mounted) return;
+      // 切项目后迟到的旧快照不得覆盖新项目（异步读盘与通知会交错）。
+      if (!mounted || project != _project) return;
       setState(() {
         if (_errorSource == 'refresh') {
           _errorKey = '';
@@ -545,12 +788,14 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _specDirty = false;
         _loadError = '';
         _loadDetail = '';
+        _winInitFailed = false;
         _errorKey = '';
         _errorText = '';
         _errorDetail = '';
       });
-      store.setThreeProjectName(name);
+      _setStoreProject(name);
       await _mountPreview();
+      unawaited(_reloadProjects());
       final components = (snapshot.spec['components'] as List?)?.length ?? 0;
       _toasts.success('规范已生成（$components 组件）', '点「生成当前层」开始第一层。');
     } on ThreeFailure catch (failure) {
@@ -584,7 +829,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         final name = i == 0 ? kit.id : '${kit.id}-${i + 1}';
         try {
           snapshot = await service.newProject(name: name, brief: kit.brief, config: config);
-          store.setThreeProjectName(name);
+          _setStoreProject(name);
         } on ThreeFailure catch (failure) {
           if (failure.code != 'project_exists') rethrow;
           lastError = failure;
@@ -601,11 +846,13 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _specDirty = false;
         _loadError = '';
         _loadDetail = '';
+        _winInitFailed = false;
         _errorKey = '';
         _errorText = '';
         _errorDetail = '';
       });
       await _mountPreview();
+      unawaited(_reloadProjects());
       final components = (snapshot.spec['components'] as List?)?.length ?? 0;
       _toasts.success('${kit.name}：规范已生成（$components 组件）', '点「生成当前层」开始第一层。');
     } on ThreeFailure catch (failure) {
@@ -634,7 +881,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   /// 都实测过），内联后页面零文件读取。每次重建控制器都重新组装（版本注释换新），
   /// 就绪态归零，等预览页的 metrics 桥重新点亮。
   Future<void> _mountPreview() async {
-    if (!_webViewSupported) return;
+    if (!_scenePreviewSupported) return;
     final service = _service;
     final project = _project;
     if (service == null || project == null) return;
@@ -643,13 +890,29 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     try {
       bundle = await service.preparePreview(project);
     } on ThreeFailure catch (failure) {
+      if (!mounted || project != _project) return;
       _setLoadError(threeFailureMessage(failure), failure.detail);
       return;
     } catch (error) {
+      if (!mounted || project != _project) return;
       _setLoadError(threeFailureMessage(null), '$error');
       return;
     }
-    if (!mounted) return;
+    // 准备预览是异步写盘：期间切了项目就不再挂旧项目的页面（否则新项目
+    // 的预览会闪回旧内容）。
+    if (!mounted || project != _project) return;
+    if (_windowsPreviewSupported) {
+      // WebView2 面由 [ThreeWinPreview] 初始化并加载；版本号换新即重载同一
+      // 宿主页（preparePreview 已把新页面写到 bundle.htmlPath）。
+      setState(() {
+        _winHtmlPath = bundle.htmlPath;
+        _winGeneration++;
+        _winInitFailed = false;
+        _loadError = '';
+        _loadDetail = '';
+      });
+      return;
+    }
     final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel('NON3D', onMessageReceived: _onBridgeMessage)
@@ -687,6 +950,57 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     }
   }
 
+  /// Windows 预览页的桥消息：WebView2 宿主消息 → 与 webview_flutter 的
+  /// JavaScriptChannel 同一条处理链（error / metrics / screenshot）。
+  void _onWindowsBridge(String text) {
+    unawaited(_onBridgeMessage(JavaScriptMessage(message: text)));
+  }
+
+  /// WebView2 初始化失败（常见：系统缺 WebView2 运行时）：降级成可操作面
+  /// （浏览器打开 / 定位文件 / 重试），不留在「准备预览…」当作终态。
+  void _onWindowsUnavailable(String detail) {
+    _previewReady = false;
+    if (!mounted) return;
+    setState(() {
+      _winInitFailed = true;
+      _loadError = '';
+      _loadDetail = detail;
+    });
+  }
+
+  void _onWindowsLoadFailed(String detail) {
+    _setLoadError('预览加载失败，请重试', detail);
+  }
+
+  /// 用系统浏览器打开当前项目的预览文件（Windows 初始化失败时的兜底）。
+  Future<void> _openPreviewInBrowser() async {
+    final project = _project;
+    final service = _service;
+    if (_host.os != HostOs.windows || project == null || service == null) return;
+    final path = service.previewHtmlPath(project);
+    if (!File(path).existsSync()) {
+      _toasts.warn('预览文件还没有准备好');
+      return;
+    }
+    try {
+      await Process.run('cmd', ['/c', 'start', '', path]);
+    } catch (error) {
+      debugPrint('[three] open preview externally failed: $error');
+      _toasts.warn('没能打开预览', '请检查系统默认浏览器。');
+    }
+  }
+
+  /// 截图 / 四方位取证：按当前执行面把脚本送进预览页。
+  void _runPreviewScript(String script) {
+    if (_windowsPreviewSupported) {
+      final preview = _winPreviewKey.currentState;
+      if (preview == null) return;
+      unawaited(preview.runJavaScript(script));
+      return;
+    }
+    unawaited(_controller?.runJavaScript(script));
+  }
+
   void _setLoadError(String message, [String detail = '']) {
     _previewReady = false; // 主帧失败：截图/四方位立即失效
     if (!mounted) return;
@@ -703,6 +1017,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     setState(() {
       _loadError = '';
       _loadDetail = '';
+      _winInitFailed = false;
     });
     await _mountPreview();
   }
@@ -814,15 +1129,24 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     try {
       items = await service.listProjects();
     } on ThreeFailure catch (failure) {
-      _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
-      return;
+      // 读盘失败（权限/占用）时用最近一次重扫的缓存兜底：NaN 新建/删除后
+      // 列表已经刷过，不能让「项目」入口变成静默死路；没有缓存才显性报错。
+      if (_projects.isEmpty) {
+        _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
+        return;
+      }
+      items = _projects;
     } catch (error) {
-      _showError('项目列表没有读出来', '$error');
-      return;
+      if (_projects.isEmpty) {
+        _showError('项目列表没有读出来', '$error');
+        return;
+      }
+      items = _projects;
     }
     // 列表请求也是在飞窗口：期间视图可能已被切走，此时再 showNonDialog 就是
     // 死 context 弹窗。
     if (!mounted) return;
+    _projects = items; // 缓存同步（NaN 新建/删除后弹窗里的列表就是这份磁盘态）
     final choice = await showNonDialog<String>(
       context: context,
       builder: (ctx) => SimpleDialog(
@@ -895,6 +1219,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       _snapshot = null;
       _loadError = '';
       _loadDetail = '';
+      _winInitFailed = false;
       // 项目边界复位规范编辑守卫：A 项目未保存的编辑不能带进 B。
       _specDirty = false;
       if (draft != null && draft.isNotEmpty) {
@@ -902,7 +1227,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _specDirty = true;
       }
     });
-    store.setThreeProjectName(choice);
+    _setStoreProject(choice);
     await _mountPreview();
     await _refresh();
   }
@@ -939,6 +1264,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       await service.deleteProject(name);
       if (!mounted) return;
       if (_project == name) {
+        _projectSeq++; // 作废在飞的旧项目读盘
         // 规范草稿随项目目录一起作废（留下就是幽灵草稿）。
         _specCtl.clear();
         _specDirty = false;
@@ -949,13 +1275,16 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _previewReady = false;
           _loadError = '';
           _loadDetail = '';
+          _winHtmlPath = '';
+          _winInitFailed = false;
           _lastError = '';
           _face = 'preview';
         });
         store.setThreeSpecDraft(name, null);
-        store.setThreeProjectName('');
+        _setStoreProject('');
         _clearError();
       }
+      await _reloadProjects();
       _toasts.success('已删除 3D 项目', name);
     } on ThreeFailure catch (failure) {
       _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
@@ -1196,7 +1525,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
             icon: Icons.camera_alt_outlined,
             label: '截图',
             onTap: _captureReady
-                ? () => _controller?.runJavaScript(
+                ? () => _runPreviewScript(
                     'window.__non3d_screenshot && window.__non3d_screenshot()')
                 : null,
           ),
@@ -1204,7 +1533,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
             icon: Icons.rotate_90_degrees_ccw_outlined,
             label: '四方位取证',
             onTap: _captureReady
-                ? () => _controller?.runJavaScript(
+                ? () => _runPreviewScript(
                     'window.__non3d_turntable && window.__non3d_turntable()')
                 : null,
           ),
@@ -1284,10 +1613,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         // 菜单项已 disabled，这里再挡一道：任何杂散调用都不得在未就绪页面上
         // 跑截图（按钮亮但无操作 = 静默失败）。
         if (!_captureReady) return;
-        _controller?.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot()');
+        _runPreviewScript('window.__non3d_screenshot && window.__non3d_screenshot()');
       case 'turntable':
         if (!_captureReady) return;
-        _controller?.runJavaScript('window.__non3d_turntable && window.__non3d_turntable()');
+        _runPreviewScript('window.__non3d_turntable && window.__non3d_turntable()');
       case 'continue':
         _continue();
       case 'reload':
@@ -1313,10 +1642,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         onOpenUi: _webViewSupported ? _openThreeUi : null,
       );
     }
-    // 无 WebView / 未验证的移动端最先分流：不构造控制器，给可复制的路径与
+    // 无内嵌执行面 / 未验证的移动端最先分流：不构造控制器，给可复制的路径与
     // 能力说明（不把「加载预览…」当作终态）。
     final Widget preview;
-    if (!_webViewSupported) {
+    if (!_scenePreviewSupported) {
       preview = _PreviewUnsupportedPane(
         projectDir: _service?.projectDir(_project!).path ?? '',
         previewPath: _service?.previewHtmlPath(_project!) ?? '',
@@ -1325,12 +1654,40 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         onCopy: _copy,
         onReveal: _host.supportsRevealInFolder ? _revealProject : null,
       );
+    } else if (_windowsPreviewSupported && _winInitFailed) {
+      // WebView2 没初始化起来（常见：系统缺运行时）：保留浏览器 / 文件管理器
+      // 两条出路，装好运行时也能就地重试。
+      preview = _PreviewUnsupportedPane(
+        projectDir: _service?.projectDir(_project!).path ?? '',
+        previewPath: _service?.previewHtmlPath(_project!) ?? '',
+        host: _host,
+        title: '这台电脑暂时不能内嵌显示 3D 预览',
+        preferred: '可以先用系统浏览器打开预览。',
+        // 原始诊断只进折叠的「技术详情」：缺 WebView2 运行时这类原因用户
+        // 需要能拿去查，但不能直接摆上屏。
+        detail: _loadDetail,
+        onCopy: _copy,
+        onReveal: _host.supportsRevealInFolder ? _revealProject : null,
+        onOpenExternally: _openPreviewInBrowser,
+        onRetry: _retryPreview,
+      );
     } else if (_loadError.isNotEmpty) {
       preview = _PreviewErrorPane(
         message: _loadError,
         detail: _loadDetail,
         onRetry: _retryPreview,
       );
+    } else if (_windowsPreviewSupported) {
+      preview = _winHtmlPath.isEmpty
+          ? Center(child: Text('准备预览…', style: TextStyle(fontSize: 12, color: p.ink3)))
+          : ThreeWinPreview(
+              key: _winPreviewKey,
+              htmlPath: _winHtmlPath,
+              generation: _winGeneration,
+              onBridge: _onWindowsBridge,
+              onUnavailable: _onWindowsUnavailable,
+              onLoadFailed: _onWindowsLoadFailed,
+            );
     } else if (_controller == null) {
       preview = Center(child: Text('准备预览…', style: TextStyle(fontSize: 12, color: p.ink3)));
     } else {
@@ -1339,9 +1696,25 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     final side = switch (_face) {
       'source' => SingleChildScrollView(
           padding: const EdgeInsets.all(14),
-          child: SelectableText(
-            _sceneJs.isEmpty ? '还没有场景代码——点「生成当前层」开始' : _sceneJs,
-            style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: p.ink2, height: 1.5),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 场景代码长度随 run 转发刷新可见（NaN 每完成一层都会改写
+              // 这份代码，用户能直接看到「有没有新东西进来」）。
+              if (_sceneJs.isNotEmpty)
+                Padding(
+                  key: const ValueKey('three-scene-meta'),
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '场景代码 · ${_sceneJs.length} 字符',
+                    style: TextStyle(fontSize: 11, color: p.ink3),
+                  ),
+                ),
+              SelectableText(
+                _sceneJs.isEmpty ? '还没有场景代码——点「生成当前层」开始' : _sceneJs,
+                style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: p.ink2, height: 1.5),
+              ),
+            ],
           ),
         ),
       'spec' => _SpecPane(controller: _specCtl, onSave: _saveSpec),
@@ -1963,6 +2336,10 @@ class _PreviewUnsupportedPane extends StatelessWidget {
     required this.preferred,
     required this.onCopy,
     required this.onReveal,
+    this.title = '这台设备不能内嵌显示 3D 预览',
+    this.onOpenExternally,
+    this.onRetry,
+    this.detail = '',
   });
 
   final String projectDir;
@@ -1971,6 +2348,18 @@ class _PreviewUnsupportedPane extends StatelessWidget {
   final String preferred;
   final Future<void> Function(String text, String done) onCopy;
   final Future<void> Function()? onReveal;
+
+  /// 标题按失败面区分：设备本身没有内嵌预览 vs 内嵌预览这次没起来。
+  final String title;
+
+  /// 用系统浏览器打开预览文件（Windows 初始化失败时的兜底）。
+  final Future<void> Function()? onOpenExternally;
+
+  /// 就地重试（装好运行时后不用退出工作台）。
+  final Future<void> Function()? onRetry;
+
+  /// 原始诊断（只进折叠的「技术详情」；人话在上面的 [preferred] 里）。
+  final String detail;
 
   @override
   Widget build(BuildContext context) {
@@ -1984,7 +2373,8 @@ class _PreviewUnsupportedPane extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.view_in_ar_outlined, size: 36, color: p.ink4),
           const SizedBox(height: 10),
-          Text('这台设备不能内嵌显示 3D 预览',
+          Text(title,
+              textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink2)),
           const SizedBox(height: 6),
           ConstrainedBox(
@@ -1998,6 +2388,13 @@ class _PreviewUnsupportedPane extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
+            if (onOpenExternally != null)
+              FilledButton.icon(
+                key: const ValueKey('three-preview-open-external'),
+                onPressed: () => onOpenExternally!(),
+                icon: const Icon(Icons.open_in_new, size: 14),
+                label: const Text('用浏览器打开'),
+              ),
             OutlinedButton.icon(
               key: const ValueKey('three-preview-copy-path'),
               onPressed: projectDir.isEmpty ? null : () => onCopy(projectDir, '已复制项目路径'),
@@ -2017,6 +2414,13 @@ class _PreviewUnsupportedPane extends StatelessWidget {
                 icon: const Icon(Icons.folder_open_outlined, size: 14),
                 label: const Text('在文件夹中显示'),
               ),
+            if (onRetry != null)
+              OutlinedButton.icon(
+                key: const ValueKey('three-preview-retry'),
+                onPressed: () => onRetry!(),
+                icon: const Icon(Icons.refresh, size: 14),
+                label: const Text('重试'),
+              ),
           ]),
           if (projectDir.isNotEmpty) ...[
             const SizedBox(height: 10),
@@ -2025,6 +2429,15 @@ class _PreviewUnsupportedPane extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5)),
           ],
+          if (detail.trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: _TechDetails(
+                detail: detail,
+                palette: p,
+                bodyKey: const ValueKey('three-preview-unsupported-detail'),
+              ),
+            ),
         ]),
       ),
     );

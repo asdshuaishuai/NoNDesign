@@ -409,8 +409,11 @@ void main() {
       final offenders = <String>[];
       for (final file in libDir.listSync(recursive: true).whereType<File>()) {
         if (!file.path.endsWith('.dart')) continue;
-        if (file.path.endsWith(serviceFile)) continue;
-        final isHost = file.path.endsWith(hostFile);
+        // Windows 的 path 用 `\`：先归一化再和 POSIX 形态的常量比较，
+        // 否则服务自身会被当成消费者（历史假红）。
+        final posixPath = file.path.replaceAll('\\', '/');
+        if (posixPath.endsWith(serviceFile)) continue;
+        final isHost = posixPath.endsWith(hostFile);
         final code = _codeOnly(file.readAsStringSync());
         final tokens = isHost ? <Pattern>[...patterns, 'history'] : patterns;
         for (final token in tokens) {
