@@ -14,6 +14,7 @@
 | 4 | 视频 = 用代码创造视频与动漫；新增两种场景风格（**沙雕短剧** / **美式线条漫画**）；引入**导演台**、**剧本标准**、**TTS**；**联动音乐工作台制作配乐**（继「设计→热应用」之后的第二个跨模块联动，显式裁决） |
 | 5 | 音乐 = 编曲工作台（详见 plan-music-module.md），承担视频配乐联动 |
 | 6 | **所有工作台必须强绑定且强规范**（结构性纪律，见 §1） |
+| 7 | 视频渲染**引入游戏引擎**（2026-11-20 补充裁决）：选定 **Phaser 3**（vendored 运行时），`screenplay.json` 编译为引擎短片（见 §5.0） |
 
 ## 1. 工作台强绑定强规范（统一契约框架）
 
@@ -99,6 +100,43 @@
 
 ## 5. 视频：导演台 + 剧本标准 + 双风格 + TTS + 配乐联动
 
+### 5.0 引擎选型：Phaser 3（2026-11-20 裁决「引入游戏引擎」）
+
+**结论**：引入 **Phaser 3.x**（MIT，单文件可 vendored，WebGL/Canvas 双渲染面）作为「引擎短片」的
+2D 游戏引擎运行时；沿用现有沙箱——自包含 HTML + `file://` WebView + `VideoClipBridge` 桥，零外联。
+
+**候选对比（为什么不选别的）**：
+
+| 候选 | 结论 | 理由 |
+| --- | --- | --- |
+| Phaser 3 | ✅ 采用 | 完整 2D 引擎：Scene / Tween / Timeline / Arcade+Matter 物理 / 粒子 / 相机（闪白、震屏、变焦）/ 遮罩 / 滤镜 / 声音；单文件约 1.2MB 可 vendored；有 HEADLESS 模式可做确定性自检；与 `assets/video/clip/` 沙箱同构 |
+| PixiJS 8 | ❌ | 只是渲染器：tween / 物理 / 场景 / 时间线全部要自建，等于自造半个引擎 |
+| Godot 4 web export | ❌ | 单项目 wasm+pck ≥ 20–40MB；`file://` 下 fetch/wasm MIME 与 COOP/COEP 线程限制，需要本地 HTTP 服务（违背零端口纪律）；构建 pck 需要 Godot 工具链（违背零外部工具链纪律） |
+| Unity WebGL | ❌ | 许可、体积、加载器三面全不可行 |
+| Flame（Flutter 原生） | ❌（备选记录） | 预览可原生渲染且理论上能逐帧截图，但产物不再是可脱离 NaN 打开的自包含 HTML，引擎生态也小一个量级 |
+| 自写 Canvas/DOM（现状 `ND.scene`） | 保留 | 已发布样片与 science / screenplay v1 规范不动，作为轻量渲染面并存（三渲染面：矢量算式动画 / DOM 动效合成 / 引擎短片） |
+
+**架构（引擎短片 = 编译产物，不是手写 Phaser 代码）**：
+
+* 事实源仍是 `screenplay.json`（§5.1）；**Agent 只写 JSON，不写 Phaser 代码**——确定性、可校验、可回放。
+* 编译器 `assembleEnginePlayer(screenplay, stylePack)` → 单文件 HTML：内嵌 `phaser.min.js` +
+  场景解释器 `nd-stage.js` + screenplay 字面量 + 风格包（全部代码绘制，零图片资源）。
+* 解释器把剧本编译成 Phaser Scene：shot = 时间线段；台词 = 字幕/气泡；动作 = 预设 tween 组；
+  转场 = 相机/遮罩；角色 = 矢量绘制（Graphics → RenderTexture 缓存）。
+* 运行时**固定步进 30fps**；`seek(t)` = 重置场景 + 按 1/30s 步进重放 `t×30` 帧（≤3 分钟片子
+  5400 步，可接受）——任意时刻回放同一帧；随机数一律种子化（`seed` 字段），不用 wall clock。
+* 桥扩展（`VideoClipBridge` v2，向后兼容 v1）：`ready/state` 照旧，新增 `shot`（当前镜头
+  id/进度）、`markers`（自检结果）、`audio`（beat/ended，配乐联动用）。
+* 播放控制 `window.__ndClip` 命令面不变（play/pause/seek/restart/setLoop），
+  Dart 侧 `VideoClipWebPlayback` 不改。
+* vendoring：`app/assets/video/engine/phaser.min.js` + `manifest.json`（版本 + SHA256 + 字节数，
+  沿用 `three.module.js` / wasm_run 纪律）；`docs/video-engine-contract.md` 记录版本、升级流程、
+  桥契约、解释器 schema 映射。
+* 验证：Dart 侧 `verifyScreenplay`（schema）+ 页面内 `?verify=1` 自检（逐镜头步进，检查台词出场、
+  转场触发、时长和，经 `markers` 回传）——「机械对照」升级为引擎实测。
+* 平台：沿用现有 WebView 矩阵（macOS/iOS 应用内；Win/Linux 仍降级）。Windows 原生 WebView2
+  接线是独立工作项（视频工作台全平台化的前置，不在本批）。
+
 ### 5.1 剧本标准（新契约文档 `docs/video-screenplay-contract.md`）
 
 `screenplay.json`（`v:1`）：幕 → 场 → 镜头（`id`、场景、镜头语言、时长、台词
@@ -110,15 +148,15 @@
 剧本树 ｜ 分镜时间线（镜头条）｜ 镜头审查卡（对照检查）+ 配音轨 + 配乐轨 ｜
 成片预览。四区与右侧 chat 分工同 §2。
 
-### 5.3 双风格场景包（vendored JS 风格库，three-live 同族）
+### 5.3 双风格场景包（解释器插件，全部代码绘制）
 
 | 风格 | 内容 |
 | --- | --- |
-| `silly_skit` 沙雕短剧 | 几何/简笔角色库 + 夸张弹跳运动预设 + 大字幕梗卡规范 + 点音效组 |
-| `line_toon` 美式线条漫画 | 单线条人物 + 对话气泡 + 分格转场（panel wipe）+ 滑稽物理预设 |
+| `silly_skit` 沙雕短剧 | 几何/简笔角色库 + 夸张弹跳运动预设（outBack/spring 参数族）+ 大字幕梗卡规范 + 点音效组 |
+| `line_toon` 美式线条漫画 | 单线条人物 + 对话气泡 + 分格转场（panel wipe，相机遮罩实现）+ 滑稽物理预设 |
 
-风格包 = 角色库 + 运动/转场预设 + 字幕规范 + 音效组；编译时按 `spec.style` 选择，
-确定性、零外联。默认风格（`default`）保留。
+风格包 = 角色库（Phaser Graphics 程序化绘制）+ 运动/转场预设 + 字幕规范 + 音效组；
+解释器按 `screenplay.style` 选择，确定性、零外联、零图片资源。默认风格（`default`）保留。
 
 ### 5.4 TTS（离线）
 
@@ -134,7 +172,8 @@ video 项目 `musicRef` 指向音乐项目；播放经桥接共享时钟同步�
 
 `video_list / create / read / patch / verify / inspect` + 既有 `video_review`；
 TTS 渲染 `video_tts_render`；联动 `video_link_music`。校验器：镜头时长 > 0、台词非空、
-tts 行与台词一一对应、`musicRef` 合法、风格包在场。
+tts 行与台词一一对应、`musicRef` 合法、风格包在场。`verify` 双档：Dart schema 校验 +
+播放页 `?verify=1` 引擎自检（`markers` 回传）；`video_review` 保留为人工审查面。
 
 ## 6. 音乐：编曲工作台（承接 plan-music-module.md）
 
@@ -150,13 +189,16 @@ tts 行与台词一一对应、`musicRef` 合法、风格包在场。
 | 2 | 全局执行/结果双面组件（进度线 + 产物卡），四工作台接入骨架 | 双面组件测试 |
 | 3 | 设计：验证原型绑定原型 + `design_verify_prototype` 收口 + 迁移过滤 | §3 验收清单 |
 | 4 | 3D：建模视口（大纲/检查器/gizmo 桥）+ `scene.json` 契约 | §4 校验器 + 视口测试 |
-| 5 | 视频：剧本标准 + 导演台 + 双风格包 + TTS | §5 契约测试 |
+| 5a | 视频引擎接入：Phaser vendored（manifest/SHA256）+ 解释器 + `assembleEnginePlayer` + 桥 v2 + 既有样片回归 | 引擎短片单测：字节确定性 / seek 重放同帧 / 桥 v2 兼容 v1 |
+| 5b | 视频：剧本标准 + 导演台 + 双风格包 + TTS | §5 契约测试 + `?verify=1` 自检全绿 |
 | 6 | 音乐：按 plan-music-module 批次 1–4 | 该文档验收 |
 | 7 | 视频 ↔ 音乐配乐联动 | 共享时钟/`musicRef` 校验 |
-| 8（拉伸） | CSG、音频导出、MIDI、音乐局域网分享 | 另立裁决 |
+| 8（拉伸） | CSG、音频导出、MIDI、音乐局域网分享、Windows WebView2 接线 | 另立裁决 |
 
 ## 8. 明确不做 / 待裁决
 
 * 云 TTS、采样音源、实时协作、出版级排版：不做。
 * 热应用嵌音乐播放器（新跨模块联动）、验证原型是否允许独立导出包：**待裁决**，默认不做。
 * 3D 布尔/曲线编辑、视频导出成片：拉伸批次。
+* Godot / Unity / PixiJS / Flame 已裁决不采用（理由见 §5.0）；引擎短片 v1 **只走剧本解释器**，
+  不允许 Agent 手写 Phaser 代码（保确定性与可校验性）。
