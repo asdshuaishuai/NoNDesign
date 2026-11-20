@@ -139,8 +139,10 @@
   桥契约、解释器 schema 映射。
 * 验证：Dart 侧 `verifyScreenplay`（schema）+ 页面内 `?verify=1` 自检（逐镜头步进，检查台词出场、
   转场触发、时长和，经 `markers` 回传）——「机械对照」升级为引擎实测。
-* 平台：沿用现有 WebView 矩阵（macOS/iOS 应用内；Win/Linux 仍降级）。Windows 原生 WebView2
-  接线是独立工作项（视频工作台全平台化的前置，不在本批）。
+* 平台：macOS/iOS/Android 的应用内 WebView 已有；Windows 的 3D/热应用预览已走
+  WebView2（`webview_windows`，2026-11-20），视频工作台的 WebView 播放面仍需另接
+  Windows 分支（独立工作项）；Linux 无内嵌 WebView（降级）。`webview_all` 全量替换
+  已评估、不采用，见 [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) §1。
 
 > **版本研究回填（2026-11-20）**：Phaser 4.2.1 已是当前主线（WebGL1 基线、Stencil/Mesh2D），
 > Phaser 3.90 是 v3 最后版本。本项目只用 Sprite/Container/Camera/Text/Mask，迁移面小；

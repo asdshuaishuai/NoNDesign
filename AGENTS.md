@@ -18,7 +18,8 @@ AI 原生创作工作台。**一句话 → 产品需求设计文档 → 完整�
 文档分层、决策台账、状态口径与施工顺序都在那里。当前**未施工**的方案线：
 `docs/plan-creative-workbench.md`（交互升级 + 四模块 + 强绑定强规范）、
 `docs/plan-music-module.md`（音乐/编曲）、
-`docs/plan-cross-platform-runtime.md`（webview_all / 引擎 wasm SDK / flutter_scene 裁决）。
+`docs/plan-cross-platform-runtime.md`（WebView 现状：webview_flutter + webview_windows；
+引擎 wasm SDK；flutter_scene 裁决）。
 方案文档写的是目标态，不要当作现状引用；两者冲突时以文档总纲的决策台账为准。
 
 ## 架构边界（改代码前先读）
@@ -117,9 +118,10 @@ plugins/             独立插件资产（视频制作说明）
 | 连接桌面（桌面宿主） | ✅ 设置卡启停/地址/连接码 | — | — |
 | 系统分享 / 导出面板 | ❌ 未装插件 | ❌ | ❌ |
 
-> 上表描述**当前实现**（2026-11-20）。同日定稿的全平台运行时方案（未施工）会改变
-> WebView / wasm 宿主两行：`webview_all` 让 Windows/Linux 也具备应用内 WebView，
-> 引擎 wasm SDK 跑进 WebView 后 iOS/Android 的本地引擎路径重新评估。台账见
+> 上表描述**当前实现**（2026-11-20）。WebView 行已更新：Windows 3D/热应用预览走
+> `webview_windows`（WebView2），Linux 仍无应用内 WebView；`webview_all` 全量替换
+> 评估后**不采用**（备选，见 plan §1）。wasm 宿主行仍待迁移：引擎 wasm SDK 跑进
+> WebView 后 iOS/Android 的本地引擎路径重新评估。台账见
 > [docs/README.md](docs/README.md) §2，细节见
 > [docs/plan-cross-platform-runtime.md](docs/plan-cross-platform-runtime.md)。
 
@@ -265,8 +267,8 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
   Linux 无应用内 WebView（预览降级为浏览器/路径）。视频工作台的矢量代码动画
   全平台一致（纯 Dart 逐帧）；**mp4 产物内嵌播放仍只在 macOS/iOS/Android**
   （`VideoPlayerSurface` 按能力矩阵判平台，Windows/Linux 是路径行降级）。
-  **计划中**：`webview_all` 全平台替换，见 `docs/plan-cross-platform-runtime.md`
-  §1（方案定稿、未施工；落地后本节按方案更新）。
+  **`webview_all` 已评估、不采用**（新包 + 全量替换风险；见
+  `docs/plan-cross-platform-runtime.md` §1）；Linux 需要内嵌 WebView 时再单独评估。
 - macOS Runner 已关闭 App Sandbox（本地文件 + `~/.nondesign`）；不要随手加回 sandbox
   而不补 network client / app container。
 
@@ -363,8 +365,8 @@ python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/
 - **Windows 预览已应用内**：3D / 热应用走 WebView2（`webview_windows`）；
   Linux 仍无应用内 WebView（降级浏览器/路径）。视频 mp4 产物内嵌播放仍只在
   macOS/iOS/Android，Windows/Linux 是「复制路径/在文件夹中显示」降级面
-  （`shelf_video_player_test.dart` 按能力矩阵分平台断言）。全平台 WebView 替换
-  方案见 `docs/plan-cross-platform-runtime.md` §1（未施工）。
+  （`shelf_video_player_test.dart` 按能力矩阵分平台断言）。`webview_all` 全量替换
+  已评估、**不采用**（见 `docs/plan-cross-platform-runtime.md` §1）；Linux 仍是缺口。
 - API Key 明文存本机 `SharedPreferences`（并镜像 `~/.nondesign/settings.json`）；
   Keychain 未接。
 
