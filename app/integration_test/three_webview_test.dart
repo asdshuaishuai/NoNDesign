@@ -95,7 +95,16 @@ void main() {
     expect(html, isNot(contains('importmap')));
     expect(html, isNot(contains('./three.module.js')));
     expect(html, isNot(contains('unpkg.com')));
-    expect(html, isNot(contains('https://')));
+    // `https://` appears in three.module.js JSDoc comments and in the
+    // `http://www.w3.org/...` XML namespaces used by createElementNS — neither
+    // is a network reference. Assert on live URL-bearing syntax instead of the
+    // literal substring (the old check failed on comments alone).
+    final liveExternalRef = RegExp(
+      r'''(?:src|href)\s*=\s*["']https?://|url\(\s*["']?https?://|fetch\(\s*["']https?://|import\(\s*["']https?://''',
+      caseSensitive: false,
+    );
+    expect(liveExternalRef.hasMatch(html), isFalse,
+        reason: 'generated preview contains a live external URL reference');
 
     final messages = <Map<String, dynamic>>[];
     final raw = <String>[];
@@ -164,8 +173,18 @@ void main() {
     expect(meshes as int, greaterThanOrEqualTo(2), reason: '土星场景应有行星 + 环两个 mesh');
     expect(triangles, isA<int>());
     expect(triangles as int, greaterThan(100), reason: '球体/圆环的三角面数远大于 100');
-    expect(user['planet'], isTrue, reason: 'scene.js 的 metrics 必须回传（证明代码真的执行了）');
-    expect(user['ring'], isTrue);
+    // 页面有两种执行面：默认 three-live 沙箱（Worker → GLB），Worker 被拦 /
+    // 空场景时降级到页内 r160（legacy）。两者都必须证明 scene.js 真的跑了：
+    // legacy 回传 scene.js 自己的 metrics；live 的 metrics 由 viewer 的 GLB
+    // 网格统计给出，没有 user 字段。
+    final path = '${payload['path']}';
+    if (path == 'legacy') {
+      expect(user['planet'], isTrue, reason: 'scene.js 的 metrics 必须回传（legacy 路径）');
+      expect(user['ring'], isTrue);
+    } else {
+      expect(path, 'three-live', reason: 'metrics 必须来自 live 或 legacy 执行面');
+      expect(payload['sandbox'], isTrue, reason: 'three-live 必须走沙箱 Worker');
+    }
 
     // 截图桥与四方位桥存在（行为由工作台的按钮门控，这里只确认可调用）。
     await controller.runJavaScript('window.__non3d_screenshot && window.__non3d_screenshot("boot")');
@@ -176,7 +195,21 @@ void main() {
       await tester.pump();
     }
     final shot = messages.where((m) => m['kind'] == 'screenshot').toList();
-    expect(shot, isNotEmpty, reason: '截图桥必须能在真机上回传一张 PNG');
+    final probe = await controller.runJavaScriptReturningResult('''
+      (function () {
+        var el = document.getElementById('non3d-live');
+        var out = { hasEl: !!el, hasFn: !!(el && el.toDataURL), hasCanvas: !!(el && el.canvas) };
+        try {
+          var data = el && el.toDataURL ? el.toDataURL('image/png') : '';
+          out.length = data ? data.length : 0;
+        } catch (e) {
+          out.error = String(e);
+        }
+        return JSON.stringify(out);
+      })()
+    ''');
+    expect(shot, isNotEmpty,
+        reason: '截图桥必须能在真机上回传一张 PNG；messages=$messages probe=$probe');
     expect('${shot.first['payload']}', startsWith('data:image/png;base64,'));
     expect('${shot.first['tag']}', 'boot');
   });

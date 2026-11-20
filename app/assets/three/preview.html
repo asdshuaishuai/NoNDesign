@@ -416,16 +416,26 @@ window.__non3d_legacy_boot = function () {
 
   window.__non3d_screenshot = function (tag) {
     var el = document.getElementById('non3d-live');
-    try {
-      var data = el && el.toDataURL ? el.toDataURL('image/png') : '';
-      if (!data || data.length < 1024) {
-        __report({ kind: 'unsupported', message: 'screenshot_empty' });
-        return;
+    // 首帧刚上报时 WebGL 画布可能还没完成第一次合成：WKWebView 上
+    // canvas.toDataURL 会短暂返回空串。重试几帧再判定失败，避免用户刚看到
+    // 「预览就绪」立刻点截图就吃一个 screenshot_empty。
+    function capture(retries) {
+      try {
+        var data = el && el.toDataURL ? el.toDataURL('image/png') : '';
+        if ((!data || data.length < 1024) && retries > 0) {
+          setTimeout(function () { capture(retries - 1); }, 120);
+          return;
+        }
+        if (!data || data.length < 1024) {
+          __report({ kind: 'unsupported', message: 'screenshot_empty' });
+          return;
+        }
+        __report({ kind: 'screenshot', payload: data, tag: tag || 'shot' });
+      } catch (e) {
+        __report({ kind: 'error', message: String(e) });
       }
-      __report({ kind: 'screenshot', payload: data, tag: tag || 'shot' });
-    } catch (e) {
-      __report({ kind: 'error', message: String(e) });
     }
+    capture(4);
   };
 
   window.__non3d_turntable = function () {
