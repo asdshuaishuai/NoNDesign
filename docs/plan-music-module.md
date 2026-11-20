@@ -51,8 +51,8 @@ README 开头一句话、site/index.html Hero 与四模块卡（→ 五模块卡
       "clef": "treble",
       "measures": [
         { "notes": [
-            { "pitch": "C5", "dur": "q", "acc": null, "dot": 0, "tie": null },
-            { "pitch": "E5", "dur": "e", "acc": null, "dot": 0, "tie": "start" }
+            { "pitch": "C5", "dur": { "num": 1, "den": 4 }, "acc": null, "dot": 0, "tie": null },
+            { "pitch": "E5", "dur": { "num": 1, "den": 8 }, "acc": null, "dot": 0, "tie": "start" }
         ] }
       ]
     }
@@ -61,7 +61,10 @@ README 开头一句话、site/index.html Hero 与四模块卡（→ 五模块卡
 ```
 
 * `pitch`：科学音名（`C4`–`B6`；鼓轨用 `kick/snare/hihat/openhat/crash/ride/tom`）。
-* `dur`：`w/h/q/e/s`（全/二分/四分/八分/十六分）；`dot` 附点数（0/1）；`tie`：`start|continue|null`。
+* `dur`：有理数 `{num, den}`（全音符 = 1；四分 = 1/4，八分 = 1/8）；`dot` 附点数（0/1）；
+  `tie`：`start|continue|null`；`tuplet` 可选 `{n, in, group}`（三/五连音；七连音 v1 拒绝）。
+* 播放层编译成**整数 tick**（建议 `ppq = 3840`），运行时不再出现浮点拍点；布局/显示层直接用有理数。
+* 关系对象（`beam`/`tie`/`slur`）用独立对象引用事件 ID，不在单个 note 上写 `beam=true`。
 * `acc`：`sharp|flat|null`（记谱升/降；合成按半音折算）。
 * 空小节省略 `notes`（整小节休止）；和弦 = 同一拍位多条 note。
 * 轨道数上限 8（音轨 6 + 鼓轨 2），小节上限 256——防失控，校验器报 `score_too_large`。
@@ -70,6 +73,10 @@ README 开头一句话、site/index.html Hero 与四模块卡（→ 五模块卡
 **为什么是 JSON 不是 DSL**：Agent 工具要确定性读写（读/改小节、补拍），JSON 可校验、
 可 diff、可被编辑器与工具双端消费；与 video timeline+spec JSON 同族。人类不手写它——
 人类画五线谱（§3），Agent 经工具改它。
+
+> **研究回填（2026-11-20）**：有理数时值、tick 编译、CustomPainter + SMuFL 排版、
+> Web Audio 调度与六音色配方、模板+DP+规则编曲的施工细节见
+> [research/music-arrangement-howto.md](research/music-arrangement-howto.md)。
 
 ## 3. 五线谱绘制器（编辑器，桌面优先）
 
@@ -92,6 +99,8 @@ README 开头一句话、site/index.html Hero 与四模块卡（→ 五模块卡
 * **调度**：标准 lookahead（25ms 定时器排 100ms 窗口内的音符事件到 `AudioContext`
   时钟）；播放/暂停/停止、每轨音量/静音、拍位回传（`window.NONMUSIC` 桥消息族：
   `beat` / `ended` / `error`，与 three 的 `window.NON3D` 同模式）。
+* 播放运行在 WebView 播放页内（纯 Flutter 没有 `AudioContext`）；若需原生播放，
+  用 `PlaybackEngine` 接口接 `flutter_soloud`（MIT）作为备选，不改变 score.json 事实源。
 * **合成音色（纯代码，编曲 v1 六种 + 鼓组）**：
   `piano`（三角波+正弦混合快攻）、`strings`（锯齿慢攻+低通）、`bass`（正弦低八度）、
   `bell`（FM 正弦）、`organ`（加法正弦叠置）、`pluck`（衰减锯齿）；鼓组 = 噪声脉冲 +

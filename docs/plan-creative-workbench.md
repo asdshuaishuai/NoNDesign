@@ -142,6 +142,12 @@
 * 平台：沿用现有 WebView 矩阵（macOS/iOS 应用内；Win/Linux 仍降级）。Windows 原生 WebView2
   接线是独立工作项（视频工作台全平台化的前置，不在本批）。
 
+> **版本研究回填（2026-11-20）**：Phaser 4.2.1 已是当前主线（WebGL1 基线、Stencil/Mesh2D），
+> Phaser 3.90 是 v3 最后版本。本项目只用 Sprite/Container/Camera/Text/Mask，迁移面小；
+> 施工时在 **4.2.1 / 3.90 中锁定一个版本**（建议 4.2.1，3.90 作老 WebGL 降级），不要浮动升级。
+> 角色/关键帧/确定性/资产预算的完整工艺见
+> [research/video-animation-howto.md](research/video-animation-howto.md)。
+
 ### 5.1 剧本标准（新契约文档 `docs/video-screenplay-contract.md`）
 
 `screenplay.json`（`v:1`）：幕 → 场 → 镜头（`id`、场景、镜头语言、时长、台词
@@ -163,10 +169,13 @@
 风格包 = 角色库（Phaser Graphics 程序化绘制）+ 运动/转场预设 + 字幕规范 + 音效组；
 解释器按 `screenplay.style` 选择，确定性、零外联、零图片资源。默认风格（`default`）保留。
 
-### 5.4 TTS（离线）
+### 5.4 TTS（离线，含许可红线）
 
-OS 音色离线渲染：macOS `say -o` / Windows SAPI（PowerShell）渲染 WAV → base64 内嵌
-播放页（确定性、零网络）。台词编辑在导演台；**不做云 TTS**。
+主路径：**sherpa-onnx（Apache-2.0）+ 许可清晰的中文模型**（Matcha zh-baker 约 73MB / Kokoro int8），
+Dart FFI 五端统一；句级真实时长 + 字级估算回写镜头时长；台词编辑在导演台；**不做云 TTS**。
+OS 系统音色（macOS `say` / Windows SAPI / iOS AVSpeech / Android TTS）只做**草稿预览**——
+Apple macOS SLA 把 System Voices 限定为个人非商业用途，禁止录制/公开分享/商业再分发。
+详见 [research/video-animation-howto.md](research/video-animation-howto.md) §5。
 
 ### 5.5 音乐联动（新裁决，第二条跨模块通道）
 

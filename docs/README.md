@@ -70,11 +70,21 @@
 | [release-installers.md](release-installers.md) | 安装包来源、本地复现、签名与限制 |
 | [release-notes.md](release-notes.md) | Release 页面文案模板（`__VERSION__` 占位） |
 
+### 1.7 专题研究（可施工工艺）
+
+| 文档 | 状态 | 内容 |
+| --- | --- | --- |
+| [research/music-arrangement-howto.md](research/music-arrangement-howto.md) | 调研结论（供施工） | 编曲：score.json 时间模型、CustomPainter 五线谱、SMuFL/Bravura、Web Audio 调度与六音色配方、模板+DP+规则编曲、校验与 A/B、许可证 |
+| [research/video-animation-howto.md](research/video-animation-howto.md) | 调研结论（供施工） | 视频动画/沙雕短剧：工艺与节奏量化、screenplay/rig/clip 数据模型、cutout 木偶、30fps 确定性运行时、离线 TTS（sherpa-onnx；OS 音色仅草稿）、口型/音效、导出与验收 |
+| [research/tts-offline-appendix.md](research/tts-offline-appendix.md) | 原始调研全文 | 离线 TTS 的平台细节、模型/许可证对照、时间对齐、viseme、音效与配乐联动（视频文档 §5 的出处） |
+
 ## 2. 决策台账（按时间倒序）
 
 | 日期 | 裁决 | 状态 | 事实源 |
 | --- | --- | --- | --- |
 | 2026-11-20 | **愿景：代码创造世界**——人提出世界，Agent 写源代码，工作台让世界可进入、可修改、可验证、可带走；四个工作台是同一底座的四视图 | **生效（方向与取舍依据）** | vision.md |
+| 2026-11-20 | **音乐编曲实现路线**：score.json 有理数时值 → 整数 tick（ppq 3840）；CustomPainter 纯 Dart 排版；Web Audio 自写 lookahead；模板+功能和声+DP 编曲，validator 硬门 | 调研结论（施工依据） | research/music-arrangement-howto.md |
+| 2026-11-20 | **视频/沙雕动画实现路线**：cutout 木偶 + 30fps 整数帧 + reset/replay seek + 种子随机；TTS 主路径 sherpa-onnx，**OS 系统音色仅草稿**（Apple SLA 限制商业发布） | 调研结论（施工依据） | research/video-animation-howto.md |
 | 2026-11-20 | 所有工作台**强绑定且强规范**（项目↔工作台、工作台↔事实源、Agent↔工具面、执行归属；每模块 schema+校验器+工具族+双面四件套） | 方案定稿 | plan-creative-workbench §1 |
 | 2026-11-20 | 视频引入游戏引擎：**Phaser 3**（vendored），剧本 JSON 编译为引擎短片；Godot/Unity/PixiJS/Flame 否决 | 方案定稿 | plan-creative-workbench §5.0 |
 | 2026-11-20 | 视频工作台：导演台 + `screenplay.json` 标准 + `silly_skit`/`line_toon` 双风格 + 离线 TTS + **视频→音乐配乐联动** | 方案定稿 | plan-creative-workbench §5 |
