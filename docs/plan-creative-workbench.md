@@ -149,6 +149,12 @@
 > 施工时在 **4.2.1 / 3.90 中锁定一个版本**（建议 4.2.1，3.90 作老 WebGL 降级），不要浮动升级。
 > 角色/关键帧/确定性/资产预算的完整工艺见
 > [research/video-animation-howto.md](research/video-animation-howto.md)。
+>
+> **OpenMotion / HyperFrames 对照调研（2026-11-21，用户裁决）**：两者都是
+> Apache-2.0 的“HTML-as-video”工具，但**只参考、不引入**——不做依赖、不内置
+> 进程、不套壳、不设导出适配器；只借 Motion.md/版本/导出纪律。3D 栈
+> （three.js / three-live）是明确例外；本方案 **Phaser 3 裁决不变**。
+> 完整结论见 [research/openmotion-hyperframes.md](research/openmotion-hyperframes.md)。
 
 ### 5.1 剧本标准（新契约文档 `docs/video-screenplay-contract.md`）
 

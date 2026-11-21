@@ -62,6 +62,12 @@ plugins/             独立插件资产（视频制作说明）
   WebView 内 JS 调用不能从 Dart 中断，但跑在平台 Web 进程而非 Flutter UI isolate；
   看门狗超时即销毁并重建离屏会话。**不要**把引擎调用搬回 UI isolate，也不要恢复
   「原生 wasmtime + 平台动态库」作为主路径。
+- **外部创作工具只参考、不引入（2026-11-21 用户裁决）**：OpenMotion、HyperFrames
+  及同类第三方创作产品/运行时**不做依赖、不内置进程、不套壳、不设导出适配器**；
+  只借鉴它们的规范、协议与交互（如 Motion.md、版本/导出/MCP 纪律）。我们是做
+  自己的产品，不是别人的工作台。**3D 栈（three.js / three-live）是明确例外**；
+  视频工作台此前已裁决的 Phaser 3 引擎选型不因这次调研改变（若用户进一步收紧，
+  再单独改方案）。
 - **两道门是不同的门**：画布走 `apply_human_op_in`，智能体走 `apply_agent_op_in`
   （`gate:'agent'`）。只读命令走 session/检视路由，绝不能进变更路径。
 - **移动端本地引擎默认开启**（2026-11-20 起）：classic wasm 跑在 iOS/Android 的
