@@ -1,4 +1,4 @@
-# 创意工作台交互升级与模块规范（2026-11-20 定稿，未施工）
+# 创意工作台交互升级与模块规范（2026-11-20 定稿，2026-11-22 增补 ink_line / 3dcodeverse / pixelfx，未施工）
 
 > 状态：**方案定稿，待施工**。本文覆盖全局交互升级与四个工作台的能力/联动裁决；
 > 音乐模块的技术面（谱面/合成/编译器）以 [plan-music-module.md](plan-music-module.md) 为准。
@@ -16,10 +16,14 @@
 | 1 | 全局交互：强化工作台的**执行过程与结果**呈现；Agent 执行保持在**右侧 chat** |
 | 2 | 设计 = 产品 → 交互的一站式「验证式热应用」；该产物**绑定原型本身**，**不再列入热应用模块** |
 | 3 | 3D = **建模**（three.js 实现），强化工作区形态与建模能力 |
-| 4 | 视频 = 用代码创造视频与动漫；新增两种场景风格（**沙雕短剧** / **美式线条漫画**）；引入**导演台**、**剧本标准**、**TTS**；**联动音乐工作台制作配乐**（继「设计→热应用」之后的第二个跨模块联动，显式裁决） |
+| 4 | 视频 = 用代码创造视频与动漫；新增两种场景风格（**沙雕短剧** / **美式线条漫画**）；引入**导演台**、**剧本标准**、**TTS**；**联动音乐工作台制作配乐**（继「设计→热应用」之后的第二个跨模块联动，显式裁决）；2026-11-22 增补第三种风格，见 #8 |
 | 5 | 音乐 = 编曲工作台（详见 plan-music-module.md），承担视频配乐联动 |
 | 6 | **所有工作台必须强绑定且强规范**（结构性纪律，见 §1） |
 | 7 | 视频渲染**引入游戏引擎**（2026-11-20 补充裁决）：选定 **Phaser 3**（vendored 运行时），`screenplay.json` 编译为引擎短片（见 §5.0） |
+| 8 | 视频新增**第三种风格 `ink_line`（墨线手绘）**（2026-11-22 用户裁决）：参考 `JDhruv14/line-art-animation` 的线稿/步态/昼夜规则，**不引入其 TypeScript/SVG 运行时**；`silly_skit` / `line_toon` 保留 |
+| 9 | 3D **直接引入 threejs-live + 3dcodeverse**（2026-11-22 用户裁决）：采用 3dcodeverse 的 skill/harness 契约（Apache-2.0）与 three-live 执行面；Python/Blender/CadQuery/URDF 运行时不进入产品进程，检查器按 Dart/JS 等价实现（见 §4） |
+| 10 | 视频 **直接引入 pixelfx 特效子集**（2026-11-22 用户裁决）：只取火焰/冰霜/风/爆炸/闪电等**特效**，**不含人物/角色**；`actor`/`rig`/`poses`/`act`/`moves` 与 on-body 特效一律不引入（见 §5.3、§5.6） |
+| 11 | **统一创作 skill `creative-workbench`**（2026-11-22）：把 intake/direction/structure/build/check/blind-judge/refine/deliver 标准化，视频、3D、设计共用；`awesome-opus5-5-videos` 只提供提示词结构参考，不引入其作品/服务（见 `docs/skills/creative-workbench/`） |
 
 ## 1. 工作台强绑定强规范（统一契约框架）
 
@@ -73,6 +77,34 @@
 | 视频 | 成片首帧 + 时长 + 「播放 / 分镜表」 |
 | 音乐 | 谱面缩略 + 时长/轨道数 + 「播放」 |
 
+### 2.4 统一 creative-workbench skill（标准化）
+
+所有创作线共用一份 skill 契约：[`docs/skills/creative-workbench/SKILL.md`](skills/creative-workbench/SKILL.md)。
+它把「创意」拆成可检查的七步，而不是一段万能提示词：
+
+```
+intake → direction → structure → build → check → blind judge → refine → deliver
+```
+
+**标准四件套**（与 §1.2 的四件套对齐）：
+
+| 件 | 内容 |
+| --- | --- |
+| `spec.json` | 请求：kind/track、prompt、must/must-not、dims/duration、references、style、output |
+| `plan.json` | 精确数字 + acceptance：3D 的 parts/dims/materials，视频的 shots/beats/duration |
+| `src/` | 可执行源；code 模式是事实源，scene 模式由 `scene.json` 编译 |
+| `artifacts/` + `judge/rNN/` | 渲染/测量证据；blind judge 的 brief/montage/judgment/score |
+
+**四条跨线硬规则**：
+
+1. **代码是真相，产物是派生物**；GLB/PNG/MP4/sheet 都可重建。
+2. **确定性门先行，视觉判断殿后**；门 ERROR 直接 cap 分数，视觉不能翻案。
+3. **生成者与评审者分离**；judge 只看 brief + 图，不看代码/推理。
+4. **交付最佳轮，不是最后一轮**；每轮 `rNN` 可回退。
+
+该 skill 不引入新运行时：3D 走 three-live，视频走应用 WebView，VFX 走过滤后的
+pixelfx 子集；Python/Blender/headless Chrome 只在开发期参考。
+
 ## 3. 设计：验证式原型一站式（绑定原型）
 
 * **裁决变更**：验证式热应用**不再进热应用模块列表**，绑定设计项目本身。
@@ -88,22 +120,52 @@
   不静默删除用户数据）。
 * 验收：项目内 prototype 生成 / 覆盖验证结果 / 入口可达 / 热应用列表不含。
 
-## 4. 3D：建模工作台强化
+## 4. 3D：建模工作台 + 3dcodeverse harness
 
-* 定位：three.js 实现的**建模**工作台（从「场景展示」升级为「建模」）。
+* 定位：three.js 实现的**建模**工作台（从「场景展示」升级为「建模」）；执行面 =
+  vendored **three-live 1.4.0** 沙箱，编辑面 = 大纲/视口/检查器。
+* **直接引入（2026-11-22 用户裁决）**：threejs-live + 3dcodeverse 的
+  **skill/harness 契约**（Apache-2.0）——控制器/语言 skill、`plan.json` schema、
+  确定性门阈值、judge rubric、`spec/src/artifacts/judge` 工作区布局。
+  **不引入** Python CLI / Blender / CadQuery / URDF / moderngl 运行时（产品无 Python
+  子进程）；需要的检查器用 Dart/JS 等价实现。数据集 CC-BY-NC-SA 不随产品分发。
+* **双 authoring 模式**（解决 `scene.json` 与「code is truth」的冲突）：
+
+| 模式 | 事实源 | 适用 | 编辑器 |
+| --- | --- | --- | --- |
+| `scene` | `scene.json`（v1：nodes/transform/material/env/camera，节点 ≤200） | 手工建模、图元/变换/材质、轻量场景 | 大纲/视口/检查器直接改 JSON；编译成 `src/scene.js` 预览/导出 |
+| `code` | `src/*.js` | 一句话生成、3dcodeverse harness、复杂世界/shader | 源码为主；检查器读派生 scene graph，编辑走受控 patch；禁止整文件重写 |
+
+  新空场景默认 `scene`；生成/harness 路径默认 `code`。两种模式共用 three-live、
+  同一套门/judge/artifacts；`code` 模式的 `scene.json` 是**派生投影**，不是第二真相。
+* **工作区**：`spec.json`（track/language/prompt/must/dims/references）+
+  `plan.json`（精确数字 + acceptance）+ `src/` + `artifacts/` + `judge/rNN/`。
 * **工作区形态**：三栏 = 大纲（场景树）｜视口（Orbit 相机、网格、拾取、变换 gizmo
-  move/rotate/scale、吸附）｜检查器（对象变换/材质/几何参数）。视口 = WebView 内嵌
-  vendored `three.module.js`（已在库），编辑事件经桥回 Dart 落事实源。
-* **事实源**：`scene.json`（`v:1`）：`nodes[{id, primitive, params, transform, material,
-  parent}]` + 环境（灯光/背景）+ 相机；上限（节点 200）。既有 scene spec / pass 管线
-  作为**生成管线**保留（brief → scene.json → 检查）。
-* **工具面**：与强规范命名对齐 `three_list / create / read / patch / verify / inspect`；
-  既有 `three_pass / three_continue` 保留为生成推进。
-* **校验器**：图元参数域、变换数值有限、材质参数域、父级引用完整、节点/尺寸上限。
+  move/rotate/scale、吸附）｜检查器（对象变换/材质/几何参数）；现有 scene spec /
+  pass 管线保留为**生成管线**（brief → plan → scene/code → check）。
+* **轨道**：v1 做 `static_object`（threejs）、`scene`（scene_threejs）、
+  `graphics`（glsl_shader）；`articulated_object`（URDF/Blender）列入 backlog，
+  先用 three.js Group 层级 + 自定义 joint 检查近似。
+* **计划/验收**：plan 必须写精确尺寸/材质/父级/bbox + 二分验收项（如「座高
+  0.45m」「四腿落地 ≤2mm」「无漂浮/穿插 >2mm」）；`three_plan_validate` 通过后才写代码。
+* **确定性门**（先于视觉）：contract（bbox max(10mm,10%)、ground 10/30mm、
+  footprint 居中、placeholder part）、connectivity（接触 ≤2mm、穿插 >2mm WARN /
+  >10mm ERROR、漂浮 ERROR）、detail budget、scene placement/census/draw calls、
+  shader compile、frame metrics；每条 ERROR 带可执行 fix hint。
+* **盲评**：`three_judge` 打包 brief + 多视角 montage（对象 14 视角；场景作者相机
+  t=0/1.5s + orbit；图形 frame sheet），交独立 judge 上下文；`three_score` 做
+  rubric 权重 + 惩罚 + caps，输出 improvement list；最佳轮交付。
+* **工具面**：`three_list / create / read / patch / verify / inspect` 保留；
+  新增 `three_plan_validate / build / check / measure / render_views / scene_probe /
+  check_placement / shader_probe / judge / score`（命名实现时定）。
 * **能力分批**：图元（box/sphere/cylinder/cone/torus/plane/lathe）→ 变换/复制/父级 →
-  材质 PBR 参数 → 布尔（three-bvh-csg vendored，拉伸）。
+  材质 PBR 参数 → 布尔（three-bvh-csg vendored，拉伸）；3dcodeverse 的 plan/check/
+  judge 从第一批就接入，不等几何能力全齐。
 
-## 5. 视频：导演台 + 剧本标准 + 双风格 + TTS + 配乐联动
+详见 [research/3dcodeverse.md](research/3dcodeverse.md) 与
+[skills/creative-workbench/references/3d-pipeline.md](skills/creative-workbench/references/3d-pipeline.md)。
+
+## 5. 视频：导演台 + 剧本标准 + 三风格 + TTS + 配乐联动
 
 ### 5.0 引擎选型：Phaser 3（2026-11-20 裁决「引入游戏引擎」）
 
@@ -155,27 +217,50 @@
 > 进程、不套壳、不设导出适配器；只借 Motion.md/版本/导出纪律。3D 栈
 > （three.js / three-live）是明确例外；本方案 **Phaser 3 裁决不变**。
 > 完整结论见 [research/openmotion-hyperframes.md](research/openmotion-hyperframes.md)。
+>
+> **`ink_line` 的渲染分支（2026-11-22）**：墨线手绘是第三种风格包，不走 Phaser
+> 的 cutout 图集，**方案是**同一 `screenplay.json` 编译器下的自研 Canvas2D 矢量笔触
+> 后端（固定 30fps、几何抖动、纸面遮挡，I0 spike 验证）；不引入
+> `JDhruv14/line-art-animation` 的 TypeScript/SVG 库。`silly_skit` / `line_toon`
+> 仍走 Phaser 3。详见 [research/line-art-animation.md](research/line-art-animation.md)。
 
 ### 5.1 剧本标准（新契约文档 `docs/video-screenplay-contract.md`）
 
 `screenplay.json`（`v:1`）：幕 → 场 → 镜头（`id`、场景、镜头语言、时长、台词
-`[{role, text, tts}]`、动作、转场）。剧本是创作面**事实源**；既有 timeline/spec 由
-编译产生（保持播放器与机械对照兼容）。
+`[{role, text, tts}]`、动作、**VFX 事件** `[{f,type:"vfx",cue,...}]`、转场）。剧本是
+创作面**事实源**；既有 timeline/spec 由编译产生（保持播放器与机械对照兼容）。
 
 ### 5.2 导演台（工作区形态）
 
 剧本树 ｜ 分镜时间线（镜头条）｜ 镜头审查卡（对照检查）+ 配音轨 + 配乐轨 ｜
 成片预览。四区与右侧 chat 分工同 §2。
 
-### 5.3 双风格场景包（解释器插件，全部代码绘制）
+### 5.3 三风格场景包（解释器插件，全部代码绘制）
 
 | 风格 | 内容 |
 | --- | --- |
-| `silly_skit` 沙雕短剧 | 几何/简笔角色库 + 夸张弹跳运动预设（outBack/spring 参数族）+ 大字幕梗卡规范 + 点音效组 |
+| `silly_skit` 沙雕短剧 | 几何/简笔角色库 + 夸张弹跳运动预设（outBack/spring 参数族）+ 大字幕梗卡规范 + 点音效组 + **pixelfx 战斗/环境特效子集**（火焰/冰霜/风/爆炸等，不含人物） |
 | `line_toon` 美式线条漫画 | 单线条人物 + 对话气泡 + 分格转场（panel wipe，相机遮罩实现）+ 滑稽物理预设 |
+| `ink_line` 墨线手绘 | 细抖墨线 + 暖纸底 + 无脸小人 + 开放双笔触四肢 + 纸面遮挡 + 1–2 点缀色 + 昼夜反转；步态用求解器（站立脚/最小 jerk 摆动/脚跟离地/髋高反解），服装绕骨架绘制；Canvas2D 矢量笔触渲染 |
 
-风格包 = 角色库（Phaser Graphics 程序化绘制）+ 运动/转场预设 + 字幕规范 + 音效组；
-解释器按 `screenplay.style` 选择，确定性、零外联、零图片资源。默认风格（`default`）保留。
+风格包 = 角色库（`silly_skit`/`line_toon` 用 Phaser Graphics 程序化绘制；
+`ink_line` 用 `ink_figure` 骨架 + 服装/发型/道具路径）+ 运动/转场预设 + 字幕规范 +
+音效组；解释器按 `screenplay.style` 选择，确定性、零外联、零图片资源。默认风格
+（`default`）保留。
+
+`ink_line` 的「角色库」不是 cutout 图集：它需要两骨 IK、开放双笔触肢体、纸色遮挡和
+衣摆绕膝，图集化会把风格签名磨掉。渲染**建议**走自研 Canvas2D 矢量笔触（固定 30fps、
+整数帧、种子化几何抖动，I0 spike 验证），**不引入 line-art-animation 的 TypeScript/SVG
+库**；若移动端 1080p30 实测不达标，再评估预烘焙笔触图集回退。
+
+**VFX 层（2026-11-22 用户裁决）**：`silly_skit` 直接引入 **pixelfx 特效子集**
+（MIT；火焰/冰霜/风/爆炸/闪电/烟尘/水花等），只取**特效**，不取人物：
+`actor.js`/`rig.js`/`poses.js`/`act.js`/`moves/` 与所有 `meta.actor`/`o.actor`/
+on-body 特效一律不引入；角色仍由我们的 cutout/rig 负责。VFX 是
+`screenplay.json` 的一等事件（`{f,type:"vfx",cue,x,y,seed,palette,layer}`），cue
+必须在 allowlist 内；固定 30fps、双缓冲（color+light）、最近邻放大。`line_toon`
+只在刻意的像素特效层用；`ink_line` 默认不用（1px 像素光与细墨线语法冲突）。
+详见 [research/pixelfx.md](research/pixelfx.md)。
 
 ### 5.4 TTS（离线，含许可红线）
 
@@ -194,8 +279,13 @@ video 项目 `musicRef` 指向音乐项目；播放经桥接共享时钟同步�
 
 `video_list / create / read / patch / verify / inspect` + 既有 `video_review`；
 TTS 渲染 `video_tts_render`；联动 `video_link_music`。校验器：镜头时长 > 0、台词非空、
-tts 行与台词一一对应、`musicRef` 合法、风格包在场。`verify` 双档：Dart schema 校验 +
-播放页 `?verify=1` 引擎自检（`markers` 回传）；`video_review` 保留为人工审查面。
+tts 行与台词一一对应、`musicRef` 合法、风格包在场；`ink_line` 另查站立脚漂移
+（< 0.5px/帧）、开放双笔触四肢、昼夜对比度与灯光错峰。`verify` 双档：Dart schema
+校验 + 播放页 `?verify=1` 引擎自检（`markers` 回传）；`video_review` 保留为人工审查面。
+
+**VFX 校验**：`cue` 在 pixelfx allowlist、无 `actor`/`onBody`/`moves`、同 seed
+同帧同像素、不出画布、一次性结束为空/循环无缝、palette 白名单、单帧预算。
+allowlist 由 vendoring 时扫描生成并写入 `manifest.json`，视频编译器只认清单。
 
 ## 6. 音乐：编曲工作台（承接 plan-music-module.md）
 
@@ -208,11 +298,13 @@ tts 行与台词一一对应、`musicRef` 合法、风格包在场。`verify` �
 | --- | --- | --- |
 | 0 | 「创意工作台」定位文案全落面（README / site / AGENTS / 主页副标题含音乐） | copy_guard 绿 |
 | 1 | 强规范框架：四份契约文档矩阵 + 契约测试模板 | 模板测试全绿 |
+| 1b | 标准化 `creative-workbench` skill：`SKILL.md` + 六份 references + spec/plan/gates/judge schema | 文档对照 + 样例 roundtrip |
 | 2 | 全局执行/结果双面组件（进度线 + 产物卡），四工作台接入骨架 | 双面组件测试 |
 | 3 | 设计：验证原型绑定原型 + `design_verify_prototype` 收口 + 迁移过滤 | §3 验收清单 |
-| 4 | 3D：建模视口（大纲/检查器/gizmo 桥）+ `scene.json` 契约 | §4 校验器 + 视口测试 |
+| 4 | 3D：3dcodeverse plan/gates/judge + three-live 双 authoring 模式 + 建模视口（大纲/检查器/gizmo 桥） | §4 校验器 + 视口测试 |
 | 5a | 视频引擎接入：Phaser vendored（manifest/SHA256）+ 解释器 + `assembleEnginePlayer` + 桥 v2 + 既有样片回归 | 引擎短片单测：字节确定性 / seek 重放同帧 / 桥 v2 兼容 v1 |
-| 5b | 视频：剧本标准 + 导演台 + 双风格包 + TTS | §5 契约测试 + `?verify=1` 自检全绿 |
+| 5b | 视频：剧本标准 + 导演台 + 三风格包 + TTS | §5 契约测试 + `?verify=1` 自检全绿 |
+| 5c | 视频 VFX：pixelfx 过滤子集 + allowlist + VFX 事件 + color/light 合成 + 性能门 | allowlist/确定性/越界/循环/合成测试 |
 | 6 | 音乐：按 plan-music-module 批次 1–4 | 该文档验收 |
 | 7 | 视频 ↔ 音乐配乐联动 | 共享时钟/`musicRef` 校验 |
 | 8（拉伸） | CSG、音频导出、MIDI、音乐局域网分享、Windows WebView2 接线 | 另立裁决 |
@@ -221,6 +313,16 @@ tts 行与台词一一对应、`musicRef` 合法、风格包在场。`verify` �
 
 * 云 TTS、采样音源、实时协作、出版级排版：不做。
 * 热应用嵌音乐播放器（新跨模块联动）、验证原型是否允许独立导出包：**待裁决**，默认不做。
-* 3D 布尔/曲线编辑、视频导出成片：拉伸批次。
+* 3D 布尔/曲线编辑、视频导出成片、articulated（URDF/Blender）轨：拉伸/backlog。
+* **3dcodeverse 的运行时边界**：不引入 Python CLI / Blender / CadQuery / URDF /
+  moderngl 到产品进程；只采用其 skill/harness 契约与阈值，检查器用 Dart/JS 实现。
+  3DCodeVerse-2M 数据集（CC-BY-NC-SA）不随产品分发。
+* **pixelfx 的人物边界**：只引入特效，不引入 stock character / `actor` / `rig` /
+  `poses` / `act` / `moves` / on-body 特效；角色由我们自己的 rig 负责。
+* **awesome-opus5-5-videos 只借结构**：不复制创作者作品、角色、品牌、成段 prompt，
+  不接入 Skillry 服务；六段 prompt 结构进 `creative-workbench` skill。
 * Godot / Unity / PixiJS / Flame 已裁决不采用（理由见 §5.0）；引擎短片 v1 **只走剧本解释器**，
   不允许 Agent 手写 Phaser 代码（保确定性与可校验性）。
+* `ink_line` 的参考源是 `JDhruv14/line-art-animation`（MIT），但**不复制其代码、不依赖
+  其 TypeScript/SVG 运行时**；只借风格参数、步态求解规则与验收方法（见
+  [research/line-art-animation.md](research/line-art-animation.md)）。

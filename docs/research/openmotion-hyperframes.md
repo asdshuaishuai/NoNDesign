@@ -202,7 +202,8 @@ AI 生成结果还受各 provider 条款约束。
 
 - 事实源 `screenplay.json`（幕/场/镜头/台词/动作/转场）；
 - Phaser 3 引擎短片（vendored，自包含 HTML，30fps 固定步进，seek=reset+replay）；
-- `silly_skit` / `line_toon` 双风格，cutout 木偶、表情、口型、TTS、音效；
+- `silly_skit` / `line_toon` / `ink_line` 三风格，cutout 木偶、表情、口型、TTS、音效
+  （`ink_line` 为 2026-11-22 增补的墨线手绘，走 Canvas2D 笔触分支）；
 - 视频 → 音乐配乐联动；
 - 视频导出是拉伸项，当前代码动画为主。
 
@@ -213,9 +214,9 @@ AI 生成结果还受各 provider 条款约束。
 
 | 维度 | OpenMotion / HyperFrames | NaN 视频工作台（计划） |
 | --- | --- | --- |
-| 核心载体 | HTML + CSS + GSAP/Lottie/Three.js | Phaser 3 场景 + `screenplay.json` 编译 |
-| 强项 | 动效图文、产品发布、字幕/图表/品牌片、参考复刻 | 沙雕短剧、cutout 角色、表情/口型、交互式场景 |
-| 角色系统 | 无内置 cutout rig / viseme；靠 HTML/素材 | 计划内建 8–12 部件木偶、6 viseme、表情补丁 |
+| 核心载体 | HTML + CSS + GSAP/Lottie/Three.js | Phaser 3（`silly_skit`/`line_toon`）+ Canvas2D 笔触（`ink_line`）+ `screenplay.json` 编译 |
+| 强项 | 动效图文、产品发布、字幕/图表/品牌片、参考复刻 | 沙雕短剧、cutout 角色、墨线生活流、表情/口型、交互式场景 |
+| 角色系统 | 无内置 cutout rig / viseme；靠 HTML/素材 | `silly_skit`/`line_toon` 用 8–12 部件木偶；`ink_line` 用 `ink_figure` 骨架 + 开放双笔触；6 viseme、表情补丁 |
 | 物理/游戏感 | 主要靠 GSAP；Three.js 可选 | Phaser Arcade/Matter、相机、粒子、tween |
 | 渲染 | headless Chrome + FFmpeg（Node 侧） | WebView 预览 + Dart/Rust/ffmpeg 导出（计划） |
 | 运行时 | Node/Chromium/FFmpeg 重依赖 | Flutter + WebView，轻依赖 |

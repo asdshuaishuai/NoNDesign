@@ -53,7 +53,8 @@
 
 | 文档 | 状态 | 覆盖 |
 | --- | --- | --- |
-| [plan-creative-workbench.md](plan-creative-workbench.md) | **方案定稿，未施工** | 全局交互（右 chat + 执行/结果双面）、设计验证式原型绑定、3D 建模、视频导演台/剧本/双风格/TTS/配乐联动、强绑定强规范框架、施工批次 0–8 |
+| [plan-creative-workbench.md](plan-creative-workbench.md) | **方案定稿，未施工** | 全局交互（右 chat + 执行/结果双面）、设计验证式原型绑定、3D 建模 + 3dcodeverse harness、视频导演台/剧本/三风格/TTS/配乐联动、强绑定强规范框架、施工批次 0–8 |
+| [skills/creative-workbench/SKILL.md](skills/creative-workbench/SKILL.md) | **方案定稿，未接线** | 统一创作 skill：intake → direction → structure → build → check → blind judge → refine → deliver；spec/plan/src/artifacts/judge 标准工作区；视频/3D/设计共用 |
 | [plan-music-module.md](plan-music-module.md) | **方案定稿，未施工** | 音乐（编曲）模块：score.json、五线谱编辑器、Web Audio 编译播放、music_* 工具面 |
 | [plan-flutter-3.50-adoption.md](plan-flutter-3.50-adoption.md) | backlog（待排期） | Flutter 3.50 采纳清单 |
 
@@ -81,20 +82,28 @@
 | [research/video-animation-howto.md](research/video-animation-howto.md) | 调研结论（供施工） | 视频动画/沙雕短剧：工艺与节奏量化、screenplay/rig/clip 数据模型、cutout 木偶、30fps 确定性运行时、离线 TTS（sherpa-onnx；OS 音色仅草稿）、口型/音效、导出与验收 |
 | [research/tts-offline-appendix.md](research/tts-offline-appendix.md) | 原始调研全文 | 离线 TTS 的平台细节、模型/许可证对照、时间对齐、viseme、音效与配乐联动（视频文档 §5 的出处） |
 | [research/openmotion-hyperframes.md](research/openmotion-hyperframes.md) | 调研结论（**只参考，不引入**） | OpenMotion（nexu-io，Apache-2.0）与 HyperFrames（Apache-2.0）：HTML-as-video、Motion.md、Agent+Studio 同源工程、版本/导出/MCP 纪律；只借规范，不做依赖/内置/套壳/导出适配器；3D 栈例外 |
+| [research/line-art-animation.md](research/line-art-animation.md) | 调研结论（**只参考，不引入**） | `JDhruv14/line-art-animation`（MIT，TypeScript）：细抖墨线 + 暖纸 + 无脸小人 + 开放双笔触四肢 + 步态求解 + 昼夜反转 + 帧条验收；我们新增 `ink_line` 风格包，只借规则/参数/验收，不依赖其 TS/SVG 库 |
+| [research/awesome-opus5-5-videos.md](research/awesome-opus5-5-videos.md) | 调研结论（**只参考，不引入**） | 703 条 Opus 5.5 视频 prompt 的结构/分类/技术栈统计；六段 prompt（inputs/direction/structure/build/gotchas/start）、seek(t) 确定性、beat grid、帧证据；抽象进 `creative-workbench` skill，不复制作品/服务 |
+| [research/3dcodeverse.md](research/3dcodeverse.md) | 调研结论（**3D 线直接引入**） | 3DCodeVerse 论文/harness：代码即真相、四轨七运行时、plan → check → blind judge → refine、contract/connectivity/placement/shader 门、cap 规则；我们直接采用 skill/harness 契约，Python/Blender 运行时不入产品 |
+| [research/pixelfx.md](research/pixelfx.md) | 调研结论（**特效子集直接引入**） | `patch-gg/pixelfx`（MIT，v0.3.1，244 effects）：color+light 双缓冲、seeded RNG、纯/模拟 effect、sprite sheet、质量 bar；只引入火焰/冰霜/风/爆炸等特效，**不引入人物/stock actor/moves** |
 
 ## 2. 决策台账（按时间倒序）
 
 | 日期 | 裁决 | 状态 | 事实源 |
 | --- | --- | --- | --- |
-| 2026-11-21 | **外部创作工具只参考、不引入**：OpenMotion / HyperFrames 及同类第三方创作产品不做依赖、不内置进程、不套壳、不设导出适配器；只借规范/协议/交互。**3D 栈（three.js / three-live）例外**；视频工作台 Phaser 3 裁决不变 | **生效（用户裁决）** | AGENTS.md · research/openmotion-hyperframes.md |
+| 2026-11-22 | **3D 直接引入 threejs-live + 3dcodeverse**：采用 3dcodeverse 的 skill/harness 契约（Apache-2.0）与 three-live 执行面；双 authoring（`scene.json` / `src/*.js`）；Python/Blender/CadQuery/URDF 运行时不入产品，检查器用 Dart/JS 等价实现 | 方案定稿（未施工） | plan-creative-workbench §4 · research/3dcodeverse.md |
+| 2026-11-22 | **视频直接引入 pixelfx 特效子集**：只取火焰/冰霜/风/爆炸/闪电等**特效**，**不含人物/角色**；`actor`/`rig`/`poses`/`act`/`moves`/on-body 特效不引入；角色仍用我们自己的 rig | 方案定稿（未施工） | plan-creative-workbench §5.3/§5.6 · research/pixelfx.md |
+| 2026-11-22 | **统一创作 skill `creative-workbench`**：intake/direction/structure/build/check/blind-judge/refine/deliver 标准化；`awesome-opus5-5-videos` 只借六段 prompt 结构与质量规则，不引入作品/服务 | 方案定稿（未接线） | skills/creative-workbench/SKILL.md · research/awesome-opus5-5-videos.md |
+| 2026-11-22 | **视频新增第三种风格 `ink_line`（墨线手绘）**：参考 `JDhruv14/line-art-animation` 的线稿/步态/昼夜规则，**不引入其 TypeScript/SVG 运行时**；`silly_skit` / `line_toon` 保留，Phaser 3 与 3D 例外不变 | 方案定稿（风格包） | plan-creative-workbench §5.3 · research/line-art-animation.md |
+| 2026-11-21 | **外部创作工具只参考、不引入**：OpenMotion / HyperFrames 及同类第三方创作产品不做依赖、不内置进程、不套壳、不设导出适配器；只借规范/协议/交互。**3D 栈（three.js / three-live）例外**；视频工作台 Phaser 3 裁决不变（2026-11-22 增补例外：3D 线 3dcodeverse + 视频 pixelfx 特效子集，见上） | **生效（用户裁决）** | AGENTS.md · research/openmotion-hyperframes.md |
 | 2026-11-20 | **愿景：代码创造世界**——人提出世界，Agent 写源代码，工作台让世界可进入、可修改、可验证、可带走；四个工作台是同一底座的四视图 | **生效（方向与取舍依据）** | vision.md |
 | 2026-11-20 | **音乐编曲实现路线**：score.json 有理数时值 → 整数 tick（ppq 3840）；CustomPainter 纯 Dart 排版；Web Audio 自写 lookahead；模板+功能和声+DP 编曲，validator 硬门 | 调研结论（施工依据） | research/music-arrangement-howto.md |
 | 2026-11-20 | **视频/沙雕动画实现路线**：cutout 木偶 + 30fps 整数帧 + reset/replay seek + 种子随机；TTS 主路径 sherpa-onnx，**OS 系统音色仅草稿**（Apple SLA 限制商业发布） | 调研结论（施工依据） | research/video-animation-howto.md |
 | 2026-11-20 | 所有工作台**强绑定且强规范**（项目↔工作台、工作台↔事实源、Agent↔工具面、执行归属；每模块 schema+校验器+工具族+双面四件套） | 方案定稿 | plan-creative-workbench §1 |
 | 2026-11-20 | 视频引入游戏引擎：**Phaser 3**（vendored），剧本 JSON 编译为引擎短片；Godot/Unity/PixiJS/Flame 否决 | 方案定稿 | plan-creative-workbench §5.0 |
-| 2026-11-20 | 视频工作台：导演台 + `screenplay.json` 标准 + `silly_skit`/`line_toon` 双风格 + 离线 TTS + **视频→音乐配乐联动** | 方案定稿 | plan-creative-workbench §5 |
+| 2026-11-20 | 视频工作台：导演台 + `screenplay.json` 标准 + `silly_skit`/`line_toon` 双风格 + 离线 TTS + **视频→音乐配乐联动** | 方案定稿（2026-11-22 增补 `ink_line`，见上） | plan-creative-workbench §5 |
 | 2026-11-20 | 设计 = 验证式原型**绑定项目本身**，不再列入热应用模块 | 方案定稿 | plan-creative-workbench §3 |
-| 2026-11-20 | 3D = **建模**工作台（three.js；大纲/视口/检查器 + scene.json） | 方案定稿 | plan-creative-workbench §4 |
+| 2026-11-20 | 3D = **建模**工作台（three.js；大纲/视口/检查器 + scene.json） | 方案定稿（2026-11-22 扩展：3dcodeverse harness + 双 authoring，见上） | plan-creative-workbench §4 |
 | 2026-11-20 | 全局交互：右 chat 唯一对话面；工作台只做执行过程面 + 结果面 | 方案定稿 | plan-creative-workbench §2 |
 | 2026-11-20 | 音乐为第五个独立模块（只做编曲） | 方案定稿 | plan-music-module |
 | 2026-11-20 | **WebView 统一 `webview_all` 全平台**（macOS/iOS WKWebView、Windows WebView2、Linux WebKitGTK、Android WebView）；旧 `webview_flutter` / `webview_windows` 与 Windows 专属预览已删除 | **已实施（批次 A）**；Windows/Linux 真机复验待补 | plan-cross-platform-runtime §1 |
@@ -110,9 +119,9 @@
 ```
 plan-cross-platform-runtime §1（已落地：webview_all 全平台）
         │  wasm 主路径同步切换：classic wasm + JS 宿主跑进离屏 WebView（§2）
-        ├──> plan-creative-workbench §2（执行/结果双面）
-        ├──> plan-creative-workbench §4（3D 建模视口，three.js）
-        ├──> plan-creative-workbench §5（视频导演台 / Phaser）
+        ├──> plan-creative-workbench §2（执行/结果双面；统一 creative-workbench skill）
+        ├──> plan-creative-workbench §4（3D 建模视口 + 3dcodeverse plan/check/judge；three-live）
+        ├──> plan-creative-workbench §5（视频导演台 / Phaser；`ink_line` 走 Canvas2D 笔触；pixelfx 特效子集）
         │          └──> plan-music-module（§5.5 配乐联动依赖音乐模块）
         └──> wasm_run B4 退役（待 Windows/Linux/移动真机复验）
 ```
@@ -147,7 +156,9 @@ plan-cross-platform-runtime §1（已落地：webview_all 全平台）
 
 ---
 
-最后对账：2026-11-20（与 `AGENTS.md`、`vision.md`、四份方案、已实施契约头部交叉核对；
+最后对账：2026-11-22（与 `AGENTS.md`、`vision.md`、四份方案、已实施契约头部交叉核对；
 **批次 A（webview_all 全平台）+ B1（classic wasm WebView 宿主）已落地**；
 macOS WKWebView 真实集成测试通过；Windows/Linux/移动真机复验与 wasm_run B4 退役
-仍是未清项；OHOS 离屏 WebView 缺口已登记）。
+仍是未清项；OHOS 离屏 WebView 缺口已登记；本轮新增 `creative-workbench` skill、
+3dcodeverse 3D harness、pixelfx VFX 子集与 `ink_line` 风格调研——除 3D 线
+（three-live + 3dcodeverse）与 pixelfx 特效子集外，仍坚持「只参考、不引入」）。

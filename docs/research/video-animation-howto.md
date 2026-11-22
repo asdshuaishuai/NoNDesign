@@ -9,7 +9,7 @@
 1. **工艺本质**：沙雕动画不是低配动画，而是「**音频为时间主轴 + 有限动画 + 表情贴片 + 音效/字幕卡放大笑点**」。画面精度不是壁垒，节奏与表演时机是。
 2. **数据模型**：`screenplay.json`（剧本/镜头/台词/事件）→ 编译成 **30fps 整数帧**的 RuntimePlan；角色用 `rig.json`（部件/骨骼/表情）+ `clip.json`（关键帧）；运行时只读，不回写。
 3. **确定性**：所有动画是 `stateAt(frame)` 纯函数；seek = 重置 + 从镜头起点重放；随机用 `hash(seed, shotId, trackId, instanceId, index)`；禁止 `Math.random`/`Date.now`/物理/Phaser 粒子参与状态。
-4. **角色**：自建 cutout 木偶（8–12 部件沙雕；15–25 部件线条漫画），不引 Spine/DragonBones/Live2D 运行时；厚描边预烘焙进图集，不做运行时描边。
+4. **角色**：自建 cutout 木偶（8–12 部件沙雕；15–25 部件线条漫画），不引 Spine/DragonBones/Live2D 运行时；厚描边预烘焙进图集，不做运行时描边。**线条漫画有两条路线**：`line_toon` 美式硬线分格（cutout 图集）；`ink_line` 墨线手绘（开放双笔触+步态求解+Canvas2D 笔触，2026-11-22 新增，只参考 `JDhruv14/line-art-animation` 的规则，不引入其 TS/SVG 运行时，见 §3.6）。
 5. **引擎**：Phaser 4.2.1（当前主线，锁版本）或 Phaser 3.90.0（更成熟，锁版本）二选一；本项目只用 Sprite/Container/Camera/Text/Mask，迁移面小。**不要等 Phaser 5，也不要浮动升级**。
 6. **配音**：OS 系统音色（macOS `say` / Windows SAPI）**不适合对外发布的商业视频**（Apple SLA 限制个人非商业用途）；主路径用 **sherpa-onnx（Apache-2.0）+ 许可清晰的模型**，OS 音色只做草稿预览并显式提示。
 7. **导出**：短期只做确定性播放；未来导出走 **WebView `gl.readPixels` → Rust 二进制 IPC → ffmpeg sidecar**，不用 MediaRecorder；帧级可复现，码流级不承诺字节一致。
@@ -228,6 +228,25 @@
 
 Cue 表 12–16 个：dun/ding/boing/whoosh/slap/gasp/scratch/awkward/laugh/impact/pop/click/riser/sub_drop。**音效是最大版权雷区**：不要扒影视/游戏/综艺；用 CC0 + 程序合成，资产打 `license/risk` 字段。
 
+**战斗/环境特效**：`silly_skit` 可接 **pixelfx 特效子集**（MIT；火焰/冰霜/风/爆炸/闪电/烟尘/水花等），只取特效、不取人物/stock actor/moves；VFX 以 `{f,type:"vfx",cue,...}` 事件进 `screenplay.json`，固定 30fps、color+light 双缓冲、最近邻放大。`line_toon` 只在刻意像素层用，`ink_line` 默认不用。详见 [pixelfx.md](pixelfx.md)。
+
+### 3.6 墨线手绘（`ink_line`）的额外约束
+
+`ink_line` 是第三种风格包，不走 cutout 图集；完整调研见
+[line-art-animation.md](line-art-animation.md)。施工时守住：
+
+- **视觉签名**：一支细（约 1.35 人物单位）、略抖的墨线在暖纸上；人物无脸；
+  四肢是两条**开放**笔画夹纸色带（绝不画闭合管）；纸色填充做遮挡；1–2 个点缀色；
+  建筑正立面画满、天空留白；页面底色不随昼夜变化。
+- **运动**：步态必须解（站立脚以行进速度后滑、最小 jerk 摆动、脚跟离地、髋高由
+  腿长反解）；两骨 IK；衣摆绕前膝/两踝；袖/包/灯笼用弹簧/摆锤；禁止自由正弦 bob。
+- **昼夜**：`palette(τ)` 反转墨/纸；每扇窗/每盏灯独立阈值错峰亮灭；夜色 tint；
+  辉光单独一层；同一套 30fps 整数帧、种子化随机。
+- **渲染**：自研 Canvas2D 矢量笔触（几何抖动，不用运行时 SVG filter）；静态层
+  缓存 `Path2D`；若移动端 1080p30 不达标，再评估预烘焙笔触图集回退。
+- **验收**：站立脚漂移 <0.5px/帧、开放四肢、前腿在上、昼夜对比度、交互回 idle；
+  先做一个 figure 给用户过，再铺整场。
+
 ## 4. 确定性运行时
 
 ### 4.1 帧时钟
@@ -404,7 +423,7 @@ WebView renderAt(f) → gl.readPixels → Uint8Array(约 8MB/1080p)
 3. 不要用 Phaser 粒子做叙事特效；不要 `Math.random`/`Date.now` 进状态。
 4. 不要用 wall clock delta 插值；一律整数帧。
 5. 不要每骨一个 Container；不要每部件 mask/filter；不要每帧 `Graphics.clear()` 重绘。
-6. 不要运行时 SVG 做复杂线条漫画；不要运行时描边；不要 >2048 图集做移动端首屏。
+6. 不要运行时 SVG 做复杂线条漫画；不要运行时描边；不要 >2048 图集做移动端首屏。`ink_line` 走 Canvas2D 矢量笔触，不引入 `line-art-animation` 的 TS/SVG 库；几何抖动可复现，运行时 SVG filter 不可作为跨端确定性保证。
 7. 不要用 MediaRecorder 导出；不要把整段 mp4 base64 塞进默认 HTML。
 8. 不要用 Apple System Voices 做对外发布配音；不要用 Coqui XTTS（CPML）商用。
 9. 不要把 Spine/Rive/Live2D 作为 v1 唯一角色格式；它们是导入格式，不是事实源。
@@ -413,6 +432,7 @@ WebView renderAt(f) → gl.readPixels → Uint8Array(约 8MB/1080p)
 ## 9. 主要来源
 
 - 新榜/腾讯新闻 YY 访谈：https://news.qq.com/rain/a/20210129A0FD7400
+- 墨线手绘参考：https://github.com/JDhruv14/line-art-animation（MIT；只参考，不引入）
 - 流媒体网 AI 解说漫流水线：https://lmtw.com/mzw/content/detail/id/247980
 - Adobe Animate：https://www.adobe.com/products/animate.html
 - Cartoon Animator：https://www.reallusion.com/cartoon-animator/

@@ -1,9 +1,17 @@
 # 3D 沙箱执行面：vendored three-live 与双执行路径（批次 06；three-live 1.4.0 于 2026-11-19 引入，991afe2）
 
-> **WebView 迁移注记（2026-11-20 方案定稿，未施工）**：应用内 WebView 将从
-> `webview_flutter`（仅 macOS/iOS）迁到 `webview_all`（全平台，含 Windows/Linux），
-> 见 [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) §1。本文描述的
+> **WebView 迁移（已落地，2026-11-20 批次 A/B1）**：应用内 WebView 已从
+> `webview_flutter`（仅 macOS/iOS）迁到 `webview_all`（macOS/iOS WKWebView、
+> Windows WebView2、Linux WebKitGTK、Android WebView），见
+> [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) §1。本文描述的
 > 沙箱契约、CSP 边界与双执行路径不变；迁移只换宿主库，不改 three-live 资产。
+>
+> **3dcodeverse harness 接入（2026-11-22 用户裁决，方案未施工）**：3D 工作台直接
+> 采用 3dcodeverse 的 skill/harness 契约（plan/check/judge/score），执行面仍是本文的
+> three-live 沙箱；Python/Blender/CadQuery/URDF 运行时不进入产品进程。3D 项目分
+> `scene`（`scene.json` 事实源）与 `code`（`src/*.js` 事实源）两种 authoring 模式。
+> 见 [research/3dcodeverse.md](research/3dcodeverse.md) 与
+> [plan-creative-workbench.md](plan-creative-workbench.md) §4。
 
 3D 工作台的执行面在 docs/ 里此前没有正式文档，契约只散落在代码注释里；本文把
 **vendored 资产范围、双执行路径、CSP 放宽清单与安全边界、画廊组件来源**收拢到一处。
@@ -93,7 +101,8 @@
 
 ## 5. 平台与验证
 
-- 内嵌预览需要 WebView 插件（桌面 macOS / iOS / Android 有，Linux / Windows 无）；
+- 内嵌预览使用 `webview_all` 全平台（macOS/iOS WKWebView、Windows WebView2、
+  Linux WebKitGTK、Android WebView）；Windows/Linux 真机复验待补；
   移动端另受 `ThreeWebViewGate` 约束（`three_workspace.dart:50-63`）：file:// 模块
   脚本在集成测试跑通前不启用，未通过时诚实降级为「用电脑上的连接桌面查看」，
   不让用户对着白屏等待。

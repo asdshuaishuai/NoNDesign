@@ -17,7 +17,8 @@ AI 原生创作工作台。**一句话 → 产品需求设计文档 → 完整�
 **文档入口（2026-11-20 起）**：[docs/README.md](docs/README.md) 是文档总纲——
 文档分层、决策台账、状态口径与施工顺序都在那里。当前**未施工**的方案线：
 `docs/plan-creative-workbench.md`（交互升级 + 四模块 + 强绑定强规范）、
-`docs/plan-music-module.md`（音乐/编曲）。
+`docs/plan-music-module.md`（音乐/编曲）、
+`docs/skills/creative-workbench/SKILL.md`（统一创作 skill 契约，未接线）。
 **已落地**：`docs/plan-cross-platform-runtime.md`（批次 A/B1：webview_all 全平台 +
 引擎 classic wasm 进离屏 WebView；wasm_run 仅兜底；flutter_scene 不采用）。
 方案文档写的是目标态，不要当作现状引用；两者冲突时以文档总纲的决策台账为准。
@@ -62,12 +63,27 @@ plugins/             独立插件资产（视频制作说明）
   WebView 内 JS 调用不能从 Dart 中断，但跑在平台 Web 进程而非 Flutter UI isolate；
   看门狗超时即销毁并重建离屏会话。**不要**把引擎调用搬回 UI isolate，也不要恢复
   「原生 wasmtime + 平台动态库」作为主路径。
-- **外部创作工具只参考、不引入（2026-11-21 用户裁决）**：OpenMotion、HyperFrames
+- **外部创作工具只参考、不引入（2026-11-21 用户裁决；下列「创作线引入例外」优先）**：OpenMotion、HyperFrames
   及同类第三方创作产品/运行时**不做依赖、不内置进程、不套壳、不设导出适配器**；
   只借鉴它们的规范、协议与交互（如 Motion.md、版本/导出/MCP 纪律）。我们是做
   自己的产品，不是别人的工作台。**3D 栈（three.js / three-live）是明确例外**；
   视频工作台此前已裁决的 Phaser 3 引擎选型不因这次调研改变（若用户进一步收紧，
-  再单独改方案）。
+  再单独改方案）。**代码/技能包同理**：`JDhruv14/line-art-animation`（MIT）只作为
+  `ink_line` 墨线手绘风格的规则参考，不复制其代码、不依赖其 TypeScript/SVG 运行时；
+  方案线的风格包渲染走自研 Canvas2D 矢量笔触（未施工，I0 spike 验证）。
+- **创作线引入例外（2026-11-22 用户裁决）**：
+  ① **3D 线直接引入** `threejs-live`（已在库）+ **3dcodeverse skill/harness 契约**
+  （Apache-2.0：plan schema、确定性门阈值、blind judge rubric、spec/src/artifacts/judge
+  工作区）。**不引 Python/Blender/CadQuery/URDF/moderngl 运行时**；检查器用 Dart/JS
+  等价实现；3DCodeVerse-2M 数据集（CC-BY-NC-SA）不随产品分发。3D 项目双 authoring：
+  `scene`（`scene.json` 事实源）/ `code`（`src/*.js` 事实源，3dcodeverse harness）。
+  ② **视频 VFX 直接引入** `pixelfx` **特效子集**（MIT）：火焰/冰霜/风/爆炸/闪电等；
+  **不引人物**——`actor.js`/`rig.js`/`poses.js`/`act.js`/`moves/` 与 `meta.actor`/
+  `o.actor`/on-body 特效一律不引入，角色仍用我们自己的 rig。
+  ③ **`awesome-opus5-5-videos` 只借结构**：六段 prompt（inputs/direction/structure/
+  build/gotchas/start）+ seek(t)/beat grid/帧证据进统一 skill，不复制作品/服务。
+  ④ **统一 skill**：`docs/skills/creative-workbench/SKILL.md` 是视频/3D/设计的
+  intake→direction→structure→build→check→blind judge→refine→deliver 契约。
 - **两道门是不同的门**：画布走 `apply_human_op_in`，智能体走 `apply_agent_op_in`
   （`gate:'agent'`）。只读命令走 session/检视路由，绝不能进变更路径。
 - **移动端本地引擎默认开启**（2026-11-20 起）：classic wasm 跑在 iOS/Android 的
@@ -234,6 +250,14 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   `video_create`（name/timeline/spec/title，失败码统一 `video_<code>`）→
   `video_review`（机械对照）；`video_list` 列生成项目 + 内置示例。**成片导出仍屏蔽**
   （`video_render` 只回 `video_export_disabled`，不落 mp4）。
+  **方案线（未施工）**：视频新增第三种风格 `ink_line`（墨线手绘，2026-11-22 用户裁决）——
+  只借 line-art-animation 的笔宽/开放双笔触/步态求解/昼夜/帧条验收规则，不引入其
+  TS/SVG 库；`silly_skit` / `line_toon` 与 Phaser 3 裁决不变。VFX 层直接引入
+  **pixelfx 特效子集**（只取火焰/冰霜/风/爆炸等，不取人物/stock actor/moves），
+  以 `{f,type:"vfx",cue,...}` 事件接入 `screenplay.json`；cue 走 allowlist。
+  统一创作流程见 `docs/skills/creative-workbench/SKILL.md`。
+  详见 `docs/research/line-art-animation.md`、`docs/research/pixelfx.md`、
+  `docs/research/awesome-opus5-5-videos.md`。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
   成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
 - **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，
