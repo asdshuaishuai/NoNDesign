@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
@@ -42,7 +42,7 @@ void main() {
       ),
     ));
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('NoNDesign'), findsWidgets);
+    expect(find.text('NaN'), findsWidgets);
     expect(find.textContaining('把想法变成'), findsOneWidget);
     expect(find.text('开始创作'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -131,8 +131,8 @@ void main() {
     ));
     await tester.pump(const Duration(milliseconds: 150));
     expect(find.text('smoke'), findsWidgets);
-    expect(find.text('NoN'), findsWidgets);
-    expect(find.textContaining('问 NoN'), findsOneWidget);
+    expect(find.text('NaN'), findsWidgets);
+    expect(find.textContaining('问 NaN'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.binding.setSurfaceSize(null);
   });

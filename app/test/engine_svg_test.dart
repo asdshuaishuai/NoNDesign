@@ -2,7 +2,7 @@
 // 实现渲染）。fixture 取自 0.2-dev 真机 render 信封（探针落 /tmp/home.svg），
 // 覆盖引擎输出的全部特征面：<style> 字体块、defs 三档 feDropShadow、
 // 全幅背景 rect、rotate transform、文本节点。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 

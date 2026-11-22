@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "source": "ThreeUI Community 1.1.0 (MIT, MengTo/threeui)",
+  "components": [
+    {
+      "id": "spark-badge",
+      "name": "火花徽章",
+      "description": "徽章在雨丝与火花中持续发光，适合做品牌标识的动效参考。",
+      "file": "spark-badge.html",
+      "hint": "暗底、高光、粒子拖尾"
+    },
+    {
+      "id": "thinking-button",
+      "name": "思考按钮",
+      "description": "一枚带呼吸光边的按钮，把「上传中 / 思考中」的等待状态做成可看的动效。",
+      "file": "thinking-button.html",
+      "hint": "单按钮、循环光边"
+    },
+    {
+      "id": "semantic-explorer",
+      "name": "语义探索器",
+      "description": "有机形态的语义检索界面，输入一句话就能看到主题词与结果聚合成形。",
+      "file": "semantic-explorer.html",
+      "hint": "柔和有机形、深色界面"
+    },
+    {
+      "id": "text-on-a-path",
+      "name": "路径文字 I",
+      "description": "三段文字沿路径运动的排版实验，适合做标题或入场文字的参考。",
+      "file": "text-on-a-path.html",
+      "hint": "三格演示、文字轨迹"
+    },
+    {
+      "id": "glassblown-neon",
+      "name": "玻璃霓虹",
+      "description": "玻璃吹制质感的霓虹字，反光与折射都很重，适合夜间氛围标题。",
+      "file": "glassblown-neon.html",
+      "hint": "高反光字、暗场"
+    },
+    {
+      "id": "audio-wordmark",
+      "name": "广播字标",
+      "description": "音频品牌风格的字标与版面，黑底白字，带播放参数与编号排版。",
+      "file": "audio-wordmark.html",
+      "hint": "黑底白字、编辑排版"
+    },
+    {
+      "id": "gallery-heading",
+      "name": "画廊标题",
+      "description": "颗粒渐变的大标题动效，适合展陈、作品集的首屏标题。",
+      "file": "gallery-heading.html",
+      "hint": "大标题、颗粒渐变"
+    },
+    {
+      "id": "creator-studio-intro",
+      "name": "创作室开场",
+      "description": "主题演讲式的开场动效：字标组装、窗口墙铺开，适合做展示短片。",
+      "file": "creator-studio-intro.html",
+      "hint": "黑底、窗口墙、字标"
+    },
+    {
+      "id": "text-on-a-path-ii",
+      "name": "路径文字 II",
+      "description": "六段文字路径实验，包含沿经纬线排布的地球文字，可拖动与滚动。",
+      "file": "text-on-a-path-ii.html",
+      "hint": "六格演示、可交互"
+    },
+    {
+      "id": "inner-green-3d",
+      "name": "林野世界",
+      "description": "自然品牌首页与 3D 场景：深绿底色、大标题与可滚动的空间叙事。",
+      "file": "inner-green-3d.html",
+      "hint": "深绿、大标题、3D 场景"
+    },
+    {
+      "id": "character-filmstrip",
+      "name": "角色胶片",
+      "description": "可拖动的角色卡片胶片，焦点卡片放大、两侧渐隐，适合人物展示。",
+      "file": "character-filmstrip.html",
+      "hint": "暖色人像卡、胶片排布"
+    },
+    {
+      "id": "character-wave",
+      "name": "角色波浪",
+      "description": "卡片按波浪排布，指针移动或方向键会带动整排卡片起伏。",
+      "file": "character-wave.html",
+      "hint": "卡片波浪、指针交互"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
 
@@ -9,6 +9,7 @@ import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
+import 'markdown_theme.dart';
 import 'left_panel.dart' show ExtractCompareView, extractDesignData;
 
 class DocsView extends StatefulWidget {
@@ -91,9 +92,9 @@ class _DocsViewState extends State<DocsView> {
       }
       _lastTab = tab;
     }
-    if (tab != 'spec' && _syncedFor != '${tab}:${source.hashCode}' && _editor.text != source) {
+    if (tab != 'spec' && _syncedFor != '$tab:${source.hashCode}' && _editor.text != source) {
       _editor.text = source;
-      _syncedFor = '${tab}:${source.hashCode}';
+      _syncedFor = '$tab:${source.hashCode}';
     }
     return Column(
       children: [
@@ -117,7 +118,7 @@ class _DocsViewState extends State<DocsView> {
                   SizedBox(width: 11, height: 11, child: CircularProgressIndicator(strokeWidth: 1.5, color: p.accent)),
                   if (!narrow) ...[
                     const SizedBox(width: 6),
-                    Text(store.agentPhase == 'planning' ? 'NoN 正在写文档…' : 'NoN 正在工作…',
+                    Text(store.agentPhase == 'planning' ? 'NaN 正在写文档…' : 'NaN 正在工作…',
                         style: TextStyle(fontSize: 10, color: p.accent)),
                     const SizedBox(width: 10),
                   ],
@@ -216,7 +217,7 @@ class _DocsViewState extends State<DocsView> {
             Text(kind == 'prd' ? '先定义产品，再画界面' : '逐屏写清 UI 约束',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: p.ink)),
             const SizedBox(height: 5),
-            Text('描述目标用户、核心流程和页面范围。NoN 会写成可施工的${kind == 'prd' ? ' PRD' : ' UI 说明'}。',
+            Text('描述目标用户、核心流程和页面范围。NaN 会写成可施工的${kind == 'prd' ? ' PRD' : ' UI 说明'}。',
                 textAlign: TextAlign.center, style: TextStyle(fontSize: 12, height: 1.55, color: p.ink3)),
             const SizedBox(height: 18),
             Container(
@@ -252,7 +253,7 @@ class _DocsViewState extends State<DocsView> {
                           final brief = _brief.text.trim();
                           if (brief.isNotEmpty) store.runPlan(brief);
                         },
-                        child: const Text('让 NoN 撰写', style: TextStyle(fontSize: 12)),
+                        child: const Text('让 NaN 撰写', style: TextStyle(fontSize: 12)),
                       ),
                     ],
                   ),
@@ -272,7 +273,7 @@ class _DocsViewState extends State<DocsView> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
           child: LayoutBuilder(builder: (context, constraints) {
-            // 窄屏：Pill + 字数 + 预览/编辑 + 「让 NoN 完善」曾右溢 246px。
+            // 窄屏：Pill + 字数 + 预览/编辑 + 「让 NaN 完善」曾右溢 246px。
             // 窄屏下切换与完善按钮改图标态（带 tooltip），正文区不受挤压。
             final narrow = constraints.maxWidth < 560;
             return Row(
@@ -289,7 +290,7 @@ class _DocsViewState extends State<DocsView> {
                 const SizedBox(width: 8),
                 if (narrow)
                   IconButton(
-                    tooltip: '让 NoN 完善',
+                    tooltip: '让 NaN 完善',
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.auto_fix_high, size: 16),
                     onPressed: store.agentBusy
@@ -306,7 +307,7 @@ class _DocsViewState extends State<DocsView> {
                     child: const Row(mainAxisSize: MainAxisSize.min, children: [
                       Icon(Icons.auto_fix_high, size: 12),
                       SizedBox(width: 4),
-                      Text('让 NoN 完善'),
+                      Text('让 NaN 完善'),
                     ]),
                   ),
               ],
@@ -330,7 +331,7 @@ class _DocsViewState extends State<DocsView> {
                     ),
                     child: MarkdownBody(
                       data: store.liveDocText,
-                      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                      styleSheet: markdownStyleSheetOf(context).copyWith(
                         p: TextStyle(fontSize: 13, height: 1.7, color: p.ink2),
                         h1: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: p.ink),
                         h2: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink),
@@ -349,7 +350,7 @@ class _DocsViewState extends State<DocsView> {
                     ),
                     child: MarkdownBody(
                       data: source,
-                      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                      styleSheet: markdownStyleSheetOf(context).copyWith(
                         p: TextStyle(fontSize: 13, height: 1.7, color: p.ink2),
                         h1: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: p.ink),
                         h2: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink),
@@ -384,7 +385,7 @@ class _DocsViewState extends State<DocsView> {
             return Row(
               children: [
                 Expanded(
-                  child: Text('Markdown · 存在 .mbt.md 的 nondesign 标记里，随 DDP 一起走',
+                  child: Text('Markdown · 随项目文件一起保存，换设备打开也不丢',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 10, color: p.ink4)),
@@ -467,47 +468,51 @@ class _SpecPreviewState extends State<_SpecPreview> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text('设计规范', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.4)),
-              const SizedBox(width: 8),
-              Pill(label: 'DESIGN.md', color: p.accent, background: p.accentSoft),
-              const Spacer(),
-              OutlinedButton.icon(
-                onPressed: store.activeBoard == null || _extracting ? null : _runExtract,
-                icon: _extracting
-                    ? SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5, color: p.accent))
-                    : const Icon(Icons.colorize, size: 12),
-                label: const Text('从画布提取设计规范'),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: () => store.setPanel('spec'),
-                icon: const Icon(Icons.edit_outlined, size: 12),
-                label: const Text('编辑'),
-              ),
-            ],
-          ),
+          // 窄屏（手机 390 / 手机横屏——2026-11-19 起真机到不了，仅方向门兜底/
+          // web 矮窗可达）此前标题 + 两个按钮挤在一行右溢 121px：
+          // 窄屏让按钮换行，宽屏保持原来的「标题左、按钮右」布局。
+          LayoutBuilder(builder: (context, constraints) {
+            final title = Text('设计规范',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.4));
+            final badge = Pill(label: 'DESIGN.md', color: p.accent, background: p.accentSoft);
+            final extract = OutlinedButton.icon(
+              onPressed: store.activeBoard == null || _extracting ? null : _runExtract,
+              icon: _extracting
+                  ? SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5, color: p.accent))
+                  : const Icon(Icons.colorize, size: 12),
+              label: const Text('从画布提取设计规范'),
+            );
+            final edit = OutlinedButton.icon(
+              onPressed: () => store.setPanel('spec'),
+              icon: const Icon(Icons.edit_outlined, size: 12),
+              label: const Text('编辑'),
+            );
+            if (constraints.maxWidth < 700) {
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [title, badge, extract, edit],
+              );
+            }
+            return Row(
+              children: [title, const SizedBox(width: 8), badge, const Spacer(), extract, const SizedBox(width: 8), edit],
+            );
+          }),
           const SizedBox(height: 4),
           Text('配色、字体、间距与圆角从这份规范派生，约束每一块画板。',
               style: TextStyle(fontSize: 12, color: p.ink3)),
           const SizedBox(height: 22),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _card(context, 'PALETTE', _palette(context, design))),
-              const SizedBox(width: 14),
-              Expanded(child: _card(context, 'TYPE SCALE', _typeScale(context, design))),
-            ],
+          _twoUp(
+            context,
+            _card(context, 'PALETTE', _palette(context, design)),
+            _card(context, 'TYPE SCALE', _typeScale(context, design)),
           ),
           const SizedBox(height: 14),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _card(context, 'SPACING', _spacing(context, design))),
-              const SizedBox(width: 14),
-              Expanded(child: _card(context, 'RADIUS', _radius(context, design))),
-            ],
+          _twoUp(
+            context,
+            _card(context, 'SPACING', _spacing(context, design)),
+            _card(context, 'RADIUS', _radius(context, design)),
           ),
           const SizedBox(height: 14),
           _card(context, 'RULES', Wrap(
@@ -524,13 +529,13 @@ class _SpecPreviewState extends State<_SpecPreview> {
           )),
           if (_extract != null) ...[
             const SizedBox(height: 14),
-            _card(context, 'ENGINE EXTRACT', Column(
+            _card(context, '提取对比', Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
                     Expanded(
-                      child: Text('引擎从画板 ${_extractAb ?? ''} 提取的颜色使用统计，与现规范对比。',
+                      child: Text('从画板 ${_extractAb ?? ''} 提取的颜色使用统计，可与现规范对照。',
                           style: TextStyle(fontSize: 11, color: p.ink3)),
                     ),
                     IconAction(
@@ -560,7 +565,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
               children: [
                 Icon(Icons.auto_awesome, size: 14, color: p.accent),
                 const SizedBox(width: 8),
-                Expanded(child: Text('规范会随每次 Agent run 注入上下文，保持全局视觉一致。',
+                Expanded(child: Text('每次生成都会带上这份规范，保持全局视觉一致。',
                     style: TextStyle(fontSize: 11, color: p.ink3))),
               ],
             ),
@@ -568,6 +573,23 @@ class _SpecPreviewState extends State<_SpecPreview> {
         ],
       ),
     );
+  }
+
+  /// 规范页的「两张卡」布局：宽屏并排、窄屏上下堆叠（手机 390 下并排会把
+  /// 色卡/间距条挤到右溢）。
+  Widget _twoUp(BuildContext context, Widget a, Widget b) {
+    return LayoutBuilder(builder: (context, constraints) {
+      if (constraints.maxWidth < 560) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [a, const SizedBox(height: 14), b],
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [Expanded(child: a), const SizedBox(width: 14), Expanded(child: b)],
+      );
+    });
   }
 
   Widget _card(BuildContext context, String title, Widget child) {
@@ -638,29 +660,29 @@ class _SpecPreviewState extends State<_SpecPreview> {
 
   Widget _spacing(BuildContext context, DesignSpec design) {
     final p = context.palette;
-    return SizedBox(
-      height: 48,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          for (final s in design.spacing)
-            Padding(
-              padding: const EdgeInsets.only(right: 7),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Container(
-                    width: 14,
-                    height: (s * 1.6).clamp(4, 44),
-                    decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(4)),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(s.round().toString(), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
-                ],
-              ),
+    // 不钉死行高：条高 + 标签在字号缩放（手机 +10%）下会超出 48px 盒子，
+    // 生产界面会出现黄黑警示条。让 Row 按内容自然撑开即可。
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        for (final s in design.spacing)
+          Padding(
+            padding: const EdgeInsets.only(right: 7),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Container(
+                  width: 14,
+                  height: (s * 1.6).clamp(4, 44),
+                  decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(4)),
+                ),
+                const SizedBox(height: 3),
+                Text(s.round().toString(), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+              ],
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 

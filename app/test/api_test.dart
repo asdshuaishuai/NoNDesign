@@ -1,160 +1,351 @@
-import 'dart:async';
+// Runtime router tests (batch 05).
+//
+// The app has two runtimes: the local core (engine + project library) and the
+// optional connected desktop (RPC, see remote_rpc_contract_test.dart). These
+// tests pin the router's *local* behaviour and its failure envelopes:
+//
+//  * local engine calls never touch HTTP;
+//  * projects are client-side `.ddp` files (save → open → list round-trip);
+//  * with no runtime at all every face answers `engine_unavailable` /
+//    `remote_unavailable` instead of throwing or returning null;
+//  * remote-only faces (3D / hot-app / portfolio / external agents) are honest
+//    when no desktop is connected.
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:nondesign/core/api.dart';
+import 'package:nondesign/core/capability.dart';
+import 'package:nondesign/core/project_service.dart';
+import 'package:nondesign/core/remote_desktop_client.dart';
+
+class _FakeEngine implements LocalEngine {
+  bool ready = true;
+  String canonical = 'MBT_0';
+  final List<String> gates = [];
+  final List<String> appliedOps = [];
+  int renderCalls = 0;
+  final List<String> calls = [];
+
+  Map<String, dynamic> _envelope(String mbt, {String entry = 'home'}) => {
+        'ok': true,
+        'mbt': mbt,
+        'entry': entry,
+        'revision': 1,
+        'artboards': [
+          {'id': entry, 'name': entry, 'width': 390, 'height': 844, 'nodes': []},
+        ],
+        'flows': [],
+      };
+
+  @override
+  bool get isReady => ready;
+
+  @override
+  String? get startupError => ready ? null : 'engine fixture off';
+
+  @override
+  CapabilityAvailability probeAvailability() => ready
+      ? const CapabilityAvailability.available(CapabilityId.localDesignEngine)
+      : const CapabilityAvailability.unavailable(CapabilityId.localDesignEngine);
+
+  @override
+  Future<Map<String, dynamic>> render(String mbt) async {
+    calls.add('render');
+    renderCalls++;
+    canonical = mbt;
+    return _envelope(mbt);
+  }
+
+  @override
+  Future<Map<String, dynamic>> validate(String mbt) async {
+    calls.add('validate');
+    return {'ok': true, 'mbt': mbt};
+  }
+
+  @override
+  Future<Map<String, dynamic>> apply(String mbt, String op, {String gate = 'human'}) async {
+    calls.add('apply');
+    gates.add(gate);
+    appliedOps.add(op);
+    canonical = 'MBT_${appliedOps.length}';
+    return _envelope(canonical);
+  }
+
+  @override
+  Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) async {
+    calls.add('session:$name');
+    return {'ok': true, 'data': const []};
+  }
+
+  @override
+  Future<Map<String, dynamic>> generate(
+          String mbt, String intent, String name, Map<String, dynamic> spec) async {
+    calls.add('generate');
+    return {'ok': true, 'mbt': '$mbt<!--gen-->', 'artboard': name};
+  }
+
+  @override
+  Future<Map<String, dynamic>> tap(String mbt, String artboard, double x, double y) async {
+    calls.add('tap');
+    return {'ok': true, 'current': artboard};
+  }
+
+  @override
+  Future<Map<String, dynamic>> constrainIntent(String mbt, String artboard, String intent) async {
+    calls.add('constrain');
+    return {'ok': true, 'mbt': mbt};
+  }
+
+  @override
+  Future<Map<String, dynamic>> event(String mbt, String artboard, String spec) async {
+    calls.add('event');
+    return {'ok': true, 'current': artboard};
+  }
+
+  @override
+  Future<Map<String, dynamic>> history(String mbt, String command) async {
+    calls.add('history');
+    return {'ok': true};
+  }
+
+  @override
+  Future<Map<String, dynamic>> exportHtml(String mbt) async {
+    calls.add('exportHtml');
+    return {'ok': true, 'html': '<html></html>'};
+  }
+
+  @override
+  Future<Map<String, dynamic>> tokens() async {
+    calls.add('tokens');
+    return {'ok': true, 'data': const []};
+  }
+
+  @override
+  Future<Map<String, dynamic>> versionInfo() async {
+    calls.add('version');
+    return {'ok': true, 'version': 'fixture'};
+  }
+
+  @override
+  Future<List<dynamic>> templates() async {
+    calls.add('templates');
+    return [
+      {'id': 'pc_app'},
+    ];
+  }
+
+  @override
+  Future<List<dynamic>> components() async {
+    calls.add('components');
+    return ['button'];
+  }
+
+  @override
+  Future<List<dynamic>> themes() async {
+    calls.add('themes');
+    return ['dark'];
+  }
+
+  @override
+  Future<List<dynamic>> ops() async {
+    calls.add('ops');
+    return ['place'];
+  }
+}
+
+Directory _tempDir() {
+  final dir = Directory.systemTemp.createTempSync('nondesign-api-test');
+  addTearDown(() {
+    try {
+      dir.deleteSync(recursive: true);
+    } catch (_) {}
+  });
+  return dir;
+}
 
 void main() {
-  test('agentRun parses SSE events and stops at done', () async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    server.listen((request) async {
-      request.response.headers.contentType = ContentType('text', 'event-stream');
-      request.response.write('data: ${jsonEncode({'type': 'note', 'label': 'start'})}\n\n');
-      request.response.write('data: ${jsonEncode({'type': 'assistant_delta', 'text': 'hi'})}\n\n');
-      request.response.write('data: ${jsonEncode({'type': 'done', 'text': 'ok', 'stopReason': 'done'})}\n\n');
-      await request.response.close();
+  group('local runtime', () {
+    late _FakeEngine engine;
+    late ProjectService projects;
+    late NoNDesignApi api;
+
+    setUp(() {
+      engine = _FakeEngine();
+      projects = ProjectService(root: () async => _tempDir());
+      api = NoNDesignApi.runtime(
+        local: LocalCore(engine: engine, projects: projects),
+      );
     });
-    final api = NoNDesignApi('http://127.0.0.1:${server.port}');
-    final events = await api
-        .agentRun({'run_id': 1, 'mode': 'build', 'instruction': 'x'})
-        .toList()
-        .timeout(const Duration(seconds: 5));
-    expect(events.map((e) => e['type']), ['note', 'assistant_delta', 'done']);
-    expect(events.last['text'], 'ok');
-    await server.close(force: true);
+
+    test('engine faces go to the in-process engine, never to HTTP', () async {
+      expect((await api.render('MBT_A'))['mbt'], 'MBT_A');
+      expect((await api.apply('MBT_A', 'move home n1 1 2'))['ok'], isTrue);
+      expect((await api.session('MBT_A', 'session_list_artboards'))['ok'], isTrue);
+      expect((await api.generate('MBT_A', '居中', 'home', const {}))['ok'], isTrue);
+      expect((await api.tap('MBT_A', 'home', 1, 2))['current'], 'home');
+      expect((await api.event('MBT_A', 'home', 'key_enter'))['current'], 'home');
+      expect((await api.constrainIntent('MBT_A', 'home', '居中'))['ok'], isTrue);
+      expect((await api.history('MBT_A', 'undo'))['ok'], isTrue);
+      expect((await api.exportHtml('MBT_A'))['html'], isNotNull);
+
+      expect(engine.gates, ['human']);
+      expect(engine.renderCalls, 1);
+      expect(
+        engine.calls,
+        containsAll([
+          'render',
+          'apply',
+          'session:session_list_artboards',
+          'generate',
+          'tap',
+          'event',
+          'constrain',
+          'history',
+          'exportHtml',
+        ]),
+      );
+    });
+
+    test('agent gate is forwarded verbatim', () async {
+      await api.apply('MBT_A', 'place home text t1 0 0 10 10', gate: 'agent');
+      expect(engine.gates, ['agent']);
+    });
+
+    test('registries read from the local engine', () async {
+      expect(await api.templates(), hasLength(1));
+      expect(await api.components(), ['button']);
+      expect(await api.themes(), ['dark']);
+      expect(await api.ops(), ['place']);
+      expect((await api.tokens())['ok'], isTrue);
+      expect((await api.versionInfo())['version'], 'fixture');
+    });
+
+    test('projects are local .ddp files: save → open → list', () async {
+      final dir = _tempDir();
+      final target = '${dir.path}/demo.ddp';
+
+      final saved = await api.saveProject(
+        mbt: 'MBT_BODY',
+        path: target,
+        docs: {'prd': '需求', 'ui': ''},
+      );
+      expect(saved['ok'], isTrue);
+      expect(saved['path'], target);
+      expect(File(target).existsSync(), isTrue);
+      expect(saved['bytes'], greaterThan(0));
+
+      final opened = await api.openProject(target);
+      expect(opened['ok'], isTrue);
+      expect(opened['mbt'], contains('MBT_BODY'));
+      expect((opened['docs'] as Map)['prd'], '需求');
+
+      final listed = await api.listProjects(dir.path);
+      expect(listed.map((e) => (e as Map)['name']), contains('demo'));
+    });
+
+    test('a wrong password is reported as need_password, not a failure', () async {
+      final dir = _tempDir();
+      final target = '${dir.path}/locked.ddp';
+      await api.saveProject(mbt: 'MBT_BODY', path: target, password: 'pw', docs: const {});
+
+      final locked = await api.openProject(target);
+      expect(locked['ok'], isFalse);
+      expect(locked['need_password'], isTrue);
+
+      final opened = await api.openProject(target, password: 'pw');
+      expect(opened['ok'], isTrue);
+    });
+
+    test('local models() answers honestly (the registry lives in the store)', () async {
+      final models = await api.models();
+      expect(models['ok'], isFalse);
+      expect(models['error'], 'models_local_only');
+    });
   });
 
-  test('non-2xx responses surface status/detail instead of throwing', () async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    server.listen((request) async {
-      if (request.uri.path == '/plain') {
-        request.response.statusCode = 500;
-        request.response.write('boom');
-      } else {
-        request.response.statusCode = 502;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(jsonEncode({'detail': 'upstream down'}));
+  group('no runtime', () {
+    final api = NoNDesignApi.runtime();
+
+    test('isReady is false and every engine face returns engine_unavailable', () async {
+      expect(api.isReady, isFalse);
+      for (final res in await Future.wait([
+        api.render('x'),
+        api.validate('x'),
+        api.apply('x', 'op'),
+        api.session('x', 'session_list_artboards'),
+        api.generate('x', 'i', 'n', const {}),
+        api.tap('x', 'a', 0, 0),
+        api.event('x', 'a', 'e'),
+        api.constrainIntent('x', 'a', '居中'),
+        api.history('x', 'log'),
+        api.exportHtml('x'),
+      ])) {
+        expect(res['ok'], isFalse);
+        expect(res['error'], 'engine_unavailable');
       }
-      await request.response.close();
+      expect(await api.templates(), isEmpty);
+      expect(await api.components(), isEmpty);
     });
-    final api = NoNDesignApi('http://127.0.0.1:${server.port}');
-    final plain = await api.getJson('/plain');
-    expect(plain['ok'], false);
-    expect(plain['status'], 500);
-    expect(plain['detail'], 'boom');
-    final jsonRes = await api.getJson('/json');
-    expect(jsonRes['ok'], false);
-    expect(jsonRes['status'], 502);
-    expect(jsonRes['detail'], 'upstream down');
-    await server.close(force: true);
+
+    test('agentRun is a single failed terminal, never a hang', () async {
+      final events = await api.agentRun({'run_id': 1}).toList();
+      expect(events.single['type'], 'failed');
+      expect(events.single['error'], 'remote_unavailable');
+    });
+
+    test('remote-only faces answer remote_unavailable', () async {
+      for (final res in await Future.wait([
+        api.exportFigma('x'),
+        api.threeProjects(),
+        api.hotAppList(),
+        api.portfolio(),
+        api.clearSession('x'),
+      ])) {
+        expect(res['ok'], isFalse);
+        expect(res['error'], 'remote_unavailable');
+      }
+      expect(await api.acpAgents(), isEmpty);
+      expect(await api.cancelAgent(1), isFalse);
+    });
   });
 
-  // ---- 2026-11-17 核心状态机批次回归锚 ----
-
-  test('manual server url trailing slash is stripped from the handle baseUrl', () async {
-    // 移动端「连接桌面」地址带单个尾斜杠：_healthy 自行剥斜杠所以健康检查
-    // 能过，但 handle.baseUrl 保留斜杠会让之后所有路径变成 //path 而 404
-    // （启动死锁在误导性 no models in registry）。
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final paths = <String>[];
-    server.listen((request) async {
-      paths.add(request.uri.path);
-      request.response.headers.contentType = ContentType.json;
-      request.response.write(jsonEncode({'ok': true}));
-      await request.response.close();
-    });
-    ServerLauncher.manualBaseUrl = 'http://127.0.0.1:${server.port}/';
-    addTearDown(() => ServerLauncher.manualBaseUrl = null);
-
-    final handle = await ServerLauncher.launch();
-
-    expect(handle.baseUrl, 'http://127.0.0.1:${server.port}');
-    final api = NoNDesignApi(handle.baseUrl);
-    final models = await api.models();
-    expect(models['ok'], true);
-    expect(paths, containsAllInOrder(['/health', '/models']),
-        reason: '路径必须是 /models 而非 //models');
-    await server.close(force: true);
+  test('SSE idle timeout is shared with the connected desktop client', () {
+    final previous = RemoteDesktopClient.sseIdleTimeout;
+    addTearDown(() => RemoteDesktopClient.sseIdleTimeout = previous);
+    NoNDesignApi.sseIdleTimeout = const Duration(milliseconds: 123);
+    expect(RemoteDesktopClient.sseIdleTimeout, const Duration(milliseconds: 123));
   });
 
-  test('agentRun synthesizes a failed terminal when the stream stalls mid-flight', () async {
-    // 流中空闲超时：服务端进程活、响应头已回但不再发数据——此前 await for
-    // 永挂。现在收流并合成 sse_idle_timeout 终态（SSE 必须始终有终态事件）。
-    // 本机 dart:io 的 HttpResponse.flush() 只推响应头、body 压到 close 才
-    // 到（探针实证）——这里稳定呈现为「连接后静默」的空闲；「事件到达后再
-    // 卡死」由 store_test 的原始 socket mock 覆盖。
-    NoNDesignApi.sseIdleTimeout = const Duration(milliseconds: 250);
-    addTearDown(() => NoNDesignApi.sseIdleTimeout = const Duration(seconds: 660));
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    server.listen((request) async {
-      request.response.headers.contentType = ContentType('text', 'event-stream');
-      request.response.write('data: ${jsonEncode({'type': 'note', 'label': 'start'})}\n\n');
-      await request.response.flush(); // 头已上网络、行未到——之后永久卡死
-      await Completer<void>().future;
-    });
-    final api = NoNDesignApi('http://127.0.0.1:${server.port}');
-    final events = await api
-        .agentRun({'run_id': 1, 'mode': 'build', 'instruction': 'x'})
-        .toList()
-        .timeout(const Duration(seconds: 5));
-    expect(events.map((e) => e['type']), ['failed']);
-    expect(events.last['error'], 'sse_idle_timeout');
-    await server.close(force: true);
+  test('a configured desktop address is normalised once', () {
+    final api = NoNDesignApi('http://127.0.0.1:8799///');
+    addTearDown(() => api.remote?.close());
+    expect(api.baseUrl, 'http://127.0.0.1:8799');
+    expect(api.hasRemote, isTrue);
+    expect(api.isReady, isTrue);
   });
 
-  test('acpPrompt also synthesizes a failed terminal on stream stall', () async {
-    NoNDesignApi.sseIdleTimeout = const Duration(milliseconds: 250);
-    addTearDown(() => NoNDesignApi.sseIdleTimeout = const Duration(seconds: 660));
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    server.listen((request) async {
-      request.response.headers.contentType = ContentType('text', 'event-stream');
-      request.response.write('data: ${jsonEncode({'type': 'assistant_delta', 'text': 'hi'})}\n\n');
-      await request.response.flush();
-      await Completer<void>().future;
-    });
-    final api = NoNDesignApi('http://127.0.0.1:${server.port}');
-    final events = await api
-        .acpPrompt('sid', 'hello')
-        .toList()
-        .timeout(const Duration(seconds: 5));
-    expect(events.map((e) => e['type']), ['failed']);
-    expect(events.last['error'], 'sse_idle_timeout');
-    await server.close(force: true);
+  test('runtime router exposes no raw HTTP escape hatch', () {
+    // 旧 `getJson`/`postJson` 助手已随旧 HTTP 路由一起删除：远程面只能经
+    // `/v1/health|capabilities|rpc`（RemoteDesktopClient）访问。
+    final source = File('lib/core/api.dart').readAsStringSync();
+    expect(source.contains('getJson('), isFalse);
+    expect(source.contains('postJson('), isFalse);
   });
 
-  // ---- 2026-11-17 3D 客户端超时批次回归锚（three-2）----
+  test('hot-app / 3D asset URLs degrade to a placeholder page, never a blank', () {
+    final api = NoNDesignApi.runtime();
+    final page = api.hotAppPageUrl('demo');
+    expect(page, startsWith('data:text/html'));
+    final decoded = Uri.parse(page).data!.contentAsString();
+    expect(decoded, contains('热应用需要先连接桌面'));
+    expect(api.threePreviewUrl('demo'), startsWith('data:text/html'));
+  });
 
-  test('threeNewProject/threeRunPass carry the 10-minute LLM generation timeout', () async {
-    // 值锚：默认与 hotAppGenerate/hotAppRefine 的 10 分钟对齐，不得回退
-    // postJson 默认 30s——真实 LLM 生成整份 spec JSON / scene.js 经常超过
-    // 30s，客户端先抛 TimeoutException 报「生成失败」而服务端继续落盘
-    //（重试撞 project_exists / pass_awaiting_feedback，状态分叉）。
-    expect(NoNDesignApi.llmGenTimeout, const Duration(minutes: 10));
-    // 接线锚：缩短超时、响应慢于它——两方法都必须抛 TimeoutException。
-    //（若有人把 timeout: llmGenTimeout 撤掉回到默认 30s，400ms 响应不会
-    // 抛，本测试变红。）
-    NoNDesignApi.llmGenTimeout = const Duration(milliseconds: 120);
-    addTearDown(() => NoNDesignApi.llmGenTimeout = const Duration(minutes: 10));
-    final api = NoNDesignApi('http://mock.local', MockClient((request) async {
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-      return http.Response('{"ok":true}', 200);
-    }));
-    await expectLater(
-      api.threeNewProject(
-        name: 'saturn-demo', brief: '带环行星',
-        model: 'm', baseUrl: 'u', apiKey: 'k', thinkingLevel: 'off',
-      ),
-      throwsA(isA<TimeoutException>()),
-    );
-    await expectLater(
-      api.threeRunPass(
-        name: 'saturn-demo',
-        model: 'm', baseUrl: 'u', apiKey: 'k', thinkingLevel: 'off',
-      ),
-      throwsA(isA<TimeoutException>()),
-    );
+  test('bundled model snapshot is parseable JSON with providers', () {
+    final raw = File('assets/models.json').readAsStringSync();
+    final decoded = jsonDecode(raw) as Map<String, dynamic>;
+    expect(decoded['providers'], isA<Map>());
+    expect((decoded['providers'] as Map), isNotEmpty);
   });
 }

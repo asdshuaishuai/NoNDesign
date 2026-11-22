@@ -4,7 +4,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show ValueListenable, mapEquals, debugPrint;
-import 'package:flutter/material.dart' hide Flow;
+import 'package:material_ui/material_ui.dart' hide Flow;
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
@@ -164,7 +164,7 @@ class NodeImageCache extends ChangeNotifier {
 ///    把 SourceAlpha 图层颜色置黑（resolver.dart:495 Color.fromARGB(a,0,0,0)），
 ///    恰为 feDropShadow 默认 flood-color 黑。flood-opacity 在三基元白名单内
 ///    无法表达，改写链不携带（阴影比引擎意图略重，可见性优先）。
-/// ② <image> 仅接受 data: href（parser.dart:610），http(s) href 直接
+/// ② `<image>` 仅接受 data: href（parser.dart:610），http(s) href 直接
 ///    return 丢弃（:649-652）——网络图整节点消失。这里把 http(s) href 按
 ///    NodeImageCache 同款管线语义（URL 幂等、失败不重试）预取原始字节，
 ///    改写为 data: URI（mime 按 Content-Type/扩展名收紧到 png/jpeg/webp/
@@ -224,7 +224,7 @@ class EngineSvgPrep extends ChangeNotifier {
         final raw = _attr(tag, name)?.trim();
         if (raw == null || raw.isEmpty) return null;
         final v = double.tryParse(raw.split(RegExp(r'[\s,]+')).first);
-        return v == null ? null : v.toString();
+        return v?.toString();
       }
 
       final std = num('stdDeviation') ?? '0';
@@ -338,37 +338,37 @@ class EngineSvgPrep extends ChangeNotifier {
   }
 }
 
-enum _ResizeHandle { topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left }
+enum ResizeHandle { topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left }
 
 /// 手柄 delta 应用到起始矩形（8 向钳制最小边 8）。painter 与手势收尾共用。
-Rect _applyResizeHandle(Rect start, Offset delta, _ResizeHandle handle) {
+Rect _applyResizeHandle(Rect start, Offset delta, ResizeHandle handle) {
   const minSide = 8.0;
   var left = start.left;
   var top = start.top;
   var right = start.right;
   var bottom = start.bottom;
-  if (handle == _ResizeHandle.topLeft || handle == _ResizeHandle.left || handle == _ResizeHandle.bottomLeft) {
+  if (handle == ResizeHandle.topLeft || handle == ResizeHandle.left || handle == ResizeHandle.bottomLeft) {
     left = math.min(left + delta.dx, right - minSide);
   }
-  if (handle == _ResizeHandle.topRight || handle == _ResizeHandle.right || handle == _ResizeHandle.bottomRight) {
+  if (handle == ResizeHandle.topRight || handle == ResizeHandle.right || handle == ResizeHandle.bottomRight) {
     right = math.max(right + delta.dx, left + minSide);
   }
-  if (handle == _ResizeHandle.topLeft || handle == _ResizeHandle.top || handle == _ResizeHandle.topRight) {
+  if (handle == ResizeHandle.topLeft || handle == ResizeHandle.top || handle == ResizeHandle.topRight) {
     top = math.min(top + delta.dy, bottom - minSide);
   }
-  if (handle == _ResizeHandle.bottomLeft || handle == _ResizeHandle.bottom || handle == _ResizeHandle.bottomRight) {
+  if (handle == ResizeHandle.bottomLeft || handle == ResizeHandle.bottom || handle == ResizeHandle.bottomRight) {
     bottom = math.max(bottom + delta.dy, top + minSide);
   }
   return Rect.fromLTRB(left, top, right, bottom);
 }
 
-SystemMouseCursor _resizeCursor(_ResizeHandle handle) => switch (handle) {
-      _ResizeHandle.topLeft || _ResizeHandle.bottomRight => SystemMouseCursors.resizeUpLeftDownRight,
-      _ResizeHandle.topRight || _ResizeHandle.bottomLeft => SystemMouseCursors.resizeUpRightDownLeft,
-      _ResizeHandle.top => SystemMouseCursors.resizeUp,
-      _ResizeHandle.bottom => SystemMouseCursors.resizeDown,
-      _ResizeHandle.left => SystemMouseCursors.resizeLeft,
-      _ResizeHandle.right => SystemMouseCursors.resizeRight,
+SystemMouseCursor _resizeCursor(ResizeHandle handle) => switch (handle) {
+      ResizeHandle.topLeft || ResizeHandle.bottomRight => SystemMouseCursors.resizeUpLeftDownRight,
+      ResizeHandle.topRight || ResizeHandle.bottomLeft => SystemMouseCursors.resizeUpRightDownLeft,
+      ResizeHandle.top => SystemMouseCursors.resizeUp,
+      ResizeHandle.bottom => SystemMouseCursors.resizeDown,
+      ResizeHandle.left => SystemMouseCursors.resizeLeft,
+      ResizeHandle.right => SystemMouseCursors.resizeRight,
     };
 
 class _CanvasViewState extends State<CanvasView> {
@@ -381,10 +381,13 @@ class _CanvasViewState extends State<CanvasView> {
   bool _nodePressed = false;
   // 8 向缩放手势状态：拖手柄期间 painter 用 ghost 矩形实时绘制。
   String? _resizingId;
-  _ResizeHandle? _resizeHandle;
+  ResizeHandle? _resizeHandle;
   Rect _resizeStart = Rect.zero;
   final ValueNotifier<Offset> _resizeDelta = ValueNotifier(Offset.zero);
   bool _handlePressed = false;
+  // 悬停板：只有悬停板（及选中板/起始板）的跳转线保持高亮，其余连线淡出，
+  // 避免一次全画时线互相穿插。指针经 Listener 探测，换板才 setState。
+  String? _hoveredBoard;
   // 活动板手势期 painter 的 repaint：图片缓存 + 两个手势 delta 合并监听。
   late final Listenable _gestureRepaint =
       Listenable.merge([NodeImageCache.instance, _dragDelta, _resizeDelta]);
@@ -414,8 +417,8 @@ class _CanvasViewState extends State<CanvasView> {
     final dx = (viewport.width - layout.total.width * scale) / 2;
     final dy = (viewport.height - layout.total.height * scale) / 2;
     _controller.value = Matrix4.identity()
-      ..translate(dx, dy)
-      ..scale(scale);
+      ..translateByDouble(dx, dy, 0.0, 1.0)
+      ..scaleByDouble(scale, scale, scale, 1.0);
   }
 
   void _scaleBy(double factor, Size viewport, Offset focal) {
@@ -423,9 +426,35 @@ class _CanvasViewState extends State<CanvasView> {
     final target = (current * factor).clamp(0.08, 4.0);
     final scene = _controller.toScene(focal);
     _controller.value = Matrix4.identity()
-      ..translate(focal.dx, focal.dy)
-      ..scale(target)
-      ..translate(-scene.dx, -scene.dy);
+      ..translateByDouble(focal.dx, focal.dy, 0.0, 1.0)
+      ..scaleByDouble(target, target, target, 1.0)
+      ..translateByDouble(-scene.dx, -scene.dy, 0.0, 1.0);
+  }
+
+  /// 悬停板探测：挂在画布最外层的 Listener 收指针事件（悬停事件沿命中链
+  /// 上浮，板内节点/手势都拦不住；HUD/角标也算画布内，滑上去会清空悬停），
+  /// 局部坐标就是视口坐标，经 toScene 换算回场景坐标后按板位 rect 判定。
+  /// 只有换板才 setState。
+  void _onCanvasHover(Offset viewportPosition) {
+    if (!mounted) return;
+    final layout = _layoutCache;
+    final boards = _layoutSrc;
+    if (layout == null || boards == null) return;
+    final scene = _controller.toScene(viewportPosition);
+    String? hit;
+    for (final b in boards) {
+      final r = layout.positions[b.id];
+      if (r != null && r.shift(_canvasPad).contains(scene)) {
+        hit = b.id;
+        break;
+      }
+    }
+    _setHoveredBoard(hit);
+  }
+
+  void _setHoveredBoard(String? id) {
+    if (!mounted || _hoveredBoard == id) return;
+    setState(() => _hoveredBoard = id);
   }
 
   /// 画布焦点下的键盘处理：方向键微调选中节点，Esc 取消选择。
@@ -540,108 +569,129 @@ class _CanvasViewState extends State<CanvasView> {
             if (mounted) _fit(viewport, layout);
           });
         }
-        return Stack(
-          children: [
-            Positioned.fill(
-              child: InteractiveViewer(
-                transformationController: _controller,
-                constrained: false,
-                boundaryMargin: const EdgeInsets.all(800),
-                minScale: 0.08,
-                maxScale: 4,
-                panEnabled: !_nodePressed && !_handlePressed,
-                trackpadScrollCausesScale: true,
-                child: ExcludeSemantics(
-                  // 画布是自绘 CustomPaint + 热区覆盖——语义树对它只有成本没有
-                  // 价值（OS AX 层激活时 SEMANTICS 每帧走查全树）。
-                  child: SizedBox(
-                    width: layout.total.width + 160,
-                    height: layout.total.height + 160,
-                    child: Stack(
-                    children: [
-                      Positioned.fill(
-                        // RepaintBoundary：flow 连线层独立栅格化，板内重绘不连带。
-                        child: RepaintBoundary(
-                          child: CustomPaint(
-                            painter: FlowPainter(
-                            boards: boards,
-                            positions: layout.positions,
-                            flows: source.flows,
-                            accent: p.accent,
-                              controller: _controller,
+        return MouseRegion(
+          // 指针离开画布（移出到侧栏/标题栏）时清除悬停高亮。
+          onExit: (_) => _setHoveredBoard(null),
+          child: Listener(
+            // 悬停探测放在最外层：指针在画布内但不在板上（包括滑到 HUD/角标）
+            // 也会清掉悬停板，不会再残留高亮；局部坐标仍是视口坐标。
+            onPointerHover: (event) => _onCanvasHover(event.localPosition),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: InteractiveViewer(
+                    transformationController: _controller,
+                    constrained: false,
+                    boundaryMargin: const EdgeInsets.all(800),
+                    minScale: 0.08,
+                    maxScale: 4,
+                    panEnabled: !_nodePressed && !_handlePressed,
+                    trackpadScrollCausesScale: true,
+                    child: ExcludeSemantics(
+                      // 画布是自绘 CustomPaint + 热区覆盖——语义树对它只有成本没有
+                      // 价值（OS AX 层激活时 SEMANTICS 每帧走查全树）。
+                      child: SizedBox(
+                        width: layout.total.width + 160,
+                        height: layout.total.height + 160,
+                        child: Stack(
+                        children: [
+                          Positioned.fill(
+                            // RepaintBoundary：flow 连线层独立栅格化，板内重绘不连带。
+                            child: RepaintBoundary(
+                              child: CustomPaint(
+                                painter: FlowPainter(
+                                  boards: boards,
+                                  positions: layout.positions,
+                                  flows: source.flows,
+                                  controller: _controller,
+                                  accent: p.accent,
+                                  ink: p.ink,
+                                  panel: p.panel,
+                                  line: p.line,
+                                  // 焦点板：选中板 / 悬停板 / 原型起始板。只有与它们
+                                  // 相关的连线高亮，其余淡到背景层（全线同权 =
+                                  // 互相穿插、标签压板，看不出跳转关系）。
+                                  activeBoard: activeBoard,
+                                  hoveredBoard: _hoveredBoard,
+                                  entryBoard: source.entry,
+                                  // 板位 rect 与板 widget 共用同一内边距（见 _canvasPad）。
+                                  canvasPadding: _canvasPad,
+                                ),
+                              ),
                             ),
                           ),
+                          for (final b in boards)
+                            // 板位与 FlowPainter 共用 _canvasPad（连线坐标系对齐）。
+                            _boardWidget(store, b, layout.positions[b.id]!.topLeft + _canvasPad, activeBoard == b.id),
+                          ],
                         ),
                       ),
-                      for (final b in boards)
-                        _boardWidget(store, b, layout.positions[b.id]!.topLeft + const Offset(80, 80), activeBoard == b.id),
-                      ],
                     ),
                   ),
                 ),
-              ),
-            ),
-            if (boards.isEmpty) _EmptyCanvas(store: store),
-            Positioned(
-              left: 12,
-              bottom: 12,
-              child: _CanvasHud(
-                controller: _controller,
-                onZoomIn: () {
-                  _canvasFocus.requestFocus();
-                  _scaleBy(1.2, viewport, Offset(viewport.width / 2, viewport.height / 2));
-                },
-                onZoomOut: () {
-                  _canvasFocus.requestFocus();
-                  _scaleBy(1 / 1.2, viewport, Offset(viewport.width / 2, viewport.height / 2));
-                },
-                onFit: () {
-                  _canvasFocus.requestFocus();
-                  _fit(viewport, layout);
-                },
-                flows: store.settings.theme,
-              ),
-            ),
-            Positioned(
-              right: 12,
-              bottom: 12,
-              child: Row(
-                children: [
-                  if (store.agentBusy && store.previewRender != null)
-                    Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: p.accentSoft,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: p.accent.withValues(alpha: 0.3)),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(width: 5, height: 5, decoration: BoxDecoration(color: p.accent, shape: BoxShape.circle)),
-                          const SizedBox(width: 5),
-                          Text('LIVE · NoN 正在工作', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
-                        ],
-                      ),
-                    ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: p.bgElevated.withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: p.line),
-                    ),
-                    child: Text(
-                      MediaQuery.sizeOf(context).width < 700
-                          ? '${boards.length} 画板'
-                          : '${boards.length} 画板 · space 拖动 · ${modCombo('⌘')}滚轮缩放',
-                      style: TextStyle(fontSize: 10, color: p.ink4),
-                    ),
+                if (boards.isEmpty) _EmptyCanvas(store: store),
+                Positioned(
+                  left: 12,
+                  bottom: 12,
+                  child: _CanvasHud(
+                    controller: _controller,
+                    onZoomIn: () {
+                      _canvasFocus.requestFocus();
+                      _scaleBy(1.2, viewport, Offset(viewport.width / 2, viewport.height / 2));
+                    },
+                    onZoomOut: () {
+                      _canvasFocus.requestFocus();
+                      _scaleBy(1 / 1.2, viewport, Offset(viewport.width / 2, viewport.height / 2));
+                    },
+                    onFit: () {
+                      _canvasFocus.requestFocus();
+                      _fit(viewport, layout);
+                    },
+                    flows: store.settings.theme,
                   ),
-                ],
-              ),
+                ),
+                Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: Row(
+                    children: [
+                      if (store.agentBusy && store.previewRender != null)
+                        Container(
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: p.accentSoft,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: p.accent.withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(width: 5, height: 5, decoration: BoxDecoration(color: p.accent, shape: BoxShape.circle)),
+                              const SizedBox(width: 5),
+                              Text('LIVE · NaN 正在工作', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
+                            ],
+                          ),
+                        ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: p.bgElevated.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: p.line),
+                        ),
+                        child: Text(
+                          MediaQuery.sizeOf(context).width < 700
+                              ? '${boards.length} 画板'
+                              : '${boards.length} 画板 · space 拖动 · ${modCombo('⌘')}滚轮缩放',
+                          style: TextStyle(fontSize: 10, color: p.ink4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         );
       },
       ),
@@ -716,7 +766,7 @@ class _CanvasViewState extends State<CanvasView> {
                         Positioned.fill(
                           child: ListenableBuilder(
                             listenable: EngineSvgPrep.instance,
-                            builder: (_, __) => SvgPicture.string(
+                            builder: (_, _) => SvgPicture.string(
                               EngineSvgPrep.instance.prepared(board.svg),
                               fit: BoxFit.fill,
                             ),
@@ -844,15 +894,15 @@ class _CanvasViewState extends State<CanvasView> {
     final node = hit;
     final rect = Rect.fromLTWH(node.x, node.y, node.w, node.h);
     const grip = 14.0;
-    final targets = <(Offset, _ResizeHandle)>[
-      (rect.topLeft, _ResizeHandle.topLeft),
-      (rect.topCenter, _ResizeHandle.top),
-      (rect.topRight, _ResizeHandle.topRight),
-      (rect.centerRight, _ResizeHandle.right),
-      (rect.bottomRight, _ResizeHandle.bottomRight),
-      (rect.bottomCenter, _ResizeHandle.bottom),
-      (rect.bottomLeft, _ResizeHandle.bottomLeft),
-      (rect.centerLeft, _ResizeHandle.left),
+    final targets = <(Offset, ResizeHandle)>[
+      (rect.topLeft, ResizeHandle.topLeft),
+      (rect.topCenter, ResizeHandle.top),
+      (rect.topRight, ResizeHandle.topRight),
+      (rect.centerRight, ResizeHandle.right),
+      (rect.bottomRight, ResizeHandle.bottomRight),
+      (rect.bottomCenter, ResizeHandle.bottom),
+      (rect.bottomLeft, ResizeHandle.bottomLeft),
+      (rect.centerLeft, ResizeHandle.left),
     ];
     return [
       for (final (point, handle) in targets)
@@ -895,7 +945,7 @@ class _CanvasViewState extends State<CanvasView> {
               onPanEnd: (_) async {
                 _handlePressed = false;
                 final startRect = _resizeStart;
-                final which = _resizeHandle ?? _ResizeHandle.bottomRight;
+                final which = _resizeHandle ?? ResizeHandle.bottomRight;
                 final ghost = _applyResizeHandle(startRect, _resizeDelta.value, which);
                 final target = node.id;
                 _resizeDelta.value = Offset.zero;
@@ -1027,7 +1077,7 @@ class ArtboardPainter extends CustomPainter {
   final ValueListenable<Offset>? dragDelta;
   final String? resizeId;
   final Rect? resizeStart; // 缩放手势的起始矩形（board 坐标）
-  final _ResizeHandle? resizeHandle;
+  final ResizeHandle? resizeHandle;
   final ValueListenable<Offset>? resizeDelta;
   /// 演示模式入场进度（0→1；仅演示传入，编辑画布 null = 静态设计稿语义）。
   /// style.motion=='fade_in' 的节点把整体 alpha 乘以该进度；经 repaint
@@ -1064,7 +1114,7 @@ class ArtboardPainter extends CustomPainter {
       final isDragging = dragId == node.id;
       final isResizing = resizeId == node.id && resizeStart != null;
       final rect = isResizing
-          ? _applyResizeHandle(resizeStart!, resizeDelta, resizeHandle ?? _ResizeHandle.bottomRight)
+          ? _applyResizeHandle(resizeStart!, resizeDelta, resizeHandle ?? ResizeHandle.bottomRight)
           : Rect.fromLTWH(
               node.x + (isDragging ? dragDelta.dx : 0.0),
               node.y + (isDragging ? dragDelta.dy : 0.0),
@@ -1303,7 +1353,7 @@ class ArtboardPainter extends CustomPainter {
     // （超板如实可见，与演示模式「不裁剪」取向一致）。
     final width = math.max(4, rect.width - 24).round();
     final aq = (alpha * 16).round();
-    final key = '${node.text}|${node.style.fontSize}|${weight.index}|${align.index}|$width|$aq'
+    final key = '${node.text}|${node.style.fontSize}|${weight.value}|${align.index}|$width|$aq'
         '|${node.style.line}|${node.style.tracking}|${node.style.italic}';
     var painter = _textCache[key];
     if (painter == null) {
@@ -1370,6 +1420,29 @@ class ArtboardPainter extends CustomPainter {
       old.entrance != entrance;
 }
 
+/// 画布内边距：layoutBoards 的板位 rect 以 0 起算，板上屏统一 +80/+80
+/// （留出板名标签与阴影空间）。FlowPainter 必须使用同一坐标系，否则连线
+/// 相对画板整体偏移 80px、箭头会扎进板里——「板位 rect 避让」也就无从谈起。
+const Offset _canvasPad = Offset(80, 80);
+
+/// 一条聚合后的跳转边：同一对 (from,to) 的多条 flow 合并成一条线，
+/// count 用于中点 ×N 计数（避免平行线堆叠），points 是板边正交折线。
+class _RoutedFlow {
+  final String from;
+  final String to;
+  final String label;
+  final int count;
+  final List<Offset> points;
+
+  const _RoutedFlow({
+    required this.from,
+    required this.to,
+    required this.label,
+    required this.count,
+    required this.points,
+  });
+}
+
 class FlowPainter extends CustomPainter {
   final List<Artboard> boards;
   final Map<String, Rect> positions;
@@ -1379,135 +1452,508 @@ class FlowPainter extends CustomPainter {
   /// paint 时现读，缩放中/后流线描边与箭头补偿即时跟随。
   final TransformationController controller;
 
-  FlowPainter({required this.boards, required this.positions, required this.flows, required this.controller, required this.accent})
-      : super(repaint: controller);
+  /// 配色取 context.palette（NonPalette 是唯一颜色源，painter 无 context
+  /// 只能传值）：accent 高亮线、ink 标签字、panel 标签底、line 标签描边。
   final Color accent;
+  final Color ink;
+  final Color panel;
+  final Color line;
+
+  /// 焦点板：当前选中板 / 悬停板 / 原型起始板（entry）。只有与它们相关的
+  /// 连线保持 accent 高亮并显示标签，其余降到很淡的背景层——所有线同等
+  /// 强调时线会互相穿插、标签压板，反而看不出跳转关系（用户反馈）。
+  final String? activeBoard;
+  final String? hoveredBoard;
+  final String? entryBoard;
+
+  /// 板位 rect 的坐标系平移（见 _canvasPad）。
+  final Offset canvasPadding;
+
+  FlowPainter({
+    required this.boards,
+    required this.positions,
+    required this.flows,
+    required this.controller,
+    required this.accent,
+    required this.ink,
+    required this.panel,
+    required this.line,
+    this.activeBoard,
+    this.hoveredBoard,
+    this.entryBoard,
+    this.canvasPadding = _canvasPad,
+  }) : super(repaint: controller);
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (flows.isEmpty) return;
+    if (flows.isEmpty || boards.isEmpty) return;
     final zoom = controller.value.getMaxScaleOnAxis();
     final k = 1 / math.max(0.2, zoom);
-    final stroke = Paint()
-      ..color = accent.withValues(alpha: 0.75)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2 * k
-      ..strokeCap = StrokeCap.round;
 
-    // 源板节点位置索引：连线从「触发节点中心」出发，而不是板中心——
-    // 跳转关系一眼可见（用户反馈：线太短太小看不清）。
-    final nodeOf = <String, Map<String, Offset>>{};
+    // 板位 rect 平移到板 widget 同一坐标系；顺带记下板名（标签用）。
+    final rects = <String, Rect>{};
+    final names = <String, String>{};
     for (final b in boards) {
-      nodeOf[b.id] = {
-        for (final n in b.nodes) n.id: Offset(n.x + n.w / 2, n.y + n.h / 2),
-      };
+      final r = positions[b.id];
+      if (r == null) continue;
+      rects[b.id] = r.shift(canvasPadding);
+      names[b.id] = b.name.isEmpty ? b.id : b.name;
+    }
+    if (rects.isEmpty) return;
+    final obstacles = rects.values.toList(growable: false);
+
+    // 同一对板之间的多条 flow 合并成一条（count 进标签），只留唯一一条线。
+    final order = <String>[];
+    final counts = <String, int>{};
+    for (final f in flows) {
+      if (f.from == f.to) continue; // 自跳转没有可读的板间路由
+      if (!rects.containsKey(f.from) || !rects.containsKey(f.to)) continue;
+      final key = '${f.from}\u0001${f.to}';
+      if (!counts.containsKey(key)) order.add(key);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    if (order.isEmpty) return;
+
+    final focus = <String>{};
+    for (final id in [activeBoard, hoveredBoard, entryBoard]) {
+      if (id != null && id.isNotEmpty && rects.containsKey(id)) focus.add(id);
     }
 
-    for (final flow in flows) {
-      final from = positions[flow.from];
-      final to = positions[flow.to];
-      if (from == null || to == null) continue;
-      final local = nodeOf[flow.from]?[flow.nodeId];
-      // 起点：节点中心（板内坐标 + 板位）；无节点回落板中心。
-      final src = local != null
-          ? from.topLeft + local
-          : from.center;
-      final dst = to.center;
+    // 标签策略（「高亮线各标一个」与「只标焦点板」结合）：悬停优先——
+    // 用户正在看这块板就只标它；否则标选中板；再退起始板。其余高亮线
+    // 只亮线不带标签，配合下面的标签互斥避让，线多时也不糊。
+    String? labelFocus;
+    if (hoveredBoard != null && rects.containsKey(hoveredBoard)) {
+      labelFocus = hoveredBoard;
+    } else if (activeBoard != null && rects.containsKey(activeBoard)) {
+      labelFocus = activeBoard;
+    } else if (entryBoard != null && rects.containsKey(entryBoard)) {
+      labelFocus = entryBoard;
+    }
 
-      // 出源板：从 src 朝板外延伸到源板边界。
-      final outDir = (src - from.center);
-      final out = outDir == Offset.zero ? const Offset(0, -1) : (outDir / outDir.distance);
-      var start = src + out * 14 * k; // 节点外 14px
-      start = _clipToRect(src, start, from.inflate(4 * k));
-
-      // 入目标板：从 dst 反向回退到目标板边界（箭头贴边不进板内）。
-      final dir = (dst - start);
-      final len = dir.distance;
-      final u = len == 0 ? const Offset(0, -1) : (dir / len);
-      var end = dst - u * 6 * k;
-      end = _clipToRect(dst, dst - u * (len + 200 * k), to.inflate(2 * k));
-
-      // 三阶贝塞尔：水平/垂直主导时用控制点外撑，弧线更可读。
-      final d = end - start;
-      Offset c1;
-      Offset c2;
-      if (d.dx.abs() >= d.dy.abs()) {
-        final right = d.dx > 0;
-        c1 = Offset(start.dx + (right ? 70 : -70) * k, start.dy);
-        c2 = Offset(end.dx + (right ? -70 : 70) * k, end.dy);
+    // 先画全部淡线，再画高亮线（高亮永远压在最上层）。
+    final faint = <List<Offset>>[];
+    final lit = <_RoutedFlow>[];
+    for (final key in order) {
+      final sep = key.indexOf('\u0001');
+      final fromId = key.substring(0, sep);
+      final toId = key.substring(sep + 1);
+      final from = rects[fromId]!;
+      final to = rects[toId]!;
+      final points = _route(from, to, obstacles);
+      if (points.length < 2) continue;
+      // 焦点为空是异常态（activeBoard 未就绪）：全部高亮，避免线整层消失。
+      final highlight = focus.isEmpty || focus.contains(fromId) || focus.contains(toId);
+      if (highlight) {
+        lit.add(_RoutedFlow(
+          from: fromId,
+          to: toId,
+          label: names[toId] ?? toId,
+          count: counts[key] ?? 1,
+          points: points,
+        ));
       } else {
-        final down = d.dy > 0;
-        c1 = Offset(start.dx, start.dy + (down ? 70 : -70) * k);
-        c2 = Offset(end.dx, end.dy + (down ? -70 : 70) * k);
+        faint.add(points);
       }
-      final path = Path()
-        ..moveTo(start.dx, start.dy)
-        ..cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, end.dx, end.dy);
-      canvas.drawPath(path, stroke);
+    }
 
-      // 起点小圆点（触发节点标记）
-      canvas.drawCircle(src, 3.5 * k, Paint()..color = accent.withValues(alpha: 0.9));
-
-      // 大箭头
-      final dirE = (end - c2);
-      final angle = math.atan2(dirE.dy, dirE.dx);
-      final head = 13 * k;
-      final arrow = Path()
-        ..moveTo(end.dx, end.dy)
-        ..lineTo(end.dx - head * math.cos(angle - 0.42), end.dy - head * math.sin(angle - 0.42))
-        ..lineTo(end.dx - head * math.cos(angle + 0.42), end.dy - head * math.sin(angle + 0.42))
-        ..close();
-      canvas.drawPath(arrow, Paint()..color = accent);
-
-      // 中点标签：目标板名（白底 pill，跟缩放）
-      final mid = _cubicAt(start, c1, c2, end, 0.5);
-      final label = flow.to;
-      final tp = TextPainter(
-        text: TextSpan(
-            text: label,
-            style: TextStyle(
-                fontSize: 10 * math.max(0.5, math.min(1.6, zoom)),
-                fontFamily: 'Menlo',
-                // 双主题通用：白底深字（画布标注惯例，painter 无 palette）。
-                color: const Color(0xFF14161A))),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      final pad = 4 * k;
-      final rect = Rect.fromCenter(
-          center: mid,
-          width: tp.width + pad * 2,
-          height: tp.height + pad);
-      canvas.drawRRect(
-          RRect.fromRectAndRadius(rect, Radius.circular(4 * k)),
-          Paint()..color = Colors.white.withValues(alpha: 0.92));
-      tp.paint(canvas, Offset(rect.left + pad, rect.top + pad / 2));
+    for (final points in faint) {
+      _paintFlow(canvas, points, k, zoom, obstacles, highlight: false);
+    }
+    // 已放置的标签矩形：后画的标签必须避开它们（两个标签叠在一起比没有更乱）。
+    final labelBoxes = <Rect>[];
+    for (final routed in lit) {
+      final allowLabel = labelFocus != null &&
+          (routed.from == labelFocus || routed.to == labelFocus);
+      // 标签永远指「对端」：出边标目标板，入边标来源板——否则焦点板的
+      // 多条入边会挂一串一样的板名，等于没信息。
+      final label = routed.to == labelFocus
+          ? (names[routed.from] ?? routed.from)
+          : routed.label;
+      _paintFlow(canvas, routed.points, k, zoom, obstacles,
+          highlight: true,
+          label: label,
+          count: routed.count,
+          allowLabel: allowLabel,
+          labelBoxes: labelBoxes);
     }
   }
 
-  /// 线段 p0→p1 与 rect 边界的交点（从 p0 朝 p1 出发的第一次出界点）。
-  Offset _clipToRect(Offset p0, Offset p1, Rect rect) {
-    double t = 1;
-    if (p1.dx != p0.dx) {
-      final tx = p1.dx > p0.dx
-          ? (rect.right - p0.dx) / (p1.dx - p0.dx)
-          : (rect.left - p0.dx) / (p1.dx - p0.dx);
-      if (tx >= 0 && tx < t) t = tx;
+  /// 板边正交路由：出口/入口都取板边缘中点，按两块板相对位置选边；
+  /// 候选折线全部水平/垂直（2–4 段），用其余板的 rect 打分——穿过板数
+  /// 最少优先，其次路径最短，同分取先生成（更符合相对位置的走向）。
+  /// 布局是网格 + 150px 板间通道，所以「贴板外侧的通道 + 中段过渡」
+  /// 几乎总能绕开中间板，包括同行隔板跳转与深对角跳转。
+  List<Offset> _route(Rect from, Rect to, List<Rect> obstacles) {
+    final dx = to.center.dx - from.center.dx;
+    final dy = to.center.dy - from.center.dy;
+    final hGap = math.max(to.left - from.right, from.left - to.right);
+    final vGap = math.max(to.top - from.bottom, from.top - to.bottom);
+    final preferHorizontal = (hGap > 0 && (vGap <= 0 || hGap >= vGap)) ||
+        (hGap <= 0 && vGap <= 0 && dx.abs() >= dy.abs());
+    // 两板之间的通道距离；绕行通道贴板外侧并多留一点标签位置。
+    const margin = 26.0;
+    const outside = 34.0;
+
+    final hBetween = <List<Offset>>[];
+    final vBetween = <List<Offset>>[];
+    final mixed = <List<Offset>>[];
+    final hOutside = <List<Offset>>[];
+    final vOutside = <List<Offset>>[];
+
+    if (hGap > 0) {
+      // 横向有通道：出口/入口在左右边中点，中间竖一段过渡。
+      final right = dx >= 0;
+      final dir = right ? 1.0 : -1.0;
+      final src = Offset(right ? from.right : from.left, from.center.dy);
+      final dst = Offset(right ? to.left : to.right, to.center.dy);
+      for (final cx in <double>[
+        (src.dx + dst.dx) / 2,
+        src.dx + dir * margin,
+        dst.dx - dir * margin,
+      ]) {
+        // 通道必须在两锚点之间（不回折），且离两端留出圆角空间。
+        if (right ? (cx <= src.dx + 6 || cx >= dst.dx - 6) : (cx >= src.dx - 6 || cx <= dst.dx + 6)) {
+          continue;
+        }
+        hBetween.add(<Offset>[src, Offset(cx, src.dy), Offset(cx, dst.dy), dst]);
+      }
     }
-    if (p1.dy != p0.dy) {
-      final ty = p1.dy > p0.dy
-          ? (rect.bottom - p0.dy) / (p1.dy - p0.dy)
-          : (rect.top - p0.dy) / (p1.dy - p0.dy);
-      if (ty >= 0 && ty < t) t = ty;
+    if (vGap > 0) {
+      // 纵向有通道：出口/入口在上下边中点，中间横一段过渡。
+      final down = dy >= 0;
+      final dir = down ? 1.0 : -1.0;
+      final src = Offset(from.center.dx, down ? from.bottom : from.top);
+      final dst = Offset(to.center.dx, down ? to.top : to.bottom);
+      for (final cy in <double>[
+        (src.dy + dst.dy) / 2,
+        src.dy + dir * margin,
+        dst.dy - dir * margin,
+      ]) {
+        if (down ? (cy <= src.dy + 6 || cy >= dst.dy - 6) : (cy >= src.dy - 6 || cy <= dst.dy + 6)) {
+          continue;
+        }
+        vBetween.add(<Offset>[src, Offset(src.dx, cy), Offset(dst.dx, cy), dst]);
+      }
     }
-    return Offset(p0.dx + (p1.dx - p0.dx) * t, p0.dy + (p1.dy - p0.dy) * t);
+    if (hGap <= 0) {
+      // 同列（横向无通道）：从列外侧绕 U 形，出口/入口同侧。
+      for (final side in const <double>[1.0, -1.0]) {
+        final edgeX = side > 0 ? math.max(from.right, to.right) : math.min(from.left, to.left);
+        final cx = edgeX + side * outside;
+        final src = Offset(side > 0 ? from.right : from.left, from.center.dy);
+        final dst = Offset(side > 0 ? to.right : to.left, to.center.dy);
+        hOutside.add(<Offset>[src, Offset(cx, src.dy), Offset(cx, dst.dy), dst]);
+      }
+    }
+    if (vGap <= 0) {
+      // 同行（纵向无通道）：从行外侧绕 U 形，典型是「同行隔板」的下穿。
+      for (final side in const <double>[1.0, -1.0]) {
+        final edgeY = side > 0 ? math.max(from.bottom, to.bottom) : math.min(from.top, to.top);
+        final cy = edgeY + side * outside;
+        final src = Offset(from.center.dx, side > 0 ? from.bottom : from.top);
+        final dst = Offset(to.center.dx, side > 0 ? to.bottom : to.top);
+        vOutside.add(<Offset>[src, Offset(src.dx, cy), Offset(dst.dx, cy), dst]);
+      }
+    }
+    // 混合走向（一横一竖）：先出板到本板外侧通道，再贴目标板外侧进板，
+    // 中间横/竖过渡——深对角跳转（跨两行/两列以上）靠它绕开中间板。
+    if (preferHorizontal) {
+      final dirE = dx >= 0 ? 1.0 : -1.0;
+      final dirN = dy >= 0 ? 1.0 : -1.0;
+      final src = Offset(dx >= 0 ? from.right : from.left, from.center.dy);
+      final dst = Offset(to.center.dx, dy >= 0 ? to.top : to.bottom);
+      // 出板通道要越过「本列」整列的边缘，否则会切到更宽的同列板。
+      final bandX = dirE > 0 ? _bandRight(from, obstacles) + margin : _bandLeft(from, obstacles) - margin;
+      for (final laneX in <double>[src.dx + dirE * margin, bandX, (src.dx + dst.dx) / 2]) {
+        for (final laneY in <double>[dst.dy - dirN * margin, (src.dy + dst.dy) / 2]) {
+          mixed.add(<Offset>[src, Offset(laneX, src.dy), Offset(laneX, laneY), Offset(dst.dx, laneY), dst]);
+        }
+      }
+    } else {
+      final dirE = dy >= 0 ? 1.0 : -1.0;
+      final dirN = dx >= 0 ? 1.0 : -1.0;
+      final src = Offset(from.center.dx, dy >= 0 ? from.bottom : from.top);
+      final dst = Offset(dx >= 0 ? to.left : to.right, to.center.dy);
+      // 出板通道要越过「本行」整行的边缘，否则会切到更高的同行板。
+      final bandY = dirE > 0 ? _bandBottom(from, obstacles) + margin : _bandTop(from, obstacles) - margin;
+      for (final laneY in <double>[src.dy + dirE * margin, bandY, (src.dy + dst.dy) / 2]) {
+        for (final laneX in <double>[dst.dx - dirN * margin, (src.dx + dst.dx) / 2]) {
+          mixed.add(<Offset>[src, Offset(src.dx, laneY), Offset(laneX, laneY), Offset(laneX, dst.dy), dst]);
+        }
+      }
+    }
+    final ordered = <List<Offset>>[];
+    if (preferHorizontal) {
+      ordered.addAll(hBetween);
+      ordered.addAll(mixed);
+      ordered.addAll(vBetween);
+      ordered.addAll(hOutside);
+      ordered.addAll(vOutside);
+    } else {
+      ordered.addAll(vBetween);
+      ordered.addAll(mixed);
+      ordered.addAll(hBetween);
+      ordered.addAll(vOutside);
+      ordered.addAll(hOutside);
+    }
+    if (ordered.isEmpty) {
+      // 板重叠等异常布局的兜底：两段直角折线，两端仍落在板边中点。
+      final src = Offset(dx >= 0 ? from.right : from.left, from.center.dy);
+      ordered.add(<Offset>[
+        src,
+        Offset(dx >= 0 ? to.left : to.right, src.dy),
+        Offset(dx >= 0 ? to.left : to.right, to.center.dy),
+      ]);
+    }
+
+    List<Offset>? best;
+    var bestScore = double.infinity;
+    for (final candidate in ordered) {
+      final pts = _simplifyPolyline(candidate);
+      if (pts.length < 2) continue;
+      var hits = 0;
+      var length = 0.0;
+      for (var i = 0; i + 1 < pts.length; i++) {
+        length += (pts[i + 1] - pts[i]).distance;
+        for (final r in obstacles) {
+          if (identical(r, from) || identical(r, to)) continue;
+          if (_segmentCrossesRect(pts[i], pts[i + 1], r)) hits++;
+        }
+      }
+      final score = hits * 100000.0 + length;
+      if (score < bestScore) {
+        bestScore = score;
+        best = pts;
+      }
+    }
+    return best ?? const <Offset>[];
   }
 
-  Offset _cubicAt(Offset p0, Offset c1, Offset c2, Offset p1, double t) {
-    final u = 1 - t;
-    return Offset(
-      u * u * u * p0.dx + 3 * u * u * t * c1.dx + 3 * u * t * t * c2.dx + t * t * t * p1.dx,
-      u * u * u * p0.dy + 3 * u * u * t * c1.dy + 3 * u * t * t * c2.dy + t * t * t * p1.dy,
+  /// 与 from 同一行（纵向范围相交）的板下沿/上沿：混合路由的横通道必须
+  /// 落在整行之外，否则会被同行更高的板挡住（板高不一致时 bottom 不齐）。
+  double _bandBottom(Rect from, List<Rect> obstacles) {
+    var bottom = from.bottom;
+    for (final r in obstacles) {
+      if (identical(r, from)) continue;
+      if (r.top < from.bottom && r.bottom > from.top) bottom = math.max(bottom, r.bottom);
+    }
+    return bottom;
+  }
+
+  double _bandTop(Rect from, List<Rect> obstacles) {
+    var top = from.top;
+    for (final r in obstacles) {
+      if (identical(r, from)) continue;
+      if (r.top < from.bottom && r.bottom > from.top) top = math.min(top, r.top);
+    }
+    return top;
+  }
+
+  /// 与 from 同一列（横向范围相交）的板右沿/左沿（同上，列内板宽不一致）。
+  double _bandRight(Rect from, List<Rect> obstacles) {
+    var right = from.right;
+    for (final r in obstacles) {
+      if (identical(r, from)) continue;
+      if (r.left < from.right && r.right > from.left) right = math.max(right, r.right);
+    }
+    return right;
+  }
+
+  double _bandLeft(Rect from, List<Rect> obstacles) {
+    var left = from.left;
+    for (final r in obstacles) {
+      if (identical(r, from)) continue;
+      if (r.left < from.right && r.right > from.left) left = math.min(left, r.left);
+    }
+    return left;
+  }
+
+  /// 去掉零长段与共线中间点（同向），保证后面的圆角/标签段序干净。
+  List<Offset> _simplifyPolyline(List<Offset> input) {
+    final out = <Offset>[];
+    for (final p in input) {
+      if (out.isNotEmpty && (p - out.last).distance < 0.01) continue;
+      out.add(p);
+    }
+    var i = 1;
+    while (i < out.length - 1) {
+      final a = out[i - 1];
+      final b = out[i];
+      final c = out[i + 1];
+      final cross = (b.dx - a.dx) * (c.dy - b.dy) - (b.dy - a.dy) * (c.dx - b.dx);
+      if (cross.abs() < 0.01) {
+        out.removeAt(i);
+      } else {
+        i++;
+      }
+    }
+    return out;
+  }
+
+  /// 轴对齐线段是否穿过 board rect（只做 BBox 判定——线段非横即竖）。
+  bool _segmentCrossesRect(Offset a, Offset b, Rect r) {
+    final l = math.min(a.dx, b.dx);
+    final rr = math.max(a.dx, b.dx);
+    final t = math.min(a.dy, b.dy);
+    final bb = math.max(a.dy, b.dy);
+    return rr > r.left && l < r.right && bb > r.top && t < r.bottom;
+  }
+
+  /// 折线 → 圆角路径：每个拐点用二次贝塞尔收圆角，半径随缩放补偿
+  /// （屏幕 ~12px），并钳到相邻线段长度的一半以内。
+  Path _roundedPolyline(List<Offset> pts, double radius) {
+    final path = Path()..moveTo(pts.first.dx, pts.first.dy);
+    for (var i = 1; i < pts.length - 1; i++) {
+      final prev = pts[i - 1];
+      final cur = pts[i];
+      final next = pts[i + 1];
+      final l1 = (cur - prev).distance;
+      final l2 = (next - cur).distance;
+      final r = math.min(radius, math.min(l1, l2) * 0.45);
+      if (r <= 0.5) {
+        path.lineTo(cur.dx, cur.dy);
+        continue;
+      }
+      final u1 = (cur - prev) / l1;
+      final u2 = (next - cur) / l2;
+      final p1 = cur - u1 * r;
+      final p2 = cur + u2 * r;
+      path.lineTo(p1.dx, p1.dy);
+      path.quadraticBezierTo(cur.dx, cur.dy, p2.dx, p2.dy);
+    }
+    path.lineTo(pts.last.dx, pts.last.dy);
+    return path;
+  }
+
+  void _paintFlow(
+    Canvas canvas,
+    List<Offset> points,
+    double k,
+    double zoom,
+    List<Rect> obstacles, {
+    required bool highlight,
+    String label = '',
+    int count = 0,
+    bool allowLabel = false,
+    List<Rect>? labelBoxes,
+  }) {
+    // 高亮 1.9px / 其余 1.1px（屏幕像素，随缩放补偿）；alpha 0.14 让
+    // 非焦点连线退成背景肌理，不再和焦点线抢注意力。
+    final color = highlight ? accent.withValues(alpha: 0.9) : accent.withValues(alpha: 0.14);
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = (highlight ? 1.9 : 1.1) * k
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    canvas.drawPath(_roundedPolyline(points, (12 * k).clamp(2.0, 36.0).toDouble()), stroke);
+    _paintArrow(canvas, points[points.length - 2], points.last, color, k);
+    if (!highlight || !allowLabel || labelBoxes == null) return;
+    _paintLabel(canvas, points, label, count, k, zoom, obstacles, labelBoxes);
+  }
+
+  /// 箭头画在目标板边缘：尖端贴板边、两翼在板外——尺寸 13 屏幕 px
+  /// （13 * k 补偿缩放），不会穿进目标板内部。
+  void _paintArrow(Canvas canvas, Offset from, Offset tip, Color color, double k) {
+    final delta = tip - from;
+    final len = delta.distance;
+    if (len < 0.01) return;
+    final unit = delta / len;
+    final head = 13 * k;
+    final base = tip - unit * head;
+    final normal = Offset(-unit.dy, unit.dx);
+    final wing = head * 0.52;
+    final arrow = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(base.dx + normal.dx * wing, base.dy + normal.dy * wing)
+      ..lineTo(base.dx - normal.dx * wing, base.dy - normal.dy * wing)
+      ..close();
+    canvas.drawPath(arrow, Paint()..color = color);
+  }
+
+  /// 高亮线的唯一标签（目标板名，多条合并时带 ×N）：放在中段外侧的
+  /// 法线上，并避开所有板位 rect——不压画板、不叠线。
+  void _paintLabel(
+    Canvas canvas,
+    List<Offset> points,
+    String label,
+    int count,
+    double k,
+    double zoom,
+    List<Rect> obstacles,
+    List<Rect> placedBoxes,
+  ) {
+    final text = count > 1 ? '$label  ×$count' : label;
+    // 字号按 1/zoom 反算：缩到 33% 时画布字号变大，屏幕上始终约 10px
+    // （旧实现 *0.55 在 33% 下只有 ~1.8px，标签等于没画）。
+    final fontSize = (10.0 / math.max(0.2, zoom)).clamp(6.0, 60.0).toDouble();
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(fontSize: fontSize, fontFamily: 'Menlo', color: ink, height: 1.1),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+      ellipsis: '…',
+    )..layout(maxWidth: 200);
+    final padX = fontSize * 0.55;
+    final padY = fontSize * 0.3;
+    final w = tp.width + padX * 2;
+    final h = tp.height + padY * 2;
+
+    // 段序：中线附近优先，再向两侧扩；每段试中线/近中线位置与法线两侧。
+    final order = <int>[];
+    final mid = (points.length - 1) ~/ 2;
+    if (mid < points.length - 1) order.add(mid);
+    for (var step = 1; step < points.length; step++) {
+      for (final i in <int>[mid - step, mid + step]) {
+        if (i >= 0 && i < points.length - 1 && !order.contains(i)) order.add(i);
+      }
+    }
+    Rect? placed;
+    for (final i in order) {
+      final a = points[i];
+      final b = points[i + 1];
+      final segLen = (b - a).distance;
+      if (segLen < 1) continue;
+      final unit = (b - a) / segLen;
+      final normal = Offset(-unit.dy, unit.dx);
+      for (final t in const <double>[0.5, 0.42, 0.58, 0.32, 0.68]) {
+        final base = a + (b - a) * t;
+        for (final side in const <double>[1.0, -1.0]) {
+          final center = base + normal * side * (h / 2 + 8 * k);
+          final rect = Rect.fromCenter(center: center, width: w, height: h);
+          if (_rectHitsBoards(rect, obstacles)) continue;
+          // 标签互斥：两个标签压在一起比没有标签更乱，放不下就跳过。
+          if (placedBoxes.any((r) => rect.overlaps(r.inflate(2)))) continue;
+          placed = rect;
+          break;
+        }
+        if (placed != null) break;
+      }
+      if (placed != null) break;
+    }
+    if (placed == null) return; // 周围都被板和已有标签占满：这条线不标
+    final rect = placed;
+    placedBoxes.add(rect);
+    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(4 * k));
+    canvas.drawRRect(rrect, Paint()..color = panel.withValues(alpha: 0.94));
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = line
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1 * k,
     );
+    tp.paint(canvas, Offset(rect.left + padX, rect.top + (rect.height - tp.height) / 2));
+  }
+
+  bool _rectHitsBoards(Rect rect, List<Rect> obstacles) {
+    for (final r in obstacles) {
+      if (rect.overlaps(r.inflate(2))) return true;
+    }
+    return false;
   }
 
   @override
@@ -1516,7 +1962,18 @@ class FlowPainter extends CustomPainter {
       // 恒不等 → 流线整层跟着画布每次 rebuild 重绘，抵消 RepaintBoundary 隔离。
       // flows 保持引用比较（render 信封未变时为同实例）。zoom 不在对比链——
       // 缩放经 repaint listenable（controller）直驱，见构造参数注释。
-      old.flows != flows || !mapEquals(old.positions, positions);
+      // 焦点板与配色都进对比链：hover 换板只重绘连线层，不碰板内 painter。
+      old.boards != boards ||
+      old.flows != flows ||
+      !mapEquals(old.positions, positions) ||
+      old.activeBoard != activeBoard ||
+      old.hoveredBoard != hoveredBoard ||
+      old.entryBoard != entryBoard ||
+      old.accent != accent ||
+      old.ink != ink ||
+      old.panel != panel ||
+      old.line != line ||
+      old.canvasPadding != canvasPadding;
 }
 
 class _EmptyCanvas extends StatelessWidget {
@@ -1563,7 +2020,7 @@ class _EmptyCanvas extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('从一句话开始', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
-                      Text('NoN 先写产品文档与设计规范，再把原型画到画布上。',
+                      Text('NaN 先写产品文档与设计规范，再把原型画到画布上。',
                           style: TextStyle(fontSize: 11, color: p.ink3)),
                     ],
                   ),
@@ -1573,25 +2030,13 @@ class _EmptyCanvas extends StatelessWidget {
             const SizedBox(height: 14),
             Text(
               MediaQuery.sizeOf(context).width < 700
-                  ? '在底部 NoN 面板描述你的产品；或先用文档页生成 PRD。'
-                  : '在右侧 NoN 面板描述你的产品；或先用文档页生成 PRD。',
+                  ? '在底部 NaN 面板描述你的产品；或先用文档页生成 PRD。'
+                  : '在右侧 NaN 面板描述你的产品；或先用文档页生成 PRD。',
               style: TextStyle(fontSize: 12, height: 1.6, color: p.ink3),
             ),
             const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton(
-                  onPressed: () => store.setRightTab('agent'),
-                  child: const Text('打开 NoN'),
-                ),
-                OutlinedButton(
-                  onPressed: () => store.setView('docs'),
-                  child: const Text('先写文档'),
-                ),
-              ],
-            ),
+            // 移动适配（2026-11-19）：空项目不再放操作按钮——描述文案
+            // 指向右侧 NaN 面板即可，动作由面板/composer 承担。
           ],
         ),
           ),

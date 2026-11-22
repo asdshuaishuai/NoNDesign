@@ -2,7 +2,7 @@
 // - 分组根页（无顶部横向 tab），下钻详情单列卡片；
 // - 触控目标 ≥44/48，输入 ≥44，字号与卡片间距按移动端；
 // - 手机横屏矮窗同样走移动端布局。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
@@ -65,7 +65,7 @@ void main() {
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('模型与端点'), findsOneWidget);
     expect(find.text('外观与交互'), findsOneWidget);
-    expect(find.text('上下文与缓存'), findsOneWidget);
+    expect(find.text('智能体'), findsOneWidget);
     expect(find.text('关于'), findsOneWidget);
     // 移动端触控目标：分组行 ≥64。
     final tile = tester.getRect(find.byKey(const ValueKey('settings-m-models')));
@@ -93,12 +93,13 @@ void main() {
     expect(endpoint.height, greaterThanOrEqualTo(44));
     expect(apiKey.height, greaterThanOrEqualTo(44));
 
-    // 服务商选择行与「桌面服务器」输入都是移动端高度。
+    // 服务商选择行与模型行都是移动端高度（模型行点按打开底部选择面板）。
     final provider = tester.getRect(find.byKey(const ValueKey('settings-m-provider')));
     expect(provider.height, greaterThanOrEqualTo(48));
-    final server = tester.getRect(find.byKey(const ValueKey('settings-m-server')));
-    expect(server.left, closeTo(endpoint.left, 0.5));
-    expect(server.width, closeTo(endpoint.width, 0.5));
+    final modelRow = tester.getRect(find.byKey(const ValueKey('settings-m-model-row')));
+    expect(modelRow.left, closeTo(endpoint.left, 0.5));
+    expect(modelRow.width, closeTo(endpoint.width, 0.5));
+    expect(modelRow.height, greaterThanOrEqualTo(48));
 
     await tester.tap(find.byKey(const ValueKey('settings-mobile-back')));
     await tester.pump(const Duration(milliseconds: 220));

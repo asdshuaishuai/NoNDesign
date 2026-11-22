@@ -58,13 +58,28 @@ class _InspectorState extends State<Inspector> {
     _theme = match?.group(1) ?? 'light';
   }
 
+  /// 主题显示名：引擎给了人类可读名就用它；只回传内部 id 时才人性化已知主题
+  /// （`copy_guard` 禁止把 `high_contrast` 这类代号直接摆到下拉里）。
+  String _themeLabel(String id, String label) {
+    if (label.isNotEmpty && label != id) return label;
+    return switch (id) {
+      'light' => '浅色',
+      'dark' => '深色',
+      'high_contrast' => '高对比',
+      'sepia' => '护眼',
+      'nord' => '北境',
+      'sunset' => '日落',
+      _ => label.isNotEmpty ? label : id,
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final node = store.node;
     final board = store.board;
     if (board == null) {
-      return EmptyHint(icon: Icons.crop_square, title: '没有画板', detail: '创建一个画板，或让 NoN 从一句话开始。');
+      return EmptyHint(icon: Icons.crop_square, title: '没有画板', detail: '创建一个画板，或让 NaN 从一句话开始。');
     }
     if (store.activeBoard != null) _ensureNodeInteractions(store, store.activeBoard!);
     return ListView(
@@ -173,12 +188,9 @@ class _InspectorState extends State<Inspector> {
           const SizedBox(width: 4),
           _MiniButton(label: '翻转 V', icon: Icons.flip, onTap: () => store.flipNode(node.id, 'v')),
           const Spacer(),
-          _MiniButton(label: '让 NoN 改', icon: Icons.auto_awesome, accent: true, onTap: () {
+          _MiniButton(label: '让 NaN 改', icon: Icons.auto_awesome, accent: true, onTap: () {
             store.setRightTab('agent');
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text('已选中 ${node.id}，在输入框里描述要怎么改。'),
-              behavior: SnackBarBehavior.floating,
-            ));
+            store.toasts.info('已选中 ${node.id}', '在 NaN 的输入框里描述要怎么改。');
           }),
         ],
       ),
@@ -495,16 +507,16 @@ class _InspectorState extends State<Inspector> {
               // _theme（如 harmony）由此获得匹配项。
               items: _themes.isEmpty
                   ? const [
-                      DropdownMenuItem(value: 'light', child: Text('light', style: TextStyle(fontSize: 11))),
-                      DropdownMenuItem(value: 'dark', child: Text('dark', style: TextStyle(fontSize: 11))),
-                      DropdownMenuItem(value: 'high_contrast', child: Text('high_contrast', style: TextStyle(fontSize: 11))),
-                      DropdownMenuItem(value: 'sepia', child: Text('sepia', style: TextStyle(fontSize: 11))),
-                      DropdownMenuItem(value: 'nord', child: Text('nord', style: TextStyle(fontSize: 11))),
-                      DropdownMenuItem(value: 'sunset', child: Text('sunset', style: TextStyle(fontSize: 11))),
+                      DropdownMenuItem(value: 'light', child: Text('浅色', style: TextStyle(fontSize: 11))),
+                      DropdownMenuItem(value: 'dark', child: Text('深色', style: TextStyle(fontSize: 11))),
+                      DropdownMenuItem(value: 'high_contrast', child: Text('高对比', style: TextStyle(fontSize: 11))),
+                      DropdownMenuItem(value: 'sepia', child: Text('护眼', style: TextStyle(fontSize: 11))),
+                      DropdownMenuItem(value: 'nord', child: Text('北境', style: TextStyle(fontSize: 11))),
+                      DropdownMenuItem(value: 'sunset', child: Text('日落', style: TextStyle(fontSize: 11))),
                     ]
                   : [
                       for (final (id, label) in _themes)
-                        DropdownMenuItem(value: id, child: Text(label, style: const TextStyle(fontSize: 11))),
+                        DropdownMenuItem(value: id, child: Text(_themeLabel(id, label), style: const TextStyle(fontSize: 11))),
                     ],
               onChanged: (v) async {
                 if (v == null) return;
@@ -525,7 +537,7 @@ class _InspectorState extends State<Inspector> {
             setState(() => _critique = result);
           }),
           const SizedBox(width: 4),
-          _MiniButton(label: '让 NoN 继续', icon: Icons.auto_awesome, accent: true, onTap: () => store.setRightTab('agent')),
+          _MiniButton(label: '让 NaN 继续', icon: Icons.auto_awesome, accent: true, onTap: () => store.setRightTab('agent')),
         ],
       ),
       if (_critique != null) ...[
@@ -923,14 +935,14 @@ class _ConstrainBarState extends State<_ConstrainBar> {
         if (err.startsWith('cannot_parse')) {
           _vocab = _vocabFromError(err);
         } else {
-          _error = err.isEmpty ? '布局意图应用失败' : err;
+          _error = _inspectorFailureMessage(err);
         }
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = '布局意图应用失败';
+        _error = '这次布局调整没有生效，可以换个说法再试。';
       });
     }
   }
@@ -964,7 +976,7 @@ class _ConstrainBarState extends State<_ConstrainBar> {
         ),
         if (_vocab.isNotEmpty) ...[
           const SizedBox(height: 6),
-          Text('无法解析该意图，试试引擎支持的：', style: TextStyle(fontSize: 10, color: p.warn)),
+          Text('这句话没看懂，可以试试：', style: TextStyle(fontSize: 10, color: p.warn)),
           const SizedBox(height: 4),
           Wrap(
             spacing: 4,
@@ -1019,6 +1031,8 @@ class _NodeStatesSectionState extends State<_NodeStatesSection> {
   bool _loading = true;
   bool _busyDefining = false;
   String? _error;
+  /// 原始诊断：只进折叠的「技术详情」，默认不展开。
+  String _errorDetail = '';
   String? _defineError;
   String _current = 'default';
   List<String> _states = const [];
@@ -1057,7 +1071,8 @@ class _NodeStatesSectionState extends State<_NodeStatesSection> {
       if (res['ok'] != true || data is! List) {
         setState(() {
           _loading = false;
-          _error = res['error']?.toString() ?? 'states_unavailable';
+          _error = _inspectorFailureMessage(res['error']?.toString());
+          _errorDetail = (res['error'] ?? '').toString();
         });
         return;
       }
@@ -1073,6 +1088,7 @@ class _NodeStatesSectionState extends State<_NodeStatesSection> {
       setState(() {
         _loading = false;
         _error = null;
+        _errorDetail = '';
         _current = current;
         _states = states;
       });
@@ -1080,7 +1096,8 @@ class _NodeStatesSectionState extends State<_NodeStatesSection> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _error = '状态读取失败，请重试';
+        _errorDetail = e.toString();
       });
     }
   }
@@ -1127,7 +1144,7 @@ class _NodeStatesSectionState extends State<_NodeStatesSection> {
     } else {
       final parsed = _parsePatch(patchText);
       if (parsed == null) {
-        setState(() => _defineError = '补丁格式应为 k=v 对，键如 fill / text_color / text / radius / font_size');
+        setState(() => _defineError = '补丁格式不对：写成「键=值」，用空格分隔，例如 fill=#FF5722 radius=8。');
         return;
       }
       patch = parsed;
@@ -1160,7 +1177,13 @@ class _NodeStatesSectionState extends State<_NodeStatesSection> {
         ),
         const SizedBox(height: 6),
         if (_error != null)
-          Text('状态读取失败：$_error', style: TextStyle(fontSize: 10, color: p.danger))
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_error!, style: TextStyle(fontSize: 10, color: p.danger)),
+              if (_errorDetail.isNotEmpty) _InspectorDetails(text: _errorDetail),
+            ],
+          )
         else ...[
           if (_states.isEmpty)
             Text('未定义状态。定义后可一键切换节点外观。', style: TextStyle(fontSize: 10, color: p.ink4))
@@ -1223,14 +1246,14 @@ class _NodeStatesSectionState extends State<_NodeStatesSection> {
             enabled: !_busyDefining,
             style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink),
             decoration: const InputDecoration(
-              hintText: 'k=v 补丁，如 fill=#FF5722 radius=8（留空记录当前外观）',
+              hintText: '外观补丁，如 fill=#FF5722 radius=8（留空则记录当前外观）',
               contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             ),
             onSubmitted: (_) => _define(),
           ),
           const SizedBox(height: 3),
           Text(
-            '键任选：fill / text_color / text / radius / font_size；补丁留空时记录节点当前外观（填充/文字色/圆角/字号）。',
+            '可用键：填充（fill）、文字色（text_color）、文本（text）、圆角（radius）、字号（font_size）；补丁留空时记录节点当前外观。',
             style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4),
           ),
           if (_defineError != null) ...[
@@ -1259,6 +1282,9 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
   Map<String, dynamic>? _pageType;
   String? _missingError;
   String? _typeError;
+  /// 原始诊断（只进折叠的「技术详情」）。
+  String _missingDetail = '';
+  String _typeDetail = '';
   bool _busyMissing = false;
   bool _busyType = false;
   bool _busyFill = false;
@@ -1278,16 +1304,20 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
       if (res == null) {
         setState(() {
           _busyMissing = false;
-          _missingError = 'engine_unavailable';
+          _missingError = _inspectorFailureMessage('engine_unavailable');
+          _missingDetail = 'engine_unavailable';
         });
       } else if (res['ok'] == false) {
         setState(() {
           _busyMissing = false;
-          _missingError = res['error']?.toString() ?? 'infer_failed';
+          _missingError = _inspectorFailureMessage(res['error']?.toString());
+          _missingDetail = (res['error'] ?? '').toString();
         });
       } else {
         setState(() {
           _busyMissing = false;
+          _missingError = null;
+          _missingDetail = '';
           _missing = res;
         });
       }
@@ -1295,7 +1325,8 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
       if (!mounted) return;
       setState(() {
         _busyMissing = false;
-        _missingError = e.toString();
+        _missingError = '缺失体检失败，请重试';
+        _missingDetail = e.toString();
       });
     }
   }
@@ -1315,16 +1346,20 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
       if (res == null) {
         setState(() {
           _busyType = false;
-          _typeError = 'engine_unavailable';
+          _typeError = _inspectorFailureMessage('engine_unavailable');
+          _typeDetail = 'engine_unavailable';
         });
       } else if (res['ok'] == false) {
         setState(() {
           _busyType = false;
-          _typeError = res['error']?.toString() ?? 'infer_failed';
+          _typeError = _inspectorFailureMessage(res['error']?.toString());
+          _typeDetail = (res['error'] ?? '').toString();
         });
       } else {
         setState(() {
           _busyType = false;
+          _typeError = null;
+          _typeDetail = '';
           _pageType = res;
         });
       }
@@ -1332,16 +1367,45 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
       if (!mounted) return;
       setState(() {
         _busyType = false;
-        _typeError = e.toString();
+        _typeError = '页型判定失败，请重试';
+        _typeDetail = e.toString();
       });
     }
+  }
+
+  /// 页型档位 → 界面文案。未收录的类型不把 snake_case 代号摆上屏
+  /// （单英文词照原样显示，那是引擎给的名字，不是错误码）。
+  static String _pageTypeLabel(String raw) {
+    switch (raw) {
+      case '':
+        return '';
+      case 'list':
+        return '列表页';
+      case 'detail':
+        return '详情页';
+      case 'form':
+        return '表单页';
+      case 'dashboard':
+        return '看板页';
+      case 'landing':
+        return '落地页';
+      case 'settings':
+        return '设置页';
+      case 'empty':
+        return '空状态页';
+      case 'checkout':
+        return '结算页';
+      case 'profile':
+        return '个人页';
+    }
+    return raw.contains('_') ? '其他页面' : raw;
   }
 
   /// Materialize the infer_missing report into real nodes via the engine's
   /// autofill op (verified on both human+agent gates; idempotent — the engine
   /// runs auto_fix afterwards to settle overlaps). Engine issue #25: only
   /// shells and placeholder copy are materialized; domain-semantic containers
-  /// (mock_missing) still need NoN or manual content, ≥2 rows each.
+  /// (mock_missing) still need NaN or manual content, ≥2 rows each.
   Future<void> _runFill() async {
     final store = context.read<AppStore>();
     final ab = store.activeBoard;
@@ -1363,7 +1427,7 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
     final pageType = _pageType;
     final missingList = ((missing?['missing'] as List?) ?? const []).whereType<Map>().toList();
     final missingCount = (missing?['missing_count'] as num?)?.toInt() ?? missingList.length;
-    final pageTypeName = (pageType?['page_type'] ?? '').toString();
+    final pageTypeName = _pageTypeLabel((pageType?['page_type'] ?? '').toString());
     final signals = pageType?['signals'];
     final confidence = pageType?['confidence'];
     return Column(
@@ -1399,16 +1463,18 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
         ),
         const SizedBox(height: 5),
         Text(
-          '引擎只物化壳与占位文案；领域语义内容（mock_missing 标记的容器）需再让 NoN 或手动填充，每容器 ≥2 条',
+          '一键填充只补齐外壳与占位文字；具体业务内容（占位标记的容器）还要让 NaN 补或手动填，每个容器至少 2 条。',
           style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4),
         ),
         if (_missingError != null) ...[
           const SizedBox(height: 6),
-          Text('缺失体检失败：$_missingError', style: TextStyle(fontSize: 10, color: p.danger)),
+          Text(_missingError!, style: TextStyle(fontSize: 10, color: p.danger)),
+          if (_missingDetail.isNotEmpty) _InspectorDetails(text: _missingDetail),
         ],
         if (_typeError != null) ...[
           const SizedBox(height: 6),
-          Text('页型判定失败：$_typeError', style: TextStyle(fontSize: 10, color: p.danger)),
+          Text(_typeError!, style: TextStyle(fontSize: 10, color: p.danger)),
+          if (_typeDetail.isNotEmpty) _InspectorDetails(text: _typeDetail),
         ],
         if (missing != null) ...[
           const SizedBox(height: 8),
@@ -1437,7 +1503,7 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
                     ),
                     const Spacer(),
                     if ((missing['page_type'] ?? '').toString().isNotEmpty)
-                      Pill(label: '页型 ${missing['page_type']}', color: p.ink4),
+                      Pill(label: '页型 ${_pageTypeLabel((missing['page_type'] ?? '').toString())}', color: p.ink4),
                   ],
                 ),
                 for (final item in missingList) ...[
@@ -1490,13 +1556,10 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
                   Text('置信度 ${(confidence * 100).toStringAsFixed(0)}%',
                       style: TextStyle(fontSize: 10, color: p.ink3)),
                 ],
-                if (signals is Map && signals.isNotEmpty) ...[
-                  const SizedBox(height: 5),
-                  Text(
-                    signals.entries.map((e) => '${e.key} ${e.value}').join(' · '),
-                    style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
+                if (signals is Map && signals.isNotEmpty)
+                  _InspectorDetails(
+                    text: signals.entries.map((e) => '${e.key}: ${e.value}').join('\n'),
                   ),
-                ],
               ],
             ),
           ),
@@ -1617,11 +1680,24 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
       _extraText.clear();
       await _refresh();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('交互动作被引擎拒绝'), behavior: SnackBarBehavior.floating),
-      );
+      store.toasts.error('这次交互没有加上', '换个动作或检查一下参数再试。');
     }
   }
+
+  /// 触发方式 -> 界面文案（引擎词表在括号里保留，方便对照文档）。
+  static String _triggerLabel(String trigger) => switch (trigger) {
+        'tap' => '轻点',
+        'long_press' => '长按',
+        'swipe_left' => '左滑',
+        'swipe_right' => '右滑',
+        'swipe_up' => '上滑',
+        'swipe_down' => '下滑',
+        'scroll_end' => '滚动到底',
+        'key_enter' => '回车',
+        'focus' => '获得焦点',
+        'blur' => '失去焦点',
+        _ => trigger,
+      };
 
   static String _actionLabel(String kind) => switch (kind) {
         'show_toast' => '显示提示',
@@ -1632,7 +1708,7 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
         'haptic' => '震动反馈',
         'play_sound' => '播放音效',
         'back' => '返回',
-        _ => kind,
+        _ => '交互动作',
       };
 
   @override
@@ -1650,9 +1726,16 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
         if (_refreshError != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
-            child: Text('交互列表刷新失败：$_refreshError',
-                maxLines: 2, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 10, color: p.warn)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('交互列表没有刷新出来，请重试',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10, color: p.warn)),
+                _InspectorDetails(text: _refreshError!),
+              ],
+            ),
           ),
         if (_entries.isNotEmpty) ...[
           for (final e in _entries)
@@ -1664,9 +1747,9 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(
-                      '${e['trigger'] ?? ''} → ${(e['action_spec'] ?? e['action'] ?? '').toString()}',
+                      '${_triggerLabel((e['trigger'] ?? 'tap').toString())} → ${_actionLabel((e['action'] ?? '').toString())}',
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink3),
+                      style: TextStyle(fontSize: 11, color: p.ink3),
                     ),
                   ),
                   InkWell(
@@ -1695,7 +1778,7 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
                   decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
                 items: [
                   for (final t in ['tap', 'long_press', 'swipe_left', 'swipe_right', 'swipe_up', 'swipe_down', 'scroll_end', 'key_enter', 'focus', 'blur'])
-                    DropdownMenuItem(value: t, child: Text(t, style: TextStyle(fontSize: 11))),
+                    DropdownMenuItem(value: t, child: Text(_triggerLabel(t), style: TextStyle(fontSize: 11))),
                 ],
                 onChanged: (v) => setState(() => _trigger = v ?? 'tap'),
               ),
@@ -1797,10 +1880,59 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
         if (isBack)
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
-            child: Text('back 动作由引擎内置返回处理，演示模式点按即生效。',
+            child: Text('「返回」由应用内置处理，演示模式里点按即生效。',
                 style: TextStyle(fontSize: 10, color: p.ink4)),
           ),
       ],
+    );
+  }
+}
+
+/// 引擎失败码 → 一句人话（`docs/copy-glossary.md` §4 的子集）。
+///
+/// 检查器只调引擎的检视/变更接口，未在表内的码统一落到「这次操作没有成功，
+/// 请重试」；原始码由调用方放进折叠的 [技术详情]。
+String _inspectorFailureMessage(String? raw) {
+  final code = (raw ?? '').trim().split(':').first.trim();
+  return switch (code) {
+    'engine_unavailable' => '设计服务暂时不可用，请稍后重试',
+    'engine_timeout' => '这次操作耗时过长，已安全停止',
+    'engine_trap' => '设计服务刚刚重启，请重试',
+    'engine_fuel_exhausted' => '这次操作太大，已安全停止，可以拆小再试',
+    'mbt_gate_block' || 'engine_gate_failed' => '这次改动未通过设计校验',
+    'render_failed' => '预览生成失败',
+    _ => '这次操作没有成功，请重试',
+  };
+}
+
+/// 折叠的「技术详情」：原始诊断（引擎码、异常文本）只在这里出现，默认不展开。
+class _InspectorDetails extends StatelessWidget {
+  final String text;
+  const _InspectorDetails({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 6),
+        dense: true,
+        title: Text('技术详情',
+            style: TextStyle(fontSize: 10, color: p.ink4, fontWeight: FontWeight.w600)),
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(6)),
+            child: SelectableText(
+              text,
+              style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4, height: 1.4),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

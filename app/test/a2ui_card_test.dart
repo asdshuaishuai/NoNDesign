@@ -8,7 +8,7 @@ import 'dart:async';
 import 'package:a2ui_agent/a2ui_agent.dart';
 import 'package:a2ui_core/a2ui_core.dart';
 import 'package:a2ui_flutter/basic_catalog.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nondesign/core/theme.dart';
@@ -80,6 +80,34 @@ void main() {
 
     expect(find.text('生成中…'), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
+  testWidgets('offlineOnly：Image 的 http 地址不生成网络图（渲染期兜底）', (tester) async {
+    final messages = <Object?>[
+      {
+        'version': '1.0',
+        'createSurface': {
+          'surfaceId': 'offline',
+          'catalogId':
+              'https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json',
+          'components': [
+            {
+              'id': 'root',
+              'component': 'Image',
+              'url': 'https://evil.example/x.png',
+              'description': '远程图',
+            },
+          ],
+        },
+      },
+    ];
+    await tester.pumpWidget(_host(A2uiCard.messages(messages: messages, offlineOnly: true)));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // 官方 buildImage 会为 http(s) 直接构造 Image.network；离线目录把它换成
+    // broken-image 占位，因此树里不应出现任何 Image（也不会有网络请求）。
+    expect(find.byType(Image), findsNothing);
+    expect(find.byIcon(Icons.broken_image), findsOneWidget);
   });
 
   testWidgets('动作回流：点击按钮 → onAction 收到事件名与 context', (tester) async {

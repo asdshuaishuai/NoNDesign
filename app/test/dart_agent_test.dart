@@ -9,7 +9,7 @@
 //   （fixture 由该 Python 逻辑生成，见 fixtures/thinking_dialect.json）；
 // - design_op 引擎门：唯一写路径 = bridge.applyAgent（gate=agent 语义），
 //   canonical 回写 + ops 记账 + preview + state 卡；拒绝 op 不入 ops。
-// - models.dart agentRuntime 默认与往返（移动 dart / 桌面 server / 未知回落）。
+// - models.dart agentRuntime 默认 local / 显式 server 保留 / 未知回落 local。
 //
 // 事件契约即 store._handleAgentEvent 的消费面——事件形状改动必须同步该函数。
 import 'dart:async';
@@ -243,7 +243,7 @@ void main() {
       // finish 后还会补一次纯文本调用，故 >=3 而非精确值。
       expect(events.any((e) => e['type'] == 'usage' && (e['requests'] as int) >= 3), isTrue);
       // PLAN 全程零 nudge（交付齐全）。
-      expect(events.any((e) => e['type'] == 'note' && e['label'] == 'NoN 继续执行'), isFalse);
+      expect(events.any((e) => e['type'] == 'note' && e['label'] == 'NaN 继续执行'), isFalse);
       // PLAN 不暴露引擎面工具（事件里也不该有 design_op 的 tool_start）。
       expect(events.any((e) => e['type'] == 'tool_start' && e['tool'] == 'design_op'), isFalse);
     });
@@ -287,7 +287,7 @@ void main() {
       expect(result.ok, isFalse);
       expect(result.stopReason, 'doc_not_written');
       expect(result.error, 'doc_not_written');
-      final nudges = events.where((e) => e['type'] == 'note' && e['label'] == 'NoN 继续执行').toList();
+      final nudges = events.where((e) => e['type'] == 'note' && e['label'] == 'NaN 继续执行').toList();
       expect(nudges, hasLength(1), reason: 'nudge 恰好一轮（server 同构）');
       final failed = events.where((e) => e['type'] == 'failed' && e['error'] == 'doc_not_written').toList();
       expect(failed, hasLength(1));
@@ -316,7 +316,7 @@ void main() {
       );
       expect(result.ok, isTrue);
       expect(result.stopReason, 'text_only');
-      expect(events.any((e) => e['type'] == 'note' && e['label'] == 'NoN 继续执行'), isTrue);
+      expect(events.any((e) => e['type'] == 'note' && e['label'] == 'NaN 继续执行'), isTrue);
       expect(events.any((e) => e['type'] == 'failed'), isFalse);
       expect(events.last['type'], 'done');
     });
@@ -448,7 +448,7 @@ void main() {
       expect(failed.single['stopReason'], 'cancelled');
       // 取消后不再有 done / nudge。
       expect(events.any((e) => e['type'] == 'done'), isFalse);
-      expect(events.any((e) => e['type'] == 'note' && e['label'] == 'NoN 继续执行'), isFalse);
+      expect(events.any((e) => e['type'] == 'note' && e['label'] == 'NaN 继续执行'), isFalse);
     });
 
     test('两轮之间取消：不再进入 nudge 轮（确定性：第二轮挂起探测）', () async {
@@ -471,7 +471,7 @@ void main() {
       final result = await runFuture;
       expect(result.stopReason, 'cancelled');
       expect(model.calls, 1, reason: '取消检查先于 nudge：第二轮不应开始');
-      expect(events.any((e) => e['type'] == 'note' && e['label'] == 'NoN 继续执行'), isFalse,
+      expect(events.any((e) => e['type'] == 'note' && e['label'] == 'NaN 继续执行'), isFalse,
           reason: 'run 间隙取消检查先于 nudge');
     });
   });
@@ -557,26 +557,101 @@ void main() {
       expect(build, contains('PROJECT MAP · x'));
       expect(build, contains('pc_app(PC App)[pc]'));
       expect(build, contains('PRD (1 chars)'));
-      expect(build.startsWith('You are NoN'), isTrue);
+      expect(build.startsWith('You are NaN'), isTrue);
+      // 列表/条目区域的硬性规范（分割线或 ≥12px 间距、图标文字不压盖、容器内边距）
+      // 必须随 BUILD 静态提示词下发，防止生成出来的一整页列表糊成一片。
+      expect(build, contains('must read row-by-row'));
+      expect(build, contains('icon overlap its label'));
+      // autofix 能力必须随 BUILD 提示词下发（迁移前 deepDesign 的「AI 自动修复」，
+      // 迁移不能丢）：生成信封 autofix/missing/skipped 的读法、收尾 fix/lint
+      // 复核、以及 autofill 补缺入口。
+      expect(build, contains('autofix{fixes,detail}'));
+      expect(build, contains('autofill <ab>'));
+      expect(build, contains('BATCH YOUR TURNS'));
+      expect(build, contains('`fix <ab>`'));
+      // 页面体检只读面：missing / page_type 必须出现在工具说明里。
+      expect(build, contains('missing (what the page type lacks)'));
       expect(dartUserMessage('refine', '改标题'), contains('REFINE the existing document.'));
       expect(dartUserMessage('build', ''), contains('(empty)'));
     });
+
+    test('composeDartInstructions：workspace 模式是精简上下文（不带设计文档/画板地图）', () {
+      final out = composeDartInstructions(
+        mode: 'workspace',
+        projectMap: 'PROJECT MAP · should not appear',
+        designSpec: const {'v': 1},
+        docs: const {'prd': 'P', 'ui': 'U', 'design': {}},
+        templates: const [
+          {'id': 'pc_app', 'name': 'PC App', 'device': 'pc'},
+        ],
+        components: const ['button'],
+        hasWorkspaceTools: true,
+        workspaceHint: 'three',
+      );
+      expect(out, contains('WORKSPACE mode'));
+      expect(out, contains('## TARGET WORKSPACE'));
+      expect(out, contains('mode: three'));
+      expect(out, contains('three_create'));
+      // 视频「生成有落地」的三件套必须在提示词里：模型要知道先取示例格式、
+      // 再落盘、最后对照检查；成片导出不存在也要明说。
+      expect(out, contains('video_sample'));
+      expect(out, contains('video_create'));
+      expect(out, contains('video_list'));
+      expect(out, contains('NO video-file export'));
+      // 答题卡纪律与常规 agent 循环一致：ask_user 在所有模式可用，钉死
+      // 工作台时只对「真要换工作台」用 switch_to。
+      expect(out, contains('ask_user works in every run'));
+      expect(out, contains('switch_to'));
+      expect(out, isNot(contains('ask_user is not available')));
+      expect(out, isNot(contains('ask_user_unavailable')));
+      expect(out, isNot(contains('## PROJECT MAP')));
+      expect(out, isNot(contains('PRD (1 chars)')));
+      expect(out, isNot(contains('pc_app(PC App)[pc]')));
+      expect(out, contains('## Engine facts'));
+
+      // 没有工作区工具时必须明说，不能让模型假装有工具。
+      final none = composeDartInstructions(
+        mode: 'workspace',
+        projectMap: '',
+        designSpec: const {},
+        docs: const {},
+        templates: const [],
+        components: const [],
+        hasWorkspaceTools: false,
+        workspaceHint: 'video',
+      );
+      expect(none, contains('this host exposes none'));
+
+      expect(
+        dartUserMessage('workspace', '做个场景', workspaceHint: 'three'),
+        contains('WORKSPACE: act inside the three workspace'),
+      );
+      expect(
+        dartUserMessage('workspace', '做个场景', workspaceHint: 'three'),
+        contains('Do not touch the design canvas.'),
+      );
+    });
   });
 
-  group('AppSettings.agentRuntime（移动 dart / 桌面 server）', () {
-    test('默认按平台解析；宿主 macOS 上默认 server', () {
-      // flutter test 跑在 macOS 宿主：非 iOS/Android → server。
-      expect(defaultAgentRuntime(), agentRuntimeServer);
-      expect(AppSettings().agentRuntime, agentRuntimeServer);
+  group('AppSettings.agentRuntime（默认 local / 显式 server）', () {
+    test('默认内置本机，与平台无关', () {
+      expect(defaultAgentRuntime(), agentRuntimeLocal);
+      expect(AppSettings().agentRuntime, agentRuntimeLocal);
     });
 
     test('toJson/fromJson 往返与容错', () {
-      expect(AppSettings.fromJson(AppSettings().toJson()).agentRuntime, agentRuntimeServer);
-      expect(AppSettings.fromJson({'agentRuntime': 'dart'}).agentRuntime, 'dart');
-      expect(AppSettings.fromJson({'agentRuntime': 'server'}).agentRuntime, 'server');
-      // 旧存档无键 → 平台默认；未知值不静默当 server → 平台默认。
+      expect(AppSettings.fromJson(AppSettings().toJson()).agentRuntime, agentRuntimeLocal);
+      // 旧存档的 dart 等同内置；显式 server（连接桌面）保留。
+      expect(AppSettings.fromJson({'agentRuntime': 'dart'}).agentRuntime, agentRuntimeLocal);
+      expect(AppSettings.fromJson({'agentRuntime': 'server'}).agentRuntime, agentRuntimeServer);
+      // 旧存档无键 → 默认 local；未知值静默回落 local，绝不当成远程。
       expect(AppSettings.fromJson({}).agentRuntime, defaultAgentRuntime());
-      expect(AppSettings.fromJson({'agentRuntime': 'bogus'}).agentRuntime, defaultAgentRuntime());
+      expect(AppSettings.fromJson({'agentRuntime': 'bogus'}).agentRuntime, agentRuntimeLocal);
+      // 赋值同样归一：未知值不留在存档里。
+      final s = AppSettings()..agentRuntime = 'bogus';
+      expect(s.agentRuntime, agentRuntimeLocal);
+      s.agentRuntime = agentRuntimeServer;
+      expect(s.toJson()['agentRuntime'], agentRuntimeServer);
     });
   });
 
@@ -631,7 +706,7 @@ void main() {
       );
       expect(result.ok, isTrue, reason: '全链跑通 → done（无 nudge：remoteCalls>0）');
       expect(result.stopReason, 'done');
-      expect(events.any((e) => e['type'] == 'note' && e['label'] == 'NoN 继续执行'), isFalse);
+      expect(events.any((e) => e['type'] == 'note' && e['label'] == 'NaN 继续执行'), isFalse);
 
       // canonical 线程化：第二条 op 的基底必须是第一条回传的 canonical。
       expect(gate.ops, ['create home 390 844', 'place home text t1 10 10 100 30']);
@@ -703,6 +778,37 @@ void main() {
       expect(fed, contains('unknown_artboard:nope'));
       // 守门路径零引擎调用（critique 缺板被本地拦下）。
       expect(gate.sessionNames.contains('session_critique'), isFalse);
+    });
+
+    test('inspect 面补齐页面体检：missing/page_type 路由到引擎只读会话面', () async {
+      const mbt0 = '---\nrevision: 1\n---\n# doc';
+      final gate = _FakeGate(canonical: mbt0);
+      final model = _ScriptedModel([
+        [
+          mockToolCall(toolName: 'inspect', input: {'kind': 'missing', 'artboard': 'home'}),
+          mockToolCall(toolName: 'inspect', input: {'kind': 'page_type', 'artboard': 'home'}),
+        ],
+        [mockToolCall(toolName: 'finish', input: {'summary': '查缺完成'})],
+      ]);
+      final result = await runDartAgent(
+        request: DartAgentRequest(
+          mode: 'build',
+          instruction: 'x',
+          mbt: mbt0,
+          docs: const {},
+          model: 'm',
+          apiKey: 'k',
+        ),
+        modelOverride: model,
+        bridge: gate,
+        onEvent: (_) {},
+      );
+      expect(result.ok, isTrue);
+      // 迁移前 deepDesign 的 missing <ab> / 页型判定（查缺 → autofill 的前置）：
+      // 只读 session 面，绝不进写门（ops 为空）。
+      expect(gate.sessionNames, contains('session_infer_missing'));
+      expect(gate.sessionNames, contains('session_infer_page_type'));
+      expect(gate.ops, isEmpty);
     });
   });
 }

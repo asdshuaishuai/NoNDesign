@@ -1,0 +1,241 @@
+{
+  "_comment": "Shared parity cases for scripts/wf/engine_parity.py: the Python reference host and the Dart host run the same steps and every field is compared. Placeholders: $seed, $spec, $lastMbt (canonical returned by the previous step).",
+  "seed": "---\nmoonviz:\n  format: visual-document\n  revision: 1\n  entry: __seed\n---\n\n# __seed\n\n<!-- moonviz:artboard __seed -->\n```mbt\nfn visual___seed() -> @decl.Prototype {\n  let page = @decl.prototype(name=\"__seed\", width=390.0, height=844.0)\n  page\n}\n```\n",
+  "spec": "{\"v\":1,\"style\":\"apple\",\"palette\":{\"primary\":\"#2F6B4F\",\"background\":\"#FFFFFF\",\"surface\":\"#F2F7F4\",\"text\":\"#14201A\",\"muted\":\"#5F7A6B\",\"danger\":\"#DC2626\",\"success\":\"#16A34A\"},\"typography\":{\"h1\":30,\"body\":14,\"caption\":12},\"spacing\":[4,8,12,16,24,32],\"radius\":{\"sm\":8,\"md\":12,\"lg\":16}}",
+  "cases": [
+    {
+      "id": "validate-empty",
+      "kind": "validate",
+      "mbt": ""
+    },
+    {
+      "id": "validate-seed",
+      "kind": "validate",
+      "mbt": "$seed"
+    },
+    {
+      "id": "render-empty",
+      "kind": "render",
+      "mbt": ""
+    },
+    {
+      "id": "render-seed",
+      "kind": "render",
+      "mbt": "$seed"
+    },
+    {
+      "id": "apply-human-place",
+      "kind": "apply",
+      "mbt": "$seed",
+      "gate": "human",
+      "op": "place __seed button probe_btn - 30 110 140 44 text=下一页"
+    },
+    {
+      "id": "apply-agent-place",
+      "kind": "apply",
+      "mbt": "$seed",
+      "gate": "agent",
+      "op": "place __seed button agent_btn - 40 220 160 44 text=确认"
+    },
+    {
+      "id": "chain-place-query-nodes",
+      "steps": [
+        {
+          "kind": "apply",
+          "mbt": "$seed",
+          "gate": "human",
+          "op": "place __seed button probe_btn - 30 110 140 44 text=下一页"
+        },
+        {
+          "kind": "session",
+          "mbt": "$lastMbt",
+          "name": "session_query_nodes",
+          "arg": "__seed"
+        }
+      ]
+    },
+    {
+      "id": "chain-place-render",
+      "steps": [
+        {
+          "kind": "apply",
+          "mbt": "$seed",
+          "gate": "human",
+          "op": "place __seed button probe_btn - 30 110 140 44 text=下一页"
+        },
+        {
+          "kind": "render",
+          "mbt": "$lastMbt"
+        }
+      ]
+    },
+    {
+      "id": "session-list-artboards",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_list_artboards"
+    },
+    {
+      "id": "session-flows",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_flows"
+    },
+    {
+      "id": "session-benchmark",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_benchmark"
+    },
+    {
+      "id": "session-query-nodes",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_query_nodes",
+      "arg": "__seed"
+    },
+    {
+      "id": "session-interactions",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_interactions",
+      "arg": "__seed"
+    },
+    {
+      "id": "session-states",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_states",
+      "arg": "__seed"
+    },
+    {
+      "id": "session-lint",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_lint",
+      "arg": "__seed"
+    },
+    {
+      "id": "session-critique",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_critique",
+      "arg": "__seed"
+    },
+    {
+      "id": "session-spec",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_spec",
+      "arg": "__seed"
+    },
+    {
+      "id": "session-save",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_save"
+    },
+    {
+      "id": "session-snapshot",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_snapshot"
+    },
+    {
+      "id": "session-library-snapshot",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_library_snapshot"
+    },
+    {
+      "id": "session-history-init",
+      "kind": "session",
+      "mbt": "$seed",
+      "name": "session_history",
+      "arg": "init __seed"
+    },
+    {
+      "id": "chain-constrain-center",
+      "steps": [
+        {
+          "kind": "apply",
+          "mbt": "$seed",
+          "gate": "human",
+          "op": "place __seed button probe_btn - 30 110 140 44 text=下一页"
+        },
+        {
+          "kind": "constrain",
+          "mbt": "$lastMbt",
+          "artboard": "__seed",
+          "intent": "居中"
+        }
+      ]
+    },
+    {
+      "id": "constrain-cannot-parse",
+      "kind": "constrain",
+      "mbt": "$seed",
+      "artboard": "__seed",
+      "intent": "不是布局意图"
+    },
+    {
+      "id": "event-long-press",
+      "kind": "event",
+      "mbt": "$seed",
+      "artboard": "__seed",
+      "spec": "long_press:100:130:500"
+    },
+    {
+      "id": "event-unknown",
+      "kind": "event",
+      "mbt": "$seed",
+      "artboard": "__seed",
+      "spec": "focus"
+    },
+    {
+      "id": "tap",
+      "kind": "tap",
+      "mbt": "$seed",
+      "artboard": "__seed",
+      "x": 100.0,
+      "y": 130.0
+    },
+    {
+      "id": "generate",
+      "kind": "generate",
+      "mbt": "$seed",
+      "intent": "探针页 as probe_generate",
+      "name": "probe_generate",
+      "spec": "$spec"
+    },
+    {
+      "id": "export-html",
+      "kind": "exportHtml",
+      "mbt": "$seed"
+    },
+    {
+      "id": "list-templates",
+      "kind": "listing",
+      "fn": "list_templates"
+    },
+    {
+      "id": "list-themes",
+      "kind": "listing",
+      "fn": "list_themes"
+    },
+    {
+      "id": "list-ops",
+      "kind": "listing",
+      "fn": "list_ops"
+    },
+    {
+      "id": "list-tokens",
+      "kind": "listing",
+      "fn": "list_tokens"
+    },
+    {
+      "id": "version",
+      "kind": "version"
+    }
+  ]
+}

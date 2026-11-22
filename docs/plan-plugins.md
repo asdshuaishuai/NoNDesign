@@ -16,7 +16,7 @@
 - 服务端 `/project/export/figma`：每板引擎自渲染 SVG + nondesign.json
   manifest + README，落 `~/Documents/NoNDesign/NoNDesign-figma-<ts>/`。
 - figma-plugin/（manifest.json + code.js + ui.html）：Import nondesign.json
-  → Frame/Text/Rectangle 真实可编辑图层；Export 选区 → NoNDesign JSON。
+  → Frame/Text/Rectangle 真实可编辑图层；Export 选区 → NaN JSON。
 - 客户端：项目菜单「导出 Figma 包」。
 - **两处真机实证修复**（72491c6）：
   ① 路由错挂 `/acp/prompt`（FastAPI 同路径先注册者胜出 → ACP 对话全部
@@ -58,7 +58,7 @@
 - 化学（配平校验）/数学（manim 风构造）/地理（色阶图例）规范模板细化
 - 音轨/旁白（TTS 时间轴对齐）
 
-## C · 3D 制作工作台（客户端插件）—— 🚧 C1 骨架已落地（C2 强化待接）
+## C · 3D 制作工作台（客户端插件）—— 🚧 C1 骨架已落地（C2 强化待接；C3 3dcodeverse 待接）
 
 **定位（用户裁决）**：不是 2D 画板 3D 化预览，而是**直接制作 3D**——
 LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引外部浏览器、
@@ -109,6 +109,33 @@ LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引�
   mkdir 曾在 LLM 成功前执行（失败残留目录 → project_exists）。
 - 后续：GLTF 真 3D 资产（3dcodeverse 语料模型）、动画时间轴、多场景分镜。
 
+### C3 · 3dcodeverse harness 接入（2026-11-22 用户裁决，未施工）
+
+用户裁决：**threejs-live 与 3dcodeverse 直接引入**。落法：
+
+- **直接采用 skill/harness 契约**（Apache-2.0）：`spec.json` / `plan.json` /
+  `src/` / `artifacts/` / `judge/rNN/` 工作区；`plan → validate → build →
+  check → blind judge → score → refine → best round` 循环；contract/connectivity/
+  placement/shader/frame 门的阈值；judge rubric 与 caps。
+- **运行时不引 Python**：3dcodeverse 的 `3dcode` CLI、Blender、CadQuery、URDF、
+  moderngl 只在开发期参考；产品内用 three-live + Dart/JS 检查器实现等价能力。
+- **双 authoring 模式**：`scene`（`scene.json` 事实源，手工图元/变换/材质）与
+  `code`（`src/*.js` 事实源，3dcodeverse harness）；`code` 模式的 `scene.json`
+  是派生投影，不是第二真相。
+- **v1 轨道**：`static_object`（threejs）、`scene`（scene_threejs）、
+  `graphics`（glsl_shader）；`articulated_object` backlog。
+- **工具面**：`three_plan_validate / build / check / measure / render_views /
+  scene_probe / check_placement / shader_probe / judge / score`；保留既有
+  `three_pass / three_continue` 作为生成推进。
+- **统一 skill**：3D 的 intake/plan/judge 也走
+  [`docs/skills/creative-workbench/SKILL.md`](skills/creative-workbench/SKILL.md)，
+  不再单独维护一套提示词。
+- **不做**：3DCodeVerse-2M 数据集（CC-BY-NC-SA）随包分发；示例资产复制；
+  articulated 轨在 Blender/URDF 运行时缺失下的假实现。
+
+详见 [research/3dcodeverse.md](research/3dcodeverse.md) 与
+[plan-creative-workbench.md](plan-creative-workbench.md) §4。
+
 ## D · RSI 审查与增强（design 模块内置）—— 📋 待施工
 
 - 审查 agent.py review 循环对 0.2 引擎 critique 信封（results[].
@@ -123,5 +150,5 @@ LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引�
 |---|---|---|
 | A Figma 双向 | ✅ 落地（含两处真机修复） | 72491c6 |
 | B 视频引擎 | ✅ 落地（spec 硬门 + expr 闭包 + RSI 三环 + 三示例） | 本轮 |
-| C 3D 工作台 | 🚧 C1 落地（spec 先行 + 分 pass 状态门禁 + WebView 执行面 + 三反馈桥 + fail-closed 全链 E2E）；C2 强化（turntable 四方位门/自相交检测/spec 手编）待接 | 本轮 |
+| C 3D 工作台 | 🚧 C1 落地（spec 先行 + 分 pass 状态门禁 + WebView 执行面 + 三反馈桥 + fail-closed 全链 E2E）；C2 强化（turntable 四方位门/自相交检测/spec 手编）待接；**C3 3dcodeverse harness（plan/check/judge + 双 authoring）方案定稿，未施工** | 本轮 |
 | D RSI 审查 | 📋 待施工 | — |

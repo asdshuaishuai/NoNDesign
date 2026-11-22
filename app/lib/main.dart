@@ -1,21 +1,23 @@
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'core/keys.dart';
+import 'core/layout.dart';
 import 'core/mediapipe_embedder_adapter.dart';
 import 'core/mediapipe_service.dart';
 import 'core/nonapp_intake.dart';
+import 'core/orientation.dart';
+import 'core/platform_capabilities.dart';
 import 'core/store.dart';
 import 'core/theme.dart';
-import 'plugins/registry.dart';
 import 'widgets/command_palette.dart';
 import 'widgets/common.dart';
 import 'widgets/settings_dialog.dart';
 import 'widgets/shell_host.dart';
-import 'widgets/welcome.dart';
+import 'widgets/toast_host.dart';
 import 'widgets/workspace.dart';
 
 /// 根级快捷键需要 Navigator 内的 context 才能弹对话框（命令面板/新建/
@@ -30,21 +32,71 @@ void main() {
   MediaPipeService.defaultEmbedderFactory = createMediaPipeEmbedder;
   runApp(
     ChangeNotifierProvider(
-      create: (_) => AppStore()..boot(),
+      create: (_) {
+        final store = AppStore();
+        // 切项目「保存 / 放弃 / 取消」与口令询问的唯一 UI 出口。判定本身
+        // 在 store 主路径（newProject/openProjectPath），这里只提供 Navigator。
+        store.confirmUnsavedChanges = _confirmUnsavedChanges;
+        store.passwordPrompt = _askProjectPassword;
+        store.boot();
+        return store;
+      },
       child: const NonApp(),
     ),
   );
 }
 
-class NonApp extends StatelessWidget {
+/// 移动适配方向门宿主：手机锁竖屏、平板跟随系统旋转（横屏=桌面壳、
+/// 竖屏=聊天优先壳）；桌面宿主是 no-op，行为不变（移动适配 2026-11-19）。
+class NonApp extends StatefulWidget {
   const NonApp({super.key});
+
+  @override
+  State<NonApp> createState() => _NonAppState();
+}
+
+class _NonAppState extends State<NonApp> with WidgetsBindingObserver {
+  bool get _isMobile {
+    final os = PlatformCapabilities.current().os;
+    return os == HostOs.ios || os == HostOs.android;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isMobile) {
+      WidgetsBinding.instance.addObserver(this);
+      // 首帧后视图尺寸才可信：拿到第一个真实 metrics 就把方向门钉下来
+      //（手机竖屏锁定 / 平板四向）。
+      WidgetsBinding.instance.addPostFrameCallback((_) => _applyGate());
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_isMobile) WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    // 旋转 / 分屏 / 折叠屏展开都会走这里：手机永远被压回竖屏，
+    // 平板按当前短边重新决定四向或竖屏。
+    _applyGate();
+  }
+
+  void _applyGate() {
+    final views = WidgetsBinding.instance.platformDispatcher.views;
+    if (views.isEmpty) return;
+    applyDeviceOrientationFor(views.first);
+  }
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final dark = store.settings.theme != 'light';
     return MaterialApp(
-      title: 'NoNDesign',
+      title: 'NaN',
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: rootMessengerKey,
       navigatorKey: rootNavigatorKey,
@@ -56,60 +108,76 @@ class NonApp extends StatelessWidget {
         final store = context.read<AppStore>();
         // 响应式字号：手机 +10% / 平板 +5% / 桌面 1.0（渲染期统一缩放，
         // 字号声明仍守 8 档字阶）。系统文字大小一并尊重，钳 1.0–1.3。
-        return withResponsiveTextScale(context, FocusScope(
-          autofocus: true,
-          child: CallbackShortcuts(
-            bindings: {
-              // workspace 级动作上移根级：插件/作品集视图会早退 Workspace
-              // 的 CallbackShortcuts，⌘N/⌘O/⌘S/⌘Z/⌘K 在这些全屏视图里
-              // 曾全部失联（对应 workspace 内的重复绑定已删除）。
-              modKey(LogicalKeyboardKey.keyK): _rootCommand,
-              modKey(LogicalKeyboardKey.keyS): () {
-                if (!_overlayRouteActive()) store.saveProject();
-              },
-              modKey(LogicalKeyboardKey.keyN): _rootNewProject,
-              modKey(LogicalKeyboardKey.keyO): _rootOpenProject,
-              modKey(LogicalKeyboardKey.keyZ): () {
-                if (!_overlayRouteActive()) undoRedoShortcut(store, redo: false);
-              },
-              modKey(LogicalKeyboardKey.keyZ, shift: true): () {
-                if (!_overlayRouteActive()) undoRedoShortcut(store, redo: true);
-              },
-              modKey(LogicalKeyboardKey.digit1): () => store.setView('design'),
-              modKey(LogicalKeyboardKey.digit2): () => store.setView('docs'),
-              modKey(LogicalKeyboardKey.digit3): () => store.setView('source'),
-              modKey(LogicalKeyboardKey.digit4): () => store.setView('play'),
-              modKey(LogicalKeyboardKey.digit0): () {
-                store.setView('design');
-                store.bumpFit();
-              },
-              // 插件快捷键 ⌘5/⌘6/…：根级挂载（注册表顺序派生）——
-              // workspace 级 CallbackShortcuts 在插件视图内不挂载
-              // （视图路由早退），插件入口键必须活在根级才能在
-              // 插件视图内可达（配合各插件顶栏返回按钮与 Esc）。
-              for (var i = 0; i < pluginRegistry.length && i < pluginDigitKeys.length; i++)
-                modKey(pluginDigitKeys[i]): () => store.setView('plugin:${pluginRegistry[i].id}'),
-              // Esc：插件视图与作品集（均无设计板）的返回设计出口（镜像
-              // 各全屏视图顶栏返回按钮）；聊天流为默认主面时，设计壳内
-              // Esc 返回聊天流（chat_stream 顶栏进、Esc 出，S1 最小闭环）。
-              // 有对话框/浮层在场（焦点路由非当前路由或本身是 PopupRoute）
-              // 时不消费——交给浮层自身处理。
-              SingleActivator(LogicalKeyboardKey.escape): () {
-                final fromShell =
-                    store.view == 'portfolio' || store.view.startsWith('plugin:');
-                if (!fromShell && !(store.view == 'design' && store.settings.chatStreamHome)) {
-                  return;
-                }
-                final fctx = FocusManager.instance.primaryFocus?.context;
-                final route = fctx == null ? null : ModalRoute.of(fctx);
-                if (route == null || !route.isCurrent || route is PopupRoute) return;
-                store.setView(fromShell ? 'design' : 'chat');
-              },
-            },
-            child: child ?? const SizedBox.shrink(),
+        return DefaultTextStyle(
+            style: platformDefaultTextStyle,
+            child: withResponsiveTextScale(
+          context,
+          // 通知宿主（批次 04）挂在整个路由树之上：对话框/设置/命令面板之上
+          // 也能看到通知，且不依赖 Scaffold / ScaffoldMessenger。
+          ToastHost(
+            child: FocusScope(
+              autofocus: true,
+              child: CallbackShortcuts(
+                bindings: {
+                  // workspace 级动作上移根级：插件/作品集视图会早退 Workspace
+                  // 的 CallbackShortcuts，⌘N/⌘O/⌘S/⌘Z/⌘K 在这些全屏视图里
+                  // 曾全部失联（对应 workspace 内的重复绑定已删除）。
+                  modKey(LogicalKeyboardKey.keyK): _rootCommand,
+                  modKey(LogicalKeyboardKey.keyS): () {
+                    if (!_overlayRouteActive()) store.saveProject();
+                  },
+                  modKey(LogicalKeyboardKey.keyN): _rootNewProject,
+                  modKey(LogicalKeyboardKey.keyO): _rootOpenProject,
+                  modKey(LogicalKeyboardKey.keyZ): () {
+                    if (!_overlayRouteActive()) undoRedoShortcut(store, redo: false);
+                  },
+                  modKey(LogicalKeyboardKey.keyZ, shift: true): () {
+                    if (!_overlayRouteActive()) undoRedoShortcut(store, redo: true);
+                  },
+                  modKey(LogicalKeyboardKey.digit1): () => store.setView('design'),
+                  modKey(LogicalKeyboardKey.digit2): () => store.setView('docs'),
+                  modKey(LogicalKeyboardKey.digit3): () => store.setView('source'),
+                  modKey(LogicalKeyboardKey.digit4): () => store.setView('play'),
+                  modKey(LogicalKeyboardKey.digit0): () {
+                    store.setView('design');
+                    store.bumpFit();
+                  },
+                  // 3D / 视频 / 热应用没有「就地切工作台」的快捷键（用户裁决
+                  // 2026-11-19：工作台类型由项目决定）。进这些工作台要么打开
+                  // 对应项目（顶栏项目菜单 / 主页作品集 / 艺术架），要么让 NaN
+                  // 在工作区模式下建一个。
+                  // Esc：插件视图与作品集（均无设计板）的返回设计出口（镜像
+                  // 各全屏视图顶栏返回按钮）；聊天优先壳（手机/竖屏平板）里
+                  // 设计面按 Esc 回到聊天主面。桌面壳没有整块聊天路由——Esc
+                  // 不抢工作区（聊天在右侧窄栏里随时可达）。
+                  // 有对话框/浮层在场（焦点路由非当前路由或本身是 PopupRoute）
+                  // 时不消费——交给浮层自身处理。
+                  SingleActivator(LogicalKeyboardKey.escape): () {
+                    // 顺序固定：fullscreen_view_test 锚定
+                    // `store.view == 'portfolio' || store.view.startsWith('plugin:')`
+                    // 这段连续文本（作品集与插件工作台必须同路）。
+                    final fromShell = store.view == 'portfolio' ||
+                        store.view.startsWith('plugin:') ||
+                        store.view == 'play';
+                    final chatFirst = _usesChatFirstShell(context);
+                    if (!fromShell && !(store.view == 'design' && chatFirst)) {
+                      return;
+                    }
+                    final fctx = FocusManager.instance.primaryFocus?.context;
+                    final route = fctx == null ? null : ModalRoute.of(fctx);
+                    if (route == null || !route.isCurrent || route is PopupRoute) return;
+                    // 插件工作区彼此独立：Esc 回**主页**（不是回某个设计项目）；
+                    // 作品集/演示仍回设计面（它们是设计项目的展示态）。
+                    store.setView(
+                        store.view.startsWith('plugin:') ? 'home' : (fromShell ? 'design' : 'chat'));
+                  },
+                },
+                child: child ?? const SizedBox.shrink(),
+              ),
+            ),
           ),
         ),
-        );
+      );
       },
       // 应用级 ExcludeSemantics：Flutter macOS 引擎的无障碍桥在 macOS 27.2
       // 上被 AX 客户端激活后，逐帧语义更新经 AccessibilityBridgeMac 触发
@@ -123,62 +191,45 @@ class NonApp extends StatelessWidget {
         child: ExcludeSemantics(
           child: store.bootError != null
               ? _BootError(message: store.bootError!)
-            : !store.ready
-                ? const _BootScreen()
-                // 聊天流视图（'chat'）与作品集/插件工作台一样不依赖项目，
-                // 显式进入（view=='chat'）时无条件可路由。S4：聊天流由
-                // ChatWorkspaceHost 承载——≥1100 常驻 chat+workspace 分栏，
-                // 否则 chat 全屏 + 画中画工作区（全屏工作区语义不变）。
-                : store.view == 'chat'
-                    ? _WindowThemeSync(
-                      dark: dark,
-                      child: ChatWorkspaceHost(
-                        onSettings: () {
-                          final ctx = _navigatorContext();
-                          if (ctx != null) showSettingsDialog(ctx);
-                        },
-                      ),
-                    )
-                    // 作品集/插件工作台不依赖项目：无项目启动也必须可路由，
-                    // 否则欢迎页卡片与 ⌘5–⌘7 点了不换屏（四个入口全不可达）。
-                    // 离线移动端恢复的 docs（api==null）同样走 Workspace：
-                    // 否则恢复成功后 hasProject 仍 false，界面停在 Welcome，
-                    // 文档虽然恢复进 store 却看不见。
-                    : (store.hasProject ||
-                            store.view == 'portfolio' ||
-                            store.view.startsWith('plugin:') ||
-                            (store.api == null && store.view == 'docs'))
-                        ? const Workspace()
-                        // chatStreamHome（用户决策默认开）：无项目时的默认
-                        // 主面是聊天流（同一宿主：分栏/画中画按宽度自适应）；
-                        // 关闭即回经典 Welcome。
-                        : store.settings.chatStreamHome
-                            ? _WindowThemeSync(
-                              dark: dark,
-                              child: ChatWorkspaceHost(
-                                onSettings: () {
-                                  final ctx = _navigatorContext();
-                                  if (ctx != null) showSettingsDialog(ctx);
-                                },
-                              ),
-                            )
-                            // Builder：回调的 context 必须落在 MaterialApp（Navigator 子树）
-                            // 之内——NonApp 自己的 context 在其上层，showDialog/流程入口
-                            // 会以 "does not include a Navigator" 崩溃（2026-11-13 实证）。
-                            : _WindowThemeSync(
-                              dark: dark,
-                              child: Builder(
-                                builder: (ctx) => Welcome(
-                                  onNewProject: () => showNewProjectFlow(ctx),
-                                  onOpenPath: (path) => openProjectFlow(ctx, path),
-                                  onSettings: () => showSettingsDialog(ctx),
-                                ),
-                              ),
-                            ),
+              : !store.ready
+                  ? const _BootScreen()
+                  // 响应式壳（批次 12）：手机/iPad 竖屏 = 聊天全屏 + 工作区
+                  // 画中画；桌面/iPad 横屏 = 工作区/Welcome + 右侧聊天窄栏。
+                  // 四档由 core/layout.dart 单点裁决，这里不再有 view=='chat'
+                  // 的整块路由，也不再用 chatStreamHome 决定桌面主面。
+                  : _WindowThemeSync(dark: dark, child: _routeFor(store)),
         ),
       ),
     );
   }
+
+  /// 整壳全幅视图先于响应式壳：只有 play / portfolio 不吃右侧窄栏。
+  ///
+  /// 四个工作区里的三个（3D / 视频 / 热应用）都走 `plugin:*`，它们**必须**
+  /// 留在响应式壳里：桌面壳左侧是固定工作区、右侧是常驻 NaN 窄栏（用户
+  /// 裁决 2026-11-18：所有内容都通过 NaN 交互，工作区里不能没有它）。
+  /// 手机/iPad 聊天优先壳由 [ChatPiPShell] 自己把 plugin 视图渲染成整屏。
+  Widget _routeFor(AppStore store) {
+    if (store.view == 'portfolio' || store.view == 'play') {
+      // 无项目也必须可路由（Welcome 卡片曾点了不换屏）。
+      return const Workspace();
+    }
+    return const ShellHost();
+  }
+}
+
+/// 当前视口是否属于聊天优先壳（手机竖屏——横屏仅为方向门兜底、真机不可达；
+/// iPad 竖屏）。
+///
+/// Esc 的「设计 → 聊天」只在聊天优先壳里成立：桌面壳的聊天在右侧窄栏，
+/// 不存在整块聊天路由可回。
+bool _usesChatFirstShell(BuildContext context) {
+  final size = MediaQuery.sizeOf(context);
+  return LayoutSpec.classifyHost(
+    PlatformCapabilities.current(),
+    width: size.width,
+    height: size.height,
+  ).usesChatFirstShell;
 }
 
 /// Navigator 内的 context（Overlay 是 Navigator 的子级）——GlobalKey 挂在
@@ -224,8 +275,73 @@ bool _overlayRouteActive() {
   return route is PopupRoute || (route != null && !route.isCurrent);
 }
 
+/// 切换项目前的未保存改动确认（store 主路径调用的唯一 UI 出口）。
+///
+/// 没有 Navigator（极早期/无 UI 宿主）时按取消处理：宁可不让切换，
+/// 也不静默丢掉当前项目的文档与画布。
+Future<UnsavedChoice> _confirmUnsavedChanges(String action) async {
+  final ctx = _navigatorContext();
+  if (ctx == null) return UnsavedChoice.cancel;
+  final choice = await showNonDialog<UnsavedChoice>(
+    context: ctx,
+    builder: (_) => _UnsavedChangesDialog(action: action),
+  );
+  return choice ?? UnsavedChoice.cancel;
+}
+
+/// 受口令保护的项目需要口令时（恢复崩溃快照 / 保存加锁项目）。
+///
+/// 返回 null 表示取消——调用方据此不恢复、不写盘。
+Future<String?> _askProjectPassword(String? path) async {
+  final ctx = _navigatorContext();
+  if (ctx == null) return null;
+  return showNonDialog<String>(
+    context: ctx,
+    builder: (_) => PasswordDialog(path: path ?? '', retry: false),
+  );
+}
+
+/// 「保存 / 放弃 / 取消」三选一。
+class _UnsavedChangesDialog extends StatelessWidget {
+  final String action;
+  const _UnsavedChangesDialog({required this.action});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return AlertDialog(
+      backgroundColor: p.panel,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.lineStrong)),
+      title: const Text('还有未保存的改动',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+      content: SizedBox(
+        width: 380,
+        child: Text(
+          '$action会替换当前项目的内容。要先把现在的改动保存下来吗？',
+          style: TextStyle(fontSize: 12, height: 1.6, color: p.ink3),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(UnsavedChoice.cancel),
+          child: const Text('取消'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(UnsavedChoice.discard),
+          child: const Text('放弃改动'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(UnsavedChoice.save),
+          child: const Text('保存'),
+        ),
+      ],
+    );
+  }
+}
+
 /// 启动画面：品牌化加载动画——logo 呼吸 + 光晕脉动 + 细进度条，
-/// 不再出现任何运行时（Python 等）字样。
+/// 不再出现任何运行时服务或连接方式字样。
 class _BootScreen extends StatefulWidget {
   const _BootScreen();
 
@@ -280,7 +396,7 @@ class _BootScreenState extends State<_BootScreen> with SingleTickerProviderState
               },
             ),
             const SizedBox(height: 18),
-            Text('NoNDesign', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3)),
+            Text('NaN', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3)),
             const SizedBox(height: 16),
             SizedBox(
               width: 168,
@@ -368,7 +484,7 @@ class _BootError extends StatelessWidget {
               const SizedBox(height: 6),
               SelectableText(message, style: TextStyle(fontSize: 11, height: 1.5, fontFamily: 'Menlo', color: p.ink3)),
               const SizedBox(height: 14),
-              Text('检查 .venv 依赖与 server/main.py；或设置 NONDESIGN_SERVER 指向已运行的服务。',
+              Text('可以先重试；或打开设置调整「连接桌面」；也可以先离线继续查看已恢复的内容。',
                   textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: p.ink4)),
               const SizedBox(height: 12),
               // 死屏三出路：重试（改完环境/服务器地址后）、设置（改连接

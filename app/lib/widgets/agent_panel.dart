@@ -16,6 +16,9 @@ class _AgentPanelState extends State<AgentPanel> {
   int _lastCount = 0;
   int _lastStreamLen = 0;
   int _lastThinkLen = 0;
+  /// 聊天 A2UI 卡数量（ask_user 选项卡只进 store.chatMessages，不经时间线；
+  /// 窄栏必须自己渲染并跟随新卡贴底）。
+  int _lastA2uiCount = 0;
   // 跟随滚动：流式增量只改文本不触发滚动，长输出落视口下不可见——
   // 跟随开启时每次长度变化贴底；用户上翻（手势门）即暂停并给出浮标。
   bool _follow = true;
@@ -64,19 +67,30 @@ class _AgentPanelState extends State<AgentPanel> {
 
   Future<void> _send(AppStore store) async {
     final text = _input.text.trim();
-    if (text.isEmpty || store.agentBusy) return;
+    if (text.isEmpty) return;
+    if (store.agentBusy) {
+      // 静默 return 会让用户觉得"点了没反应"；明确提示并保留输入。
+      store.toasts.warn('NaN 正在工作，等这一轮结束再发送。');
+      return;
+    }
     _input.clear();
     // 新一轮消息直达视口下（时间线以 user 行开场），用户上翻过也重新贴上。
     _follow = true;
     _showJumpPill = false;
     _followBottom(animate: true);
     // 外部智能体（ACP）接管发送：模式芯片无意义，文本直达该 CLI。
-    // 移动端没有本地 agent/引擎：即使设置里残留 acpAgentId 也强制走 NoN 内置。
+    // 移动端没有本地 agent/引擎：即使设置里残留 acpAgentId 也强制走 NaN 内置。
     final mobile = Theme.of(context).platform == TargetPlatform.iOS ||
         Theme.of(context).platform == TargetPlatform.android;
     final external = mobile ? null : store.settings.acpAgentId;
     if (external != null && external.isNotEmpty) {
       await store.runAcp(text);
+      return;
+    }
+    // 常驻的 NaN 面板在插件工作区里发起的任务属于那个工作台：3D / 视频 /
+    // 热应用的指令不能落成设计画布的 BUILD（用户裁决 2026-11-18）。
+    if (store.view.startsWith('plugin:')) {
+      await store.runWorkspace(text);
       return;
     }
     if (_mode == 'plan') {
@@ -98,7 +112,7 @@ class _AgentPanelState extends State<AgentPanel> {
           Row(children: [
             Icon(Icons.auto_awesome, size: 10, color: p.accent),
             const SizedBox(width: 4),
-            Text('NoN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
+            Text('NaN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
           ]),
           const SizedBox(height: 4),
           SelectableText(
@@ -135,6 +149,23 @@ class _AgentPanelState extends State<AgentPanel> {
     );
   }
 
+  /// 聊天 A2UI 卡：surface 消息随 ChatMessage 持久化，静态路径渲染；动作
+  /// 经 store.handleChatAction 回流续跑（与手机聊天流同一个出口）。
+  ///
+  /// 不再重复渲染 ChatMessage.text——ask_user 的问题已在 surface 内，聊天流
+  /// 卡片同样只渲染 surface（避免窄栏里同一句话出现两次）。
+  Widget _buildA2uiCard(AppStore store, ChatMessage m, int index) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: A2uiCard.messages(
+        key: ValueKey('agent-a2ui-$index'),
+        messages: m.a2uiMessages ?? const [],
+        onAction: (action) => store.handleChatAction(action.name, action.context),
+        onError: (_) {},
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
@@ -142,24 +173,40 @@ class _AgentPanelState extends State<AgentPanel> {
     final mobile = Theme.of(context).platform == TargetPlatform.iOS ||
         Theme.of(context).platform == TargetPlatform.android;
     final external = !mobile && store.settings.acpAgentId?.isNotEmpty == true;
+    // 用户可见只落产品名（外部智能体）：协议/运行时名不上屏
+    // （docs/copy-glossary.md §2）。
     final agentLabel = external
-        ? (store.settings.acpAgentName ?? store.settings.acpAgentId!) + ' · ACP'
-        : 'NoN 内置';
+        ? (store.settings.acpAgentName ?? store.settings.acpAgentId!)
+        : 'NaN 内置';
     if (!external && !_modeTouched) _mode = store.render.artboards.isEmpty ? 'build' : 'refine';
+    // 常驻面板当前挂在哪个工作台（3D / 视频 / 热应用）：模式芯片换成工作台标识，
+    // 输入直达该工作台的任务（见 _send 的 runWorkspace 分支）。
+    final inWorkspace = store.view.startsWith('plugin:');
+    final workspaceLabel = workspaceModeLabel(AppStore.workspaceModeForView(store.view));
+    // 聊天 A2UI 卡（ask_user 的确认/选项 surface）：a2ui 事件只追加到
+    // store.chatMessages，时间线里没有对应行。手机聊天流由 ChatStreamView
+    // 渲染；桌面/iPad 横屏的 NaN 窄栏（本面板）必须同样渲染，否则问题只剩
+    // 工具副标题、选项只能从展开的技术详情里看到。
+    final a2uiCards = store.chatMessages
+        .where((m) => m.kind == chatKindA2ui && (m.a2uiMessages?.isNotEmpty ?? false))
+        .toList();
     // 三类长度比对：时间线行（离散追加，动画贴底）+ 流式文本/思考增量
     // （80ms 合帧只改文本不触发滚动——不比对就落视口下不可见）。
     final tlChanged = store.timeline.length != _lastCount;
     final streamChanged = store.streamText.length != _lastStreamLen;
     final thinkChanged = store.thinkingText.length != _lastThinkLen;
-    if (tlChanged || streamChanged || thinkChanged) {
+    final a2uiChanged = a2uiCards.length != _lastA2uiCount;
+    if (tlChanged || streamChanged || thinkChanged || a2uiChanged) {
       _lastCount = store.timeline.length;
       _lastStreamLen = store.streamText.length;
       _lastThinkLen = store.thinkingText.length;
+      _lastA2uiCount = a2uiCards.length;
       // 手势拖拽进行中（_userScrolling）不贴底——与手指抢滚动条。
       if (_follow && !_userScrolling) {
         final first = _firstFollow;
         _firstFollow = false;
-        _followBottom(animate: !first && tlChanged && !streamChanged && !thinkChanged);
+        _followBottom(
+            animate: !first && (tlChanged || a2uiChanged) && !streamChanged && !thinkChanged);
       }
     }
     return Column(
@@ -176,12 +223,21 @@ class _AgentPanelState extends State<AgentPanel> {
                   child: ListView.builder(
                     controller: _scroll,
                     padding: const EdgeInsets.all(12),
-                    itemCount: (store.timeline.isEmpty && store.streamText.isEmpty && store.thinkingText.isEmpty ? 1 : 0) +
+                    itemCount: (store.timeline.isEmpty &&
+                                store.streamText.isEmpty &&
+                                store.thinkingText.isEmpty &&
+                                a2uiCards.isEmpty
+                            ? 1
+                            : 0) +
                         store.timeline.length +
                         (store.streamText.isNotEmpty ? 1 : 0) +
-                        (store.thinkingText.isNotEmpty ? 1 : 0),
+                        (store.thinkingText.isNotEmpty ? 1 : 0) +
+                        a2uiCards.length,
                     itemBuilder: (context, i) {
-                      final intro = store.timeline.isEmpty && store.streamText.isEmpty && store.thinkingText.isEmpty;
+                      final intro = store.timeline.isEmpty &&
+                          store.streamText.isEmpty &&
+                          store.thinkingText.isEmpty &&
+                          a2uiCards.isEmpty;
                       if (intro) {
                         return _AgentIntro(onPick: (mode, text) {
                           setState(() {
@@ -204,7 +260,14 @@ class _AgentPanelState extends State<AgentPanel> {
                         if (idx == 0) return _buildStreamRow(context, store, p);
                         idx -= 1;
                       }
-                      return _buildThinkingTile(context, store, p);
+                      if (store.thinkingText.isNotEmpty) {
+                        if (idx == 0) return _buildThinkingTile(context, store, p);
+                        idx -= 1;
+                      }
+                      if (idx < a2uiCards.length) {
+                        return _buildA2uiCard(store, a2uiCards[idx], idx);
+                      }
+                      return const SizedBox.shrink();
                     },
                   ),
                 ),
@@ -259,17 +322,20 @@ class _AgentPanelState extends State<AgentPanel> {
                 child: Column(
                   children: [
                     TextField(
+                      key: const ValueKey('agent-input'),
                       controller: _input,
                       focusNode: _inputFocus,
                       minLines: 2,
                       maxLines: 5,
                       style: TextStyle(fontSize: 13, height: 1.5, color: p.ink),
                       decoration: InputDecoration(
-                        hintText: _mode == 'plan'
-                            ? '描述产品目标，NoN 会写 PRD / UI 说明 / 设计规范…'
-                            : _mode == 'build'
-                                ? '描述要生成的原型，NoN 会先规划页面再逐屏生成…'
-                                : '描述要改的地方，例如「把主按钮改成品牌色，圆角 10」…',
+                        hintText: inWorkspace
+                            ? '描述要在$workspaceLabel工作台做的事，NaN 会直接调用它的工具…'
+                            : _mode == 'plan'
+                                ? '描述产品目标，NaN 会写 PRD / UI 说明 / 设计规范…'
+                                : _mode == 'build'
+                                    ? '描述要生成的原型，NaN 会先规划页面再逐屏生成…'
+                                    : '描述要改的地方，例如「把主按钮改成品牌色，圆角 10」…',
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
                         focusedBorder: InputBorder.none,
@@ -285,7 +351,7 @@ class _AgentPanelState extends State<AgentPanel> {
                         Tooltip(
                           message: external
                               ? '消息将发给外部智能体 $agentLabel（模式芯片不参与）；在设置 → 外部智能体 里切换'
-                              : 'NoN 内置管线；可在设置 → 外部智能体 里切换',
+                              : 'NaN 内置管线；可在设置 → 外部智能体 里切换',
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
@@ -306,7 +372,25 @@ class _AgentPanelState extends State<AgentPanel> {
                             ]),
                           ),
                         ),
-                        if (!external) ...[
+                        if (!external && inWorkspace) ...[
+                          const SizedBox(width: 3),
+                          Container(
+                            key: const ValueKey('agent-workspace-chip'),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: p.accentSoft,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: p.accent.withValues(alpha: 0.45)),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(Icons.dashboard_customize_outlined, size: 10, color: p.accent),
+                              const SizedBox(width: 4),
+                              Text('$workspaceLabel工作台',
+                                  style: TextStyle(
+                                      fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
+                            ]),
+                          ),
+                        ] else if (!external) ...[
                           const SizedBox(width: 3),
                           _ModeChip(
                             mode: 'build',
@@ -352,7 +436,7 @@ class _AgentPanelState extends State<AgentPanel> {
                           // 通知才刷新，打字后按钮滞留禁用态）。
                           ListenableBuilder(
                             listenable: _input,
-                            builder: (_, __) => FilledButton.icon(
+                            builder: (_, _) => FilledButton.icon(
                               style: FilledButton.styleFrom(
                                 backgroundColor: p.accent,
                                 foregroundColor: Colors.white,
@@ -441,16 +525,18 @@ class _AgentIntro extends StatelessWidget {
             child: const Icon(Icons.auto_awesome, size: 19, color: Colors.white),
           ),
           const SizedBox(height: 12),
-          Text('嗨，我是 NoN', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
+          Text('嗨，我是 NaN', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
           const SizedBox(height: 4),
-          Text('描述目标，我会先规划页面与交互，再把它们画到画布上。也可以让我修改选中节点。',
+          Text('描述目标，我先想清楚页面结构与交互，再画到工作台上；也能直接改选中的节点。'
+              '做 3D 场景、代码动画视频或热应用时，切到对应工作台告诉我目标即可。',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11, height: 1.55, color: p.ink3)),
           const SizedBox(height: 16),
           for (final item in [
-            ('一套登录 + 首页 + 设置', 'build'),
+            ('一套登录 + 首页 + 设置的原型', 'build'),
             ('把当前页面改成深色主题', 'refine'),
             ('补一个空状态和错误态', 'refine'),
+            ('给列表补上分割线和更稳的间距', 'refine'),
           ])
             Padding(
               padding: const EdgeInsets.only(bottom: 5),
@@ -510,7 +596,12 @@ class _ToolRowState extends State<_ToolRow> {
   Widget build(BuildContext context) {
     final p = context.palette;
     final entry = widget.entry;
-    final subtitle = _toolSubtitleText(entry);
+    // 失败行优先显示服务层的人话（tool_end.message）；原始码/操作原文只在
+    // 展开的「技术详情」里出现。
+    final subtitle = entry.message ?? _toolSubtitleText(entry);
+    final subtitleStyle = (entry.message != null && entry.ok == false)
+        ? TextStyle(fontSize: 10, color: p.ink3)
+        : TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4);
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: Column(
@@ -528,11 +619,11 @@ class _ToolRowState extends State<_ToolRow> {
                   Icon(
                     entry.running
                         ? Icons.hourglass_top_rounded
-                        : entry.error != null
-                            ? Icons.close_rounded
-                            : Icons.check_rounded,
+                        : entry.ok
+                            ? Icons.check_rounded
+                            : Icons.close_rounded,
                     size: 12,
-                    color: entry.running ? p.accent : entry.error != null ? p.danger : p.success,
+                    color: entry.running ? p.accent : entry.ok ? p.success : p.danger,
                   ),
                   const SizedBox(width: 6),
                   Text(_toolLabel(entry.tool ?? ''),
@@ -542,7 +633,7 @@ class _ToolRowState extends State<_ToolRow> {
                     Expanded(
                       child: Text(subtitle,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                          style: subtitleStyle),
                     ),
                   ],
                   if (entry.ms != null) ...[
@@ -563,7 +654,7 @@ class _ToolRowState extends State<_ToolRow> {
                 decoration: BoxDecoration(
                   border: Border(left: BorderSide(width: 2, color: p.accent.withValues(alpha: 0.35))),
                 ),
-                child: SelectableText(entry.error ?? entry.preview ?? '—',
+                child: SelectableText(_toolDetailText(entry),
                     style: TextStyle(fontSize: 10, fontFamily: 'Menlo', height: 1.45, color: p.ink4)),
               ),
             ),
@@ -578,29 +669,58 @@ String? _toolSubtitleText(TimelineEntry entry) {
   final args = entry.args;
   if (args == null) return null;
   final text = switch (entry.tool) {
-    'design_op' => args['op']?.toString(),
-    'generate_page' => '${args['intent'] ?? ''}${args['name'] != null ? ' · ${args['name']}' : ''}',
-    'inspect' => '${args['kind'] ?? ''}${args['artboard'] != null ? ' · ${args['artboard']}' : ''}',
-    'write_doc' => '${args['kind'] ?? ''} · ${args['chars'] ?? 0} 字',
+    // 原始 op 表达式只进展开的技术详情，不占常驻副标题。
+    'design_op' => null,
+    'generate_page' => args['name']?.toString(),
+    'inspect' => _inspectLabel(args['kind']?.toString(), args['artboard']?.toString()),
+    'write_doc' => '${_docKindLabel(args['kind']?.toString())} · ${args['chars'] ?? 0} 字',
+    'ask_user' => args['question']?.toString(),
     _ => null,
   };
   if (text == null || text.isEmpty) return null;
   return text;
 }
 
-String _toolLabel(String tool) => switch (tool) {
-      'generate_page' => '生成页面',
-      'design_op' => '设计操作',
-      'read_mbt' => '读取文档',
-      'inspect' => '检视引擎',
-      'list_templates' => '查询模板',
-      'list_components' => '查询组件',
-      'read_docs' => '读取文档',
-      'write_doc' => '写入文档',
-      'write_design_spec' => '写入规范',
-      'finish' => '收尾',
-      _ => tool,
+String _inspectLabel(String? kind, String? artboard) {
+  final label = switch (kind) {
+    'query_nodes' => '查看节点',
+    'interactions' => '查看交互',
+    'states' => '查看状态',
+    'lint' => '检查规范',
+    'critique' => '质量检查',
+    'spec' => '查看规范',
+    'export_svg' => '导出预览',
+    'flows' => '查看流程',
+    'artboards' => '查看画板',
+    _ => '检查',
+  };
+  return artboard == null || artboard.isEmpty ? label : '$label · $artboard';
+}
+
+String _docKindLabel(String? kind) => switch (kind) {
+      'prd' => '产品文档',
+      'ui' => 'UI 说明',
+      _ => '文档',
     };
+
+/// 折叠区里的技术详情：原始错误码、工具结果与参数（含 op 原文）。
+String _toolDetailText(TimelineEntry entry) {
+  final parts = <String>[];
+  if (entry.error != null && entry.error!.isNotEmpty) parts.add('错误信息：${entry.error}');
+  if (entry.preview != null && entry.preview!.isNotEmpty) parts.add(entry.preview!);
+  if (entry.args != null && entry.args!.isNotEmpty) {
+    try {
+      parts.add(jsonEncode(entry.args));
+    } catch (_) {
+      parts.add('${entry.args}');
+    }
+  }
+  return parts.isEmpty ? '—' : parts.join('\n\n');
+}
+
+/// 工具名唯一出口是 `dart_agent.dart::toolLabel`（术语表）；这里不再维护
+/// 第二套表，未知工具也回落「智能体操作」而不是裸代号。
+String _toolLabel(String tool) => toolLabel(tool);
 
 class _TimelineRow extends StatelessWidget {
   final TimelineEntry entry;
@@ -680,7 +800,7 @@ class _TimelineRow extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 6),
           child: MarkdownBody(
             data: entry.text,
-            styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+            styleSheet: markdownStyleSheetOf(context).copyWith(
               p: TextStyle(fontSize: 12, height: 1.55, color: p.ink2),
             ),
           ),

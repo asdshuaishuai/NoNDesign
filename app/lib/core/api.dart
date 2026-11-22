@@ -1,463 +1,740 @@
+/// Runtime clients for the app (batch 05).
+///
+/// The app has exactly two ways to run design work:
+///
+///  * [LocalCore] — the in-process runtime: the design engine
+///    (`core/engine/engine_service.dart`, batch 02) plus the local project
+///    library (`core/project_service.dart`, batch 03). This is the default on
+///    every host where the engine is allowed to run, and the only runtime on
+///    phones/tablets until the wasm spike passes.
+///  * [RemoteDesktopClient] — the optional "连接桌面" runtime: a desktop host
+///    that speaks `/v1/health`, `/v1/capabilities` and `/v1/rpc`. It is off
+///    until the user enters an address (and optional one-time token).
+///
+/// [NoNDesignApi] is the router the rest of the app talks to. It keeps the
+/// method names the UI already uses (`render` / `apply` / `session` /
+/// `generate` / `saveProject` / …) and decides per call:
+///
+///   local engine first → remote desktop (when connected) → explicit
+///   `{ok:false, error:'engine_unavailable'}`.
+///
+/// There is no third path: no local HTTP server, no process spawning, no
+/// fixed port. Every failure is an envelope — never a silent `null`, never a
+/// hang.
+library;
+
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
-
-import 'models.dart';
 
 import 'package:http/http.dart' as http;
 
-class ServerHandle {
-  final String baseUrl;
-  final Process? process;
-  final List<String> logs;
-  ServerHandle(this.baseUrl, this.process, this.logs);
+import 'capability.dart';
+import 'engine/engine_service.dart';
+import 'models.dart';
+import 'project_service.dart';
+import 'remote_desktop_client.dart';
+import 'remote/rpc_methods.dart';
 
-  void dispose() {
-    process?.kill(ProcessSignal.sigterm);
-  }
+/// The engine face the runtime router needs.
+///
+/// Production implementations wrap [EngineService] (see
+/// [_EngineServiceAdapter]); tests implement a scripted engine so the router
+/// and the store can be exercised without compiling a WASM module.
+abstract class LocalEngine {
+  /// True when calls can be served right now.
+  bool get isReady;
+
+  /// Diagnostic reason when [isReady] is false (never user-facing).
+  String? get startupError;
+
+  /// Capability snapshot for `CapabilityId.localDesignEngine`.
+  CapabilityAvailability probeAvailability();
+
+  Future<Map<String, dynamic>> render(String mbt);
+  Future<Map<String, dynamic>> validate(String mbt);
+  Future<Map<String, dynamic>> apply(String mbt, String op, {String gate});
+  Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]);
+  Future<Map<String, dynamic>> generate(
+      String mbt, String intent, String name, Map<String, dynamic> spec);
+  Future<Map<String, dynamic>> tap(String mbt, String artboard, double x, double y);
+  Future<Map<String, dynamic>> constrainIntent(String mbt, String artboard, String intent);
+  Future<Map<String, dynamic>> event(String mbt, String artboard, String spec);
+  Future<Map<String, dynamic>> history(String mbt, String command);
+  Future<Map<String, dynamic>> exportHtml(String mbt);
+  Future<Map<String, dynamic>> tokens();
+  Future<Map<String, dynamic>> versionInfo();
+  Future<List<dynamic>> templates();
+  Future<List<dynamic>> components();
+  Future<List<dynamic>> themes();
+  Future<List<dynamic>> ops();
 }
 
-class ServerLauncher {
-  /// 手动指定的服务器地址（手机「连接桌面」模式）：设置面板写入，launch
-  /// 优先于环境变量与本地 spawn——移动端无法跑 Python 服务器。
-  static String? manualBaseUrl;
+/// [LocalEngine] over the real in-process host.
+class EngineServiceAdapter implements LocalEngine {
+  EngineServiceAdapter(this.service);
 
-  static Future<ServerHandle> launch() async {
-    final manual = manualBaseUrl;
-    if (manual != null && manual.isNotEmpty) {
-      // 单/多尾斜杠都剥干净再进 handle：_healthy 自行剥斜杠所以健康检查
-      // 能过，但保留斜杠的 baseUrl 会让之后所有路径变成 //path 而 404
-      //（移动端「连接桌面」死锁在误导性 no models in registry）。
-      final url = manual.replaceAll(RegExp(r'/+$'), '');
-      final ok = await _healthy(url, attempts: 4);
-      if (ok) return ServerHandle(url, null, ['using manual server ($url)']);
-      throw StateError('指定的服务器不可达：$url（检查桌面端是否在运行、两机是否同一网络）');
-    }
-    final envUrl = Platform.environment['NONDESIGN_SERVER'];
-    if (envUrl != null && envUrl.isNotEmpty) {
-      final ok = await _healthy(envUrl, attempts: 12);
-      if (ok) return ServerHandle(envUrl.replaceAll(RegExp(r'/+$'), ''), null, ['using NONDESIGN_SERVER']);
-    }
+  /// The wrapped host-backed service.
+  final EngineService service;
 
-    final root = _findRoot();
-    if (root == null) {
-      throw StateError('server/main.py not found; set NONDESIGN_SERVER or run from the repo');
-    }
-    // 偶发竞态自愈（2026-11-16 真机弹窗实证：旧实例退出与 spawn 交错的窗口
-    // 里端口文件/看门狗互踩，一次 spawn 失败）：清场后重试一次再报错。
-    try {
-      return await _spawnFromRoot(root);
-    } on StateError {
-      final metaFile = File('${Platform.environment['HOME']}/.nondesign/server.json');
-      try {
-        if (metaFile.existsSync()) metaFile.deleteSync();
-      } catch (_) {}
-      return await _spawnFromRoot(root);
-    }
-  }
+  @override
+  bool get isReady => service.isReady;
 
-  static Future<ServerHandle> _spawnFromRoot(String root) async {
-    final python = _findPython(root);
-    final logs = <String>[];
-    // A stale port file from a previous run can otherwise win the race and
-    // point the app at a dead server before the new one writes its port.
-    final metaFile = File('${Platform.environment['HOME']}/.nondesign/server.json');
-    try {
-      if (metaFile.existsSync()) metaFile.deleteSync();
-    } catch (_) {}
-    final startedAt = DateTime.now();
-    final process = await Process.start(
-      python,
-      [File('$root/server/main.py').path, '--port', '0'],
-      workingDirectory: root,
-      environment: {'PYTHONUNBUFFERED': '1', 'NONDESIGN_PARENT_PID': '$pid'},
-    );
-    final completer = Completer<String>();
-    process.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
-      logs.add(line);
-      final match = RegExp(r'listening on http://127\.0\.0\.1:(\d+)').firstMatch(line);
-      if (match != null && !completer.isCompleted) {
-        completer.complete('http://127.0.0.1:${match.group(1)}');
-      }
-    });
-    process.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen(logs.add);
+  @override
+  String? get startupError => service.startupError;
 
-    // The port file is a second discovery channel (stdout can be buffered by a
-    // wrapper in packaged builds).
-    unawaited(() async {
-      for (var i = 0; i < 40 && !completer.isCompleted; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 250));
-        try {
-          if (!metaFile.existsSync()) continue;
-          if (metaFile.statSync().modified.isBefore(startedAt.subtract(const Duration(seconds: 1)))) continue;
-          final data = jsonDecode(await metaFile.readAsString()) as Map;
-          final port = data['port'];
-          if (port is num) completer.complete('http://127.0.0.1:${port.toInt()}');
-        } catch (_) {}
-      }
-    }());
+  @override
+  CapabilityAvailability probeAvailability() => service.probeAvailability();
 
-    final baseUrl = await completer.future.timeout(
-      const Duration(seconds: 30),
-      onTimeout: () {
-        process.kill(ProcessSignal.sigterm);
-        throw StateError('server did not start:\n${logs.join('\n')}');
-      },
-    );
-    if (!await _healthy(baseUrl, attempts: 20)) {
-      throw StateError('server health check failed:\n${logs.join('\n')}');
-    }
-    return ServerHandle(baseUrl, process, logs);
-  }
+  @override
+  Future<Map<String, dynamic>> render(String mbt) => service.render(mbt);
 
-  static String? _findRoot() {
-    final candidates = <String>[
-      Platform.environment['NONDESIGN_ROOT'] ?? '',
-      Directory.current.path,
-      Directory.current.parent.path,
-    ];
-    for (final c in candidates) {
-      if (c.isEmpty) continue;
-      if (File('$c/server/main.py').existsSync()) return c;
-    }
-    // Dev builds live under app/build/...; walk up from the executable so
-    // `open build/.../NoNDesign.app` still finds the repo server.
-    Directory? dir = File(Platform.resolvedExecutable).parent;
-    for (var i = 0; i < 10 && dir != null; i++) {
-      if (File('${dir.path}/server/main.py').existsSync()) return dir.path;
-      final parent = dir.parent;
-      if (parent.path == dir.path) break;
-      dir = parent;
-    }
-    return null;
-  }
+  @override
+  Future<Map<String, dynamic>> validate(String mbt) => service.validate(mbt);
 
-  static String _findPython(String root) {
-    final env = Platform.environment['NONDESIGN_PYTHON'];
-    if (env != null && env.isNotEmpty && File(env).existsSync()) return env;
-    final venv = '$root/.venv/bin/python';
-    if (File(venv).existsSync()) return venv;
-    if (File('/opt/homebrew/bin/python3').existsSync()) return '/opt/homebrew/bin/python3';
-    return 'python3';
-  }
-
-  static Future<bool> _healthy(String baseUrl, {int attempts = 1}) async {
-    for (var i = 0; i < attempts; i++) {
-      try {
-        final res = await http
-            .get(Uri.parse('${baseUrl.replaceAll(RegExp(r'/$'), '')}/health'))
-            .timeout(const Duration(seconds: 2));
-        if (res.statusCode == 200) {
-          final body = jsonDecode(res.body) as Map;
-          if (body['ok'] == true) return true;
-        }
-      } catch (e) {
-        print('[nondesign] health $baseUrl error: $e');
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-    }
-    return false;
-  }
-}
-
-class NoNDesignApi {
-  final String baseUrl;
-  final http.Client _client;
-
-  /// SSE 流中空闲超时：两行事件之间超过该时长视为服务端卡死（进程活、
-  /// 不发数据），收流并合成 failed 终态——否则 await for 永挂、客户端
-  /// agentBusy 永真。默认对齐 ACP 服务端自身的 600s 每事件等待预算再留
-  /// 余量（合法长操作——LLM 调用/引擎渲染——都在事件间远小于此值）；
-  /// 测试可缩短。
-  static Duration sseIdleTimeout = const Duration(seconds: 660);
-
-  /// LLM 生成类端点（3D 新建项目/跑层）的客户端超时：服务端整份生成
-  /// （spec JSON / scene.js，thinking_level 还透传 reasoning_effort）经常
-  /// 超过 postJson 默认的 30s——客户端先抛 TimeoutException 报「生成失败」，
-  /// 服务端却继续跑完落盘，重试撞 project_exists / pass_awaiting_feedback，
-  /// UI 认知与盘上状态分叉。默认 10 分钟（对齐 hotAppGenerate/hotAppRefine；
-  /// 服务端自身 _chat 用 AsyncOpenAI 默认 600s 无上限）；测试可缩短。
-  static Duration llmGenTimeout = const Duration(minutes: 10);
-
-  NoNDesignApi(this.baseUrl, [http.Client? client]) : _client = client ?? http.Client();
-
-  Uri _uri(String path) => Uri.parse('$baseUrl$path');
-
-  Future<Map<String, dynamic>> getJson(String path, {Duration timeout = const Duration(seconds: 20)}) async {
-    final res = await _client.get(_uri(path)).timeout(timeout);
-    return _decode(res);
-  }
-
-  Future<Map<String, dynamic>> postJson(
-    String path,
-    Map<String, dynamic> body, {
-    Duration timeout = const Duration(seconds: 30),
-  }) async {
-    final res = await _client
-        .post(_uri(path), headers: {'content-type': 'application/json'}, body: jsonEncode(body))
-        .timeout(timeout);
-    return _decode(res);
-  }
-
-
-  // ---- ACP 外部智能体 ----
-
-  Future<List<AcpAgentInfo>> acpAgents({bool probe = false}) async {
-    final res = await getJson('/acp/agents${probe ? '?probe=1' : ''}');
-    return ((res['agents'] as List?) ?? const [])
-        .whereType<Map>()
-        .map((e) => AcpAgentInfo.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
-  }
-
-  Future<Map<String, dynamic>> acpNewSession(String agent, String? cwd) =>
-      postJson('/acp/session', {'agent': agent, if (cwd != null) 'cwd': cwd});
-
-  /// ACP prompt 的 SSE 流——事件形状与 /agent/run 同族（assistant_delta /
-  /// thinking_delta / tool_start / tool_end / note / done / failed）。
-  Stream<Map<String, dynamic>> acpPrompt(String sessionId, String text) async* {
-    final request = http.Request('POST', _uri('/acp/prompt'))
-      ..headers['accept'] = 'text/event-stream'
-      ..body = jsonEncode({'session_id': sessionId, 'text': text});
-    final response = await _client.send(request).timeout(const Duration(seconds: 660));
-    if (response.statusCode != 200) {
-      yield {'type': 'failed', 'error': 'acp_http_${response.statusCode}', 'stopReason': 'failed'};
-      return;
-    }
-    var stalled = false;
-    final lines = response.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .timeout(sseIdleTimeout, onTimeout: (sink) {
-      stalled = true;
-      sink.close(); // 结束收流：下方合成 failed 终态
-    });
-    await for (final line in lines) {
-      if (!line.startsWith('data:')) continue;
-      final payload = line.substring(5).trim();
-      if (payload.isEmpty) continue;
-      try {
-        final value = jsonDecode(payload);
-        if (value is Map<String, dynamic>) {
-          yield value;
-          if (value['type'] == 'done' || value['type'] == 'failed') return;
-        }
-      } catch (_) {}
-    }
-    if (stalled) {
-      yield {'type': 'failed', 'error': 'sse_idle_timeout', 'stopReason': 'failed'};
-    }
-  }
-
-  Future<void> acpCancel(String sessionId) async {
-    try {
-      await postJson('/acp/cancel', {'session_id': sessionId});
-    } catch (_) {}
-  }
-
-  Future<void> acpClose(String sessionId) async {
-    try {
-      await postJson('/acp/close', {'session_id': sessionId});
-    } catch (_) {}
-  }
-
-  Map<String, dynamic> _decode(http.Response res) {
-    dynamic value;
-    if (res.body.isNotEmpty) {
-      try {
-        value = jsonDecode(res.body);
-      } catch (_) {
-        value = null; // 非 JSON body（代理错误页/纯文本 500）不抛 FormatException
-      }
-    }
-    final okStatus = res.statusCode >= 200 && res.statusCode < 300;
-    if (!okStatus) {
-      String detail;
-      if (value is Map) {
-        detail = (value['detail'] ?? value['error'] ?? res.body).toString();
-      } else {
-        final text = res.body.trim();
-        detail = text.isEmpty ? 'HTTP ${res.statusCode}' : text;
-      }
-      if (detail.length > 500) detail = '${detail.substring(0, 500)}…';
-      return {'ok': false, 'status': res.statusCode, 'detail': detail};
-    }
-    if (value is Map<String, dynamic>) return value;
-    if (value is Map) return Map<String, dynamic>.from(value);
-    if (value == null && res.body.isEmpty) return {'ok': false, 'error': 'empty_response'};
-    return {'ok': false, 'error': 'unexpected_response', 'status': res.statusCode};
-  }
-
-  Future<Map<String, dynamic>> health() => getJson('/health');
-  Future<Map<String, dynamic>> models() => getJson('/models');
-  Future<Map<String, dynamic>> refreshModels() => postJson('/models/refresh', const {});
-  Future<List<dynamic>> templates() async => (await getJson('/engine/templates'))['templates'] ?? const [];
-  Future<List<dynamic>> components() async => (await getJson('/engine/components'))['components'] ?? const [];
-  Future<List<dynamic>> themes() async => (await getJson('/engine/themes'))['themes'] ?? const [];
-
-  Future<Map<String, dynamic>> render(String mbt) => postJson('/engine/render', {'mbt': mbt});
-  Future<Map<String, dynamic>> validate(String mbt) => postJson('/engine/validate', {'mbt': mbt});
+  @override
   Future<Map<String, dynamic>> apply(String mbt, String op, {String gate = 'human'}) =>
-      postJson('/engine/apply', {'mbt': mbt, 'op': op, 'gate': gate});
+      service.apply(mbt, op, gate: gate);
+
+  @override
   Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) =>
-      postJson('/engine/session', {'mbt': mbt, 'name': name, if (arg != null) 'arg': arg});
-  Future<Map<String, dynamic>> generate(String mbt, String intent, String name, Map<String, dynamic> spec) =>
-      postJson('/engine/generate', {'mbt': mbt, 'intent': intent, 'name': name, 'spec': spec});
-  Future<Map<String, dynamic>> exportHtml(String mbt) => postJson('/engine/export-html', {'mbt': mbt});
+      service.session(mbt, name, arg);
 
-  /// Figma 双向包（客户端插件能力，与引擎解耦）：board-*.svg 拖入即
-  /// 矢量图层，nondesign.json 走 figma-plugin 建可编辑图层。服务器落盘。
-  Future<Map<String, dynamic>> exportFigma(String mbt) =>
-      postJson('/project/export/figma', {'mbt': mbt});
+  @override
+  Future<Map<String, dynamic>> generate(
+          String mbt, String intent, String name, Map<String, dynamic> spec) =>
+      service.generate(mbt, intent, name, spec);
 
-  // ---------- 轨道 C：3D 制作工作台（应用内 WebView 即执行面） ----------
+  @override
+  Future<Map<String, dynamic>> tap(String mbt, String artboard, double x, double y) =>
+      service.tap(mbt, artboard, x, y);
 
-  /// 生成整份 spec JSON 是分钟级 LLM 调用——10 分钟超时（llmGenTimeout），
-  /// 不用 postJson 默认 30s（否则客户端先失败、服务端照常落盘，状态分叉）。
-  Future<Map<String, dynamic>> threeNewProject({
-    required String name, required String brief,
-    required String model, required String baseUrl,
-    required String apiKey, required String thinkingLevel,
-  }) => postJson('/three/project/new', {
-        'name': name, 'brief': brief, 'model': model, 'base_url': baseUrl,
-        'api_key': apiKey, 'thinking_level': thinkingLevel,
-      }, timeout: llmGenTimeout);
+  @override
+  Future<Map<String, dynamic>> constrainIntent(String mbt, String artboard, String intent) =>
+      service.constrainIntent(mbt, artboard, intent);
 
-  /// 跑一层同样是分钟级 LLM 调用（整文件 scene.js）——同 threeNewProject。
-  Future<Map<String, dynamic>> threeRunPass({
-    required String name, required String model, required String baseUrl,
-    required String apiKey, required String thinkingLevel,
-  }) => postJson('/three/pass', {
-        'name': name, 'model': model, 'base_url': baseUrl,
-        'api_key': apiKey, 'thinking_level': thinkingLevel,
-      }, timeout: llmGenTimeout);
+  @override
+  Future<Map<String, dynamic>> event(String mbt, String artboard, String spec) =>
+      service.event(mbt, artboard, spec);
 
-  Future<Map<String, dynamic>> threeFeedback(String name, String kind, [Object? payload]) =>
-      postJson('/three/feedback', {'name': name, 'kind': kind, if (payload != null) 'payload': payload});
-
-  Future<Map<String, dynamic>> threeContinue(String name, [String summary = '']) =>
-      postJson('/three/continue', {'name': name, 'summary': summary});
-
-  Future<Map<String, dynamic>> threeProject(String name) => getJson('/three/project?name=${Uri.encodeQueryComponent(name)}');
-  Future<Map<String, dynamic>> threeProjects() => getJson('/three/projects');
-
-  /// 应用内 WebView 的执行面 URL（服务器实时 serve 的 three.js 预览页）。
-  String threePreviewUrl(String name) => '$baseUrl/three/preview/${Uri.encodeQueryComponent(name)}';
-
-  // ---------- NoN 热应用引擎 + 作品集 ----------
-
-  Future<Map<String, dynamic>> hotAppGenerate({
-    required String name, required String brief,
-    required String model, required String baseUrl, required String apiKey,
-  }) => postJson('/hotapp/generate', {
-        'name': name, 'brief': brief, 'model': model,
-        'base_url': baseUrl, 'api_key': apiKey,
-      }, timeout: const Duration(minutes: 10));
-
-  Future<Map<String, dynamic>> hotAppRefine({
-    required String name, required String instruction,
-    required String model, required String baseUrl, required String apiKey,
-  }) => postJson('/hotapp/refine', {
-        'name': name, 'instruction': instruction, 'model': model,
-        'base_url': baseUrl, 'api_key': apiKey,
-      }, timeout: const Duration(minutes: 10));
-
-  Future<Map<String, dynamic>> hotAppList() => getJson('/hotapp/list');
-  Future<Map<String, dynamic>> hotAppDelete(String name) =>
-      postJson('/hotapp/delete', {'name': name});
-
-  /// NoN 热应用的执行面 URL（自包含动画 HTML，WebView 即运行时）。
-  String hotAppPageUrl(String name) => '$baseUrl/hotapp/page/${Uri.encodeQueryComponent(name)}';
-
-  Future<Map<String, dynamic>> portfolio() => getJson('/portfolio');
-  Future<Map<String, dynamic>> portfolioDelete(String kind, String ref) =>
-      postJson('/portfolio/delete', {'kind': kind, 'ref': ref});
-
-  /// Layout intent (session_constrain): `intent` is a phrase like 居中 / 等间距 /
-  /// 网格 3. Engine returns a canonical envelope {ok, id, x, mbt} — no render
-  /// face; cannot_parse failures carry the intent vocabulary in `error`.
-  Future<Map<String, dynamic>> constrainIntent(String mbt, String ab, String intent) =>
-      postJson('/engine/constrain', {'mbt': mbt, 'artboard': ab, 'intent': intent});
-
-  /// Demo-mode gesture (session_event). `spec` is a raw event token (e.g.
-  /// `key_enter`), not JSON. Envelope matches tap: {ok, changes[], current, mbt}.
-  Future<Map<String, dynamic>> event(String mbt, String ab, String spec) =>
-      postJson('/engine/event', {'mbt': mbt, 'artboard': ab, 'spec': spec});
-
-  /// Engine version control (session_history). `command` is the sub-command
-  /// expression: `init <board>`, `commit`, `log`, `undo`, `redo`, `diff <from> <to>`.
+  @override
   Future<Map<String, dynamic>> history(String mbt, String command) =>
-      postJson('/engine/history', {'mbt': mbt, 'command': command});
+      service.history(mbt, command);
 
+  @override
+  Future<Map<String, dynamic>> exportHtml(String mbt) => service.exportHtml(mbt);
+
+  @override
+  Future<Map<String, dynamic>> tokens() => service.tokens();
+
+  @override
+  Future<Map<String, dynamic>> versionInfo() => service.versionInfo();
+
+  @override
+  Future<List<dynamic>> templates() => service.templates();
+
+  @override
+  Future<List<dynamic>> components() => service.components();
+
+  @override
+  Future<List<dynamic>> themes() => service.themes();
+
+  @override
+  Future<List<dynamic>> ops() => service.ops();
+}
+
+/// The local, in-process runtime.
+///
+/// [engine] is never null: a failed start is still a service that answers
+/// `engine_unavailable` (see [EngineService.unavailable]), so [engineReady] is
+/// the single question the store asks.
+class LocalCore {
+  LocalCore({
+    required this.engine,
+    required this.projects,
+    this.componentsSnapshot,
+  });
+
+  /// In-process design engine (batch 02).
+  final LocalEngine engine;
+
+  /// Local `.ddp` project library (batch 03).
+  final ProjectService projects;
+
+  /// Verified component registry (`assets/engine/components.json`).
+  final List<dynamic>? componentsSnapshot;
+
+  /// True when the engine can serve calls right now.
+  bool get engineReady => engine.isReady;
+}
+
+/// Runtime router over the local core and the optional connected desktop.
+class NoNDesignApi {
+  /// Legacy/remote-only construction: points the router at a desktop host.
+  ///
+  /// Kept for call sites and tests that only exercise remote-only faces
+  /// (3D / hot-app / video / portfolio / external agents). Engine and project
+  /// calls go through the same RPC contract.
+  NoNDesignApi(String baseUrl, [http.Client? client])
+      : _local = null,
+        _remote = RemoteDesktopClient(baseUrl: baseUrl, client: client),
+        _localAcp = null;
+
+  /// Local-first construction used by the store.
+  ///
+  /// [localAcp] 在没有桌面连接时提供**本机**外部智能体扫描（同一
+  /// AcpPathResolver 探测器在进程内直跑，不经 RPC、不需要另一台电脑）。
+  // Dart 私有具名参数：外部名去下划线（local/remote/localAcp），字段直初始化。
+  NoNDesignApi.runtime({
+    this._local,
+    this._remote,
+    this._localAcp,
+  });
+
+  final LocalCore? _local;
+  final RemoteDesktopClient? _remote;
+  final SystemRpcAcpRuntime? _localAcp;
+
+  /// The local runtime, when this router was built with one.
+  LocalCore? get local => _local;
+
+  /// The connected desktop client, when one is configured.
+  RemoteDesktopClient? get remote => _remote;
+
+  /// Address of the connected desktop ('' when local-only).
+  String get baseUrl => _remote?.baseUrl ?? '';
+
+  /// True when the in-process engine is serving calls.
+  bool get hasLocalEngine => _local?.engineReady ?? false;
+
+  /// True when a desktop address is configured (not necessarily reachable).
+  bool get hasRemote => _remote?.isConfigured ?? false;
+
+  /// True when at least one runtime can answer.
+  bool get isReady => hasLocalEngine || hasRemote;
+
+  /// Streaming idle budget (re-exported for tests and call sites).
+  static Duration get sseIdleTimeout => RemoteDesktopClient.sseIdleTimeout;
+  static set sseIdleTimeout(Duration value) => RemoteDesktopClient.sseIdleTimeout = value;
+
+  /// Long generative RPC budget (re-exported for tests and call sites).
+  static Duration get llmGenTimeout => RemoteDesktopClient.llmGenTimeout;
+  static set llmGenTimeout(Duration value) => RemoteDesktopClient.llmGenTimeout = value;
+
+  Map<String, dynamic> _unavailable([Object? detail]) => {
+        'ok': false,
+        'error': 'engine_unavailable',
+        if (detail != null) 'detail': '$detail',
+      };
+
+  // -------------------------------------------------------------------------
+  // Engine face
+  // -------------------------------------------------------------------------
+
+  /// Runs [localCall] on the local engine, else forwards [method] over RPC.
+  Future<Map<String, dynamic>> _engine(
+    String method,
+    Map<String, dynamic> params,
+    Future<Map<String, dynamic>> Function(LocalEngine engine) localCall,
+  ) async {
+    final core = _local;
+    if (core != null && core.engineReady) {
+      try {
+        return await localCall(core.engine);
+      } catch (e) {
+        return _unavailable('$e');
+      }
+    }
+    final desktop = _remote;
+    if (desktop != null && desktop.isConfigured) {
+      return desktop.call(method, params);
+    }
+    return _unavailable(core?.engine.startupError);
+  }
+
+  /// Renders a source document.
+  Future<Map<String, dynamic>> render(String mbt) => _engine(
+        'engine.render',
+        {'mbt': mbt},
+        (engine) => engine.render(mbt),
+      );
+
+  /// Validates without committing.
+  Future<Map<String, dynamic>> validate(String mbt) => _engine(
+        'engine.validate',
+        {'mbt': mbt},
+        (engine) => engine.validate(mbt),
+      );
+
+  /// Applies one canvas op. `gate` is `'human'` or `'agent'` — different doors.
+  Future<Map<String, dynamic>> apply(String mbt, String op, {String gate = 'human'}) => _engine(
+        'engine.apply',
+        {'mbt': mbt, 'op': op, 'gate': gate},
+        (engine) => engine.apply(mbt, op, gate: gate),
+      );
+
+  /// One session inspection/mutation call.
+  Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) => _engine(
+        'engine.session',
+        {'mbt': mbt, 'name': name, 'arg': ?arg},
+        (engine) => engine.session(mbt, name, arg),
+      );
+
+  /// Full-page generation.
+  Future<Map<String, dynamic>> generate(
+    String mbt,
+    String intent,
+    String name,
+    Map<String, dynamic> spec,
+  ) =>
+      _engine(
+        'engine.generate',
+        {'mbt': mbt, 'intent': intent, 'name': name, 'spec': spec},
+        (engine) => engine.generate(mbt, intent, name, spec),
+      );
+
+  /// Demo-mode tap routing (play view).
+  Future<Map<String, dynamic>> tap(String mbt, String artboard, double x, double y) => _engine(
+        'engine.tap',
+        {'mbt': mbt, 'artboard': artboard, 'x': x, 'y': y},
+        (engine) => engine.tap(mbt, artboard, x, y),
+      );
+
+  /// Demo-mode gesture (`session_event`).
+  Future<Map<String, dynamic>> event(String mbt, String artboard, String spec) => _engine(
+        'engine.event',
+        {'mbt': mbt, 'artboard': artboard, 'spec': spec},
+        (engine) => engine.event(mbt, artboard, spec),
+      );
+
+  /// Layout intent (`session_constrain`).
+  Future<Map<String, dynamic>> constrainIntent(String mbt, String artboard, String intent) => _engine(
+        'engine.constrain',
+        {'mbt': mbt, 'artboard': artboard, 'intent': intent},
+        (engine) => engine.constrainIntent(mbt, artboard, intent),
+      );
+
+  /// Engine-side version history (`session_history`).
+  Future<Map<String, dynamic>> history(String mbt, String command) => _engine(
+        'engine.history',
+        {'mbt': mbt, 'command': command},
+        (engine) => engine.history(mbt, command),
+      );
+
+  /// Self-contained HTML export.
+  Future<Map<String, dynamic>> exportHtml(String mbt) => _engine(
+        'engine.exportHtml',
+        {'mbt': mbt},
+        (engine) => engine.exportHtml(mbt),
+      );
+
+  /// Design tokens registry.
+  Future<Map<String, dynamic>> tokens() => _engine(
+        'engine.tokens',
+        const {},
+        (engine) => engine.tokens(),
+      );
+
+  /// Engine version facts (diagnostics only).
+  Future<Map<String, dynamic>> versionInfo() => _engine(
+        'engine.version',
+        const {},
+        (engine) => engine.versionInfo(),
+      );
+
+  Future<List<dynamic>> _listing(
+    String method,
+    String key,
+    Future<List<dynamic>> Function(LocalEngine engine) localCall,
+  ) async {
+    final core = _local;
+    if (core != null && core.engineReady) {
+      try {
+        return await localCall(core.engine);
+      } catch (_) {
+        return const [];
+      }
+    }
+    final desktop = _remote;
+    if (desktop != null && desktop.isConfigured) {
+      final reply = await desktop.call(method);
+      if (reply['ok'] != true) return const [];
+      final data = reply[key] ?? reply['data'];
+      if (data is List) return data;
+    }
+    return const [];
+  }
+
+  /// Page templates.
+  Future<List<dynamic>> templates() => _listing(
+        'engine.templates',
+        'templates',
+        (engine) => engine.templates(),
+      );
+
+  /// Component registry (verified snapshot when available).
+  Future<List<dynamic>> components() => _listing(
+        'engine.components',
+        'components',
+        (engine) => engine.components(),
+      );
+
+  /// Theme presets.
+  Future<List<dynamic>> themes() => _listing(
+        'engine.themes',
+        'themes',
+        (engine) => engine.themes(),
+      );
+
+  /// Mutating ops registry.
+  Future<List<dynamic>> ops() => _listing(
+        'engine.ops',
+        'ops',
+        (engine) => engine.ops(),
+      );
+
+  /// Model snapshot. The local runtime reads the bundled snapshot through the
+  /// store; a connected desktop may forward its own registry copy.
+  Future<Map<String, dynamic>> models() async {
+    final desktop = _remote;
+    if (desktop != null && desktop.isConfigured) {
+      return desktop.call('models.snapshot');
+    }
+    return {'ok': false, 'error': 'models_local_only'};
+  }
+
+  /// Re-reads the model registry. Local builds ship a verified snapshot, so a
+  /// "refresh" never reaches the network (no models.dev fetch at runtime).
+  Future<Map<String, dynamic>> refreshModels() async {
+    final desktop = _remote;
+    if (desktop != null && desktop.isConfigured) {
+      return desktop.call('models.refresh');
+    }
+    return {'ok': false, 'error': 'models_local_only'};
+  }
+
+  // -------------------------------------------------------------------------
+  // Project face (local library first — projects are client-side now)
+  // -------------------------------------------------------------------------
+
+  /// Saves one project through the local `.ddp` library.
   Future<Map<String, dynamic>> saveProject({
     required String mbt,
     required String path,
     String password = '',
     required Map<String, dynamic> docs,
-  }) =>
-      postJson('/project/save', {'mbt': mbt, 'path': path, 'password': password, 'docs': docs});
-
-  Future<Map<String, dynamic>> openProject(String path, {String password = ''}) =>
-      postJson('/project/open', {'path': path, 'password': password});
-
-  Future<List<dynamic>> listProjects([String? dir]) async {
-    final suffix = dir == null ? '' : '?dir=${Uri.encodeQueryComponent(dir)}';
-    return (await getJson('/project/list$suffix'))['projects'] ?? const [];
+  }) async {
+    final core = _local;
+    if (core == null) {
+      return {'ok': false, 'error': 'project_store_unavailable'};
+    }
+    final result = await core.projects.save(
+      path: path,
+      mbt: mbt,
+      password: password,
+      docs: docs,
+    );
+    if (!result.ok) return {'ok': false, 'error': result.error, 'path': result.path};
+    return {'ok': true, 'path': result.path, 'bytes': result.bytes};
   }
 
-  Future<Map<String, dynamic>> clearSession(String key) =>
-      postJson('/agent/session/clear', {'key': key});
-
-  Future<bool> cancelAgent(int runId) async {
-    final res = await postJson('/agent/cancel', {'run_id': runId});
-    return res['ok'] == true;
-  }
-
-  /// SSE stream. Emits decoded JSON events, then closes at done/failed.
-  Stream<Map<String, dynamic>> agentRun(Map<String, dynamic> body) async* {
-    final request = http.Request('POST', _uri('/agent/run'));
-    request.headers['content-type'] = 'application/json';
-    request.headers['accept'] = 'text/event-stream';
-    request.body = jsonEncode(body);
-    http.StreamedResponse response;
-    try {
-      response = await _client.send(request).timeout(const Duration(seconds: 30));
-    } catch (e) {
-      yield {'type': 'failed', 'error': 'agent_connect_failed: $e', 'stopReason': 'failed'};
-      return;
-    }
-    if (response.statusCode != 200) {
-      yield {'type': 'failed', 'error': 'agent_http_${response.statusCode}', 'stopReason': 'failed'};
-      return;
-    }
-    var stalled = false;
-    final lines = response.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .timeout(sseIdleTimeout, onTimeout: (sink) {
-      stalled = true;
-      sink.close(); // 结束收流：下方合成 failed 终态
-    });
-    await for (final line in lines) {
-      if (!line.startsWith('data:')) continue;
-      final payload = line.substring(5).trim();
-      if (payload.isEmpty) continue;
-      try {
-        // dart:convert 对 JSON 对象本来就产出 Map<String, dynamic>——
-        // 直接窄化，别再做整表拷贝（思考/文档流式每秒几十个分片）。
-        final value = jsonDecode(payload);
-        if (value is Map<String, dynamic>) {
-          yield value;
-          if (value['type'] == 'done' || value['type'] == 'failed') return;
-        }
-      } catch (_) {
-        // ignore malformed SSE line
+  /// Opens one project. Falls back to the connected desktop when the file does
+  /// not exist locally (the user may be opening one from the desktop library).
+  Future<Map<String, dynamic>> openProject(String path, {String password = ''}) async {
+    final core = _local;
+    if (core != null) {
+      final result = await core.projects.open(path, password: password);
+      if (result.ok) {
+        return {
+          'ok': true,
+          'path': result.path,
+          'mbt': result.mbt,
+          'docs': result.docs,
+          'bytes': result.bytes,
+        };
+      }
+      if (result.needPassword) {
+        return {'ok': false, 'need_password': true, 'path': result.path, 'error': result.error};
+      }
+      if (result.error != 'file_not_found') {
+        return {'ok': false, 'path': result.path, 'error': result.error};
       }
     }
-    if (stalled) {
-      // 流中空闲超时（服务端进程活但不再发数据）：合成终态，await for 的
-      // 消费方（store._runAgent）才不会永挂、agentBusy 才会释放。
-      yield {'type': 'failed', 'error': 'sse_idle_timeout', 'stopReason': 'failed'};
+    final desktop = _remote;
+    if (desktop != null && desktop.isConfigured) {
+      return desktop.call('project.open', {'path': path, 'password': password});
     }
+    return {'ok': false, 'path': path, 'error': 'file_not_found'};
   }
+
+  /// Lists `.ddp` files in the local library (or [dir] when given).
+  Future<List<dynamic>> listProjects([String? dir]) async {
+    final core = _local;
+    if (core != null) {
+      final result = await core.projects.list(dir: dir);
+      if (result.ok) {
+        return [for (final entry in result.projects) entry.toJson()];
+      }
+      if (result.error != 'dir_not_found') return const [];
+    }
+    final desktop = _remote;
+    if (desktop != null && desktop.isConfigured) {
+      final reply = await desktop.call('project.list', {'dir': ?dir});
+      final projects = reply['projects'];
+      if (projects is List) return projects;
+    }
+    return const [];
+  }
+
+  /// Figma package export (desktop-side packaging).
+  Future<Map<String, dynamic>> exportFigma(String mbt) async {
+    final desktop = _remote;
+    if (desktop == null || !desktop.isConfigured) {
+      return {'ok': false, 'error': 'remote_unavailable'};
+    }
+    return desktop.call('project.exportFigma', {'mbt': mbt});
+  }
+
+  // -------------------------------------------------------------------------
+  // Agent face
+  // -------------------------------------------------------------------------
+
+  /// Server-runtime agent stream (`agent.run` on the connected desktop).
+  Stream<Map<String, dynamic>> agentRun(Map<String, dynamic> body) {
+    final desktop = _remote;
+    if (desktop == null || !desktop.isConfigured) {
+      return Stream.fromIterable([
+        {'type': 'failed', 'error': 'remote_unavailable', 'stopReason': 'failed'},
+      ]);
+    }
+    return desktop.agentRun(body);
+  }
+
+  /// Cancels the in-flight run on the connected desktop.
+  Future<bool> cancelAgent(int runId) async {
+    final desktop = _remote;
+    if (desktop == null || !desktop.isConfigured) return false;
+    final reply = await desktop.cancelAgent(runId);
+    return reply['ok'] == true;
+  }
+
+  /// Clears the agent conversation memory.
+  Future<Map<String, dynamic>> clearSession(String key) async {
+    final desktop = _remote;
+    if (desktop == null || !desktop.isConfigured) {
+      return {'ok': false, 'error': 'remote_unavailable'};
+    }
+    return desktop.call('agent.session.clear', {'key': key});
+  }
+
+  // -------------------------------------------------------------------------
+  // External agents (desktop-only by design)
+  // -------------------------------------------------------------------------
+
+  /// Available external agents. Empty when nothing can host one.
+  ///
+  /// 路由：配置了桌面 → 桌面扫描；否则 → **本机直扫**（历史缺陷：这里
+  /// 曾直接返回空列表，导致独立安装时外部智能体页永远扫不到本地已装的
+  /// CLI——用户实测 2026-11-19）。本机扫描只做可启动形态探测，不 spawn
+  /// 握手（快、无超时风险）。
+  Future<List<AcpAgentInfo>> acpAgents({bool probe = false}) async {
+    final desktop = _remote;
+    if (desktop != null && desktop.isConfigured) {
+      final reply = await desktop.call('agent.external.agents', {'probe': probe});
+      return ((reply['agents'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => AcpAgentInfo.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    final localAcp = _localAcp;
+    if (localAcp == null || !localAcp.supported) return const [];
+    final detected = await localAcp.agents(probe: false);
+    return [
+      for (final a in detected) AcpAgentInfo.fromJson(a.toJson()),
+    ];
+  }
+
+  Future<Map<String, dynamic>> acpNewSession(String agent, String? cwd) async {
+    final desktop = _remote;
+    if (desktop == null || !desktop.isConfigured) {
+      return {'ok': false, 'error': 'remote_unavailable'};
+    }
+    return desktop.call('agent.external.session', {'agent': agent, 'cwd': ?cwd});
+  }
+
+  /// Streamed external-agent prompt. Event shapes match the built-in loop.
+  Stream<Map<String, dynamic>> acpPrompt(String sessionId, String text) {
+    final desktop = _remote;
+    if (desktop == null || !desktop.isConfigured) {
+      return Stream.fromIterable([
+        {'type': 'failed', 'error': 'remote_unavailable', 'stopReason': 'failed'},
+      ]);
+    }
+    return desktop.streamCall('agent.external.prompt', {
+      'session_id': sessionId,
+      'text': text,
+    });
+  }
+
+  Future<void> acpCancel(String sessionId) async {
+    final desktop = _remote;
+    if (desktop == null || !desktop.isConfigured) return;
+    await desktop.call('agent.external.cancel', {'session_id': sessionId});
+  }
+
+  Future<void> acpClose(String sessionId) async {
+    final desktop = _remote;
+    if (desktop == null || !desktop.isConfigured) return;
+    await desktop.call('agent.external.close', {'session_id': sessionId});
+  }
+
+  // -------------------------------------------------------------------------
+  // 3D / hot-app / video / portfolio (hosted by the local core in later
+  // batches; until then they are remote-only and answer honestly)
+  // -------------------------------------------------------------------------
+
+  Map<String, dynamic> get _noDesktop => {'ok': false, 'error': 'remote_unavailable'};
+
+  Future<Map<String, dynamic>> _rpc(
+    String method, [
+    Map<String, dynamic>? params,
+    Duration? timeout,
+  ]) {
+    final desktop = _remote;
+    if (desktop == null || !desktop.isConfigured) {
+      return Future.value(_noDesktop);
+    }
+    return desktop.call(method, params, timeout);
+  }
+
+  Future<Map<String, dynamic>> threeNewProject({
+    required String name,
+    required String brief,
+    required String model,
+    required String baseUrl,
+    required String apiKey,
+    required String thinkingLevel,
+  }) =>
+      _rpc(
+        'three.project.new',
+        {
+          'name': name,
+          'brief': brief,
+          'model': model,
+          'base_url': baseUrl,
+          'api_key': apiKey,
+          'thinking_level': thinkingLevel,
+        },
+        RemoteDesktopClient.llmGenTimeout,
+      );
+
+  Future<Map<String, dynamic>> threeRunPass({
+    required String name,
+    required String model,
+    required String baseUrl,
+    required String apiKey,
+    required String thinkingLevel,
+  }) =>
+      _rpc(
+        'three.pass',
+        {
+          'name': name,
+          'model': model,
+          'base_url': baseUrl,
+          'api_key': apiKey,
+          'thinking_level': thinkingLevel,
+        },
+        RemoteDesktopClient.llmGenTimeout,
+      );
+
+  Future<Map<String, dynamic>> threeFeedback(String name, String kind, [Object? payload]) =>
+      _rpc('three.feedback', {'name': name, 'kind': kind, 'payload': ?payload});
+
+  Future<Map<String, dynamic>> threeContinue(String name, [String summary = '']) =>
+      _rpc('three.continue', {'name': name, 'summary': summary});
+
+  Future<Map<String, dynamic>> threeProject(String name) => _rpc('three.project', {'name': name});
+
+  Future<Map<String, dynamic>> threeProjects() => _rpc('three.projects');
+
+  /// Asset URL for the 3D preview, or a friendly placeholder page when no
+  /// desktop is connected (the workspace gates the entry through the
+  /// capability hub long before this point).
+  String threePreviewUrl(String name) {
+    final desktop = _remote;
+    if (desktop == null || !desktop.isConfigured) {
+      return _placeholderPage('3D 场景需要先连接桌面');
+    }
+    return '${desktop.baseUrl}/v1/assets/three/${Uri.encodeQueryComponent(name)}';
+  }
+
+  Future<Map<String, dynamic>> hotAppGenerate({
+    required String name,
+    required String brief,
+    required String model,
+    required String baseUrl,
+    required String apiKey,
+  }) =>
+      _rpc(
+        'hotapp.generate',
+        {
+          'name': name,
+          'brief': brief,
+          'model': model,
+          'base_url': baseUrl,
+          'api_key': apiKey,
+        },
+        RemoteDesktopClient.llmGenTimeout,
+      );
+
+  Future<Map<String, dynamic>> hotAppRefine({
+    required String name,
+    required String instruction,
+    required String model,
+    required String baseUrl,
+    required String apiKey,
+  }) =>
+      _rpc(
+        'hotapp.refine',
+        {
+          'name': name,
+          'instruction': instruction,
+          'model': model,
+          'base_url': baseUrl,
+          'api_key': apiKey,
+        },
+        RemoteDesktopClient.llmGenTimeout,
+      );
+
+  Future<Map<String, dynamic>> hotAppList() => _rpc('hotapp.list');
+
+  Future<Map<String, dynamic>> hotAppDelete(String name) =>
+      _rpc('hotapp.delete', {'name': name});
+
+  String hotAppPageUrl(String name) {
+    final desktop = _remote;
+    if (desktop == null || !desktop.isConfigured) {
+      return _placeholderPage('热应用需要先连接桌面');
+    }
+    return '${desktop.baseUrl}/v1/assets/hotapp/${Uri.encodeQueryComponent(name)}';
+  }
+
+  Future<Map<String, dynamic>> portfolio() => _rpc('portfolio.list');
+
+  Future<Map<String, dynamic>> portfolioDelete(String kind, String ref) =>
+      _rpc('portfolio.delete', {'kind': kind, 'ref': ref});
+
+  /// Inline page used when a full-screen feature is opened without a desktop.
+  /// Keeps the WebView out of an empty white screen and states the reason.
+  static String _placeholderPage(String message) => Uri.dataFromString(
+        '<!doctype html><html><head><meta charset="utf-8">'
+        '<meta name="color-scheme" content="light dark">'
+        '<style>html,body{height:100%;margin:0;display:grid;place-items:center;'
+        'font:14px/1.6 -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;'
+        'color:#8a8f98;background:transparent}</style></head>'
+        '<body><p id="m"></p>'
+        '<script>document.getElementById("m").textContent=${jsonEncode(message)};</script>'
+        '</body></html>',
+        mimeType: 'text/html',
+        encoding: utf8,
+      ).toString();
 }

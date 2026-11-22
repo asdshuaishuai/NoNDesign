@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -92,7 +92,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
         Navigator.pop(context);
         widget.onNewProject();
       }),
-      _Action('打开 DDP…', '文件', Icons.folder_open_outlined, modCombo('⌘O'), () {
+      _Action('打开项目…', '文件', Icons.folder_open_outlined, modCombo('⌘O'), () {
         Navigator.pop(context);
         widget.onOpenPath('');
       }),
@@ -124,7 +124,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
         Navigator.pop(context);
         store.setView('docs');
       }),
-      _Action('MBT 源码', '视图', Icons.code, modCombo('⌘3'), () {
+      _Action('源码', '视图', Icons.code, modCombo('⌘3'), () {
         Navigator.pop(context);
         store.setView('source');
       }),
@@ -137,6 +137,10 @@ class _CommandPaletteState extends State<_CommandPalette> {
         store.setView('design');
         store.bumpFit();
       }),
+      _Action('自动修复当前画板', '画板', Icons.auto_fix_high_outlined, modCombo('⇧⌘F'), () {
+        Navigator.pop(context);
+        store.autoFix();
+      }),
       _Action('新建空白画板', '画板', Icons.crop_square, '', () {
         Navigator.pop(context);
         store.createBoard();
@@ -147,7 +151,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
         store.setView('docs');
         store.setDocsTab('spec');
       }),
-      _Action('打开 NoN 面板', 'Agent', Icons.auto_awesome, '', () {
+      _Action('打开 NaN 面板', '智能体', Icons.auto_awesome, '', () {
         Navigator.pop(context);
         store.setRightTab('agent');
       }),
@@ -279,9 +283,18 @@ class _CommandPaletteState extends State<_CommandPalette> {
               decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
               child: Row(
                 children: [
-                  Text('↑ ↓ 选择 · ↵ 执行', style: TextStyle(fontSize: 10, color: p.ink4)),
-                  const Spacer(),
-                  Text('NoNDesign Command', style: TextStyle(fontSize: 10, color: p.ink4)),
+                  // 手机窄屏（390）里两段说明并排会右溢：各自可收缩、省略号兜底。
+                  Expanded(
+                    child: Text('↑ ↓ 选择 · ↵ 执行',
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 10, color: p.ink4)),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text('NaN Command',
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 10, color: p.ink4)),
+                  ),
                 ],
               ),
             ),

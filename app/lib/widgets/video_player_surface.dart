@@ -1,37 +1,48 @@
-import 'dart:io';
-
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
-
-import '../core/api_shelf.dart';
-import '../core/theme.dart';
-
 /// 视频播放面（艺术架 → 视频产物 → 真播）。
 ///
 /// 载体是 WebView：媒体文档由平台原生播放器承担（WKWebView macOS/iOS、
 /// Android WebView）——不引入播放器依赖，也不需要把帧序列在 Dart 侧重放。
+/// 播放的是**本机文件**（`file://`），不经任何端口或内部路由：进度条拖动
+/// 由原生播放器的本地文件读取承担。
+///
 /// **只在构造时创建控制器**：视频工作台的默认渲染台模式根本不构造本 widget，
-/// 既有 video_workspace_test 不设 WebViewPlatform 也不会炸。
+/// 既有工作台测试不设 WebViewPlatform 也不会炸。
 ///
 /// 自动播放硬前提（真机黑屏的根因）：WebKitWebViewControllerCreationParams
 /// 的默认值是 `mediaTypesRequiringUserAction = {audio, video}` +
-/// `allowsInlineMediaPlayback = false`（webview_flutter_wkwebview
-/// 3.27.2 webkit_webview_controller.dart:73-77）——不显式放开这两个参数，
-/// 媒体会被自动播放策略静默拦住（页面加载成功但永远不播）。
+/// `allowsInlineMediaPlayback = false`（webview_all_wkwebview 同源实现）——
+/// 不显式放开这两个参数，媒体会被自动播放策略静默拦住（页面加载成功但永远不播）。
+///
+/// 平台判定只认能力矩阵（唯一的平台事实源）：构造参数与 WebKit 注册都按
+/// [VideoPlayerSurface.host] 的 [PlatformCapabilities] 判定，不在本文件里
+/// `Platform.isX`——否则 Windows 宿主上「macOS 能力矩阵」的测试会拿到
+/// Platform 参数而不是 WebKit 参数（diag/baseline_failures.txt 记录的既有红）。
+library;
+
+import 'dart:async';
+
+import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
+import 'package:webview_all/webview_all.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
+
+import '../core/platform_capabilities.dart';
+import '../core/theme.dart';
+import '../core/toast_service.dart';
+import '../core/video_service.dart';
+
 bool _wkRegistered = false;
 
 class VideoPlayerSurface extends StatefulWidget {
-  const VideoPlayerSurface({super.key, required this.path, this.baseUrl});
+  const VideoPlayerSurface({super.key, required this.path, this.host});
 
-  /// mp4 绝对路径（`videos/<job>/frames.mp4`，或回退的
-  /// `video/<job>/frames.mp4`）。
+  /// mp4 绝对路径（`videos/<job>/frames.mp4`）。
   final String path;
 
-  /// 服务器地址：有则经 /video/mp4?path=… 走 HTTP（Range/seek 由服务端
-  /// FileResponse 承担）；无服务器（离线）用 file:// 本地打开。
-  final String? baseUrl;
+  /// 平台矩阵；缺省取 [PlatformCapabilities.current]。测试可显式注入
+  /// （与 [VideoClipSurface.host] 同构）；生产由工作台传
+  /// `store.capabilities.platform`。
+  final PlatformCapabilities? host;
 
   @override
   State<VideoPlayerSurface> createState() => _VideoPlayerSurfaceState();
@@ -41,16 +52,53 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
   WebViewController? _controller;
   String _error = '';
 
-  /// webview_flutter 只覆盖 android/ios/macos；Linux/Windows 没有 WebView
-  /// 插件——那两平台降级为路径提示（工作台信息行仍可复制路径/定位文件）。
-  static bool get _webViewSupported => Platform.isMacOS || Platform.isIOS || Platform.isAndroid;
+  /// 平台矩阵（唯一判据来源）。
+  PlatformCapabilities get _capabilities => widget.host ?? PlatformCapabilities.current();
+
+  /// webview_all 覆盖全部应用目标（WKWebView / WebView2 / WebKitGTK /
+  /// Android WebView）；只有 Web 构建没有原生 WebView。
+  bool get _webViewSupported => _capabilities.supportsInAppWebView;
+
+  /// 媒体走 WebKit（macOS/iOS）：WebKit 平台注册与创建参数都按它判定。
+  bool get _usesWebKit =>
+      _capabilities.os == HostOs.macos || _capabilities.os == HostOs.ios;
+
+  ToastService get _toasts => ToastScope.of(context);
 
   @override
   void initState() {
     super.initState();
     if (!_webViewSupported) return;
-    _controller = _createController();
+    try {
+      _controller = _createController();
+    } catch (_) {
+      // 平台注册/控制器创建失败也不能在 initState 抛穿：落到可读的错误面。
+      _error = '无法播放：这台设备暂时打不开视频';
+      return;
+    }
     _loadMedia();
+  }
+
+  @override
+  void didUpdateWidget(VideoPlayerSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 平台矩阵变了：旧控制器是按旧平台创建的，不能复用。
+    if (_profileKey(oldWidget.host) == _profileKey(widget.host)) return;
+    _controller = null;
+    _error = '';
+    if (!_webViewSupported) return;
+    try {
+      _controller = _createController();
+    } catch (_) {
+      _error = '无法播放：这台设备暂时打不开视频';
+      return;
+    }
+    _loadMedia();
+  }
+
+  static String _profileKey(PlatformCapabilities? host) {
+    final capabilities = host ?? PlatformCapabilities.current();
+    return '${capabilities.os.name}:${capabilities.isWeb}';
   }
 
   @override
@@ -60,15 +108,17 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
   }
 
   WebViewController _createController() {
-    // webview_flutter 无 endorsed macOS 实现：首次使用前幂等注册 WebKit。
-    // 守卫同时看 instance——测试注入 fake 平台后不得被真注册覆盖
-    //（真 WKWebView 控制器在 flutter test 里构造即 UnimplementedError）。
-    if ((Platform.isMacOS || Platform.isIOS) && !_wkRegistered && WebViewPlatform.instance == null) {
+    // webview_all 的 WKWebView 平台在 Flutter 插件注册中自动就绪；测试环境
+    // 没有注册表，仍保留幂等注册兜底。守卫同时看 instance——测试注入 fake
+    // 平台后不得被真注册覆盖（真 WKWebView 控制器在 flutter test 里构造即
+    // UnimplementedError）。
+    if (_usesWebKit && !_wkRegistered && WebViewPlatform.instance == null) {
       WebKitWebViewPlatform.registerWith();
       _wkRegistered = true;
     }
-    PlatformWebViewControllerCreationParams params = const PlatformWebViewControllerCreationParams();
-    if (Platform.isMacOS || Platform.isIOS) {
+    PlatformWebViewControllerCreationParams params =
+        const PlatformWebViewControllerCreationParams();
+    if (_usesWebKit) {
       params = WebKitWebViewControllerCreationParams(
         // 空集合 = AudiovisualMediaType.none：视频无需用户手势即可播放；
         // allowsInlineMediaPlayback 让播放不抢占全屏（保持工作台布局）。
@@ -76,52 +126,68 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
         allowsInlineMediaPlayback: true,
       );
     }
-    final c = WebViewController.fromPlatformCreationParams(params)
+    return WebViewController.fromPlatformCreationParams(params)
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(NavigationDelegate(
-        // 主帧 HTTP ≥400（/video/mp4 的 400 invalid_video_path / 404 no_video）
-        // 在 WKWebView 上不进 onWebResourceError——必须用 onHttpError。
+        // 主帧加载失败在 WKWebView 上不进 onWebResourceError——用 onHttpError
+        // 兜住 HTTP 形态的错误页（本地文件缺失通常走 onWebResourceError）。
         onHttpError: (error) {
           final code = error.response?.statusCode;
-          if (code != null) _setError('无法播放：HTTP $code（产物不存在或路径越界）');
+          if (code != null) _setError('无法播放：这个视频文件读不出来（$code）');
         },
         onWebResourceError: (error) {
           // 子资源失败不清播放面；只报主帧。
           if (error.isForMainFrame == false) return;
-          _setError('无法播放：${error.description}（${error.errorCode}）');
+          _setError('无法播放：这个视频文件不在了或无法读取');
         },
       ));
-    return c;
   }
 
   void _loadMedia() {
-    final c = _controller;
-    if (c == null) return;
-    final base = widget.baseUrl?.trim() ?? '';
-    if (base.isNotEmpty) {
-      c.loadRequest(Uri.parse(videoMp4UrlFor(base, widget.path)));
-    } else {
-      // 离线：WK 默认 readAccessPath = 文件父目录（webkit_webview_controller
-      // .dart:45-47），mp4 本体可读即可播。
-      c.loadFile(widget.path);
+    final controller = _controller;
+    if (controller == null) return;
+    // 本地文件：WK 默认 readAccessPath = 文件父目录
+    //（webkit_webview_controller.dart:45-47），mp4 本体可读即可播。
+    // loadFile 的 Future 必须自己接住：文件不存在/平台不支持时它会异步失败，
+    // 放任不管会变成未处理异常（真机演示直接红屏）。
+    unawaited(_openFile(controller));
+  }
+
+  Future<void> _openFile(WebViewController controller) async {
+    try {
+      await controller.loadFile(widget.path);
+    } catch (_) {
+      _setError('无法播放：这个视频文件不在了或无法读取');
     }
   }
 
-  void _setError(String msg) {
-    if (!mounted || msg == _error) return;
-    setState(() => _error = msg);
+  void _setError(String message) {
+    if (!mounted || message == _error) return;
+    setState(() => _error = message);
+  }
+
+  /// 失败可能是时序性的：渲染刚完成 mp4 还在落盘、或网络盘短暂掉线——
+  /// 给一次手动重载，错误态不能是死端。
+  void _retryLoad() {
+    if (!mounted) return;
+    setState(() => _error = '');
+    _loadMedia();
   }
 
   Future<void> _copyPath() async {
     await Clipboard.setData(ClipboardData(text: widget.path));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制路径')));
+    _toasts.info('已复制路径');
   }
 
   Future<void> _reveal() async {
-    final ok = await revealInFolder(widget.path);
+    if (!_capabilities.supportsRevealInFolder) {
+      _toasts.warn('这台设备不支持在文件夹中显示');
+      return;
+    }
+    final ok = await revealInSystemFileManager(widget.path);
     if (!mounted || ok) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法在文件夹中显示')));
+    _toasts.warn('没能打开文件夹', '可以先用「复制路径」拿到文件位置。');
   }
 
   @override
@@ -145,13 +211,13 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
       );
     }
     if (_error.isNotEmpty) return _errorPane(p);
-    final c = _controller;
-    if (c == null) {
+    final controller = _controller;
+    if (controller == null) {
       return Center(child: CircularProgressIndicator(strokeWidth: 1.6, color: p.accent));
     }
     return Container(
       color: Colors.black,
-      child: WebViewWidget(controller: c),
+      child: WebViewWidget(controller: controller),
     );
   }
 
@@ -174,12 +240,17 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
             textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: p.ink4)),
         const SizedBox(height: 10),
         Wrap(spacing: 8, children: [
+          FilledButton.icon(
+            onPressed: _retryLoad,
+            icon: const Icon(Icons.refresh_outlined, size: 14),
+            label: const Text('重新加载', style: TextStyle(fontSize: 12)),
+          ),
           OutlinedButton.icon(
             onPressed: _copyPath,
             icon: const Icon(Icons.copy_all_outlined, size: 14),
             label: const Text('复制路径', style: TextStyle(fontSize: 12)),
           ),
-          if (revealSupported)
+          if (_capabilities.supportsRevealInFolder)
             OutlinedButton.icon(
               onPressed: _reveal,
               icon: const Icon(Icons.folder_open_outlined, size: 14),

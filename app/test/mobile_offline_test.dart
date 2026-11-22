@@ -1,13 +1,16 @@
-// 移动端网络面与离线体验的锚点测试（审查批次：mobile-1/2/4/5）。
-// - mobile-1/4：Android/iOS 平台配置是文件面（flutter test 跑不到系统层），
-//   以文件内容锚定——与本仓 scripts/wf/test_server_routes.py 同一纪律。
-// - mobile-2：离线 models.json 资产可解析、与 server 快照字节一致、
-//   空 registry 的 store 注入后有可用的 toolCall/openai 模型。
-// - mobile-5：boot 降级分支的失败可见性裁决（纯函数）。
+// Mobile network surface and offline experience anchors (mobile-1/2/4/5).
+//
+// - mobile-1/4: Android/iOS platform configuration is file-level (flutter test
+//   cannot reach the OS layer), so it is anchored by file content.
+// - mobile-2: the bundled model snapshot is the *only* registry source now —
+//   it is no longer a mirror of a repo-side copy, so this test reads
+//   `assets/models.json` alone.
+// - mobile-5: the connect-desktop failure visibility decision (pure function).
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nondesign/core/remote_desktop_client.dart';
 import 'package:nondesign/core/store.dart';
 
 void main() {
@@ -31,21 +34,20 @@ void main() {
   });
 
   group('mobile-2 离线模型注册表', () {
-    test('bundled asset 与 server 快照字节一致（sync_models.py 双写）', () {
-      final server = File('../server/models.json').readAsStringSync();
-      final asset = File('assets/models.json').readAsStringSync();
-      expect(asset, server, reason: '两份快照必须由 scripts/sync_models.py 一起写入，手改一份即漂移');
-    });
+    test('随包快照可解析，且默认服务商有可用的工具调用模型', () {
+      final raw = File('assets/models.json').readAsStringSync();
+      final decoded = jsonDecode(raw);
+      expect(decoded, isA<Map<String, dynamic>>());
+      expect((decoded as Map)['providers'], isA<Map>());
 
-    test('快照可解析为注册表，空 registry 的 store 注入后模型门控有数据源', () {
-      final registry = parseBundledModelsSnapshot(jsonDecode(File('assets/models.json').readAsStringSync()));
+      final registry = parseBundledModelsSnapshot(decoded);
       expect(registry, isNotNull);
       final flat = registry!.flatten();
       expect(flat, isNotEmpty);
       expect(flat.any((m) => m.providerId == 'deepseek' && m.toolCall), isTrue,
-          reason: '默认服务商 deepseek 必须有 toolCall 模型（_runAgent 的能力门控数据源）');
+          reason: '默认服务商 deepseek 必须有 toolCall 模型（能力门控的数据源）');
 
-      // 对照 store.dart:52 空 registry：model getter 返回 null → 门控整体跳过。
+      // 空 registry 的 store：model 为 null → 门控整体跳过；注入后有数据源。
       final store = AppStore();
       expect(store.model, isNull);
       store.registry = registry;
@@ -75,7 +77,7 @@ void main() {
       expect(store.registry.providers, isNotEmpty);
       expect(store.model, isNotNull);
       expect(store.model!.toolCall, isTrue);
-      // 幂等：registry 已有（更权威的服务器）快照时不重读不覆盖。
+      // 幂等：registry 已有快照时不重读不覆盖。
       var called = false;
       await store.ensureBundledRegistry(load: (path) async {
         called = true;
@@ -86,17 +88,32 @@ void main() {
   });
 
   group('mobile-5 连接桌面失败可见性', () {
-    test('配置过 serverUrl 却连不上 → 返回错误文案（bootError 屏显性呈现）', () {
+    test('配置过地址却连不上 → 返回人性化文案（错误正文只进日志）', () {
       final msg = AppStore.mobileDegradedBootError(
-        StateError('指定的服务器不可达：http://192.168.1.5:8799（检查桌面端是否在运行、两机是否同一网络）'),
-        'http://192.168.1.5:8799',
+        StateError('SocketException: Connection refused (port 1)'),
+        'http://192.168.1.5:9000',
       );
-      expect(msg, contains('不可达'));
+      expect(msg, contains('连接桌面没有成功'));
+      expect(msg, isNot(contains('SocketException')));
+      expect(msg, isNot(contains('port')));
+      expect(msg, isNot(contains('错误')), reason: '默认文案不暴露原始错误');
     });
 
-    test('未配置 serverUrl → null（移动端正常离线形态，静默降级 PLAN 直连）', () {
-      expect(AppStore.mobileDegradedBootError(StateError('spawn 失败'), ''), isNull);
-      expect(AppStore.mobileDegradedBootError(StateError('spawn 失败'), '   '), isNull);
+    test('未配置地址 → null（本地运行时是正常形态）', () {
+      expect(AppStore.mobileDegradedBootError(StateError('boom'), ''), isNull);
+      expect(AppStore.mobileDegradedBootError(StateError('boom'), '   '), isNull);
+    });
+
+    test('未连接时的状态文案是「还没有连接桌面」', () {
+      const status = RemoteDesktopStatus.notConfigured();
+      expect(status.configured, isFalse);
+      expect(status.connected, isFalse);
+      expect(status.message, '还没有连接桌面');
+    });
+
+    test('连接桌面地址规范化：无协议自动补 http、去尾斜杠', () {
+      expect(RemoteDesktopClient.normalizeBaseUrl(' 192.168.1.5:9000 '), 'http://192.168.1.5:9000');
+      expect(RemoteDesktopClient.normalizeBaseUrl('http://h:9000///'), 'http://h:9000');
     });
   });
 }

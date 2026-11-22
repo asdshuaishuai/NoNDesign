@@ -68,6 +68,10 @@ class _RecordingBridge implements EngineGateBridge, EngineWriteBridge {
   /// auto_fix 是否真的修好（false = 复评仍 poor，用于锚定「最多 2 轮」）。
   final bool autoFixFixes;
 
+  /// board id → norms 维度的 observation 文本（模拟「1 处规范偏差」这类
+  /// 可修债务；verdict 仍是 good，锚定 app 侧 RSI 触发面不再只看 poor）。
+  final Map<String, String> normObservations;
+
   final List<String> sessionMbts = [];
   final List<String> sessionNames = [];
   final List<String?> sessionArgs = [];
@@ -83,9 +87,11 @@ class _RecordingBridge implements EngineGateBridge, EngineWriteBridge {
     this.canonical = '',
     List<Map<String, dynamic>>? boards,
     Map<String, String>? verdicts,
+    Map<String, String>? normObservations,
     this.autoFixFixes = true,
   })  : boards = List<Map<String, dynamic>>.from(boards ?? const []),
-        verdicts = Map<String, String>.from(verdicts ?? const {});
+        verdicts = Map<String, String>.from(verdicts ?? const {}),
+        normObservations = Map<String, String>.from(normObservations ?? const {});
 
   @override
   Future<Map<String, dynamic>> generate(
@@ -128,7 +134,10 @@ class _RecordingBridge implements EngineGateBridge, EngineWriteBridge {
       return {'ok': false, 'error': 'unsupported_op'};
     }
     if (name == 'session_auto_fix') {
-      if (autoFixFixes && arg != null) verdicts[arg] = 'good';
+      if (autoFixFixes && arg != null) {
+        verdicts[arg] = 'good';
+        normObservations.remove(arg); // 引擎修完不再报同一处偏差
+      }
       canonical = '$mbt\n<!-- fixed: $arg -->';
       return {'ok': true, 'mbt': canonical};
     }
@@ -166,6 +175,14 @@ class _RecordingBridge implements EngineGateBridge, EngineWriteBridge {
                 'observation': 'x',
                 'advice': '',
               },
+              if (normObservations[arg ?? ''] != null)
+                {
+                  'principle': 'norms',
+                  'score': 7, // 引擎：≤2 处偏差 = good
+                  'verdict': 'good',
+                  'observation': normObservations[arg ?? '']!,
+                  'advice': '',
+                },
             ],
           },
         };
@@ -416,12 +433,45 @@ void main() {
       final round = events.where((e) => e['type'] == 'review_round').toList();
       expect(round, hasLength(1));
       expect(round.single['round'], 1);
-      expect(round.single['detail'], contains('home:1项poor'));
+      expect(round.single['detail'], contains('home · 1 处待改进'));
       expect(
         events.any((e) =>
-            e['type'] == 'note' && e['label'] == '修复轮' && '${e['detail']}'.contains('auto_fix')),
+            e['type'] == 'note' &&
+            e['label'] == '修复轮' &&
+            '${e['detail']}'.contains('自动优化')),
         isTrue,
       );
+    });
+
+    test('norms 1 处偏差（verdict=good）也会触发一次 auto_fix', () async {
+      // 引擎 norms 维度 ≤2 处偏差判 good；旧逻辑只看 poor，于是「列表缺分割线」
+      // 这类引擎明明能修的债一次都不会发。这条锁定 app 侧的触发面。
+      final bridge = _RecordingBridge(
+        canonical: _mbt0,
+        boards: [
+          {'id': 'home', 'nodes': 3},
+        ],
+        normObservations: {'home': '列表行间无分割线（1 处规范偏差，auto_fix 可修）'},
+      );
+      final events = <Map<String, dynamic>>[];
+      final result = await runDartAgent(
+        request: _buildReq(),
+        modelOverride: _ScriptedModel([
+          [
+            mockToolCall(toolName: 'design_op', input: {'op': 'create home 390 844'}),
+          ],
+          [mockToolCall(toolName: 'finish', input: {'summary': '首页'})],
+        ]),
+        bridge: bridge,
+        onEvent: events.add,
+      );
+
+      final fixes = bridge.mutateNames.where((n) => n == 'session_auto_fix').toList();
+      expect(fixes, hasLength(1), reason: 'norms 债务必须触发 autofix');
+      final round = events.where((e) => e['type'] == 'review_round').toList();
+      expect(round, hasLength(1));
+      expect(round.single['detail'], contains('home · 1 处待改进'));
+      expect(result.mbt, contains('<!-- fixed: home -->'));
     });
 
     test('全 good → 只发一条质量审查 note，零 auto_fix', () async {
@@ -444,7 +494,7 @@ void main() {
       expect(bridge.mutateNames, isEmpty);
       final notes = events.where((e) => e['type'] == 'note' && e['label'] == '质量审查').toList();
       expect(notes, hasLength(1));
-      expect(notes.single['detail'], contains('全部屏幕通过原则评审'));
+      expect(notes.single['detail'], contains('全部屏幕通过质量检查'));
     });
 
     test('最多 2 轮：auto_fix 未能修复时只跑两轮', () async {

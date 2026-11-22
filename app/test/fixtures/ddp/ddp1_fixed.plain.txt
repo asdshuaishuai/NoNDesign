@@ -1,0 +1,16 @@
+---
+moonviz:
+  format: visual-document
+  revision: 1
+  entry: __seed
+---
+
+# __seed
+
+<!-- moonviz:artboard __seed -->
+```mbt
+fn visual___seed() -> @decl.Prototype {
+  let page = @decl.prototype(name="__seed", width=390.0, height=844.0)
+  page
+}
+```

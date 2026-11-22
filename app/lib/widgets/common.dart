@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../core/models.dart';
 import '../core/store.dart';
@@ -18,15 +18,6 @@ Color parseHex(String raw, {Color fallback = const Color(0xFF888888)}) {
   if (hex.length == 6) hex = 'FF$hex';
   final value = int.tryParse(hex, radix: 16);
   return value == null ? fallback : Color(value);
-}
-
-String colorToHex(Color color) {
-  final a = (color.a * 255).round();
-  final r = (color.r * 255).round();
-  final g = (color.g * 255).round();
-  final b = (color.b * 255).round();
-  String h(int v) => v.toRadixString(16).padLeft(2, '0').toUpperCase();
-  return a == 255 ? '#${h(r)}${h(g)}${h(b)}' : '#${h(a)}${h(r)}${h(g)}${h(b)}';
 }
 
 String formatTokens(num? value) {
@@ -115,12 +106,12 @@ Future<T?> showNonDialog<T>({
     barrierColor: barrierColor ?? Colors.black.withValues(alpha: 0.55),
     transitionDuration: NonMotion.slow,
     // builder 必须拿路由自己的 context，不能拿推入方的 context：弹窗在场
-    // 时推入视图可能已被切走（根级 ⌘1–⌘7 不让位浮层）——调用点的
+    // 时推入视图可能已被切走（根级 ⌘1–⌘4/⌘0 不让位浮层）——调用点的
     // `Navigator.pop(ctx, …)` 与 `ctx.palette` 在死 element 上前者直接
     // TypeError（StatefulElement.state 空断言），路由 context 则始终存活
     // 且同在 MaterialApp 主题树下，行为不变。
-    pageBuilder: (routeCtx, __, ___) => builder(routeCtx),
-    transitionBuilder: (context, anim, __, child) {
+    pageBuilder: (routeCtx, _, _) => builder(routeCtx),
+    transitionBuilder: (context, anim, _, child) {
       final curved = CurvedAnimation(parent: anim, curve: NonMotion.curve);
       return FadeTransition(
         opacity: curved,
@@ -400,16 +391,10 @@ class SectionLabel extends StatelessWidget {
             style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4),
           ),
         ),
-        if (trailing != null) trailing!,
+        ?trailing,
       ],
     );
   }
-}
-
-class ThinDivider extends StatelessWidget {
-  const ThinDivider({super.key});
-  @override
-  Widget build(BuildContext context) => Divider(height: 1, thickness: 0.5, color: context.palette.line);
 }
 
 class EmptyHint extends StatelessWidget {

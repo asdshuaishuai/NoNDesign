@@ -17,7 +17,7 @@ class MainFlutterWindow: NSWindow {
       self.setFrame(rect, display: true)
     }
     self.minSize = NSSize(width: 1080, height: 700)
-    self.title = "NoNDesign"
+    self.title = "NaN"
 
     // 标题栏透明并随主题：Flutter 侧经 nc/window setTheme 同步深浅。
     self.titlebarAppearsTransparent = true

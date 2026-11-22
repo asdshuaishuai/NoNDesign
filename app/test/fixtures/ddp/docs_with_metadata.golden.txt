@@ -1,0 +1,4 @@
+DOC-BODY
+
+<!-- nondesign:design {"v":1,"palette":{"primary":"#6E7BFF","background":"#F7F8FA","surface":"#FFFFFF","text":"#14161A","muted":"#6B7280","danger":"#DC2626","success":"#16A34A"},"typography":{"h1":32,"h2":24,"body":14},"spacing":[4,8,12,16,24,32],"radius":{"sm":8,"md":12,"lg":16},"rules":["正文对比度 ≥ 4.5","8pt 间距节奏","按钮圆角 8","列表 3 行以上加分隔线","按钮文案 2–4 字"],"notes":""} -->
+<!-- nondesign:docs {"prd":"# 需求\n\n按钮 2–4 字，正文对比度 ≥ 4.5。\n","ui":"首页：一句话起步。\n"} -->

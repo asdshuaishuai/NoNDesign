@@ -3,7 +3,7 @@
 // 直接 setState——保存写盘在飞期间关闭弹窗即 setState-after-dispose。
 // 用注入的慢速 saveSettings store 复现窗口期；同文件同型路径（:66 延迟
 // 回调 / :902 ACP 选项）都守了 mounted，唯独这里漏。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
@@ -67,6 +67,9 @@ void main() {
     await tester.tap(find.text('open-settings'));
     await tester.pumpAndSettle();
     expect(find.text('设置'), findsOneWidget);
+    // 打开设置只回填端点/模型到内存，不自动落盘（batch 11：删掉 initState
+    // 的 saveSettings 微任务后，首次显式保存才是唯一一次写盘）。
+    expect(store.saves, 0, reason: '打开设置不落盘');
 
     // 「步数+保存」在默认「模型与端点」tab 的模型卡内（store.model 非空时渲染）。
     await tester.ensureVisible(find.text('保存'));

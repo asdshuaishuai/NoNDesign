@@ -1,10 +1,11 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../core/models.dart';
 import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import '../core/dart_agent.dart' show toolFailureMessage;
 import 'common.dart';
 import 'workspace.dart' show openProjectFlow;
 
@@ -71,7 +72,12 @@ class _ProjectPanel extends StatelessWidget {
       if (store.render.artboards.isEmpty)
         () => Padding(
               padding: const EdgeInsets.all(12),
-              child: Text('还没有画板——让 NoN 生成，或点面板顶部 ＋ 新建。',
+              child: Text(
+                  // 项目已打开但本机没有画布运行时：不是「空项目」，别让
+                  // 空画板冒充还没建过画板（审查 depython-1）。
+                  store.canvasPreviewUnavailable
+                      ? '项目已打开，画布需要连接桌面后才能预览。'
+                      : '还没有画板——让 NaN 生成，或点面板顶部 ＋ 新建。',
                   style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4)),
             ),
       if (board != null) ...[
@@ -334,7 +340,7 @@ class _DocsPanel extends StatelessWidget {
             padding: const EdgeInsets.all(12),
             children: [
               _docCard(context, Icons.description_outlined, '产品需求 PRD',
-                  docs.prd.trim().isEmpty ? '还没有生成——描述产品，NoN 会先写文档' : '${docs.prd.replaceAll(RegExp(r'\s'), '').length} 字 · 目标 / 流程 / 页面清单',
+                  docs.prd.trim().isEmpty ? '还没有生成——描述产品，NaN 会先写文档' : '${docs.prd.replaceAll(RegExp(r'\s'), '').length} 字 · 目标 / 流程 / 页面清单',
                   true, 'prd'),
               _docCard(context, Icons.layers_outlined, 'UI 说明',
                   docs.ui.trim().isEmpty ? '可选：逐屏布局 / 交互 / 状态' : '${docs.ui.replaceAll(RegExp(r'\s'), '').length} 字 · 逐屏约束',
@@ -511,9 +517,7 @@ class _SpecPanelState extends State<_SpecPanel> {
     if (ab == null) return;
     final ok = await store.responsiveBoard();
     if (ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('响应式适配完成 · $ab 已生成平板/桌面变体'), behavior: SnackBarBehavior.floating),
-      );
+      store.toasts.success('响应式适配完成', '$ab 已生成平板与桌面版本');
     }
   }
 
@@ -533,7 +537,7 @@ class _SpecPanelState extends State<_SpecPanel> {
           ),
           IconAction(
             icon: Icons.auto_fix_high,
-            tooltip: '把调色板写入画布 token',
+            tooltip: '把调色板写入画板配色',
             size: 26,
             onTap: () async {
               var ok = 0;
@@ -551,9 +555,11 @@ class _SpecPanelState extends State<_SpecPanel> {
                 if (color != null && await store.setToken(entry.value, color)) ok += 1;
               }
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(ok > 0 ? '已应用 $ok 个颜色令牌' : '画布颜色未变'), behavior: SnackBarBehavior.floating),
-                );
+                if (ok > 0) {
+                  store.toasts.success('已应用 $ok 个颜色到画板');
+                } else {
+                  store.toasts.info('画布颜色没有变化');
+                }
               }
             },
           ),
@@ -611,15 +617,15 @@ class _SpecPanelState extends State<_SpecPanel> {
                 ),
               if (_extracting) ...[
                 const SizedBox(height: 12),
-                const SectionLabel('引擎提取'),
+                const SectionLabel('提取结果'),
                 const SizedBox(height: 6),
-                Text('正在从 ${store.activeBoard ?? '画板'} 提取…',
+                Text('正在从 ${store.activeBoard ?? '画板'} 取色…',
                     style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4)),
               ],
               if (_extract != null) ...[
                 const SizedBox(height: 12),
                 SectionLabel(
-                  '引擎提取 · ${_extractAb ?? ''}',
+                  '提取结果 · ${_extractAb ?? ''}',
                   trailing: IconAction(
                     icon: Icons.close,
                     tooltip: '收起',
@@ -722,7 +728,7 @@ class _SpecPanelState extends State<_SpecPanel> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: p.accent.withValues(alpha: 0.2)),
                 ),
-                child: Text('规范随每次 Agent run 注入上下文，保持全局视觉一致。',
+                child: Text('每次生成都会带上这份规范，保持全局视觉一致。',
                     style: TextStyle(fontSize: 10, height: 1.5, color: p.ink3)),
               ),
             ],
@@ -743,16 +749,27 @@ class _HistoryPanel extends StatefulWidget {
 class _HistoryPanelState extends State<_HistoryPanel> {
   bool _engineMode = false;
   bool _engineBusy = false;
-  String _engineOutput = '';
+  /// 人类可读的结果句（面板正文）。
+  String _engineSummary = '';
+  /// 原始诊断（只出现在折叠的「技术详情」里，默认不展开）。
+  String _engineDetail = '';
   String _initializedBoard = '';
+
+  /// 版本记录面板的命令行：命令字符串是内部协议，界面上只出现中文动作名。
+  static const List<(String, String)> _historyCommands = [
+    ('init', '开始记录'),
+    ('commit', '保存版本'),
+    ('log', '版本列表'),
+    ('undo', '撤销一步'),
+    ('redo', '重做一步'),
+    ('diff', '对比上一版'),
+  ];
 
   Future<void> _runEngine(String command) async {
     final store = context.read<AppStore>();
     final board = store.activeBoard;
     if (command == 'init' && (board == null || board.isEmpty)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('先选择一个画板再初始化引擎版本'), behavior: SnackBarBehavior.floating),
-      );
+      store.toasts.warn('先选一个画板，再开始记录版本');
       return;
     }
     final full = command == 'init' ? 'init $board' : command;
@@ -761,16 +778,39 @@ class _HistoryPanelState extends State<_HistoryPanel> {
     if (!mounted) return;
     final data = res['data']?.toString() ?? '';
     final canonical = res['mbt']?.toString() ?? '';
+    final ok = res['ok'] == true;
+    final detail = <String>[
+      if (!ok && res['error'] != null) 'error: ${res['error']}',
+      if (data.isNotEmpty) data,
+      if (canonical.isNotEmpty) '[源码已更新，${canonical.length} 字符]',
+    ].join('\n').trim();
     setState(() {
       _engineBusy = false;
-      _engineOutput = [
-        if (res['ok'] != true && res['error'] != null) '✗ ${res['error']}',
-        if (data.isNotEmpty) data,
-        if (canonical.isNotEmpty) '[canonical 已更新，${canonical.length} 字符]',
-      ].join('\n').trim();
-      if (command == 'init' && res['ok'] == true) _initializedBoard = board ?? '';
-      if (_engineOutput.isEmpty) _engineOutput = res['ok'] == true ? 'ok' : '命令失败';
+      _engineSummary = _resultSentence(command, ok);
+      _engineDetail = detail;
+      if (command == 'init' && ok) _initializedBoard = board ?? '';
     });
+  }
+
+  /// 结果句：只说「发生了什么、下一步能做什么」，不出现命令名与错误码。
+  String _resultSentence(String command, bool ok) {
+    if (!ok) return '这一步没有完成，请重试。';
+    switch (command) {
+      case 'init':
+        return '已开始记录这个画板的版本。之后每次保存都会留下一个可回看的版本。';
+      case 'commit':
+        return '已保存一个新版本。';
+      case 'log':
+        return '版本列表已刷新。';
+      case 'undo':
+        return '已撤销一步。';
+      case 'redo':
+        return '已重做一步。';
+      case 'diff':
+        return '已生成与上一版的差异。';
+      default:
+        return '完成了。';
+    }
   }
 
   @override
@@ -789,7 +829,7 @@ class _HistoryPanelState extends State<_HistoryPanel> {
             children: [
               _seg(context, '本地快照', !_engineMode, () => setState(() => _engineMode = false)),
               const SizedBox(width: 4),
-              _seg(context, '引擎版本', _engineMode, () => setState(() => _engineMode = true)),
+              _seg(context, '版本记录', _engineMode, () => setState(() => _engineMode = true)),
             ],
           ),
         ),
@@ -801,8 +841,11 @@ class _HistoryPanelState extends State<_HistoryPanel> {
             itemBuilder: (context, i) {
               final index = store.history.length - 1 - i;
               final active = index == store.historyIndex;
-              final mbt = store.history[index];
-              final boards = RegExp(r'<!-- moonviz:artboard').allMatches(mbt).length;
+              final snapshot = store.history[index];
+              final boards = RegExp(r'<!-- moonviz:artboard').allMatches(snapshot).length;
+              // 快照正文是源码（frontmatter/标记都是内部资料），界面只报体积，
+              // 不把前 40 字源码直接摊在版本行上。
+              final chars = snapshot.replaceAll(RegExp(r'\s+'), '').length;
               return InkWell(
                 onTap: () => store.jumpHistory(index),
                 borderRadius: BorderRadius.circular(8),
@@ -827,7 +870,7 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                           children: [
                             Text(active ? '当前版本' : '版本 ${index + 1}',
                                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: active ? p.accent : p.ink3)),
-                            Text('$boards 板 · ${(() { final cleaned = mbt.replaceAll(RegExp(r'\s+'), ' '); return cleaned.length > 40 ? cleaned.substring(0, 40) : cleaned; })()}',
+                            Text('$boards 板 · $chars 字符',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
@@ -849,8 +892,8 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Text(
-                    '目标画板：${store.activeBoard ?? '（未选择）'} · ${_initializedBoard.isEmpty ? '未初始化' : '已初始化 $_initializedBoard'}',
-                    style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
+                    '当前画板：${store.activeBoard ?? '（未选择）'} · ${_initializedBoard.isEmpty ? '还没有开始记录' : '正在记录 $_initializedBoard'}',
+                    style: TextStyle(fontSize: 10, color: p.ink4),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -860,10 +903,10 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                     spacing: 4,
                     runSpacing: 4,
                     children: [
-                      for (final cmd in const ['init', 'commit', 'log', 'undo', 'redo', 'diff'])
+                      for (final (cmd, label) in _historyCommands)
                         ActionChip(
-                          label: Text(cmd,
-                              style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: _engineBusy ? p.ink4 : p.ink2)),
+                          label: Text(label,
+                              style: TextStyle(fontSize: 10, color: _engineBusy ? p.ink4 : p.ink2)),
                           onPressed: _engineBusy
                               ? null
                               : () async {
@@ -885,11 +928,17 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                       border: Border.all(color: p.line),
                     ),
                     child: SingleChildScrollView(
-                      child: SelectableText(
-                        _engineOutput.isEmpty
-                            ? '选画板 → init → 改画布 → commit → log 查看引擎版本历史。\nundo / redo / diff 均由引擎 session_history 驱动。'
-                            : _engineOutput,
-                        style: TextStyle(fontSize: 10, fontFamily: 'Menlo', height: 1.5, color: p.ink3),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SelectableText(
+                            _engineSummary.isEmpty
+                                ? '选一个画板，点「开始记录」，之后每次「保存版本」都会留下一个可回看的版本。\n撤销、重做与对比也在这排按钮里。'
+                                : _engineSummary,
+                            style: TextStyle(fontSize: 10, height: 1.5, color: p.ink3),
+                          ),
+                          if (_engineDetail.isNotEmpty) _HistoryDetails(text: _engineDetail),
+                        ],
                       ),
                     ),
                   ),
@@ -915,6 +964,38 @@ class _HistoryPanelState extends State<_HistoryPanel> {
         child: Text(label,
             style: TextStyle(
                 fontSize: 11, fontWeight: FontWeight.w600, color: active ? p.accent : p.ink3)),
+      ),
+    );
+  }
+}
+
+/// 折叠的「技术详情」：版本记录的原始诊断只在这里出现，默认不展开。
+class _HistoryDetails extends StatelessWidget {
+  final String text;
+  const _HistoryDetails({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 4),
+        dense: true,
+        title: Text('技术详情',
+            style: TextStyle(fontSize: 10, color: p.ink4, fontWeight: FontWeight.w600)),
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(6)),
+            child: SelectableText(
+              text,
+              style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4, height: 1.4),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -972,23 +1053,20 @@ class _CommitFieldState extends State<_CommitField> {
 Future<void> _runResponsive(BuildContext context, AppStore store, String boardId) async {
   final ok = await store.applyOp('responsive $boardId');
   if (ok && context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('响应式适配完成 · $boardId 已生成平板/桌面变体'), behavior: SnackBarBehavior.floating),
-    );
+    store.toasts.success('响应式适配完成', '$boardId 已生成平板与桌面版本');
   }
 }
 
 /// Fetch session_extract_design_system for [ab] via [AppStore.extractDesignSystem]
 /// and return the displayable data map ({summary, color_tokens, components}),
-/// or null on failure (the error is snackbar'd here so both hosts stay thin).
+/// or null on failure. The failure is surfaced as a human sentence through the
+/// toast service (the raw error code stays in logs) so both hosts stay thin.
 /// Shared by the left spec panel and the docs spec page (docs_view.dart).
 Future<Map<String, dynamic>?> extractDesignData(BuildContext context, AppStore store, String ab) async {
   final res = await store.extractDesignSystem(ab);
   final hasData = res != null && (res['color_tokens'] is List || res['summary'] is Map);
   if (!hasData && context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(res?['error']?.toString() ?? '提取失败'), behavior: SnackBarBehavior.floating),
-    );
+    store.toasts.error(toolFailureMessage(res?['error']?.toString()));
   }
   return hasData ? res : null;
 }
@@ -1040,14 +1118,14 @@ class ExtractCompareView extends StatelessWidget {
         ),
         const SizedBox(height: 7),
         if (tokens.isEmpty)
-          Text('该画板没有提取到颜色 token。', style: TextStyle(fontSize: 11, color: p.ink4))
+          Text('这个画板没有可提取的颜色。', style: TextStyle(fontSize: 11, color: p.ink4))
         else
           for (final t in tokens) _tokenRow(context, design, t),
         if (tokens.isNotEmpty) ...[
           const SizedBox(height: 6),
           _PanelActionButton(
             icon: Icons.merge_type,
-            label: diffs > 0 ? '合并 $diffs 处引擎建议到规范' : '已与现规范一致',
+            label: diffs > 0 ? '合并 $diffs 处建议到规范' : '已与现规范一致',
             enabled: diffs > 0,
             onTap: () => _merge(context, tokens),
           ),
@@ -1136,9 +1214,7 @@ class ExtractCompareView extends StatelessWidget {
         notes: design.notes,
       ),
     );
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已合并 $merged 个颜色到设计规范'), behavior: SnackBarBehavior.floating),
-    );
+    store.toasts.success('已合并 $merged 个颜色到设计规范');
   }
 }
 
@@ -1176,8 +1252,8 @@ class _PanelActionButton extends StatelessWidget {
   }
 }
 
-/// Engine render benchmark (session_benchmark via the generic /engine/session
-/// endpoint, no arg). Refetches on mbt change; renders nothing while the
+/// Engine render benchmark (session_benchmark via the generic session face,
+/// no arg). Refetches on mbt change; renders nothing while the
 /// engine is unreachable or the document is empty, so the existing
 /// artboard/flow/node stats stand alone.
 class _BenchmarkStrip extends StatefulWidget {
@@ -1246,7 +1322,7 @@ class _BenchmarkStripState extends State<_BenchmarkStrip> {
           children: [
             SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.2, color: p.ink4)),
             const SizedBox(width: 6),
-            Text('引擎基准测试…', style: TextStyle(fontSize: 10, color: p.ink4)),
+            Text('正在评分…', style: TextStyle(fontSize: 10, color: p.ink4)),
           ],
         ),
       );
@@ -1265,7 +1341,7 @@ class _BenchmarkStripState extends State<_BenchmarkStrip> {
       child: Row(
         children: [
           Pill(
-            label: '基准 $grade${score != null ? ' · $score 分' : ''}',
+            label: '评分 $grade${score != null ? ' · $score 分' : ''}',
             color: color,
             background: color.withValues(alpha: 0.14),
           ),
@@ -1278,7 +1354,7 @@ class _BenchmarkStripState extends State<_BenchmarkStrip> {
               style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
             ),
           ),
-          IconAction(icon: Icons.refresh, tooltip: '重跑引擎基准', size: 20, onTap: _fetch),
+          IconAction(icon: Icons.refresh, tooltip: '重新评分', size: 20, onTap: _fetch),
         ],
       ),
     );

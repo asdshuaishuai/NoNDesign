@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 double _num(dynamic v, [double fallback = 0]) => (v is num) ? v.toDouble() : fallback;
 
 class NodeStyle {
@@ -432,18 +430,107 @@ class ModelRegistry {
   }
 }
 
-/// Agent 循环运行时（docs/plan-dart-agent-migration.md P0）：
-/// - `dart`：内置 Dart 循环（core/dart_agent.dart）——桌面与移动共用；
-///   Build 的 design_op 仍经引擎 AgentGate（绝不绕过引擎门）。
+// ---------------------------------------------------------------------------
+// 工作区模式（主页输入框选择的目标工作台）
+// ---------------------------------------------------------------------------
+
+/// 主页一句话输入的目标工作台：`auto` = 未锁定工作台，与设计档同样走
+/// 「先文档后原型」的设计主线。
 ///
-/// `server`（Python `/agent/run`）已从设置面退役（用户裁决 2026-11-17：
-/// 桌面与移动内置能力一致、Python 服务退出运行时）；旧存档读到 `server`
-/// 时统一迁移到 `dart`，不再提供第二种运行时选择。
-const String agentRuntimeDart = 'dart';
-/// 仅用于旧存档读取与迁移；不再作为可选运行时。
+/// 四个工作区互相独立，切换由用户驱动：选中某个工作区就是「这次任务先
+/// 落在那里」，开工前显式落视图（`store._runChatTurn`）；工具调永不把
+/// 主面拽到另一个工作区，只有设计工具能把主面带回设计画布
+/// （`store.followAgentWorkspace`，用户裁决 2026-11-19）。
+const String workspaceModeAuto = 'auto';
+const String workspaceModeDesign = 'design';
+const String workspaceModeThree = 'three';
+const String workspaceModeVideo = 'video';
+const String workspaceModeHotapp = 'hotapp';
+
+const List<String> kWorkspaceModes = <String>[
+  workspaceModeAuto,
+  workspaceModeDesign,
+  workspaceModeThree,
+  workspaceModeVideo,
+  workspaceModeHotapp,
+];
+
+/// 主页工作区选择器的用户可见标签（唯一出口，别处只读这里）。
+String workspaceModeLabel(String mode) {
+  switch (normalizeWorkspaceMode(mode)) {
+    case workspaceModeDesign:
+      return '设计';
+    case workspaceModeThree:
+      return '3D';
+    case workspaceModeVideo:
+      return '视频';
+    case workspaceModeHotapp:
+      return '热应用';
+    default:
+      return '自动';
+  }
+}
+
+/// 归一：未知值一律回落 `auto`（旧存档没有这个键）。
+String normalizeWorkspaceMode(String? raw) {
+  final value = (raw ?? '').trim();
+  return kWorkspaceModes.contains(value) ? value : workspaceModeAuto;
+}
+
+/// Agent 循环运行时（设置界面「运行方式」）：
+/// - `local`（默认）：内置循环在本机执行，桌面与移动一致；Build 的
+///   design_op 仍经设计校验（绝不绕过引擎门）。
+/// - `server`：消息发给显式连接的桌面端执行（wire 值 `server` 保持稳定，
+///   设置界面文案称「连接桌面」）。显式选择远程时绝不静默回落本地。
+///
+/// 旧存档里的 `dart`（历史内置循环取值）与任何未知值统一回落 `local`——
+/// 迁移不抹掉用户显式选择的 `server`，也不把未知值静默当成远程。
+const String agentRuntimeLocal = 'local';
+
+/// 历史内置循环取值：与 [agentRuntimeLocal] 同义（旧存档/旧测试只读兼容）。
+const String agentRuntimeDart = agentRuntimeLocal;
+
+/// 「连接桌面」远程运行时（wire 值保持 `server`）。
 const String agentRuntimeServer = 'server';
 
-String defaultAgentRuntime() => agentRuntimeDart;
+String defaultAgentRuntime() => agentRuntimeLocal;
+
+/// 把任意存档值归一到两个合法运行时：显式 `server` 保留，其余一律 `local`。
+String normalizeAgentRuntime(String? raw) =>
+    raw == agentRuntimeServer ? agentRuntimeServer : agentRuntimeLocal;
+
+/// 内置服务商端点兜底表（模型清单快照不可用时，设置页仍能显示端点）。
+///
+/// 与 `store.dart` 的私有回退表逐字一致：设置页与请求层看到同一组地址，
+/// 避免「界面显示 A、请求发往 B」。端点在内置服务商下只读。
+const Map<String, String> builtInBaseUrls = {
+  'openai': 'https://api.openai.com/v1',
+  'deepseek': 'https://api.deepseek.com',
+  'zhipuai': 'https://open.bigmodel.cn/api/paas/v4',
+  'moonshotai-cn': 'https://api.moonshot.cn/v1',
+  'moonshotai': 'https://api.moonshot.ai/v1',
+  'minimax-cn': 'https://api.minimax.cn/v1',
+  'minimax': 'https://api.minimax.io/v1',
+  'stepfun': 'https://api.stepfun.com/v1',
+};
+
+/// 服务商的内置端点（快照优先未命中时用这张表；未知服务商回落 openai）。
+String builtInBaseUrlFor(String providerId) =>
+    builtInBaseUrls[providerId] ?? builtInBaseUrls['openai'] ?? '';
+
+/// agent 循环的「无限步骤」哨兵：远高于任何真实会话的步数。
+///
+/// 选择有限大数而不是 0/负数：ai_sdk 的 `maxSteps` 语义是「最多循环几次」，
+/// 0 等于不执行；哨兵值让循环实际永不因步数耗尽而停（真正的边界仍是
+/// 模型上下文与用户取消）。1,048,576 步按每步 1 秒计约 12 天。
+const int agentUnlimitedSteps = 1 << 20;
+
+/// 把设置里的步数换算成 agent 循环实际使用的预算。
+///
+/// 无限哨兵原样放行；普通值沿用 server 的 `max(4, min(600, max_steps))`。
+int agentStepBudget(int requested) => requested >= agentUnlimitedSteps
+    ? agentUnlimitedSteps
+    : requested.clamp(4, 600);
 
 class AppSettings {
   String providerId;
@@ -452,32 +539,51 @@ class AppSettings {
   String apiKey;
   String thinkingLevel;
   int maxSteps;
+  /// 无限步骤：开启后 agent 循环不设步数上限（仍可随时取消）。
+  /// [maxSteps] 保留为关闭后的回退值，界面上也不丢用户填过的数。
+  bool unlimitedSteps;
   String theme;
-  /// 外部智能体（ACP）：null 或空 = NoN 内置管线；否则发给该 ACP agent。
+  /// 外部智能体（ACP）：null 或空 = NaN 内置管线；否则发给该 ACP agent。
   String? acpAgentId;
   /// 选中 agent 的显示名（选定时随 id 一起持久化，输入框 pill 用）。
   String? acpAgentName;
   /// 3D 工作台当前项目名（'' = 无）。工作台视图切换会 dispose 状态，
   /// 项目名持久化让「切走再回来」续接同一项目（跨会话亦然）。
   String threeProjectName;
-  /// NoN 热应用工作台当前应用名（'' = 无）：工作台 dispose 后回来仍停在原应用。
+  /// NaN 热应用工作台当前应用名（'' = 无）：工作台 dispose 后回来仍停在原应用。
   String hotappApp;
   /// 视频工作台：当前示例下标 + 在飞/最近的渲染 job（回来可接回轮询）。
   int videoSampleIdx;
+  /// 视频工作台当前选中的动效合成短片 id（'' = 停在矢量动画）。
+  /// 选择是工作台级状态，但「检查」面板/回到工作台都要续接同一支片，
+  /// 所以按既有 threeProjectName / hotappApp 的同样做法持久化。
+  String videoClipId;
   String videoJob;
+  /// 视频工作台当前**生成项目**名（'' = 不在生成项目上）：NaN 的 `video_create`
+  /// 成功落盘后由 store 写入，工作台据此切到该项目（与 threeProjectName 同理）。
+  String videoProjectName;
   /// 3D 规范手编草稿（项目名 → JSON 文本）：未保存的编辑跨视图保留。
   Map<String, String> threeSpecDrafts;
-  /// 「连接桌面」模式：桌面端服务器地址（如 http://192.168.1.5:8799）。
-  /// 非空时 launch 优先连接它（移动端无法本地跑 Python 服务器）；
-  /// 留空且本地 spawn 失败时回落 PLAN 直连（Dart AI SDK）。
+  /// 「连接桌面」模式：桌面端地址（如 http://192.168.1.5:12345）。
+  /// 非空时运行方式可切换到桌面端执行（移动端不能在本机提供全部桌面能力）；
+  /// 留空则只使用内置本机运行时。地址与连接码都由用户显式填写。
   String serverUrl;
-  /// Agent 循环运行时（dart | server）。缺省按平台解析（见
-  /// [defaultAgentRuntime]），旧存档无此键时自动落平台默认。
-  String agentRuntime;
-  /// 主面 = 聊天流（docs/plan-chat-stream-shell.md §2 S1，用户决策默认开）。
-  /// 关闭即回经典 Welcome；工作区经聊天流顶栏「工作区」入口进入
-  /// （桌面常驻分栏与移动画中画是 S4，不在本轮）。
+  /// Agent 循环运行时（`local` | `server`）。缺省 [agentRuntimeLocal]；
+  /// 旧存档的 `dart` 与未知值读入即回落 `local`，显式 `server` 保留。
+  String _agentRuntime;
+  String get agentRuntime => _agentRuntime;
+  set agentRuntime(String value) => _agentRuntime = normalizeAgentRuntime(value);
+  /// 聊天优先壳（手机——锁竖屏、iPad 竖屏）的主面选择：true = 聊天流，
+  /// false = 经典 Welcome。桌面/iPad 横屏的工作区壳不使用该值——设置面
+  /// 只在聊天优先壳展示这一项，避免「开关打开却在桌面无效果」。
   bool chatStreamHome;
+  /// 让手机/iPad 连接这台桌面电脑（本机连接宿主）。桌面独占，默认关。
+  bool desktopHostEnabled;
+  /// 连接宿主是否允许局域网访问（默认只监听 127.0.0.1）。
+  bool desktopHostAllowLan;
+  /// 主页一句话输入的目标工作台（见 `workspaceModeAuto` 一族）。
+  /// 只决定「这次任务先落到哪个工作台」，不影响四个模块互相独立。
+  String chatWorkspaceMode;
 
   AppSettings({
     this.providerId = 'deepseek',
@@ -486,20 +592,30 @@ class AppSettings {
     this.apiKey = '',
     this.thinkingLevel = 'auto',
     this.maxSteps = 300,
+    this.unlimitedSteps = false,
     this.theme = 'dark',
     this.acpAgentId,
     this.acpAgentName,
     this.threeProjectName = '',
     this.hotappApp = '',
     this.videoSampleIdx = 0,
+    this.videoClipId = '',
     this.videoJob = '',
+    this.videoProjectName = '',
     Map<String, String>? threeSpecDrafts,
     this.serverUrl = '',
     String? agentRuntime,
     this.chatStreamHome = true,
+    this.desktopHostEnabled = false,
+    this.desktopHostAllowLan = false,
+    String? chatWorkspaceMode,
   })  : threeSpecDrafts = threeSpecDrafts ?? {},
-        // 单一运行时：旧构造参数（含 'server'）一律收敛到内置 Dart。
-        agentRuntime = agentRuntimeDart;
+        chatWorkspaceMode = normalizeWorkspaceMode(chatWorkspaceMode),
+        // 默认内置；旧存档的 `dart`/未知值归一 local，显式 `server` 保留。
+        _agentRuntime = normalizeAgentRuntime(agentRuntime);
+
+  /// 实际发给 agent 循环的步数上限：无限开关打开时用哨兵值。
+  int get effectiveMaxSteps => unlimitedSteps ? agentUnlimitedSteps : maxSteps;
 
   Map<String, dynamic> toJson() => {
         'providerId': providerId,
@@ -508,17 +624,23 @@ class AppSettings {
         'apiKey': apiKey,
         'thinkingLevel': thinkingLevel,
         'maxSteps': maxSteps,
+        'unlimitedSteps': unlimitedSteps,
         'theme': theme,
         'acpAgentId': acpAgentId,
         'acpAgentName': acpAgentName,
         'threeProjectName': threeProjectName,
         'hotappApp': hotappApp,
         'videoSampleIdx': videoSampleIdx,
+        'videoClipId': videoClipId,
         'videoJob': videoJob,
+        'videoProjectName': videoProjectName,
         'threeSpecDrafts': threeSpecDrafts,
         'serverUrl': serverUrl,
         'agentRuntime': agentRuntime,
         'chatStreamHome': chatStreamHome,
+        'desktopHostEnabled': desktopHostEnabled,
+        'desktopHostAllowLan': desktopHostAllowLan,
+        'chatWorkspaceMode': chatWorkspaceMode,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> m) => AppSettings(
@@ -528,27 +650,34 @@ class AppSettings {
         apiKey: (m['apiKey'] ?? '').toString(),
         thinkingLevel: (m['thinkingLevel'] ?? 'auto').toString(),
         maxSteps: (m['maxSteps'] is num) ? (m['maxSteps'] as num).toInt() : 300,
+        unlimitedSteps: m['unlimitedSteps'] == true,
         theme: (m['theme'] ?? 'dark').toString(),
         acpAgentId: m['acpAgentId']?.toString(),
         acpAgentName: m['acpAgentName']?.toString(),
         threeProjectName: (m['threeProjectName'] ?? '').toString(),
         hotappApp: (m['hotappApp'] ?? '').toString(),
         videoSampleIdx: (m['videoSampleIdx'] is num) ? (m['videoSampleIdx'] as num).toInt() : 0,
+        videoClipId: (m['videoClipId'] ?? '').toString(),
         videoJob: (m['videoJob'] ?? '').toString(),
+        videoProjectName: (m['videoProjectName'] ?? '').toString(),
         threeSpecDrafts: (m['threeSpecDrafts'] is Map)
             ? Map<String, String>.fromEntries(
                 (m['threeSpecDrafts'] as Map).entries
                     .map((e) => MapEntry(e.key.toString(), e.value.toString())))
             : <String, String>{},
         serverUrl: (m['serverUrl'] ?? '').toString(),
-        // 旧存档的 `server` 与未知值统一迁移到内置 Dart（不再有第二种运行时）。
-        agentRuntime: agentRuntimeDart,
+        // 默认 local；旧存档的 `dart` / 未知值回落 local，显式 `server` 保留。
+        agentRuntime: normalizeAgentRuntime(m['agentRuntime']?.toString()),
         // 旧存档无此键：默认开（用户决策 2026-11-17，聊天流是主面）。
         chatStreamHome: m['chatStreamHome'] is bool ? m['chatStreamHome'] as bool : true,
+        desktopHostEnabled: m['desktopHostEnabled'] == true,
+        desktopHostAllowLan: m['desktopHostAllowLan'] == true,
+        // 旧存档无此键：默认自动（交给 NaN 判断）。
+        chatWorkspaceMode: (m['chatWorkspaceMode'] ?? workspaceModeAuto).toString(),
       );
 }
 
-/// ACP 目录项（服务端 /acp/agents 探测结果）。
+/// ACP 目录项（外部智能体探测结果）。
 class AcpAgentInfo {
   final String id;
   final String name;
@@ -719,6 +848,8 @@ class TimelineEntry {
   int? ms;
   String? preview;
   String? error;
+  /// 服务层给出的人话失败句（`tool_end.message`）；原始码只留在 [error]。
+  String? message;
   bool running;
   final DateTime ts;
 
@@ -732,6 +863,7 @@ class TimelineEntry {
     this.ms,
     this.preview,
     this.error,
+    this.message,
     this.running = false,
     DateTime? ts,
   }) : ts = ts ?? DateTime.now();
@@ -743,6 +875,3 @@ class TimelineEntry {
   static TimelineEntry finish(bool ok, String title, [String? detail]) =>
       TimelineEntry(kind: 'finish', ok: ok, title: title, text: detail ?? '');
 }
-
-Map<String, dynamic> deepCopy(Map<String, dynamic> m) =>
-    jsonDecode(jsonEncode(m)) as Map<String, dynamic>;

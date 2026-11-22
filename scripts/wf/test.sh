@@ -1,20 +1,15 @@
 #!/usr/bin/env bash
-# 门禁：Python 回归锚点（hotapp / 路由在场 / tool 配对消毒 / ACP 客户端 /
-# write_doc 流式增量）全部先跑，任何一份红即止；最后 flutter test。
+# 门禁：Flutter 全量测试。
+#
+# 2026-11-18（批次 15）：Python 服务端已整体退役——server/、.venv 以及
+# scripts/wf/test_*.py 里的 Python 回归锚点全部删除。本脚本不再循环任何
+# Python 测试，也不再要求 .venv；Dart/Flutter 测试是唯一的运行时门禁。
+#
+# 仍保留的 Python 文件只是**开发期同步/黄金对照工具**（sync_engine.py /
+# sync_models.py / video_golden_check.py），不参与应用运行时，也不在这个
+# 门禁里执行。
 set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-
-PY="$ROOT/.venv/bin/python"
-if [ ! -x "$PY" ]; then
-  echo "test.sh: missing $PY" >&2
-  echo "  先建环境：python3 -m venv .venv && .venv/bin/pip install -r server/requirements.txt" >&2
-  exit 1
-fi
-
-for t in test_hotapp test_video_jobs test_three test_server_routes test_context_sanitize test_acp_client test_doc_delta test_engine_server_cleanup test_agent_run test_nonapp test_shelf_media; do
-  echo "== python scripts/wf/$t.py =="
-  "$PY" "$ROOT/scripts/wf/$t.py" || exit 1
-done
 
 cd "$ROOT/app" || exit 1
 export PATH="$HOME/.flutter_sdk/bin:$PATH"

@@ -19,7 +19,11 @@ android {
         applicationId = "com.example.nondesign"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // minSdk 固定 28（Android 9）：mediapipe_retrieval 的 native-assets 构建
+        // hook 硬性要求 API 28（mediapipe_core 0.3.0 family_runtimes 直接抛
+        // 「needs Android 9 (API 28)」）。Flutter 默认 24 会在
+        // `flutter build apk` 的 build_hooks 阶段直接失败——不是 Gradle/AGP 问题。
+        minSdk = 28
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)

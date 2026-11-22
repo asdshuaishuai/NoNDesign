@@ -1,6 +1,6 @@
 <div style="font-family:-apple-system,sans-serif;padding:14px;font-size:13px">
-  <b>NoNDesign Bridge</b>
-  <p style="color:#666;font-size:12px">双向桥：导入 NoN 导出包为可编辑 Figma 图层；导出选区回 NoN。</p>
+  <b>NaN Bridge</b>
+  <p style="color:#666;font-size:12px">双向桥：导入 NaN 导出包为可编辑 Figma 图层；导出选区回 NaN。</p>
   <button id="pick" style="width:100%;padding:8px;margin-bottom:8px">① 选择 nondesign.json 导入</button>
   <button id="exp" style="width:100%;padding:8px">② 导出当前页节点 → 下载 JSON</button>
   <pre id="log" style="font-size:11px;color:#888;white-space:pre-wrap"></pre>
@@ -25,7 +25,7 @@
         a.href = URL.createObjectURL(blob);
         a.download = 'nondesign-import.json';
         a.click();
-        document.getElementById('log').textContent = '已下载 nondesign-import.json — 拖回 NoNDesign 导出目录即可';
+        document.getElementById('log').textContent = '已下载 nondesign-import.json — 拖回 NaN 导出目录即可';
       }
     };
   </script>

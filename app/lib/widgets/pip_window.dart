@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../core/theme.dart';
 import 'common.dart';
@@ -33,6 +33,9 @@ class PipWindow extends StatefulWidget {
   final VoidCallback onToggleMax;
   final bool maximized;
 
+  /// 拖动/缩放手势结束（宿主据此持久化 rect——逐帧写盘不可接受）。
+  final VoidCallback? onInteractEnd;
+
   const PipWindow({
     super.key,
     required this.child,
@@ -42,6 +45,7 @@ class PipWindow extends StatefulWidget {
     required this.onClose,
     required this.onToggleMax,
     this.maximized = false,
+    this.onInteractEnd,
   });
 
   @override
@@ -74,6 +78,7 @@ class _PipWindowState extends State<PipWindow> {
       _baseRect = null;
       _delta = Offset.zero;
     });
+    widget.onInteractEnd?.call();
   }
 
   void _onDragUpdate(DragUpdateDetails d) {

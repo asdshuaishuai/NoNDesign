@@ -1,0 +1,588 @@
+<style>
+  /* 简笔画 · 斜面上的摩擦力（手绘纸面）
+   * 图层顺序：纸底 → 墨线（带手绘抖动滤镜）→ 标题/标签文字 → 颗粒 → 暗角 */
+  #nd-stage {
+    background:
+      radial-gradient(120% 100% at 22% 8%, #fbf5e8 0%, #f6efe1 42%, #eee2cd 100%);
+  }
+  #nd-cam { position: absolute; inset: 0; transform-origin: 50% 46%; }
+  #art { position: absolute; left: 0; top: 0; display: block; }
+  #title { position: absolute; inset: 0; }
+
+  .title-line {
+    position: absolute; left: 0; right: 0; top: 214px;
+    text-align: center; white-space: nowrap;
+  }
+  .title-line .ch {
+    display: inline-block;
+    font-family: var(--hand);
+    font-size: 168px;
+    line-height: 1;
+    color: var(--ink);
+    margin: 0 10px;
+    transform-origin: 50% 78%;
+    will-change: transform, opacity;
+  }
+  #subtitle {
+    position: absolute; left: 0; right: 0; top: 402px;
+    text-align: center; font-family: var(--hand); font-size: 36px;
+    letter-spacing: 0.22em; color: var(--ink-soft);
+  }
+  #subtitle .dot { color: var(--accent); }
+
+  #note-top {
+    position: absolute; left: 96px; top: 92px;
+    font-family: var(--hand); font-size: 30px; color: var(--ink-soft);
+    letter-spacing: 0.06em;
+  }
+  #note-top .rule {
+    display: block; width: 132px; height: 3px; margin-top: 8px;
+    background: var(--accent); border-radius: 2px; transform-origin: 0 50%;
+  }
+
+  #formula {
+    position: absolute; left: 826px; top: 452px; width: 344px;
+    padding: 22px 26px 20px;
+    background: #fbf6ea;
+    border: 2px solid var(--ink);
+    border-radius: 4px;
+    box-shadow: 8px 10px 0 rgba(38, 38, 43, 0.12);
+    transform-origin: 24% 30%;
+  }
+  #formula .eq {
+    font-family: var(--hand); font-size: 54px; color: var(--ink);
+    letter-spacing: 0.02em; line-height: 1.1;
+  }
+  #formula .eq em { font-style: normal; color: var(--accent); }
+  #formula .mu {
+    margin-top: 8px; font-family: var(--mono); font-size: 26px; color: var(--ink-soft);
+  }
+  #formula .mu b { color: var(--cool); font-weight: 600; }
+  #formula .hint {
+    margin-top: 4px; font-family: var(--hand); font-size: 22px; color: var(--ink-faint);
+  }
+
+  #aside {
+    position: absolute; left: 96px; top: 132px; width: 330px;
+  }
+  #aside .line1 {
+    font-family: var(--hand); font-size: 40px; color: var(--ink); letter-spacing: 0.02em;
+  }
+  #aside .line1 b { color: var(--accent); font-weight: 400; }
+  #aside .line2 {
+    margin-top: 10px; font-family: var(--body); font-size: 20px;
+    color: var(--ink-soft); letter-spacing: 0.02em;
+  }
+  #aside .swash { display: block; width: 250px; height: 10px; margin-top: 10px; }
+
+  #outro { position: absolute; inset: 0; }
+  #outro .big {
+    position: absolute; left: 0; right: 0; top: 236px; text-align: center;
+    font-family: var(--hand); font-size: 112px; color: var(--ink);
+    letter-spacing: 0.04em;
+  }
+  #outro .small {
+    position: absolute; left: 0; right: 0; top: 386px; text-align: center;
+    font-family: var(--hand); font-size: 30px; color: var(--ink-soft);
+    letter-spacing: 0.2em;
+  }
+  #stamp {
+    position: absolute; left: 50%; top: 462px; margin-left: -108px;
+    width: 216px; padding: 10px 0; text-align: center;
+    font-family: var(--hand); font-size: 27px; letter-spacing: 0.24em;
+    color: var(--accent);
+    border: 3px solid var(--accent);
+    border-radius: 8px;
+    transform-origin: 50% 50%;
+  }
+
+  .ink { stroke: var(--ink); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .ink-soft { stroke: var(--ink-faint); fill: none; stroke-linecap: round; }
+  .accent { stroke: var(--accent); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .cool { stroke: var(--cool); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .label {
+    font-family: var(--hand); font-size: 32px; letter-spacing: 0.04em;
+    fill: var(--ink); dominant-baseline: middle;
+  }
+  .label small { font-family: var(--body); font-size: 18px; fill: var(--ink-soft); }
+  .label.force-g { fill: var(--cool); }
+  .label.force-f { fill: var(--accent); }
+</style>
+
+<div id="nd-stage">
+  <div id="nd-cam">
+    <svg id="art" width="1280" height="720" viewBox="0 0 1280 720">
+      <defs>
+        <!-- 手绘抖动：让直线有铅笔的呼吸感 -->
+        <filter id="rough" x="-8%" y="-8%" width="116%" height="116%">
+          <feTurbulence id="roughNoise" type="fractalNoise" baseFrequency="0.021 0.028"
+            numOctaves="2" seed="7" result="noise" />
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="3.4"
+            xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+        <filter id="roughSoft" x="-8%" y="-8%" width="116%" height="116%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.03 0.04"
+            numOctaves="2" seed="13" result="n2" />
+          <feDisplacementMap in="SourceGraphic" in2="n2" scale="2.1"
+            xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+        <linearGradient id="paperGlow" x1="0" y1="0" x2="0.6" y2="1">
+          <stop offset="0" stop-color="#fffaf0" stop-opacity="0.75" />
+          <stop offset="0.55" stop-color="#fff6e6" stop-opacity="0.18" />
+          <stop offset="1" stop-color="#e8d8bc" stop-opacity="0.28" />
+        </linearGradient>
+        <marker id="dot" viewBox="0 0 10 10" refX="5" refY="5"
+          markerWidth="3" markerHeight="3">
+          <circle cx="5" cy="5" r="4" fill="var(--ink-faint)" />
+        </marker>
+      </defs>
+
+      <!-- 纸底 -->
+      <rect width="1280" height="720" fill="url(#paperGlow)" />
+
+      <!-- 手绘边框 -->
+      <g filter="url(#roughSoft)" opacity="0.34">
+        <rect id="frame-inner" x="30" y="26" width="1220" height="668" rx="3"
+          fill="none" stroke="var(--ink)" stroke-width="1.6" />
+        <rect x="38" y="34" width="1204" height="652" rx="2"
+          fill="none" stroke="var(--ink)" stroke-width="0.8" opacity="0.6" />
+      </g>
+
+      <!-- 标题下划线 / 装饰 -->
+      <g filter="url(#roughSoft)">
+        <path id="title-underline" d="M 404 492 C 520 470, 770 468, 884 486 C 916 491, 902 500, 868 498"
+          fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round" />
+        <path id="outro-underline" d="M 470 392 C 560 378, 730 376, 812 390"
+          fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" />
+      </g>
+
+      <!-- 场景：斜面 + 方块 + 三个力 -->
+      <g id="scene" filter="url(#rough)">
+        <path id="ground" class="ink" stroke-width="3.6" d="M 118 566 C 300 563, 520 568, 720 565 C 900 562, 1040 567, 1162 564" />
+        <path id="slope" class="ink" stroke-width="4.4" d="M 292 566 L 1012 300" />
+        <g id="hatch" opacity="0">
+          <!-- 斜面临界阴影线由 JS 生成 -->
+        </g>
+        <path id="base-tick" class="ink" d="M 268 566 L 268 598" stroke-width="3" />
+        <path id="base-tick2" class="ink" d="M 1024 300 L 1046 300" stroke-width="3" />
+      </g>
+
+      <!-- 方块 + 拖影 -->
+      <g id="trail" opacity="0"></g>
+      <g id="block" filter="url(#roughSoft)">
+        <g id="block-shape">
+          <rect x="-52" y="-34" width="104" height="68" rx="8"
+            fill="#f3e7d2" stroke="var(--ink)" stroke-width="4" />
+          <path d="M -34 -18 L 34 -18 M -40 0 L 40 0 M -34 18 L 34 18"
+            stroke="var(--ink-faint)" stroke-width="2.4" stroke-linecap="round" />
+        </g>
+      </g>
+
+      <!-- 受力箭头 -->
+      <g id="forces">
+        <g id="force-g">
+          <line class="shaft" stroke="var(--cool)" stroke-width="6" stroke-linecap="round" x1="0" y1="0" x2="0" y2="0" />
+          <polygon class="head" fill="var(--cool)" points="0,0 0,0 0,0" />
+          <circle class="origin-dot" cx="0" cy="0" r="4.5" fill="var(--cool)" opacity="0" />
+        </g>
+        <g id="force-n">
+          <line class="shaft" stroke="var(--ink)" stroke-width="6" stroke-linecap="round" x1="0" y1="0" x2="0" y2="0" />
+          <polygon class="head" fill="var(--ink)" points="0,0 0,0 0,0" />
+        </g>
+        <g id="force-f">
+          <line class="shaft" stroke="var(--accent)" stroke-width="6" stroke-linecap="round" x1="0" y1="0" x2="0" y2="0" />
+          <polygon class="head" fill="var(--accent)" points="0,0 0,0 0,0" />
+        </g>
+      </g>
+      <g id="force-labels">
+        <text id="label-g" class="label force-g" x="0" y="0">G</text>
+        <text id="label-n" class="label" x="0" y="0">N</text>
+        <text id="label-f" class="label force-f" x="0" y="0">f</text>
+      </g>
+
+      <!-- 滑块摩擦生热 / 落地尘 -->
+      <g id="sparks"></g>
+      <g id="dust"></g>
+
+      <!-- 引出线 -->
+      <g id="leaders" filter="url(#roughSoft)" opacity="0"></g>
+    </svg>
+
+    <!-- 标题 -->
+    <div id="title">
+      <div class="title-line" id="title-chars">
+        <span class="ch">摩</span><span class="ch">擦</span><span class="ch">力</span>
+      </div>
+      <div id="subtitle">斜面 <span class="dot">·</span> 滑动 <span class="dot">·</span> 三个力</div>
+    </div>
+
+    <!-- 左侧注记 -->
+    <div id="aside">
+      <div class="line1">μ 越大，<b>越难滑动</b></div>
+      <div class="line2">摩擦力 f 与正压力 N 成正比，比例就是 μ。</div>
+      <svg class="swash" width="250" height="10" viewBox="0 0 250 10">
+        <path d="M 2 6 C 60 2, 150 9, 246 5" fill="none" stroke="var(--accent)"
+          stroke-width="2.4" stroke-linecap="round" />
+      </svg>
+    </div>
+
+    <!-- 公式卡片 -->
+    <div id="formula">
+      <div class="eq">f = <em>μ</em> · N</div>
+      <div class="mu">μ = <b id="mu-value">0.00</b></div>
+      <div class="hint">斜面越粗糙，μ 越大</div>
+    </div>
+
+    <!-- 左上小注 -->
+    <div id="note-top">斜面上的滑动<span class="rule"></span></div>
+
+    <!-- 收尾 -->
+    <div id="outro">
+      <div class="big">摩擦力</div>
+      <div class="small">手绘 · 逐帧演示</div>
+      <div id="stamp">简笔演示</div>
+    </div>
+  </div>
+
+  <div class="nd-grain"></div>
+  <div class="nd-vignette"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var cam = $('nd-cam');
+  var art = $('art');
+  var stage = $('nd-stage');
+
+  // ---------------------------------------------------------------- 布景
+
+  var slope = { top: { x: 1012, y: 300 }, bottom: { x: 292, y: 566 } };
+  var slopeAngle = Math.atan2(slope.top.y - slope.bottom.y, slope.top.x - slope.bottom.x);
+  var normalAngle = slopeAngle - Math.PI / 2; // 指向斜面外（左上）
+
+  function onSlope(p) {
+    return {
+      x: ND.lerp(slope.top.x, slope.bottom.x, p),
+      y: ND.lerp(slope.top.y, slope.bottom.y, p),
+    };
+  }
+
+  // 临界阴影线（一次生成，随斜面一起淡入）
+  var hatch = $('hatch');
+  for (var i = 0; i < 13; i++) {
+    var h = onSlope(0.06 + i * 0.072);
+    var line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    line.setAttribute('d', 'M ' + h.x.toFixed(1) + ' ' + h.y.toFixed(1) +
+      ' l -16 26');
+    line.style.stroke = 'var(--ink)';
+    line.style.strokeWidth = '1.8';
+    line.style.strokeLinecap = 'round';
+    hatch.appendChild(line);
+  }
+
+  // 尘与火花（一次性建好，render 里只改属性）
+  var dust = $('dust');
+  var dusts = [];
+  for (var d = 0; d < 7; d++) {
+    var c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('r', '0');
+    c.setAttribute('fill', 'rgba(120, 102, 78, 0.5)');
+    dust.appendChild(c);
+    dusts.push(c);
+  }
+  var sparks = $('sparks');
+  var sparkEls = [];
+  for (var s = 0; s < 9; s++) {
+    var sp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    sp.setAttribute('fill', 'none');
+    sp.style.stroke = 'var(--accent)';
+    sp.style.strokeWidth = '2.6';
+    sp.style.strokeLinecap = 'round';
+    sp.setAttribute('opacity', '0');
+    sparks.appendChild(sp);
+    sparkEls.push(sp);
+  }
+
+  // 拖影（3 个半透明方块）
+  var trail = $('trail');
+  var trails = [];
+  for (var g = 0; g < 3; g++) {
+    var ghost = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    ghost.setAttribute('opacity', '0');
+    var gr = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    gr.setAttribute('x', '-52'); gr.setAttribute('y', '-34');
+    gr.setAttribute('width', '104'); gr.setAttribute('height', '68');
+    gr.setAttribute('rx', '8');
+    gr.setAttribute('fill', '#efe2cc');
+    gr.setAttribute('stroke', 'rgba(38,38,43,0.35)');
+    gr.setAttribute('stroke-width', '3');
+    ghost.appendChild(gr);
+    trail.appendChild(ghost);
+    trails.push(ghost);
+  }
+
+  // 文字逐字
+  var chars = Array.prototype.slice.call(document.querySelectorAll('#title-chars .ch'));
+  var subtitle = $('subtitle');
+  var titleWrap = $('title');
+  var aside = $('aside');
+  var formula = $('formula');
+  var noteTop = $('note-top');
+  var noteRule = noteTop.querySelector('.rule');
+  var outro = $('outro');
+  var stamp = $('stamp');
+  var muValue = $('mu-value');
+  var ground = $('ground');
+  var slopePath = $('slope');
+  var baseTick = $('base-tick');
+  var baseTick2 = $('base-tick2');
+  var frameInner = $('frame-inner');
+  var titleUnderline = $('title-underline');
+  var outroUnderline = $('outro-underline');
+  var block = $('block');
+  var blockShape = $('block-shape');
+  var forces = { g: $('force-g'), n: $('force-n'), f: $('force-f') };
+  var labels = { g: $('label-g'), n: $('label-n'), f: $('label-f') };
+  var leaders = $('leaders');
+  var roughNoise = $('roughNoise');
+
+  // ---------------------------------------------------------------- 工具
+
+  function dash(path, p, total) {
+    var len = total || path.getTotalLength();
+    path.style.strokeDasharray = len + ' ' + len;
+    path.style.strokeDashoffset = String(len * (1 - ND.clamp(p, 0, 1)));
+    return len;
+  }
+
+  var lens = {
+    ground: ground.getTotalLength(),
+    slope: slopePath.getTotalLength(),
+    frame: frameInner.getTotalLength ? 0 : 0,
+    titleUnderline: titleUnderline.getTotalLength(),
+    outroUnderline: outroUnderline.getTotalLength(),
+  };
+
+  function arrow(group, x1, y1, x2, y2, progress, headLength) {
+    if (progress <= 0.001) {
+      group.setAttribute('opacity', '0');
+      return;
+    }
+    group.setAttribute('opacity', '1');
+    var shaft = group.querySelector('.shaft');
+    var head = group.querySelector('.head');
+    var angle = Math.atan2(y2 - y1, x2 - x1);
+    var visible = ND.clamp(progress, 0, 1);
+    var tipX = ND.lerp(x1, x2, visible);
+    var tipY = ND.lerp(y1, y2, visible);
+    var hx = tipX - Math.cos(angle) * headLength;
+    var hy = tipY - Math.sin(angle) * headLength;
+    shaft.setAttribute('x1', x1.toFixed(1));
+    shaft.setAttribute('y1', y1.toFixed(1));
+    shaft.setAttribute('x2', hx.toFixed(1));
+    shaft.setAttribute('y2', hy.toFixed(1));
+    var perp = angle + Math.PI / 2;
+    var spread = headLength * 0.46;
+    var p1x = hx + Math.cos(perp) * spread;
+    var p1y = hy + Math.sin(perp) * spread;
+    var p2x = hx - Math.cos(perp) * spread;
+    var p2y = hy - Math.sin(perp) * spread;
+    head.setAttribute('points', tipX.toFixed(1) + ',' + tipY.toFixed(1) + ' ' +
+      p1x.toFixed(1) + ',' + p1y.toFixed(1) + ' ' +
+      p2x.toFixed(1) + ',' + p2y.toFixed(1));
+    head.setAttribute('opacity', String(ND.clamp(visible * 1.6, 0, 1)));
+  }
+
+  function placeLabel(el, x, y, opacity, scale) {
+    el.setAttribute('transform',
+      'translate(' + x.toFixed(1) + ',' + y.toFixed(1) + ') scale(' + scale.toFixed(3) + ')');
+    el.setAttribute('opacity', String(ND.clamp(opacity, 0, 1)));
+  }
+
+  // ---------------------------------------------------------------- 时间轴
+
+  var T = {
+    titleIn: 0.18,
+    titleOut: [2.02, 2.5],
+    sceneIn: 2.42,
+    slopeIn: [2.55, 3.55],
+    hatchIn: [3.0, 3.7],
+    blockIn: [3.25, 3.85],
+    forcesIn: [3.7, 4.7],
+    noteIn: [4.1, 4.8],
+    slide: [6.35, 7.55],
+    formulaIn: [7.15, 7.95],
+    muCount: [7.4, 8.7],
+    asideIn: [8.2, 9.05],
+    settle: [7.55, 8.5],
+    clear: [9.55, 10.35],
+    outroIn: [10.35, 11.3],
+    stampIn: [11.35, 11.95],
+    end: 12.6,
+  };
+
+  function render(t) {
+    // 纸面「呼吸」：每 1/6 秒换一次抖动种子，线会有极轻微的手绘 Boil。
+    if (roughNoise) roughNoise.setAttribute('seed', String(7 + Math.floor(t * 6) % 4));
+
+    // ---- 相机：全片缓慢推近，收尾回到中景
+    var push = ND.ease.inOutCubic(ND.phase(t, 2.4, 8.4));
+    var camScale = 1 + push * 0.045;
+    var camX = -push * 10;
+    var camY = -push * 6;
+    if (t > T.clear[0]) {
+      var back = ND.ease.inOutCubic(ND.phase(t, T.clear[0], 0.9));
+      camScale = ND.lerp(camScale, 1.0, back);
+      camX = ND.lerp(camX, 0, back);
+      camY = ND.lerp(camY, 0, back);
+    }
+    cam.style.transform = 'translate3d(' + camX.toFixed(2) + 'px,' + camY.toFixed(2) +
+      'px,0) scale(' + camScale.toFixed(4) + ')';
+
+    // ---- 开场标题
+    var outP = ND.ease.inCubic(ND.phase(t, T.titleOut[0], 0.48));
+    titleWrap.style.opacity = String(ND.clamp(1 - outP, 0, 1));
+    titleWrap.style.transform = 'translate3d(0,' + (-34 * outP).toFixed(2) + 'px,0)';
+
+    chars.forEach(function (ch, index) {
+      var p = ND.ease.outBack(ND.stagger(t, index, T.titleIn + 0.04, 0.11, 0.72));
+      ch.style.opacity = String(ND.clamp(ND.phase(t, T.titleIn + index * 0.11, 0.3), 0, 1) * (1 - outP));
+      ch.style.transform = 'translate3d(0,' + (56 * (1 - p)).toFixed(2) +
+        'px,0) rotate(' + ((index - 1) * -4 * (1 - p)).toFixed(2) + 'deg)';
+    });
+    var subP = ND.ease.outCubic(ND.phase(t, 0.62, 0.75));
+    subtitle.style.opacity = String(subP * (1 - outP));
+    subtitle.style.transform = 'translate3d(0,' + (22 * (1 - subP)).toFixed(2) + 'px,0)';
+    dash(titleUnderline, ND.ease.outQuint(ND.phase(t, 0.92, 0.62)), lens.titleUnderline);
+
+    // ---- 场景线稿
+    var groundP = ND.ease.outCubic(ND.phase(t, T.slopeIn[0], 0.75));
+    dash(ground, groundP, lens.ground);
+    var slopeP = ND.ease.outCubic(ND.phase(t, T.slopeIn[0] + 0.16, 0.85));
+    dash(slopePath, slopeP, lens.slope);
+    baseTick.style.opacity = String(ND.clamp((groundP - 0.5) * 3, 0, 1));
+    baseTick2.style.opacity = String(ND.clamp((slopeP - 0.6) * 3, 0, 1));
+    hatch.style.opacity = String(0.42 * ND.ease.outCubic(ND.phase(t, T.hatchIn[0], 0.7)));
+
+    // 手绘边框：开场逐步显形
+    frameInner.style.opacity = String(ND.clamp(ND.phase(t, 0.02, 0.9), 0, 1) * 0.9);
+
+    // ---- 方块：进入 → 滑动 → 落定
+    var slideP = ND.ease.outQuint(ND.phase(t, T.slide[0], T.slide[1] - T.slide[0]));
+    var pos = onSlope(ND.lerp(0.2, 0.84, slideP));
+    // 停稳后的极轻回弹（落定）
+    var settleP = ND.phase(t, T.settle[0], 0.55);
+    var settle = settleP > 0 ? Math.sin(settleP * Math.PI * 2.6) * 5 * (1 - settleP) : 0;
+    var blockIn = ND.ease.outBack(ND.phase(t, T.blockIn[0], 0.6));
+    var blockScale = 0.35 + 0.65 * blockIn;
+    var wobble = slideP > 0 && slideP < 1 ? Math.sin(slideP * Math.PI * 9) * 1.6 : 0;
+    block.setAttribute('opacity', String(ND.clamp(blockIn, 0, 1) * (1 - ND.phase(t, T.clear[0] + 0.15, 0.5))));
+    block.setAttribute('transform',
+      'translate(' + (pos.x + settle).toFixed(2) + ',' + (pos.y - settle * 0.4).toFixed(2) + ') ' +
+      'rotate(' + (slopeAngle * 180 / Math.PI + wobble).toFixed(2) + ') ' +
+      'scale(' + blockScale.toFixed(3) + ')');
+
+    // 拖影：滑动中才有
+    var trailP = ND.clamp(slideP * 2.2, 0, 1) * (1 - ND.clamp((slideP - 0.86) / 0.14, 0, 1));
+    trails.forEach(function (ghost, index) {
+      var lag = 0.035 * (index + 1) * (1 + slideP);
+      var pPos = onSlope(ND.lerp(0.2, 0.84, Math.max(0, slideP - lag)));
+      ghost.setAttribute('opacity', String(0.2 * trailP * (1 - index * 0.28)));
+      ghost.setAttribute('transform',
+        'translate(' + pPos.x.toFixed(2) + ',' + pPos.y.toFixed(2) + ') ' +
+        'rotate(' + (slopeAngle * 180 / Math.PI).toFixed(2) + ')');
+    });
+
+    // ---- 三个力（跟着方块走）
+    var forcesP = ND.ease.outCubic(ND.phase(t, T.forcesIn[0], 0.8));
+    var fx = pos.x, fy = pos.y;
+    var gLen = 118, nLen = 108, fLen = 104;
+    var gx2 = fx, gy2 = fy + gLen;
+    var nx2 = fx + Math.cos(normalAngle) * nLen;
+    var ny2 = fy + Math.sin(normalAngle) * nLen;
+    var sx2 = fx + Math.cos(slopeAngle) * fLen;
+    var sy2 = fy + Math.sin(slopeAngle) * fLen;
+    // 滑动时 f 略微被拉长（对抗趋势更强）
+    var fStretch = 1 + 0.1 * Math.sin(slideP * Math.PI);
+    arrow(forces.g, fx, fy, gx2, gy2, ND.ease.outCubic(ND.phase(t, T.forcesIn[0], 0.55)), 15);
+    arrow(forces.n, fx, fy, nx2, ny2, ND.ease.outCubic(ND.phase(t, T.forcesIn[0] + 0.16, 0.55)), 15);
+    arrow(forces.f, fx, fy,
+      fx + Math.cos(slopeAngle) * fLen * fStretch,
+      fy + Math.sin(slopeAngle) * fLen * fStretch,
+      ND.ease.outCubic(ND.phase(t, T.forcesIn[0] + 0.32, 0.55)), 15);
+
+    var labelP = ND.ease.outCubic(ND.phase(t, T.forcesIn[0] + 0.35, 0.6));
+    var fadeOut = 1 - ND.phase(t, T.clear[0], 0.45);
+    placeLabel(labels.g, gx2 + 16, gy2 - 2, labelP * fadeOut, 1);
+    placeLabel(labels.n, nx2 - 30, ny2 - 26, labelP * fadeOut, 1);
+    placeLabel(labels.f, sx2 + 10, sy2 - 30, labelP * fadeOut, 1);
+
+    // 力的起点小圆点
+    var originDot = forces.g.querySelector('.origin-dot');
+    if (originDot) {
+      originDot.setAttribute('cx', fx.toFixed(1));
+      originDot.setAttribute('cy', fy.toFixed(1));
+      originDot.setAttribute('opacity', String(labelP * fadeOut));
+    }
+
+    // ---- 摩擦火花 / 落地尘
+    var heat = ND.phase(t, T.slide[0] + 0.1, (T.slide[1] - T.slide[0]) * 0.92) * (1 - ND.phase(t, 9.4, 0.6));
+    sparkEls.forEach(function (sp, index) {
+      var seed = (index * 0.618) % 1;
+      var p = ND.clamp((heat - seed * 0.2) * 2.6, 0, 1);
+      var origin = onSlope(ND.lerp(0.2, 0.84, ND.clamp(slideP - index * 0.012, 0, 1)));
+      var len = 8 + 10 * (1 - p);
+      var ang = slopeAngle - Math.PI / 2 + Math.sin(index * 2.1 + t * 6) * 0.9;
+      sp.setAttribute('d', 'M ' + origin.x.toFixed(1) + ' ' + origin.y.toFixed(1) +
+        ' l ' + (Math.cos(ang) * len).toFixed(1) + ' ' + (Math.sin(ang) * len).toFixed(1));
+      sp.setAttribute('opacity', String(0.55 * p * heat));
+    });
+    var dustP = ND.phase(t, T.slide[1] - 0.12, 1.15);
+    var bottom = onSlope(0.84);
+    dusts.forEach(function (c, index) {
+      var local = ND.clamp((dustP - index * 0.045) * 2.8, 0, 1);
+      var dir = index % 2 === 0 ? -1 : 1;
+      var dx = dir * (10 + index * 7) * ND.ease.outCubic(local);
+      var dy = -18 - 16 * Math.sin(local * Math.PI);
+      c.setAttribute('cx', (bottom.x + dx).toFixed(1));
+      c.setAttribute('cy', (bottom.y - 6 + dy).toFixed(1));
+      c.setAttribute('r', (3 + index * 1.6) * local * (1 - local * 0.4));
+      c.setAttribute('opacity', String(0.5 * local * (1 - local)));
+    });
+
+    // ---- 左上注记
+    var noteP = ND.ease.outCubic(ND.phase(t, T.noteIn[0], 0.65)) * fadeOut;
+    noteTop.style.opacity = String(noteP);
+    noteTop.style.transform = 'translate3d(0,' + (14 * (1 - noteP)).toFixed(2) + 'px,0)';
+    noteRule.style.transform = 'scaleX(' + ND.ease.outQuint(ND.phase(t, T.noteIn[0] + 0.2, 0.5)).toFixed(3) + ')';
+
+    // ---- 公式卡：弹入 + μ 数字滚动
+    var fP = ND.ease.outBack(ND.phase(t, T.formulaIn[0], 0.72));
+    var fFade = 1 - ND.phase(t, T.clear[0] + 0.05, 0.45);
+    formula.style.opacity = String(ND.clamp(fFade * ND.phase(t, T.formulaIn[0], 0.25), 0, 1));
+    formula.style.transform = 'translate3d(0,' + (46 * (1 - fP)).toFixed(2) + 'px,0) ' +
+      'rotate(' + (-1.4 + 1.4 * fP).toFixed(2) + 'deg)';
+    var muP = ND.ease.outCubic(ND.phase(t, T.muCount[0], T.muCount[1] - T.muCount[0]));
+    muValue.textContent = ND.fmt(muP * 0.35, 2);
+
+    // ---- 左侧注记（第二段文字）
+    var aP = ND.ease.outCubic(ND.phase(t, T.asideIn[0], 0.8));
+    aside.style.opacity = String(aP * fFade);
+    aside.style.transform = 'translate3d(' + (-24 * (1 - aP)).toFixed(2) + 'px,0)';
+
+    // ---- 收尾
+    var oP = ND.ease.outCubic(ND.phase(t, T.outroIn[0], 0.85));
+    outro.style.opacity = String(oP);
+    outro.style.transform = 'translate3d(0,' + (18 * (1 - oP)).toFixed(2) + 'px,0)';
+    dash(outroUnderline, ND.ease.outQuint(ND.phase(t, T.outroIn[0] + 0.35, 0.6)), lens.outroUnderline);
+    var sP = ND.ease.outBack(ND.phase(t, T.stampIn[0], 0.6));
+    stamp.style.opacity = String(ND.clamp(ND.phase(t, T.stampIn[0], 0.2), 0, 1));
+    stamp.style.transform = 'rotate(' + (-6 * (1 - sP) - 3).toFixed(2) + 'deg) scale(' +
+      (0.7 + 0.3 * sP).toFixed(3) + ')';
+  }
+
+  ND.scene({ duration: 13.2, title: '摩擦力 · 简笔演示', render: render });
+})();
+</script>

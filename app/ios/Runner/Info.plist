@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Nondesign</string>
+	<string>NaN</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>nondesign</string>
+	<string>NaN</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -29,7 +29,7 @@
 	<!-- 连接桌面：局域网通信必须声明用途（iOS 14+ 未声明时系统可能静默
 	     断连，App Store 审核对局域网通信 app 会查此键）。 -->
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>NoNDesign 需要访问本地网络，连接你电脑上运行的桌面服务（设计画布、3D 预览与文档生成）。</string>
+	<string>NaN 需要访问本地网络，连接你电脑上运行的桌面服务（设计画布、3D 预览与文档生成）。</string>
 	<!-- 桌面服务器是手输的 http://<局域网 IP>，不走 HTTPS：只放开本地
 	     网络的明文流量（比 NSAllowsArbitraryLoads 收敛），公网仍强制 ATS。 -->
 	<key>NSAppTransportSecurity</key>
@@ -62,12 +62,12 @@
 	<true/>
 	<!-- `.nonapp` 单文件包（文件即应用 v2）：文档类型 + 导入的 UTI。iOS 只能
 	     “导入”别处的类型（不能像 macOS 那样 exported），接收方点击「文件」
-	     App 里的 .nonapp → 打开方式选 NoNDesign → application(_:open:)。 -->
+	     App 里的 .nonapp → 打开方式选 NaN → application(_:open:)。 -->
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>NoNDesign Application Package</string>
+			<string>NaN Application Package</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
@@ -84,7 +84,7 @@
 			<key>UTTypeIdentifier</key>
 			<string>com.nondesign.nonapp</string>
 			<key>UTTypeDescription</key>
-			<string>NoNDesign Application Package</string>
+			<string>NaN Application Package</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.zip-archive</string>
@@ -114,8 +114,6 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>

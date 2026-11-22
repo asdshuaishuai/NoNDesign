@@ -198,20 +198,20 @@ void main() {
       final review = notes.where((t) => (t.title ?? '').contains('质量审查')).toList();
       expect(review, hasLength(1), reason: '第 1 轮 poor → 1 条时间线条目；第 2 轮收敛不再发');
       expect(review.single.title, '质量审查 · 第1轮');
-      expect(review.single.text, contains('home:1项poor'));
+      expect(review.single.text, contains('home · 1 处待改进'));
       final cleaned = notes.where((t) => (t.title ?? '').contains('清理空画板')).toList();
       expect(cleaned, hasLength(1));
-      expect(cleaned.single.title, contains('__seed'));
+      expect(cleaned.single.text, contains('1 块空画板'));
 
       // 聊天进度卡：review_round / cleanup 的镜像步骤。
       final card = store.chatMessages.firstWhere((m) => m.kind == chatKindProgress);
       final reviewStep = card.steps.where((s) => s.label.contains('质量审查')).toList();
       expect(reviewStep, hasLength(1));
       expect(reviewStep.single.label, '质量审查 第1轮');
-      expect(reviewStep.single.detail, contains('home:1项poor'));
-      final cleanStep = card.steps.where((s) => s.label.contains('清理空画板')).toList();
+      expect(reviewStep.single.detail, contains('home · 1 处待改进'));
+      final cleanStep = card.steps.where((s) => s.label.startsWith('清理')).toList();
       expect(cleanStep, hasLength(1));
-      expect(cleanStep.single.label, '清理空画板 __seed');
+      expect(cleanStep.single.label, contains('1 块空画板'));
 
       // 锁步：清扫与 auto_fix 的 canonical 都被 store 采纳（后续 op 不会用旧文档）。
       expect(api.sessionNames, contains('session_apply_agent'));

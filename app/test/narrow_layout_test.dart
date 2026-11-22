@@ -1,7 +1,7 @@
 // 窄屏（手机 390×844）顶栏不溢出回归：mobile-3 修了 body 布局后，
 // TitleBar 与三个插件顶栏曾分别溢出 64–528px（右侧按钮不可见）。
 // 这里直接渲染真实顶栏组件，断言无 RenderFlex overflow 异常。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 

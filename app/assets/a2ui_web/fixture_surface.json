@@ -1,0 +1,94 @@
+[
+  {
+    "version": "1.0",
+    "createSurface": {
+      "surfaceId": "spike",
+      "catalogId": "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json"
+    }
+  },
+  {
+    "version": "1.0",
+    "updateComponents": {
+      "surfaceId": "spike",
+      "components": [
+        {
+          "id": "root",
+          "component": "Card",
+          "child": "col"
+        },
+        {
+          "id": "col",
+          "component": "Column",
+          "children": [
+            "title",
+            "hint",
+            "choice",
+            "confirm"
+          ]
+        },
+        {
+          "id": "title",
+          "component": "Text",
+          "text": "离线预览表单",
+          "variant": "body"
+        },
+        {
+          "id": "hint",
+          "component": "Text",
+          "text": "这是由官方 Web 渲染器绘制的表面；选择后点确认，动作会回流到宿主。",
+          "variant": "caption"
+        },
+        {
+          "id": "choice",
+          "component": "ChoicePicker",
+          "label": "选择一个方案",
+          "options": [
+            {
+              "value": "a",
+              "label": "方案 A · 稳妥"
+            },
+            {
+              "value": "b",
+              "label": "方案 B · 激进"
+            }
+          ],
+          "value": {
+            "@path": "/choice"
+          }
+        },
+        {
+          "id": "confirm",
+          "component": "Button",
+          "variant": "primary",
+          "child": "confirmLabel",
+          "action": {
+            "event": {
+              "name": "spike_confirm",
+              "context": {
+                "choice": {
+                  "@path": "/choice"
+                },
+                "source": "offline_preview"
+              }
+            }
+          }
+        },
+        {
+          "id": "confirmLabel",
+          "component": "Text",
+          "text": "确认"
+        }
+      ]
+    }
+  },
+  {
+    "version": "1.0",
+    "updateDataModel": {
+      "surfaceId": "spike",
+      "path": "/",
+      "value": {
+        "choice": "a"
+      }
+    }
+  }
+]

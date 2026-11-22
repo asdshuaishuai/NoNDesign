@@ -1,0 +1,50 @@
+[
+  {
+    "id": "sketch-friction",
+    "title": "摩擦力 · 简笔演示",
+    "subtitle": "手绘纸面 + 逐笔描线 + 数值滚动",
+    "style": "hand",
+    "duration": 13.2,
+    "file": "sketch-friction.html",
+    "tags": [
+      "简笔",
+      "物理"
+    ]
+  },
+  {
+    "id": "hand-water-cycle",
+    "title": "水的三态 · 简笔循环",
+    "subtitle": "手绘卡片 + 环形箭头 + 温度注记",
+    "style": "hand",
+    "duration": 14.0,
+    "file": "hand-water-cycle.html",
+    "tags": [
+      "简笔",
+      "科学"
+    ]
+  },
+  {
+    "id": "kinetic-type",
+    "title": "留白 · 动效排版",
+    "subtitle": "大字遮幕 + 逐字落位 + 落版主张",
+    "style": "motion",
+    "duration": 13.2,
+    "file": "kinetic-type.html",
+    "tags": [
+      "排印",
+      "节奏"
+    ]
+  },
+  {
+    "id": "ui-onboarding",
+    "title": "界面精修 · 三步引导",
+    "subtitle": "手机外框 + 三屏推演 + 微交互细节",
+    "style": "ui",
+    "duration": 12.6,
+    "file": "ui-onboarding.html",
+    "tags": [
+      "界面",
+      "微交互"
+    ]
+  }
+]

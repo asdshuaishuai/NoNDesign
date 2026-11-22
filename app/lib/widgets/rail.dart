@@ -1,12 +1,17 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../core/store.dart';
 import '../core/theme.dart';
-import 'common.dart';
 
 class Rail extends StatelessWidget {
-  const Rail({super.key});
+  const Rail({super.key, this.onHistory});
+
+  /// 窄屏（无左栏）点「历史」时打开可见面板的出口。
+  ///
+  /// 手机宽度下 LeftPanel 不渲染，只把 panel 置成 history 会「图标亮着、
+  /// 主面不变」（审查 nav-4）；工作区在这里接一块底部面板。
+  final VoidCallback? onHistory;
 
   @override
   Widget build(BuildContext context) {
@@ -41,6 +46,9 @@ class Rail extends StatelessWidget {
                       store.setView('docs');
                     } else if (item.$1 == 'project') {
                       store.setView('design');
+                    } else if (item.$1 == 'history') {
+                      // 有左栏时面板就地可见；窄屏交给宿主打开底部面板。
+                      onHistory?.call();
                     }
                   },
                   child: SizedBox(

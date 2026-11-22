@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>留白 · 动效排版</title>
+<style>
+  /* 动效排版 · 留白（WHITESPACE）
+   * 版式：纸面 → 12 栏网格 → 页框/页眉 → ①主标题（遮罩揭幕）→ ②副句（错开落位）
+   *        → ③数据注记（数字滚动）→ 二幕版面（细网格 + 色块切分 + 密集参数）
+   *        → 落版（论点句 + 强调色下划线）
+   * 只用三色：纸（--paper 系）/ 墨（--ink）/ 强调（--accent, 红）。
+   * 所有动效都在 render(t) 内按 t 计算；CSS 里没有 transition / animation。 */
+
+  #nd-stage {
+    background:
+      radial-gradient(125% 108% at 15% 0%, #fdf9f1 0%, #f7f0e2 42%, #ece0ca 100%);
+  }
+  #nd-cam { position: absolute; inset: 0; transform-origin: 52% 46%; }
+
+  /* ---------------------------------------------------------------- 底纹 */
+  #folio {
+    position: absolute; right: 50px; bottom: -30px; z-index: 0;
+    font-family: var(--mono); font-size: 190px; line-height: 1;
+    letter-spacing: -0.05em; color: rgba(38, 38, 43, 0.048);
+  }
+  .gl { position: absolute; background: rgba(38, 38, 43, 0.085); z-index: 1; }
+  .gl-v { width: 1px; top: 100px; height: 532px; transform-origin: 50% 0; }
+  .gl-h { height: 1px; left: 64px; width: 1152px; transform-origin: 0 50%; }
+  #grid { position: absolute; inset: 0; z-index: 1; }
+  #grid-rows { position: absolute; inset: 0; z-index: 3; }
+  .gr { position: absolute; height: 1px; background: rgba(38, 38, 43, 0.055); transform-origin: 0 50%; }
+
+  /* ---------------------------------------------------------------- 页框 / 页眉 */
+  #frame { position: absolute; left: 0; top: 0; z-index: 2; }
+  #top-rule, #bottom-rule {
+    position: absolute; height: 1px; background: rgba(38, 38, 43, 0.24); z-index: 2;
+  }
+  #top-rule { left: 64px; top: 100px; width: 1152px; transform-origin: 0 50%; }
+  #bottom-rule { left: 64px; top: 630px; width: 1152px; transform-origin: 100% 50%; }
+
+  .chrome {
+    position: absolute; z-index: 12;
+    font-family: var(--mono); font-size: 9.5px; line-height: 1;
+    letter-spacing: 0.32em; color: var(--ink-soft);
+  }
+  #chrome-left { left: 64px; top: 60px; }
+  #chrome-right { right: 64px; top: 60px; text-align: right; }
+  #chrome-bl {
+    left: 64px; top: 648px; font-size: 9px; letter-spacing: 0.14em;
+    color: var(--ink-faint); white-space: nowrap;
+  }
+  #chrome-br {
+    right: 64px; top: 648px; font-size: 9px; letter-spacing: 0.26em;
+    color: var(--ink-faint); text-align: right;
+  }
+  #mark {
+    position: absolute; left: 64px; top: 42px; width: 26px; height: 2px;
+    background: var(--accent); z-index: 12;
+  }
+  #section-index {
+    position: absolute; right: 64px; top: 126px; z-index: 12;
+    font-family: var(--mono); font-size: 9px; line-height: 1;
+    letter-spacing: 0.3em; color: var(--ink-faint); text-align: right;
+  }
+  .cursor {
+    display: inline-block; width: 6px; height: 10px; margin-left: 2px;
+    vertical-align: -1px; background: var(--ink);
+  }
+
+  /* ---------------------------------------------------------------- ① 主标题 */
+  #title-block {
+    position: absolute; left: 57px; top: 190px; z-index: 5;
+    transform-origin: 0 0; will-change: transform;
+  }
+  #title-row { display: flex; align-items: flex-end; }
+  .tmask {
+    display: inline-block; overflow: hidden;
+    padding: 0.06em 0.03em 0.08em;
+    margin: -0.06em -0.03em -0.08em;
+  }
+  .tch {
+    display: inline-block;
+    font-family: var(--body); font-weight: 600;
+    font-size: 236px; line-height: 0.94; letter-spacing: -0.012em;
+    color: var(--ink); will-change: transform;
+  }
+  #accent-dot {
+    position: absolute; left: 480px; top: 352px;
+    width: 22px; height: 22px; background: var(--accent);
+    transform-origin: 50% 50%; will-change: transform;
+  }
+
+  /* 英文小字注释：大写 + 大字距 */
+  #title-en {
+    position: absolute; left: 64px; top: 448px; z-index: 5;
+    display: flex; align-items: baseline; white-space: nowrap;
+    font-family: var(--mono); font-size: 11px; line-height: 1;
+    letter-spacing: 0.42em; color: var(--ink-soft);
+  }
+  #title-en .sep { color: var(--accent); margin: 0 10px 0 2px; letter-spacing: 0; }
+  #title-en .en2 { letter-spacing: 0.26em; color: var(--ink-faint); font-size: 10px; }
+
+  /* ② 副句 */
+  #subline {
+    position: absolute; left: 64px; top: 500px; z-index: 5;
+    font-family: var(--body); font-size: 30px; font-weight: 400;
+    line-height: 1.1; letter-spacing: 0.02em; color: rgba(38, 38, 43, 0.82);
+    white-space: nowrap;
+  }
+  .seg {
+    display: inline-block; overflow: hidden; vertical-align: bottom;
+    padding: 0.12em 0.02em 0.1em; margin: -0.12em -0.02em -0.1em;
+  }
+  .seg > span { display: inline-block; }
+
+  /* 空区的注记 */
+  #guide {
+    position: absolute; left: 640px; top: 190px; width: 1px; height: 414px;
+    background: rgba(38, 38, 43, 0.16); transform-origin: 50% 0; z-index: 3;
+  }
+  #void-note {
+    position: absolute; left: 668px; top: 208px; z-index: 5;
+    display: flex; align-items: center; white-space: nowrap;
+  }
+  #void-rule {
+    display: inline-block; width: 22px; height: 1px;
+    background: rgba(38, 38, 43, 0.34); margin-right: 10px;
+  }
+  #void-text {
+    font-family: var(--mono); font-size: 9px; line-height: 1;
+    letter-spacing: 0.28em; color: var(--ink-faint);
+  }
+
+  /* ③ 数据注记 */
+  #datum { position: absolute; left: 876px; top: 448px; width: 340px; z-index: 5; }
+  #datum-rule {
+    height: 1px; background: rgba(38, 38, 43, 0.3);
+    transform-origin: 100% 50%;
+  }
+  #datum-label {
+    margin-top: 12px; font-family: var(--mono); font-size: 9px; line-height: 1;
+    letter-spacing: 0.3em; color: var(--ink-faint);
+  }
+  #datum-num-row {
+    display: flex; align-items: baseline; margin-top: 6px;
+    transform-origin: 0 100%; will-change: transform;
+  }
+  #datum-num {
+    font-family: var(--mono); font-size: 66px; line-height: 1;
+    letter-spacing: -0.02em; color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  #datum-unit {
+    font-family: var(--mono); font-size: 22px; line-height: 1;
+    margin-left: 6px; color: var(--ink-soft);
+  }
+  #datum-foot {
+    margin-top: 10px; font-family: var(--mono); font-size: 9px; line-height: 1;
+    letter-spacing: 0.1em; color: var(--ink-faint);
+  }
+
+  /* ---------------------------------------------------------------- 二幕：密集参数 */
+  #spec { position: absolute; left: 64px; top: 206px; width: 452px; z-index: 5; }
+  #spec-head {
+    font-family: var(--mono); font-size: 9px; line-height: 1;
+    letter-spacing: 0.3em; color: var(--ink-faint);
+    display: flex; justify-content: space-between;
+  }
+  .spec-rows { margin-top: 12px; }
+  .spec-row {
+    height: 38px; display: flex; align-items: center;
+    border-top: 1px solid rgba(38, 38, 43, 0.14);
+    will-change: transform, opacity;
+  }
+  .spec-row .idx {
+    width: 30px; font-family: var(--mono); font-size: 9px;
+    letter-spacing: 0.08em; color: var(--ink-faint);
+  }
+  .spec-row .k {
+    flex: 1; font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.16em; color: var(--ink-soft); white-space: nowrap;
+  }
+  .spec-row .k em { font-style: normal; color: rgba(38, 38, 43, 0.4); margin-left: 8px; font-size: 9px; }
+  .spec-row .v {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.05em;
+    color: var(--ink); text-align: right; white-space: nowrap;
+  }
+  #spec-note {
+    margin-top: 14px; font-family: var(--mono); font-size: 9px;
+    letter-spacing: 0.1em; color: var(--ink-faint); z-index: 5;
+  }
+  #divider {
+    position: absolute; left: 584px; top: 206px; width: 1px; height: 400px;
+    background: rgba(38, 38, 43, 0.22); transform-origin: 50% 0; z-index: 4;
+  }
+
+  /* 巨号数字 */
+  #hero { position: absolute; left: 618px; top: 206px; z-index: 5; }
+  #hero-cap {
+    font-family: var(--mono); font-size: 9.5px; line-height: 1;
+    letter-spacing: 0.4em; color: var(--ink-faint);
+  }
+  #hero-num-row { display: flex; align-items: baseline; margin-top: 14px; }
+  #hero-num {
+    display: flex;
+    font-family: var(--mono); font-size: 300px; line-height: 1;
+    letter-spacing: -0.03em; color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .hmask {
+    display: inline-block; overflow: hidden;
+    padding: 0.04em 0.02em 0.09em;
+    margin: -0.04em -0.02em -0.09em;
+  }
+  .hdig { display: inline-block; will-change: transform; }
+  #hero-unit {
+    font-family: var(--mono); font-size: 86px; line-height: 1;
+    margin-left: 16px; color: rgba(38, 38, 43, 0.55);
+  }
+
+  /* 比例条 */
+  #hero-bar { position: absolute; left: 618px; top: 548px; width: 452px; height: 34px; z-index: 5; }
+  .bar-track {
+    position: absolute; left: 0; top: 18px; width: 452px; height: 1px;
+    background: rgba(38, 38, 43, 0.28);
+  }
+  .bar-fill {
+    position: absolute; left: 0; top: 13px; width: 452px; height: 9px;
+    background: var(--accent); transform-origin: 0 50%; will-change: transform;
+  }
+  .bar-cap {
+    position: absolute; top: 26px; font-family: var(--mono); font-size: 8px;
+    letter-spacing: 0.16em; color: var(--ink-faint);
+  }
+  .bar-cap.left { left: 0; }
+  .bar-cap.right { right: 0; }
+  #bar-ticks { position: absolute; left: 0; top: 8px; width: 452px; height: 8px; }
+  .tick {
+    position: absolute; top: 0; width: 1px; height: 7px;
+    background: rgba(38, 38, 43, 0.3); transform-origin: 50% 100%;
+    will-change: transform, opacity;
+  }
+  #hero-foot {
+    position: absolute; left: 618px; top: 590px; z-index: 5;
+    font-family: var(--mono); font-size: 9.5px; line-height: 1.7;
+    letter-spacing: 0.09em; color: var(--ink-soft);
+  }
+  #hero-typed {
+    position: absolute; left: 618px; top: 618px; z-index: 5;
+    font-family: var(--mono); font-size: 9px; line-height: 1;
+    letter-spacing: 0.06em; color: var(--ink-faint); white-space: nowrap;
+  }
+
+  #brackets { position: absolute; left: 0; top: 0; z-index: 4; }
+  .bracket { fill: none; stroke: rgba(38, 38, 43, 0.34); stroke-width: 1; }
+  .bracket-label {
+    font-family: var(--mono); font-size: 8px; letter-spacing: 0.18em;
+    fill: rgba(38, 38, 43, 0.42);
+  }
+  #side-cap {
+    position: absolute; left: 1236px; top: 600px; z-index: 4;
+    transform-origin: 0 0; transform: rotate(-90deg);
+    font-family: var(--mono); font-size: 8.5px; line-height: 1;
+    letter-spacing: 0.32em; color: var(--ink-faint); white-space: nowrap;
+  }
+
+  /* ---------------------------------------------------------------- 色块切分（转场） */
+  #wipe {
+    position: absolute; left: 0; top: -80px; width: 300px; height: 880px;
+    background: var(--accent); z-index: 8; opacity: 0;
+    transform-origin: 50% 50%; will-change: transform, opacity;
+  }
+  #wipe::after {
+    content: ''; position: absolute; right: -3px; top: 0;
+    width: 3px; height: 100%; background: rgba(38, 38, 43, 0.22);
+  }
+
+  /* ---------------------------------------------------------------- 落版 */
+  #outro { position: absolute; inset: 0; z-index: 9; opacity: 0; }
+  #out-kicker {
+    position: absolute; left: 0; right: 0; top: 212px; text-align: center;
+    font-family: var(--mono); font-size: 9.5px; line-height: 1;
+    letter-spacing: 0.42em; color: var(--ink-faint);
+  }
+  #out-title {
+    position: absolute; left: 0; right: 0; top: 248px;
+    display: flex; justify-content: center; align-items: flex-end;
+  }
+  #out-title .tmask { padding: 0.06em 0.02em 0.12em; margin: -0.06em -0.02em -0.12em; }
+  #out-title .tch {
+    font-size: 84px; line-height: 1.16; letter-spacing: 0.03em;
+    font-weight: 600;
+  }
+  #out-title .tch.dot-accent { color: var(--accent); }
+  #out-rule {
+    position: absolute; left: 50%; top: 384px; margin-left: -142px;
+    width: 284px; height: 3px; background: var(--accent);
+    transform-origin: 50% 50%;
+  }
+  #out-sub {
+    position: absolute; left: 0; right: 0; top: 412px; text-align: center;
+    font-family: var(--body); font-size: 26px; line-height: 1.2;
+    letter-spacing: 0.04em; color: rgba(38, 38, 43, 0.72); white-space: nowrap;
+  }
+  #out-en {
+    position: absolute; left: 0; right: 0; top: 470px; text-align: center;
+    font-family: var(--mono); font-size: 9.5px; line-height: 1;
+    letter-spacing: 0.46em; color: var(--ink-faint);
+  }
+  #out-foot {
+    position: absolute; left: 0; right: 0; top: 592px; text-align: center;
+    font-family: var(--mono); font-size: 9px; line-height: 1;
+    letter-spacing: 0.2em; color: rgba(38, 38, 43, 0.38);
+  }
+
+  .nd-grain { z-index: 20; opacity: 0.42; }
+  .nd-vignette { z-index: 21; }
+</style>
+</head>
+<body>
+<div id="nd-viewport">
+  <div id="nd-stage">
+    <div id="nd-cam">
+
+      <div id="folio">04</div>
+      <div id="grid"></div>
+      <div id="grid-rows"></div>
+
+      <svg id="frame" width="1280" height="720" viewBox="0 0 1280 720">
+        <rect x="32.5" y="26.5" width="1215" height="667" fill="none"
+          stroke="rgba(38,38,43,0.16)" stroke-width="1" />
+        <g stroke="rgba(38,38,43,0.42)" stroke-width="1.1" stroke-linecap="square">
+          <path d="M 32.5 52 L 32.5 26.5 L 56 26.5" fill="none" />
+          <path d="M 1224 26.5 L 1247.5 26.5 L 1247.5 52" fill="none" />
+          <path d="M 32.5 668 L 32.5 693.5 L 56 693.5" fill="none" />
+          <path d="M 1224 693.5 L 1247.5 693.5 L 1247.5 668" fill="none" />
+        </g>
+        <g stroke="rgba(38,38,43,0.22)" stroke-width="1">
+          <path d="M 634 34 L 646 34 M 640 28 L 640 40" fill="none" />
+          <path d="M 634 686 L 646 686 M 640 680 L 640 692" fill="none" />
+        </g>
+      </svg>
+
+      <div id="top-rule"></div>
+      <div id="bottom-rule"></div>
+
+      <div id="mark"></div>
+      <div id="chrome-left" class="chrome">NaN — TYPOGRAPHIC STUDY</div>
+      <div id="chrome-right" class="chrome">No. 04 / KINETIC TYPE</div>
+      <div id="chrome-bl" class="chrome"><span id="chrome-type"></span><span id="chrome-cursor" class="cursor"></span></div>
+      <div id="chrome-br" class="chrome">WHITESPACE / 62 %</div>
+      <div id="section-index">01 / CLAIM</div>
+
+      <div id="title-block">
+        <div id="title-row"></div>
+        <div id="accent-dot"></div>
+      </div>
+      <div id="title-en"></div>
+      <div id="subline"></div>
+
+      <div id="guide"></div>
+      <div id="void-note"><span id="void-rule"></span><span id="void-text">未落墨 / KEEP EMPTY</span></div>
+
+      <div id="datum">
+        <div id="datum-rule"></div>
+        <div id="datum-label">留白率 / RATIO</div>
+        <div id="datum-num-row"><span id="datum-num">00</span><span id="datum-unit">%</span></div>
+        <div id="datum-foot">版心 1152 × 560 / 实测</div>
+      </div>
+
+      <div id="spec">
+        <div id="spec-head"><span>02 / 版面参数</span><span>LAYOUT SPEC</span></div>
+        <div class="spec-rows" id="spec-rows"></div>
+        <div id="spec-note">数据由版面测量导出 · 非估算</div>
+      </div>
+      <div id="divider"></div>
+
+      <div id="hero">
+        <div id="hero-cap">WHITESPACE RATIO / 留白率</div>
+        <div id="hero-num-row">
+          <div id="hero-num"></div>
+          <div id="hero-unit">%</div>
+        </div>
+      </div>
+      <div id="hero-bar">
+        <div class="bar-track"></div>
+        <div class="bar-fill"></div>
+        <div id="bar-ticks"></div>
+        <div class="bar-cap left">0</div>
+        <div class="bar-cap right">100</div>
+      </div>
+      <div id="hero-foot">版心内实测：未落墨面积 62 %<br/>剩余 38 % 承载全部信息层级</div>
+      <div id="hero-typed"><span id="hero-type"></span><span id="hero-cursor" class="cursor"></span></div>
+
+      <svg id="brackets" width="1280" height="720" viewBox="0 0 1280 720">
+        <g id="bracket-g">
+          <path class="bracket" id="br-0" d="M 608 232 L 596 232 L 596 532 L 608 532" />
+          <path class="bracket" id="br-1" d="M 1076 232 L 1088 232 L 1088 532 L 1076 532" />
+          <text class="bracket-label" x="596" y="222" text-anchor="end">300 PX</text>
+        </g>
+      </svg>
+
+      <div id="side-cap">TYPOGRAPHIC DENSITY — 62 / 38</div>
+
+      <div id="wipe"></div>
+
+      <div id="outro">
+        <div id="out-kicker">04 — 落版 / CODA</div>
+        <div id="out-title"></div>
+        <div id="out-rule"></div>
+        <div id="out-sub"></div>
+        <div id="out-en">WHITESPACE IS A DECISION</div>
+        <div id="out-foot">NaN · 动效排版 No.04</div>
+      </div>
+
+    </div>
+    <div class="nd-grain"></div>
+    <div class="nd-vignette"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var DURATION = 13.2;
+
+  // 时间轴（秒）——所有入场都从这里取，错开量 48–90ms。
+  var T = {
+    gridIn: 0.04, gridStep: 0.036, gridDur: 0.56,
+    ruleTop: [0.10, 0.72],
+    ruleBottom: [0.30, 0.96],
+    titleIn: 0.40, titleStep: 0.12, titleDur: 0.78,
+    dotIn: 1.44,
+    enIn: 1.06, enStep: 0.019, enDur: 0.42,
+    en2In: 1.34,
+    subIn: 1.66, subStep: 0.088, subDur: 0.56,
+    guide: [1.94, 2.54],
+    voidIn: 2.24,
+    datumRule: [2.72, 3.22],
+    datumLabel: 2.90,
+    count: [3.30, 4.26],
+    datumUnit: 4.18,
+    datumFoot: 4.32,
+    reflow: [4.70, 5.38],
+    wipe: [4.58, 5.30],
+    divider: [5.04, 5.58],
+    specIn: 5.26, specStep: 0.048, specDur: 0.46,
+    heroCap: 5.14,
+    heroNum: 5.28, heroDigStep: 0.07, heroNumDur: 0.72,
+    heroUnit: 5.74,
+    barIn: 5.90, barDur: 1.05,
+    tickIn: 6.22, tickStep: 0.045,
+    heroFoot: 6.30,
+    brackets: [7.06, 7.66],
+    gridRows: 7.30, gridRowStep: 0.045,
+    sideCap: 7.64,
+    typedHero: [8.12, 9.30],
+    clear: [9.94, 10.54],
+    outKicker: 10.58,
+    outTitleIn: 10.74, outStep: 0.09, outDur: 0.66,
+    outRule: [11.58, 12.16],
+    outSub: 11.70, outSubStep: 0.07,
+    outEn: 11.94,
+    outFoot: 12.12
+  };
+
+  var SPEC = [
+    ['01', '版心', 'ARTBOARD', '1152 × 560'],
+    ['02', '栏数', 'COLUMNS', '12'],
+    ['03', '栏距', 'GUTTER', '24 PX'],
+    ['04', '基线', 'BASELINE', '8 PX'],
+    ['05', '字阶', 'SCALE STEPS', '6'],
+    ['06', '行距', 'LEADING', '1.35'],
+    ['07', '边距', 'MARGIN', '64 PX'],
+    ['08', '留白', 'WHITESPACE', '62 %'],
+    ['09', '色相', 'PALETTE', 'INK + RED']
+  ];
+
+  var CHROME_TEXT = '留白 · 排印研究 · NaN';
+  var HERO_TYPED = '// 62% = (版心面积 − 字面覆盖) ÷ 版心面积';
+
+  var refs = {};
+
+  function mk(tag, cls, parent, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  function span(parent, cls, text) { return mk('span', cls, parent, text); }
+
+  // 掩膜行：外层裁切，内层位移——遮罩揭幕的基本件
+  function maskedChar(parent, cls, text) {
+    var mask = mk('span', 'tmask', parent);
+    var inner = span(mask, cls || 'tch', text);
+    return { mask: mask, inner: inner };
+  }
+
+  // ---------------------------------------------------------------- 构建
+
+  function buildGrid() {
+    var grid = $('grid');
+    var i, line;
+    // 12 栏：13 条竖线（64 → 1216，步进 96）
+    for (i = 0; i <= 12; i++) {
+      line = mk('div', 'gl gl-v', grid);
+      line.style.left = (64 + i * 96) + 'px';
+      line.style.opacity = (i === 6 ? '1' : '0.78');
+      refs.cols.push(line);
+    }
+    // 三组横向基线
+    var rows = [{ y: 100, a: 0.9 }, { y: 366, a: 0.5 }, { y: 630, a: 0.9 }];
+    rows.forEach(function (r) {
+      line = mk('div', 'gl gl-h', grid);
+      line.style.top = r.y + 'px';
+      line.style.opacity = String(r.a);
+      refs.hairs.push(line);
+    });
+    refs.cols = refs.cols.slice(0, 13);
+  }
+
+  function buildTitle() {
+    var row = $('title-row');
+    ['留', '白'].forEach(function (ch) {
+      refs.titleChars.push(maskedChar(row, 'tch', ch).inner);
+    });
+
+    // 英文注释：逐字母出现（大写 + 大字距）
+    var en = $('title-en');
+    'WHITESPACE'.split('').forEach(function (c) {
+      refs.enLetters.push(mk('span', null, en, c));
+    });
+    span(en, 'sep', '/');
+    refs.en2 = mk('span', 'en2', en, 'A STUDY IN RESTRAINT');
+
+    // 副句切成三段，错开 88ms
+    var sub = $('subline');
+    ['字退一步，', '意思', '进一步。'].forEach(function (txt) {
+      var seg = mk('span', 'seg', sub);
+      refs.subSegs.push(span(seg, null, txt));
+    });
+  }
+
+  function buildSpec() {
+    var box = $('spec-rows');
+    SPEC.forEach(function (row) {
+      var el = mk('div', 'spec-row', box);
+      mk('span', 'idx', el, row[0]);
+      var k = mk('span', 'k', el, row[1]);
+      mk('em', null, k, row[2]);
+      mk('span', 'v', el, row[3]);
+      refs.specRows.push(el);
+    });
+  }
+
+  function buildHero() {
+    var num = $('hero-num');
+    '62'.split('').forEach(function (c) {
+      var mask = mk('span', 'hmask', num);
+      refs.heroDigits.push(mk('span', 'hdig', mask, c));
+    });
+    var ticks = $('bar-ticks');
+    for (var i = 0; i <= 8; i++) {
+      var tick = mk('div', 'tick', ticks);
+      tick.style.left = (i * 12.5) + '%';
+      if (i === 5) { tick.style.background = 'var(--accent)'; tick.style.height = '9px'; }
+      refs.ticks.push(tick);
+    }
+  }
+
+  function buildGridRows() {
+    var box = $('grid-rows');
+    for (var i = 0; i < 8; i++) {
+      var line = mk('div', 'gr', box);
+      line.style.left = '600px';
+      line.style.top = (232 + i * 40) + 'px';
+      line.style.width = '480px';
+      refs.gridRows.push(line);
+    }
+  }
+
+  function buildOutro() {
+    var box = $('out-title');
+    '让字退一步'.split('').forEach(function (c) {
+      refs.outChars.push(maskedChar(box, 'tch', c).inner);
+    });
+    var dot = maskedChar(box, 'tch dot-accent', '。').inner;
+    refs.outChars.push(dot);
+
+    var sub = $('out-sub');
+    ['空出来的地方，', '意思才', '站得住。'].forEach(function (txt) {
+      var seg = mk('span', 'seg', sub);
+      refs.outSegs.push(span(seg, null, txt));
+    });
+  }
+
+  function grab() {
+    refs.cam = $('nd-cam');
+    refs.cols = [];
+    refs.hairs = [];
+    refs.titleChars = [];
+    refs.enLetters = [];
+    refs.subSegs = [];
+    refs.specRows = [];
+    refs.heroDigits = [];
+    refs.ticks = [];
+    refs.gridRows = [];
+    refs.outChars = [];
+    refs.outSegs = [];
+
+    refs.topRule = $('top-rule');
+    refs.bottomRule = $('bottom-rule');
+    refs.titleBlock = $('title-block');
+    refs.dot = $('accent-dot');
+    refs.titleEn = $('title-en');
+    refs.subline = $('subline');
+    refs.guide = $('guide');
+    refs.voidNote = $('void-note');
+    refs.voidRule = $('void-rule');
+    refs.datum = $('datum');
+    refs.datumRule = $('datum-rule');
+    refs.datumLabel = $('datum-label');
+    refs.datumNum = $('datum-num');
+    refs.datumNumRow = $('datum-num-row');
+    refs.datumUnit = $('datum-unit');
+    refs.datumFoot = $('datum-foot');
+    refs.spec = $('spec');
+    refs.specNote = $('spec-note');
+    refs.divider = $('divider');
+    refs.hero = $('hero');
+    refs.heroCap = $('hero-cap');
+    refs.heroUnit = $('hero-unit');
+    refs.bar = $('hero-bar');
+    refs.barFill = document.querySelector('.bar-fill');
+    refs.heroFoot = $('hero-foot');
+    refs.heroTyped = $('hero-typed');
+    refs.heroType = $('hero-type');
+    refs.heroCursor = $('hero-cursor');
+    refs.brackets = $('bracket-g');
+    refs.brPaths = [$('br-0'), $('br-1')];
+    refs.sideCap = $('side-cap');
+    refs.wipe = $('wipe');
+    refs.outro = $('outro');
+    refs.outKicker = $('out-kicker');
+    refs.outRule = $('out-rule');
+    refs.outEn = $('out-en');
+    refs.outFoot = $('out-foot');
+    refs.sectionIndex = $('section-index');
+    refs.chromeType = $('chrome-type');
+    refs.chromeCursor = $('chrome-cursor');
+  }
+
+  // ---------------------------------------------------------------- 工具
+
+  // 方波闪烁（纯 t 函数，无定时器）
+  function blink(t, rate) { return (Math.floor(t * rate) % 2) === 0 ? 1 : 0; }
+
+  function typeText(el, text, p) {
+    var n = Math.round(ND.clamp(p, 0, 1) * text.length);
+    var s = text.slice(0, n);
+    if (el.__last !== s) { el.textContent = s; el.__last = s; }
+  }
+
+  function cursor(el, visible, on) {
+    el.style.opacity = visible ? String(on ? 1 : 0) : '0';
+  }
+
+  // ---------------------------------------------------------------- 渲染
+
+  function render(t) {
+    // ---------- 相机：极慢推近，落版时回正，末段轻微呼吸
+    var push = ND.ease.inOutCubic(ND.phase(t, 0.1, 9.4));
+    var back = ND.ease.inOutCubic(ND.phase(t, 10.0, 1.1));
+    var free = push * (1 - back);
+    var breath = 0.0022 * Math.sin(t * 1.15) * ND.phase(t, 11.3, 0.9);
+    var camScale = 1 + 0.024 * free + breath;
+    refs.cam.style.transform =
+      'translate3d(' + (-7 * free).toFixed(2) + 'px,' + (-5 * free).toFixed(2) + 'px,0) scale(' +
+      camScale.toFixed(4) + ')';
+
+    // ---------- 网格：逐列落下，二幕略退到背景
+    var dimIn = ND.ease.inOutCubic(ND.phase(t, 4.92, 0.7));
+    var dimOut = ND.ease.inOutCubic(ND.phase(t, 9.98, 0.7));
+    var gridOp = 1 - 0.48 * dimIn * (1 - dimOut);
+    $('grid').style.opacity = gridOp.toFixed(3);
+
+    for (var i = 0; i < refs.cols.length; i++) {
+      var gp = ND.ease.outQuint(ND.phase(t, T.gridIn + i * T.gridStep, T.gridDur));
+      refs.cols[i].style.transform = 'scaleY(' + gp.toFixed(4) + ')';
+    }
+    refs.hairs.forEach(function (line, index) {
+      var hp = ND.ease.inOutCubic(ND.phase(t, T.gridIn + 0.2 + index * 0.1, 0.5));
+      line.style.transform = 'scaleX(' + hp.toFixed(4) + ')';
+    });
+
+    // ---------- 页眉细线：一从左上、一从右下
+    var trP = ND.ease.outQuint(ND.phase(t, T.ruleTop[0], T.ruleTop[1] - T.ruleTop[0]));
+    refs.topRule.style.transform = 'scaleX(' + trP.toFixed(4) + ')';
+    var brP = ND.ease.outQuint(ND.phase(t, T.ruleBottom[0], T.ruleBottom[1] - T.ruleBottom[0]));
+    refs.bottomRule.style.transform = 'scaleX(' + brP.toFixed(4) + ')';
+
+    // ---------- ① 主标题：逐字遮罩揭幕 + 二幕缩成页眉
+    var reflow = ND.ease.inOutCubic(ND.phase(t, T.reflow[0], T.reflow[1] - T.reflow[0]));
+    var ts = 1 - 0.76 * reflow;
+    refs.titleBlock.style.transform =
+      'translate3d(' + (50.32 * reflow).toFixed(2) + 'px,' + (66.4 * reflow).toFixed(2) + 'px,0) scale(' +
+      ts.toFixed(4) + ')';
+
+    for (i = 0; i < refs.titleChars.length; i++) {
+      var tp = ND.ease.outQuint(ND.phase(t, T.titleIn + i * T.titleStep, T.titleDur));
+      refs.titleChars[i].style.transform =
+        'translate3d(0,' + (112 * (1 - tp)).toFixed(2) + '%,0)';
+    }
+
+    // 强调色方块（中文句号的位置）
+    var dp = ND.ease.outBack(ND.phase(t, T.dotIn, 0.44));
+    refs.dot.style.transform = 'scale(' + (0.2 + 0.8 * dp).toFixed(3) + ')';
+    refs.dot.style.opacity = String(ND.clamp(ND.phase(t, T.dotIn, 0.14), 0, 1));
+
+    // 英文注释：逐字母 + 字距
+    refs.enLetters.forEach(function (sp, index) {
+      var ep = ND.ease.outCubic(ND.phase(t, T.enIn + index * T.enStep, T.enDur));
+      sp.style.opacity = String(ND.phase(t, T.enIn + index * T.enStep, 0.18).toFixed(3));
+      sp.style.transform = 'translate3d(0,' + (9 * (1 - ep)).toFixed(2) + 'px,0)';
+    });
+    refs.en2.style.opacity = String(ND.phase(t, T.en2In, 0.5).toFixed(3));
+    refs.titleEn.style.opacity = String(1 - ND.ease.inOutCubic(ND.phase(t, 4.78, 0.46)));
+
+    // ---------- ② 副句：错开落位
+    refs.subSegs.forEach(function (sp, index) {
+      var p = ND.ease.outQuint(ND.phase(t, T.subIn + index * T.subStep, T.subDur));
+      sp.style.transform = 'translate3d(0,' + (118 * (1 - p)).toFixed(2) + '%,0)';
+    });
+    refs.subline.style.opacity = String(1 - ND.ease.inOutCubic(ND.phase(t, 4.62, 0.44)));
+
+    // 空区引导线
+    var guideP = ND.ease.outQuint(ND.phase(t, T.guide[0], T.guide[1] - T.guide[0]));
+    refs.guide.style.transform = 'scaleY(' + guideP.toFixed(4) + ')';
+    refs.guide.style.opacity = String(1 - ND.ease.inOutCubic(ND.phase(t, 4.60, 0.4)));
+    var voidP = ND.ease.outCubic(ND.phase(t, T.voidIn, 0.6));
+    refs.voidNote.style.opacity = String(voidP.toFixed(3));
+    refs.voidNote.style.transform = 'translate3d(' + (14 * (1 - voidP)).toFixed(2) + 'px,0,0)';
+    refs.voidNote.style.visibility = t > 4.9 ? 'hidden' : 'visible';
+
+    // ---------- ③ 数据注记：数字滚动 + 单位 + 脚注
+    var datumOut = 1 - ND.ease.inOutCubic(ND.phase(t, 4.72, 0.38));
+    refs.datum.style.opacity = datumOut.toFixed(3);
+
+    var dRuleP = ND.ease.inOutCubic(ND.phase(t, T.datumRule[0], T.datumRule[1] - T.datumRule[0]));
+    refs.datumRule.style.transform = 'scaleX(' + (1 - dRuleP).toFixed(4) + ')';
+    refs.datumLabel.style.opacity = String(ND.phase(t, T.datumLabel, 0.42).toFixed(3));
+
+    var cp = ND.phase(t, T.count[0], T.count[1] - T.count[0]);
+    var cv = Math.round(62 * ND.ease.outCubic(cp));
+    var cstr = (cv < 10 ? '0' : '') + cv;
+    if (refs.datumNum.textContent !== cstr) refs.datumNum.textContent = cstr;
+    refs.datumNumRow.style.transform = 'scale(' + (0.9 + 0.1 * ND.ease.outCubic(cp)).toFixed(3) + ')';
+
+    var duP = ND.ease.outBack(ND.phase(t, T.datumUnit, 0.4));
+    refs.datumUnit.style.opacity = String(ND.clamp(ND.phase(t, T.datumUnit, 0.16), 0, 1).toFixed(3));
+    refs.datumUnit.style.transform =
+      'translate3d(' + (-10 * (1 - duP)).toFixed(2) + 'px,0,0)';
+    refs.datumFoot.style.opacity = String(ND.phase(t, T.datumFoot, 0.5).toFixed(3));
+
+    // ---------- 色块切分：红色块扫过，二幕从它后面展开
+    var wp = ND.ease.inOutCubic(ND.phase(t, T.wipe[0], T.wipe[1] - T.wipe[0]));
+    var wx = -340 + (340 + 1290) * wp;
+    refs.wipe.style.transform = 'translate3d(' + wx.toFixed(2) + 'px,0,0) skewX(-4deg)';
+    refs.wipe.style.opacity = (t < T.wipe[0] || t > T.wipe[1]) ? '0' : '1';
+
+    // ---------- 二幕：密集参数表（信息密度对比的低密度侧）
+    var clear = ND.ease.inOutCubic(ND.phase(t, T.clear[0], T.clear[1] - T.clear[0]));
+    var keep = 1 - clear;
+
+    refs.specRows.forEach(function (row, index) {
+      var p = ND.ease.outQuint(ND.phase(t, T.specIn + index * T.specStep, T.specDur));
+      row.style.opacity = (ND.clamp(ND.phase(t, T.specIn + index * T.specStep, 0.22), 0, 1) * keep).toFixed(3);
+      row.style.transform = 'translate3d(0,' + (10 * (1 - p)).toFixed(2) + 'px,0)';
+    });
+    refs.specNote.style.opacity = String(ND.phase(t, 5.62, 0.5) * keep);
+    $('spec-head').style.opacity = String(ND.phase(t, T.specIn - 0.12, 0.42) * keep);
+    refs.spec.style.opacity = '1';
+
+    var divP = ND.ease.outQuint(ND.phase(t, T.divider[0], T.divider[1] - T.divider[0]));
+    refs.divider.style.transform = 'scaleY(' + divP.toFixed(4) + ')';
+    refs.divider.style.opacity = keep.toFixed(3);
+
+    // ---------- 二幕：巨号 62（遮罩逐字）+ 单位 + 比例条
+    refs.hero.style.opacity = keep.toFixed(3);
+    refs.hero.style.transform = 'translate3d(0,' + (-16 * clear).toFixed(2) + 'px,0)';
+    refs.heroCap.style.opacity = String(ND.phase(t, T.heroCap, 0.44).toFixed(3));
+
+    refs.heroDigits.forEach(function (d, index) {
+      var p = ND.ease.outQuint(ND.phase(t, T.heroNum + index * T.heroDigStep, T.heroNumDur));
+      d.style.transform = 'translate3d(0,' + (112 * (1 - p)).toFixed(2) + '%,0)';
+    });
+
+    var huP = ND.ease.outCubic(ND.phase(t, T.heroUnit, 0.46));
+    refs.heroUnit.style.opacity = String(ND.phase(t, T.heroUnit, 0.2).toFixed(3));
+    refs.heroUnit.style.transform = 'translate3d(0,' + (18 * (1 - huP)).toFixed(2) + 'px,0)';
+
+    var barP = ND.ease.outQuint(ND.phase(t, T.barIn, T.barDur));
+    refs.barFill.style.transform = 'scaleX(' + (0.62 * barP).toFixed(4) + ')';
+    refs.bar.style.opacity = String(ND.phase(t, T.barIn - 0.1, 0.3) * keep);
+
+    refs.ticks.forEach(function (tick, index) {
+      var p = ND.ease.outCubic(ND.phase(t, T.tickIn + index * T.tickStep, 0.3));
+      tick.style.opacity = String((0.9 * p * keep).toFixed(3));
+      tick.style.transform = 'scaleY(' + p.toFixed(3) + ')';
+    });
+
+    refs.heroFoot.style.opacity = String(ND.phase(t, T.heroFoot, 0.5) * keep);
+
+    // ---------- 二幕：测量括号 + 基线网格 + 竖排小注
+    var bp = ND.ease.inOutCubic(ND.phase(t, T.brackets[0], T.brackets[1] - T.brackets[0]));
+    refs.brackets.style.opacity = (bp * keep).toFixed(3);
+    refs.brPaths.forEach(function (path) {
+      var len = path.__len || (path.__len = path.getTotalLength());
+      path.style.strokeDasharray = len + ' ' + len;
+      path.style.strokeDashoffset = String(len * (1 - bp));
+    });
+
+    refs.gridRows.forEach(function (line, index) {
+      var p = ND.ease.outCubic(ND.phase(t, T.gridRows + index * T.gridRowStep, 0.45));
+      line.style.transform = 'scaleX(' + p.toFixed(3) + ')';
+      line.style.opacity = String(0.75 * keep);
+    });
+
+    refs.sideCap.style.opacity = String(ND.phase(t, T.sideCap, 0.55) * keep);
+
+    // ---------- 打字感：页脚与测量脚注
+    var ctp = ND.phase(t, 0.55, 0.95);
+    typeText(refs.chromeType, CHROME_TEXT, ctp);
+    cursor(refs.chromeCursor, t > 0.5 && t < 2.6, blink(t, 2.2));
+
+    var htp = ND.phase(t, T.typedHero[0], T.typedHero[1] - T.typedHero[0]);
+    typeText(refs.heroType, HERO_TYPED, htp);
+    cursor(refs.heroCursor, t > T.typedHero[0] - 0.1 && t < 9.95, blink(t, 2.6));
+    refs.heroTyped.style.opacity = (ND.phase(t, T.typedHero[0] - 0.1, 0.2) * keep).toFixed(3);
+
+    // ---------- 小节索引
+    var idxText = t < 5.0 ? '01 / CLAIM' : (t < 7.5 ? '02 / LAYOUT' : (t < 10.9 ? '03 / RATIO' : '04 / CODA'));
+    if (refs.sectionIndex.textContent !== idxText) refs.sectionIndex.textContent = idxText;
+    var idxOp = 1;
+    [5.0, 7.5, 10.9].forEach(function (b) {
+      idxOp = Math.min(idxOp, ND.clamp(Math.abs(t - b) / 0.2, 0, 1));
+    });
+    refs.sectionIndex.style.opacity = idxOp.toFixed(3);
+
+    // ---------- 落版
+    var oa = ND.ease.outCubic(ND.phase(t, T.outKicker, 0.5));
+    refs.outro.style.opacity = oa.toFixed(3);
+    refs.outKicker.style.opacity = String(ND.phase(t, T.outKicker, 0.45).toFixed(3));
+    refs.outKicker.style.transform = 'translate3d(0,' + (8 * (1 - oa)).toFixed(2) + 'px,0)';
+
+    refs.outChars.forEach(function (ch, index) {
+      var p = ND.ease.outQuint(ND.phase(t, T.outTitleIn + index * T.outStep, T.outDur));
+      ch.style.transform = 'translate3d(0,' + (112 * (1 - p)).toFixed(2) + '%,0)';
+    });
+    var orP = ND.ease.outQuint(ND.phase(t, T.outRule[0], T.outRule[1] - T.outRule[0]));
+    refs.outRule.style.transform = 'scaleX(' + orP.toFixed(4) + ')';
+
+    refs.outSegs.forEach(function (sp, index) {
+      var p = ND.ease.outQuint(ND.phase(t, T.outSub + index * T.outSubStep, 0.54));
+      sp.style.transform = 'translate3d(0,' + (120 * (1 - p)).toFixed(2) + '%,0)';
+    });
+    var oeP = ND.ease.outCubic(ND.phase(t, T.outEn, 0.5));
+    refs.outEn.style.opacity = String(ND.phase(t, T.outEn, 0.4).toFixed(3));
+    refs.outEn.style.transform = 'translate3d(0,' + (6 * (1 - oeP)).toFixed(2) + 'px,0)';
+    refs.outFoot.style.opacity = String(ND.phase(t, T.outFoot, 0.55).toFixed(3));
+  }
+
+  // ---------------------------------------------------------------- 启动
+
+  function boot() {
+    grab();
+    buildTitle();
+    buildGrid();
+    buildSpec();
+    buildHero();
+    buildGridRows();
+    buildOutro();
+    ND.scene({ duration: DURATION, title: '留白 · 动效排版', render: render });
+  }
+
+  // engine.js 由 Dart 侧注入在 body 结束标签之前：两种情况都等到 DOMContentLoaded 再注册。
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

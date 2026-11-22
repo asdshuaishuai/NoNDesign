@@ -1,508 +1,437 @@
-# AGENTS.md — NoNDesign
+# AGENTS.md — NaN
 
 AI 原生创作工作台。**一句话 → 产品需求设计文档 → 完整可交互原型**；同一工作台
-还能做 3D 场景、代码生成视频与带 SQLite 数据库的 NoN 热应用。
+还能做 3D 场景、代码动画视频与带本地数据库的 NaN 热应用。
+（2026-11-20 方案线：定位升级为「创意工作台」并加入音乐/编曲，未施工，见文档总纲。）
 
-**技术栈（用户决策，2026-11-13）：Flutter 3.50（macOS 主目标；linux/windows 平台壳已就位）+ Python OpenAI Agents SDK。
+**愿景（2026-11-20，方向与取舍的唯一事实源）：代码创造世界。**
+人提出世界，Agent 写出世界的源代码，工作台让世界可进入、可修改、可验证、可带走；
+设计 / 3D / 视频 / 音乐四个工作台是同一底座的四视图。新功能先过
+[docs/vision.md](docs/vision.md) §7 的五问滤镜，答不上来就不做。
+
+**技术栈（用户决策，2026-11-13 / 2026-11-18）：Flutter 3.50 + 纯 Dart 本地核心。
+没有 Python 服务、没有固定端口、没有端口文件。Python 只保留为开发期同步工具
+（`scripts/sync_engine.py` / `scripts/sync_models.py`），不参与应用运行时。
 不要重新引入 Bun、Tauri 或任何 JS 前端运行时。**
+
+**文档入口（2026-11-20 起）**：[docs/README.md](docs/README.md) 是文档总纲——
+文档分层、决策台账、状态口径与施工顺序都在那里。当前**未施工**的方案线：
+`docs/plan-creative-workbench.md`（交互升级 + 四模块 + 强绑定强规范）、
+`docs/plan-music-module.md`（音乐/编曲）、
+`docs/skills/creative-workbench/SKILL.md`（统一创作 skill 契约，未接线）。
+**已落地**：`docs/plan-cross-platform-runtime.md`（批次 A/B1：webview_all 全平台 +
+引擎 classic wasm 进离屏 WebView；wasm_run 仅兜底；flutter_scene 不采用）。
+方案文档写的是目标态，不要当作现状引用；两者冲突时以文档总纲的决策台账为准。
 
 ## 架构边界（改代码前先读）
 
 ```
-app/          Flutter UI + 原生 CustomPainter 画布（无 WebView、无 HTML；
-              3D 工作台落地后唯一 WebView 是应用内预览，见插件轨道）
-server/       Python FastAPI + OpenAI Agents SDK + wasmtime 引擎宿主 + DDP
-engine/       MoonViz classic wasm（纯 WASM MVP、零 import）+ components.json
-figma-plugin/ Figma 双向插件（manifest.json 开发目录，可编辑图层双向桥）
-plugins/      独立插件：video-engine/ 代码生成视频（零 Flutter/服务器依赖）
-app/lib/plugins/  插件工作台注册表（3D/视频独立 UI，与设计板块解耦）
+app/                 Flutter UI + 原生画布 + Dart 本地核心
+  lib/core/engine/   MoonViz 引擎宿主：
+                     · webview_engine_host.dart + assets/engine/engine_web_host.js
+                       （**主路径**：classic wasm 跑在离屏 webview_all 会话里）
+                     · engine_host.dart / engine_worker.dart（wasm_run 兜底）
+                     · engine_backend.dart（两者同一接口，EngineService 面向它编程）
+  lib/core/          DDP / 项目库 / 3D / 热应用 / 视频 / 内置智能体 / 设置
+  lib/core/remote/   「连接桌面」协议、token、方法表、Dart RPC 宿主
+  lib/widgets/       壳层（ChatPiPShell / DesktopShell）、工作台、画布、设置
+  assets/            engine 产物、components 快照、models.json、3D/视频示例
+engine/              moonviz.wasm + components.json + manifest（构建源）
+scripts/engine_web_probe.mjs  经典 wasm JS 宿主的 Node 契约探针（与 WebView 同字节）
+third_party/wasm_run/ vendored wasm 执行器（**仅兜底路径**；主路径不加载）
+scripts/             开发期同步 / 对拍 / 发布检查（不参与运行时）
+figma-plugin/        Figma 双向插件
+plugins/             独立插件资产（视频制作说明）
 ```
 
-- **NoN 热应用引擎 + 作品集（2026-11-16 立项，灵闪/Dots 式）**：热应用 =
-  **自包含单 HTML + SQLite**（全内联零外链，动画优先 canvas/SVG/CSS keyframes）——
-  「热更新」= 覆盖文件 + WebView reload（与 3D 同构；Flutter 热更新无官方
-  能力不务实）。server/hotapp_agent.py（generate/refine/page/list/delete +
-  **db_exec** + fail-closed：结构校验不过拒绝覆盖——旧版仍在热更新无损坏风险）。
-  **持久层统一 SQLite**：每应用 `app.db`，页面经注入的
-  `window.NoN.db.exec(sql, params)` 调 `POST /hotapp/db/{name}/exec`
-  （单语句、参数化、禁 ATTACH/DETACH/PRAGMA/VACUUM/LOAD_EXTENSION；
-  业务数据禁 localStorage/IndexedDB/cookie——WebView 重载即丢）。
-  应用目录 `~/Documents/NoNDesign/hotapps`（旧 `hotapp`/`a2ui` 目录启动时
-  自动并入，作品集旧条目归一为 hotapp）；**作品集横切收藏夹**
-  （portfolio/index.json 聚合 hotapp/video/three 三类，存量 mp4/3d 自动补扫）；
-  客户端 hotapp_workspace.dart（对话式修改条即热更新入口）+
-  portfolio_view.dart（类型过滤网格/打开直达/移除）；registry 第 3 插件
-  hotapp（⌘7），portfolio 独立视图（主页卡 + 标题栏入口）。
-  v1 质量环 = 结构/外链校验（全内联零外链硬门；服务端在 `</body>` 前注入
-  DB 桥 + window.onerror/unhandledrejection → NONHOTAPP 桥回传，页面 CSP
-  `connect-src 'self'` 第二道防线）；视觉截图（canvas toDataURL）v2。
-- **移动客户端（2026-11-16 立项，双层架构）**：ios/android 平台目标已生成
-  （iOS debug 构建 38.7s 实证通过；**Android toolchain 缺失**——SDK 未装，
-  apk 构建待装后验证）。主页 welcome 加「工作台」插件区（注册表驱动）。
-  手机两层模式：① **连接桌面**——settings.serverUrl（设置面板输入）→
-  ServerLauncher.manualBaseUrl → launch 优先连接桌面服务器（LAN 全功能，
-  引擎 MoonViz 无法在移动端运行）；② **PLAN 直连**——无服务器时 Dart
-  AI SDK（ai_sdk_dart 3.1 + ai_sdk_openai，**非官方 OpenAI Agents SDK，
-  Dart 生态无官方版**）本地跑文档生成（core/mobile_agent.dart，
-  write_doc 工具语义对齐 server PLAN；工具参数无流式增量，事件式而非
-  逐字直播；RSI 依赖引擎不在直连范围）。store._runAgent 分流：
-  api==null && mode==plan && 有 key → _runMobilePlan。
-- **移动端真机验证（2026-11-16 晚，iPhone 17 / iOS 27.2 模拟器）**：Xcode 27 的
-  Simulator runtime 已装；`flutter build ios --simulator --debug` 30–46s。真机截图
-  抓出 Welcome 桌面双栏在 402×874 下右溢 198px、底溢 327px（右列被压成单字竖排、
-  开始按钮叠到作品集卡上）→ 窄屏改单列滚动 + SafeArea + 输入卡 chips 换行
-  （welcome.dart 的 `_mobileBody`/`_briefCard`）；`app/test/welcome_mobile_test.dart`
-  锚定 402/390/375 无溢出、1440 保持双栏；`integration_test/mobile_smoke_test.dart`
-  在模拟器实测 Welcome→3D 工作台→返回。**Android**：SDK platforms/build-tools/NDK
-  28.2 已装，但 `flutter build apk --debug` 在 Gradle 9.5/AGP 9.3.1 下启动即挂起
-  （daemon 无网络活动、无任务输出），待专项排查。
-- **移动端第二轮优化（2026-11-16 深夜，402×874 全界面真实渲染审计）**：文档视图
-  tab 行右溢 58px、文档工具条/底部提示条各右溢 246px、空画布卡固定 520 宽、
-  视频工作台 300px 固定配置列把帧预览压到 102px、设置弹窗 860×600 被夹成 310 宽、
-  Workspace/插件/作品集全无 SafeArea。修复：统一 SafeArea；DocsView 工具条窄屏
-  收紧（tab 紧凑、动作改图标态、键盘提示隐藏）；空画布卡限宽 + Expanded + Wrap；
-  视频窄屏改单列滚动（配置在上、预览固定 280 高）；设置弹窗窄屏全屏 + 顶部横向
-  导航条；状态栏/画布 HUD 的桌面键盘提示在窄屏隐藏。回归：
-  `app/test/mobile_surfaces_test.dart`（402/390 × 视频/3D/热应用/作品集/文档/设计/
-  演示/设置/底部 sheet 共 19 项 + 宽屏视频双栏）；全量 48 项测试绿；模拟器截图
-  复核文档/设计/视频/设置四屏。
-- **响应式字号与 iPad 三档布局（2026-11-16 深夜）**：字号在渲染期统一缩放——
-  `theme.dart::responsiveTextScale`（手机 +10% / 平板 +5% / 桌面 1.0，与系统
-  文字大小相乘并钳 1.0–1.3），`NonApp.builder` 经 `withResponsiveTextScale`
-  注入，测试走同一路径；字号声明仍守 8 档字阶，不为手机另维护一套字号。
-  Workspace 三档断点：手机 <700（左右栏均底部 sheet）、平板 700–1024
-  （左栏常驻 + 右栏 sheet）、宽屏 ≥1024（三栏全开）；Welcome 双栏断点降到
-  700（iPad 竖屏不再走手机单列）。**测试基建修正**：`setSurfaceSize` 只改渲染
-  表面、不改 MediaQuery（builder 里恒 800×600）——手机/平板测试必须设
-  `tester.view.physicalSize`；修正前「手机宽度」测试实际跑的是桌面分支。
-  回归：`tablet_layout_test.dart`（768 竖屏双栏/左栏+右栏 sheet、1024 横屏
-  三栏、视频/热应用/作品集/设置）+ 手机测试全量 **54 项绿**；模拟器 iPad Pro 11
-  竖屏与 iPhone 17 截图复核。
-- **iPad 横竖屏两套布局与移动设置面板（2026-11-17）**：真机截图抓出 3D 工作台
-  在 iPad 竖屏把 9 个带文字动作 + 7 个 pass chips 塞进一行，右侧出 Flutter
-  溢出警示条（820×1180 实证）。修复不是简单缩小，而是按朝向分两套：
-  - **3D 竖屏（<1100 且高≥宽）**：双行工具栏——首行返回/项目名/pass chips
-    （横向滚动）/busy，第二行动作行横向滚动（项目、生成当前层、截图、四方位、
-    通过、刷新 + 预览/源码/规范）；内容区单面切换。
-  - **3D 横屏/桌面**：单行工具栏，≥1100 全动作带文字、<1100 保留主操作 +
-    次要动作与面切换进「3D 操作」菜单；源码/规范不再替换预览，而是预览右侧
-    侧栏（`three-body-split`，宽度 900 起）。
-  - **设置面板**：手机/矮窗（<700 或高<560）与 iPad 竖屏均全屏 + 顶部横向
-    tab（iPad 竖屏内容限宽 820）；iPad 横屏/桌面居中对话框 + 左侧栏
-    （920/860 宽、640 高，栏宽 200/176），两种朝向不共用同一套堆叠。
-  回归：`tablet_layout_test.dart` 新增 iPad 11 834×1194 / 1194×834、
-  768 竖屏 / 1024 横屏、手机横屏 844×390、设置竖屏 tab / 横屏 rail 共
-  7 项；全量 **62 项绿**；iPad Pro 11 竖屏真机截图复核 3D 双行工具栏与
-  设置顶部 tab 无溢出。
-- **Dart 化路线（用户方向 2026-11-17，方案未实施，详见 docs/plan-dart-agent-migration.md）**：
-  逐步干掉 Python agent 运行时。判定：ai_sdk_dart（已在 pubspec + PLAN 直连实证）是主战武器；
-  Genkit Dart 是「Dart 重写后端」非「干掉后端」（不引入）；genUI alpha 观望；AI Toolkit 可选；
-  两个 skills 仓库（flutter/agent-plugins、dart-lang/skills）是**开发期 Agent Skills**，精选 13 个
-  已装入 `.agents/skills/`（对本仓所有智能体会话生效），只读镜像在 `reference/`（gitignored）。
-  分阶段：P0 PLAN/Refine 泛化 → P1 Build 模式 + 流式/方言移植 → P2 删 Python agent 依赖 →
-  P3 引擎宿主 FFI 化（wasmtime C API + ffigen）。护栏铁律：Dart 循环仍必须过引擎门。
-  **二次裁决（2026-11-17）**：P0–P2 升格为 chat stream 主体方案的硬前置——本体升级为聊天流
-  （内置 Dart 循环）+ 艺术架（产物货架）+ 画中画工作区（桌面常驻分栏 / 移动右划浮窗）；
-  渲染层双后端：HTML 热应用与 `a2ui_flutter`（genui 已弃用，官方继任；复杂交互组件）**并存自适应，
-  两者都只在平台内运行、都是一等小应用**；「文件即应用」= `.nonapp` 单文件压缩包（zip：manifest +
-  双载荷），分享给其他 NoNDesign 用户打开即用（a2ui 打包应用仅限内置组件目录；离线打开路径见
-  plan §1.1）；桌面 ACP 保留。详见 docs/plan-chat-stream-shell.md。
-- **移动端能力面实测与第三方智能体禁用（2026-11-16 深夜）**：① **ACP 在移动端
-  禁用**（用户裁决）：设置页隐藏「外部智能体」、Agent 面板强制 NoN 内置
-  （残留 acpAgentId 不生效）、`store.runAcp` 在 iOS/Android 直接拒绝并提示。
-  ② **真机 DDP 渲染验证**：iPhone 17 连接桌面服务打开 `nopass.ddp` → 引擎解密/
-  渲染 3 块 390×844 画板 / 34 节点，CanvasView 正常出图（OpenResult.opened）。
-  ③ **3D 真机空白根因**：`/three/scene/{name}.js` 以 text/plain 返回，WKWebView
-  拒绝模块脚本（"'text/plain' is not a valid JavaScript MIME type for module
-  script"）→ 改 `application/javascript`，iPhone 上土星场景正常渲染。
-  ④ **视频端点脚本启动漏注册**：`if __name__ == "__main__": main()` 位于
-  /video/* 路由之前，桌面 App/移动端按脚本启动时 `/video/sample` 等 404 →
-  入口移到文件末尾；真机验证示例加载、环② spec 对照 PASS（8.0s）、后台渲染
-  出帧条带。回归锚点 `scripts/wf/test_server_routes.py`（入口顺序 + scene MIME +
-  六条路由在场）。**能力矩阵**：设计/画布/3D/视频/热应用 在移动端均需连接桌面
-  服务（引擎 wasm、three 预览、resvg/ffmpeg、LLM 都在桌面）；离线移动端只有
-  PLAN 直连文档（Dart SDK），不承诺引擎能力。
-- **插件工作台 UI 与设计板块解耦**（用户裁决 2026-11-16 二次确认）：
-  `app/lib/plugins/registry.dart` 是注册表——每插件一个 PluginDef（id/
-  图标/builder），视图路由 `plugin:<id>`，顶栏入口与 ⌘5/⌘6… 快捷键按
-  注册顺序动态派生（workspace.dart 的 _pluginDigitKeys 数字键池容量 =
-  并存插件上限）。新增插件零散落接线：写工作台 widget + 注册一条即可。
-  3D 项目名持久化在 AppSettings.threeProjectName（工作台视图切换即
-  dispose，不持久化会「切走再回来全丢」）。
-- **插件轨道与引擎解耦**（用户裁决 2026-11-16，详见 docs/plan-plugins.md）：
-  **Figma 双向桥 / 3D 制作工作台 / 代码生成视频 = 客户端能力加强**，不改
-  引擎、不依赖引擎产物；**RSI 递归视觉修复例外——design 模块内置质量环**
-  （run 循环里逐屏 critique → auto_fix ≤2 轮），不是插件。
-- **Figma**（已落地）：服务端 `/project/export/figma`（SVG 包 +
-  nondesign.json manifest）+ figma-plugin/ 双向桥。⚠️ 事故登记×2：
-  ① 路由曾错挂 `/acp/prompt`（FastAPI 同路径先注册者胜出 → ACP 对话
-  全部命中导出函数 422）——改 `/project/export/figma` + RenderRequest
-  body（大 mbt 不能走 query，h11 头 16KB 上限）；② 插件 Import 曾读
-  顶层 n.x/n.w——引擎 manifest 几何在 `n.rect`（真机 dump 实证），
-  顶层字段全 undefined，导入图层塌到原点——geomOf() 兼容读取。
-- **代码生成视频**（已落地，`plugins/video-engine/`，独立管线；视频工作台
-  UI + /video/* 端点已接——sample/review 环②/render 后台 job 轮询/帧
-  serve；**无声版**，用户裁决音轨旁白暂不做。⚠️ 真 bug×3 登记：① mp4
-  产物名错位（render.py 写 frames.mp4，job 查 <jobid>.mp4）；② spec
-  落盘曾固定 spec.json 文件名——art-sketch 引 screenplay.json 会 miss
-  （load_spec 相对引用），必须按 timeline 引用名落盘；③ to_thread 直传
-  sp.run 的 kwargs dict 会落进 bufsize 位置参数——lambda 包齐。）：
-  timeline DSL → 逐帧确定性 SVG → resvg（CJK 已验证）→ ffmpeg。
-  **双强制纪律是管线硬门不是提示词**：① spec 先行（science/screenplay
-  两形态，`spec_missing` exit 2）；② expr 符号声明闭包（自定义标识符
-  必须在 spec.params ∪ spec.formulas，`undeclared_symbol` 拒绝——
-  「想当然」的裸坐标进不来）。RSI 三环：结构校验（render 内）→
-  spec 对照（review.py 机械）→ 抽帧+提示词给评审 agent vision 打分
-  （scripts do enforcement; agent vision does judgment）。
-  ⚠️ 真 bug 登记：**含 t/T 的公式曾在 T=0 常量化**——时间相关公式必须
-  求值期展开（Expr 留在 env，Name 求值时递归），否则运动钉死在起点、
-  读数恒 0（首版冒烟真机抓出）。渲染前全量预编译（fail-closed：
-  语法/符号错误在第一帧前报干净）。三标杆示例在 examples/（物理摩擦力
-  = 真实性门面，读数 v=17.47=x·T 实测吻合）。
-- **审查批次（2026-11-16 下午，9c2e246 + 31f6eac）**：36 条发现（四路审计 + 逐条独立复核）→ 两批落地 29 项。关键面：op 在飞串行队列（丢更新整类消除）、EngineSvgPrep svg 兼容预处理（feDropShadow 改写白名单链 + 网络 image 预取 data:——flutter_svg 渲染链只支持 data: URL 的实锤复现）、3D 状态机竞态封堵（run_pass await 后重读盘上状态只写 status）、done 终态 500、turntable 四方位取证 + spec 手编回灌、插件视图三出路（返回按钮/根级 ⌘5⌘6/Esc）、检查器补原版外观与布局入口（阴影/描边/斜体/dash/尺寸模式/容器布局）、**演示墨迹随项目文档持久**（nondesign:ink 尾块幂等注入/打开解析，对齐原版 inkPersist）、**3D 预览离线化**（three.module.js vendored + MiniOrbit 自实现轨道，unpkg 单点消除）、**PLAN 文档流式直播**（_DocDeltaExtractor 提取 write_doc 参数 content 增量，7 例单测；客户端 docs_view 自动切流式渲染视图）。
-- **3D 制作工作台**（C1 骨架已落地，方案见 docs/plan-plugins.md 轨道 C；server/three_agent.py + /three/* 端点 + widgets/three_workspace.dart，mock LLM 全链 E2E 11 步绿）：
-  LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引外部
-  浏览器/headless）——执行错误 window.onerror 回传、场景几何自检、
-  canvas.toDataURL 截图给 vision 评审，三反馈驱动 RSI 修复轮。
-  吸收 img2threejs：spec 先行 + 分 pass 生成（blockout→structure→form→
-  material→lighting）+ build-state.json 状态门禁 + 确定性几何门先行
-  （turntable 四方位/自相交/锚点）、AI vision 殿后 + fail-closed（门不过
-  不交付）。3D 项目独立存储（~/Documents/NoNDesign/3d/），不走 .mbt.md/
-  .ddp（「唯一事实源」纪律只管 2D 原型线）。平台注册：wkwebview 3.27.2
-  真实 API 是 `WebKitWebViewPlatform.registerWith()`（无 endorsed macOS
-  实现，首次使用前幂等注册）。
+必须守住的边界：
 
-- **唯一事实源**：一份 canonical `.mbt.md`。人类画布操作（HumanGate）与 Agent 操作
+- **唯一事实源**：一份 canonical `.mbt.md`。人类画布操作（HumanGate）与智能体操作
   （AgentGate）都必须经引擎校验后回写同一份文档；`.ddp` 只是它的认证加密容器。
-- **Flutter 不解释视觉语义**：它只渲染引擎返回的 `artboards[].nodes[]`、发送 op、
+- **Dart 不解释视觉语义**：只渲染引擎返回的 `artboards[].nodes[]`/`svg`、发送 op、
   展示事件。不要在 Dart 里"顺手"改布局/属性——变更必须回到引擎。
-- **Python 是唯一 Agent 宿主**：`server/agent.py` 拥有 Agent 循环、tools、上下文与
-  会话；Flutter 只消费 SSE 事件。不要在前端复刻 LLM 协议。
-- **引擎宿主只有一处**：`server/engine.py`（wasmtime）。所有 `_in` 槽协议、
-  字符串读 ABI、session 缓存、epoch 超时都在这里；Flutter 不直接碰 wasm。
-- **上下文分层**：静态指令 → PROJECT MAP → 设计规范/文档 → 会话记忆 + 最新 state。
-  稳定前缀不要插入时间戳/随机序；变更走追加式 state 卡，不重写历史。
-- **模型与端点**：`server/models.json` 是 models.dev 的 vendored 快照；`server/models_store.py`
-  负责刷新。不要硬编码模型能力，能力轴以快照为准；线上方言（thinking 等）单独裁决。
+- **引擎宿主只有一处**：`app/lib/core/engine/`。`EngineService` 面向
+  `EngineBackend` 编程，生产默认 `WebViewEngineHost`（classic wasm 的 JS 宿主跑在
+  离屏 `webview_all` 会话里），`EngineHost`（wasm_run isolate）只作启动失败兜底。
+  `engine_worker.dart` 的 `_in` 槽 ABI / UTF-16 读 / 会话缓存是 JS 宿主
+  `assets/engine/engine_web_host.js` 的对照实现，两边改一处必须改另一处并跑
+  `scripts/engine_web_probe.mjs`。
+  画布与内置智能体共用同一个 `EngineService`；不要旁路直写 mbt。
+- **运行时决策（2026-11-20）**：引擎提供两种 wasm SDK——classic（WASM MVP、0 imports、
+  `_in` 槽 ABI，任何 WebView 都能跑，**主路径**）与 wasm-gc（≈90KB、JS String Builtins，
+  需 Chrome 119+/Safari 18.2+，**不作为全平台基线**，只保留为未来 V8 快路径）。
+  WebView 内 JS 调用不能从 Dart 中断，但跑在平台 Web 进程而非 Flutter UI isolate；
+  看门狗超时即销毁并重建离屏会话。**不要**把引擎调用搬回 UI isolate，也不要恢复
+  「原生 wasmtime + 平台动态库」作为主路径。
+- **外部创作工具只参考、不引入（2026-11-21 用户裁决；下列「创作线引入例外」优先）**：OpenMotion、HyperFrames
+  及同类第三方创作产品/运行时**不做依赖、不内置进程、不套壳、不设导出适配器**；
+  只借鉴它们的规范、协议与交互（如 Motion.md、版本/导出/MCP 纪律）。我们是做
+  自己的产品，不是别人的工作台。**3D 栈（three.js / three-live）是明确例外**；
+  视频工作台此前已裁决的 Phaser 3 引擎选型不因这次调研改变（若用户进一步收紧，
+  再单独改方案）。**代码/技能包同理**：`JDhruv14/line-art-animation`（MIT）只作为
+  `ink_line` 墨线手绘风格的规则参考，不复制其代码、不依赖其 TypeScript/SVG 运行时；
+  方案线的风格包渲染走自研 Canvas2D 矢量笔触（未施工，I0 spike 验证）。
+- **创作线引入例外（2026-11-22 用户裁决）**：
+  ① **3D 线直接引入** `threejs-live`（已在库）+ **3dcodeverse skill/harness 契约**
+  （Apache-2.0：plan schema、确定性门阈值、blind judge rubric、spec/src/artifacts/judge
+  工作区）。**不引 Python/Blender/CadQuery/URDF/moderngl 运行时**；检查器用 Dart/JS
+  等价实现；3DCodeVerse-2M 数据集（CC-BY-NC-SA）不随产品分发。3D 项目双 authoring：
+  `scene`（`scene.json` 事实源）/ `code`（`src/*.js` 事实源，3dcodeverse harness）。
+  ② **视频 VFX 直接引入** `pixelfx` **特效子集**（MIT）：火焰/冰霜/风/爆炸/闪电等；
+  **不引人物**——`actor.js`/`rig.js`/`poses.js`/`act.js`/`moves/` 与 `meta.actor`/
+  `o.actor`/on-body 特效一律不引入，角色仍用我们自己的 rig。
+  ③ **`awesome-opus5-5-videos` 只借结构**：六段 prompt（inputs/direction/structure/
+  build/gotchas/start）+ seek(t)/beat grid/帧证据进统一 skill，不复制作品/服务。
+  ④ **统一 skill**：`docs/skills/creative-workbench/SKILL.md` 是视频/3D/设计的
+  intake→direction→structure→build→check→blind judge→refine→deliver 契约。
+- **两道门是不同的门**：画布走 `apply_human_op_in`，智能体走 `apply_agent_op_in`
+  （`gate:'agent'`）。只读命令走 session/检视路由，绝不能进变更路径。
+- **移动端本地引擎默认开启**（2026-11-20 起）：classic wasm 跑在 iOS/Android 的
+  WebView 里，旧「wasmi 无 SIMD」阻塞已消失；WebView 启动失败时如实降级为
+  「连接桌面」并保留真因。`NONDESIGN_MOBILE_LOCAL_ENGINE=false` 可强制关回旧门。
+- **可选「连接桌面」**：客户端只允许 `/v1/health`、`/v1/capabilities`、`/v1/rpc`
+  契约（`remote_desktop_client.dart`）；桌面宿主默认关闭、默认 loopback、token 必填，
+  LAN 必须显式开关。**没有免鉴权模式、没有固定端口、没有端口文件。**
+- **能力缺失不得静默**：不要用 `api == null` 代表"功能不可用"；向
+  `CapabilityHub` 要 `CapabilityAvailability`，并把 `message` 显示出来
+  （原始诊断只放折叠的「技术详情」）。
+- **模型与端点**：`app/assets/models.json` 是 models.dev 的 vendored 快照；
+  `scripts/sync_models.py` 只写这一份。能力轴以快照为准，线上方言（thinking 等）
+  单独裁决。
+
+## 产品裁决（四个面不统一）
+
+| 宿主 + 朝向 | 壳 |
+| --- | --- |
+| 手机（锁竖屏） | `ChatPiPShell`：聊天全屏 + 工作区画中画 |
+| iPad 竖屏（含 768×1024） | `ChatPiPShell`（明确裁决：3:4 太窄，画布+聊天栏会不可用） |
+| iPad 横屏 | `DesktopShell`：Workspace/Welcome + 右侧 320–420 可折叠聊天栏 |
+| macOS / Windows / Linux | `DesktopShell` |
+| play / portfolio | 整壳全幅 |
+| 3D / 视频 / 热应用（`plugin:*`） | 留在响应式壳内：桌面壳左侧固定工作区 +
+  右侧常驻 NaN 窄栏；手机/iPad 竖屏由 `ChatPiPShell` 整屏渲染工作区 |
+
+- **方向门（用户裁决 2026-11-19）**：手机端不允许横竖切换，锁定竖屏；平板跟随系统旋转
+  （横屏=桌面壳、竖屏=聊天优先壳），桌面无方向概念。唯一实现源是
+  `app/lib/core/orientation.dart`；运行时门在 `main.dart`，每次度量变化（旋转 / 分屏 /
+  折叠屏展开）都重钉方向，手机永远被压回竖屏。
+- **工作台切换 = 项目切换**（用户裁决 2026-11-19）：一个项目只对应它自己的工作台
+  类型，项目内部不摆工作区切换条；右侧 NaN 窄栏只有 NaN / 检查两个 tab。
+  切换入口是顶栏项目下拉（设计项目 / 3D 场景 / 热应用 / 视频 / 新建 / 打开 / 回主页），
+  以及主页作品集、艺术架、各工作台自己的项目菜单。没有 ⌘5–⌘7 工作台直跳键。
+- **四工作台外壳统一（用户裁决 2026-11-20）**：设计 / 3D / 视频 / 热应用四个工作区
+  都用同一套 `WorkspaceChrome`（`widgets/workspace_chrome.dart`）：标题栏（项目下拉/
+  设置/主题）+ 左侧图标轨 + 主区 + 底部状态栏；插件工作台内容是主区槽
+  `WorkspaceMainArea`（与设计画布同一内边距/边框语义），插件自己只保留内容顶部
+  46px 工具条。**不要**再给 `plugin:*` 视图裸 `Scaffold` 早退。`play` / `portfolio`
+  仍是全屏早退；手机/iPad 竖屏仍由 `ChatPiPShell` 整屏渲染插件工作台。
+- 断点与判据唯一来源是 `app/lib/core/layout.dart`；`shell_host.dart` 只做路由。
+- 聊天窄栏默认 360、折叠后 44px；窄 PC（<1100）默认折叠，<1024 强制折叠。
+- 设置面板四档（手机 / iPad 竖 / iPad 横 / 桌面）不共用同一套堆叠；内置服务商端点
+  打开即填且只读，模型选择走底部 sheet；「连接桌面」是一张合并卡片
+  （地址 + 检测连接 + 内置/连接桌面二选一 + 人话文案）。
+- Toast 统一走 `ToastService`：圆角胶囊 + 毛玻璃 + 顶部左侧堆叠 + 1–5s 分级。
+  通知历史**只是服务内部缓冲**（去重刷新 / replay 入参），没有回看界面——通知
+  中心 UI 已随 2026-11-19 死代码清理退役（`app/test/toast_test.dart` 的
+  「无历史入口」锚定测试防守，重新回接 UI 需先推翻该登记）。**不要在
+  `ToastHost` 之外直接 `ScaffoldMessenger.showSnackBar`。**
+- 用户可见文案遵守 `docs/copy-glossary.md`：不出现 Python / server / wasm /
+  MoonViz / DDP / mbt / canonical / nonapp / ACP / AgentGate / engine / session_*/
+  tool_* / JSONL / localhost / 端口 / 构建代号。工具名必须经 `toolLabel()` 映射；
+  失败提示按错误码映射；原始错误只进折叠的「技术详情」。`app/test/copy_guard_test.dart`
+  是自动门（`COPY_GUARD_STRICT=true` 时 allowlist 为零）。
+
+### 能力矩阵（与实现同步；改了要一起改）
+
+| 能力 | macOS / Windows / Linux | iPhone / iPad | Android |
+| --- | --- | --- | --- |
+| 画布 / 设计校验（本地引擎） | ✅ classic wasm 跑在离屏 WebView | ✅ 同左（真机 smoke 待补） | ✅ 同左（真机 smoke 待补） |
+| 项目保存 / 打开（DDP） | ✅ | ✅ | ✅ |
+| 内置智能体（Dart 循环） | ✅ | ✅（文档/PLAN 无需引擎；画布 op 用本地 WebView 引擎） | ✅ |
+| 3D 工作台 | ✅（webview_all：WKWebView / WebView2 / WebKitGTK） | 本机预览受 `ThreeWebViewGate` 门控（待真机验收） | 同左 |
+| 热应用 / `.nonapp` | ✅（webview_all 统一应用内预览；数据库桥走 JS channel） | ✅ 本地库/查看；本地数据库依赖平台绑定 | ✅ 本地库；构建待验证 |
+| 视频工作台 | ✅ 代码动画全平台；mp4 产物内嵌播放随 webview_all 全平台（编码器随 WebView 运行时） | 同左（纯 Dart 矢量逐帧） | 同左 |
+| 外部智能体（ACP） | ✅ | ❌ 设计禁用 | ❌ |
+| 连接桌面（客户端） | ✅ 可填地址/连接码 | ✅ | ✅ |
+| 连接桌面（桌面宿主） | ✅ 设置卡启停/地址/连接码 | — | — |
+| 系统分享 / 导出面板 | ❌ 未装插件 | ❌ | ❌ |
+
+> 上表描述**当前实现**（2026-11-20 晚）。WebView 已统一到 `webview_all`（macOS/iOS
+> WKWebView、Windows WebView2、Linux WebKitGTK、Android WebView；OHOS 的离屏会话
+> 尚未实现，见已知限制）。本地引擎已切到**引擎 classic wasm + JS 宿主**，wasm_run
+> 仅启动失败兜底；`EngineService.startAuto` 选路，`runtime.runtime == 'webview'`
+> 即主路径命中。台账见 [docs/README.md](docs/README.md) §2，细节见
+> [docs/plan-cross-platform-runtime.md](docs/plan-cross-platform-runtime.md)。
 
 ## 常用命令
 
 ```bash
-# Python
-python3 -m venv .venv
-.venv/bin/pip install -r server/requirements.txt
-cd server && ../.venv/bin/python main.py --port 8799
-.venv/bin/python -m compileall server
-
-# 引擎 / 模型
-.venv/bin/python scripts/sync_engine.py           # 校验/下载 wasm，真机 render 探针
-.venv/bin/python scripts/sync_models.py           # 刷新 models.dev 快照
-
-# Flutter
+# Flutter（主门禁）
 cd app
-flutter analyze
-flutter test                                      # widget + SSE 测试
-flutter run -d macos                              # 自动拉起 Python 服务
-flutter build macos --debug
+flutter analyze --no-pub
+flutter test
+flutter run -d macos
+flutter build macos --release
+# 真 WebView 引擎 smoke（WKWebView；Windows/Linux 用同一用例在对应机器跑）
+flutter test integration_test/engine_webview_test.dart -d macos
+
+# 发布包桌面状态（构建后；批次 15 新增）
+cd ..
+dart run scripts/wf/check_desktop_release.dart \
+  --app app/build/macos/Build/Products/Release/NaN.app --home /tmp/nd-home
+
+# 开发期同步（可选，不参与运行时）
+python3 scripts/sync_engine.py        # 校验/下载 wasm，真机 render 探针
+python3 scripts/sync_models.py        # 刷新 models.dev 快照 → app/assets/models.json
+node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebView 同字节）
 ```
 
-服务端默认绑定 `127.0.0.1` 的临时端口，Flutter 启动时读取
-`~/.nondesign/server.json` / stdout 拿到端口。`NONDESIGN_SERVER` 可指向已运行服务。
+`scripts/wf/test.sh` 只跑 `flutter test`；Python 回归锚点已随 `server/` 删除，
+不要再往它里面加 Python 测试。
 
 ## 引擎 ABI（不要凭猜测改）
 
+- 权威产物：`app/assets/engine/moonviz.wasm`（classic，WASM MVP、0 imports、
+  `memory` 导出）。**两份同构实现必须同步改**：`engine_worker.dart`（wasm_run 兜底
+  / 纯 Dart 测试）与 `assets/engine/engine_web_host.js`（生产 WebView 主路径）。
 - 写方向：`in/arg/arg2` 三槽，UTF-8 分块（每块小端 4 字节 + 有效长度），调用
-  `*_in()` 变体。`server/engine.py::_slot` 是唯一实现。
-- 读方向：引擎返回字符串指针，布局 `[len@ptr-4][UTF-16LE@ptr]`；
-  `_read_str` 是唯一实现。
-- 每次调用（包括 `version_info`）都要重设 epoch deadline；ticker 线程持续推进时钟，
-  闲置后不重设会立即 trap。trap 后必须丢弃 session 并重建实例。
-- 会话 API 按 canonical MBT 键控；变更信封的 `mbt` 必须回写缓存。任何 trap/腐坏读
-  都弃缓存。
-- `list_components` 用 `engine/components.json` 快照；`list_templates` 直接问引擎。
-  快照与 wasm 活注册表的一致性由 sync 探针逐 id 对账（`list_components_live()`
-  直问 wasm 导出——引擎组件面增删后快照不重制即门红，2026-11-17 起）。
+  `*_in()` 变体。JS 宿主在 WebView 内部本地循环，不逐块过 Dart 桥。
+- 读方向：引擎返回字符串指针，布局 `[len@ptr-4][UTF-16LE@ptr]`；UTF-16 读必须处理
+  代理对，且 `memory.grow` 后旧 `WasmMemory.view` / `DataView` 失效（用前重取）。
+- **fuel 只存在于 wasm_run 兜底**；WebView 没有 fuel。看门狗超时 = 销毁离屏会话 +
+  重建，不能从 Dart 中断 JS 调用；trap 后同样弃 session 重建实例。
+- 会话 API 按 canonical 文本键控；变更信封的 `mbt` 必须回写缓存。任何 trap/腐坏读
+  都弃缓存。JS 宿主的会话集合（handle-only / special / mutating / unsupported）
+  与 `engine_types.dart` 逐项对齐，改一处必须改另一处。
+- `list_components` 用 `app/assets/engine/components.json` 快照；`list_templates`
+  直接问引擎。快照与 wasm 活注册表的一致性由 `scripts/sync_engine.py` 探针逐 id 对账。
+- 引擎自渲染 SVG 是内容层唯一真源：画布/演示的内容层用引擎返回的 `svg`，
+  本地 painter 只做选区/悬停/手柄等覆盖层。
 
-## Agent 层约定
+## Agent 层约定（Dart）
 
-- `server/prompts.py`：Plan / Build / Refine 三套静态提示词 + 公共 footer。改提示词时
-  守住"生成优先"、"按钮不卡文案"、"对比度硬规则"、"列表分隔线"、"flow 绑容器"这些引擎规范。
-- `server/agent.py`：tools 用 `@function_tool(strict_mode=False)`；参数用普通类型，
-  不要依赖 strict JSON schema（兼容网关会碎）。
-- 续跑策略：模型只回文本、没有交付文档/画布操作时，自动再跑一轮 nudge；Plan 模式仍缺
-  文档则返回 `doc_not_written`，不伪装成澄清。
-- 工具结果必须整形（`compact_envelope`）：剥离 `mbt`/`svg`，节点截断 24、数据截断 40，
-  追加 `state`。
-- 会话：`CompactingSession` 保留最近 18 条 + 确定性摘要；>80 条压缩；不额外调用 LLM。
-- 取消：`/agent/cancel` → `RunResultStreaming.cancel()`；SSE 必须始终有终态事件。
+- 循环在 `app/lib/core/dart_agent.dart`；`design_op` 必须经
+  `EngineGateBridge`（生产是进程内 `EngineService`，`gate:'agent'`），绝不直写 mbt。
+- 生产 LLM 调用套 `StreamToolNameGuard`（`app/lib/core/agent_model_middleware.dart`）：
+  StepFun step_plan 流式把工具名只放首个 delta、后续 delta 重复 `name:""`，
+  ai_sdk_openai_compatible 逐 delta 覆盖会以空名发出工具调用
+  （`AiNoSuchToolError` 打死整轮）；守护按 toolCallId 回填首个非空名。换 SDK
+  版本时抓包复核该方言是否仍在。
+- **工具修复（tool fix，2026-11-20）**：守护同时做模型笔误的近名修复——先严格同名，
+  再命名规范变体归一（`namespace.tool` 逐段剥前缀 / `tool()` 去括号 / 结尾冒号分号 /
+  前后空白 / 全角折叠 / 大小写 / `_-.` 空格归一），最后编辑距离 ≤4 且唯一最近且
+  公共前缀 ≥2 才改写（宁可不修不可修错）；`llm_no_such_tool` 的等待重试轮会在
+  prompt 顶部追加 `Available tools: …` 清单，让模型从真实工具名里挑正确的，
+  而不是同一错名再撞一次。新增工具/改名时同步 `knownTools` 来源（`_buildTools` keys）。
+- **模型方言（MiniMax）**：M3.x「自适应思考」模型强制开启思考，
+  `thinking.type=disabled` / `reasoning.effort=none` 会 400；且 `auto`
+  默认单轮 60–163 s。`providerThinkingOptions` 把 `auto/off/none/minimal/空`
+  统一落线为 `reasoning_effort: low`（实测 ~19.5 s/轮，工具调用正常），
+  显式档位原样透传。新增 provider 前先抓包/探针确认方言，再写映射。
+- **答题卡纪律（2026-11-20 用户裁决变更）**：`ask_user` 在**所有模式**（含钉死工作台的
+  workspace run）都真能出答题卡——不再有 `ask_user_unavailable` 拒答死路。内容/方向
+  决策照常问；只有「确实需要换到另一个工作台」时才带 `switch_to`（工作台枚举）。
+  用户答案回流 `handleChatAction` 时**真正切换** chatWorkspaceMode + 视图再续跑——
+  答案必须改变执行路径，不是换个措辞再问一遍。选 `design` 时视图回到设计画布
+  （`_switchViewForWorkspace`）。**只有最后一张答题卡可点**（历史卡灰化禁点）；
+  run 中最后一张可点，答案入队等本轮收尾续跑。
+- **工作区产物认领（2026-11-20）**：工作区 run 里成功的 `three_create/three_pass/
+  three_status/three_continue/three_feedback`、`hotapp_generate/refine/inspect/
+  from_prototype`、`video_create` 由 `AppStore._handleAgentEvent` 的
+  `_rememberWorkspaceArtifact`/`_adoptWorkspaceArtifact` 写进
+  `settings.threeProjectName` / `hotappApp` / `videoProjectName` 并 notify；各工作台
+  监听 store 自动切项目/刷新列表/重挂预览。**没有这一步就是「run 说做完了，工作台里
+  没有东西」**。工具失败不认领（失败的项目不存在）。新增产出型工作区工具必须同时
+  接这条链 + `toolLabel`/`toolFailureMessage` 映射。
+- **视频生成工具（2026-11-20）**：视频是代码动画，生成落地面 =
+  `VideoProjectStore`（`core/video_project.dart`，`<项目根>/video/<name>/` 的
+  timeline.json + spec.json + video.json，先过 `VideoDocument.build` 预编译再原子落盘）。
+  工具三件套：`video_sample`（拿 3 个内置示例的完整 timeline+spec JSON 学格式）→
+  `video_create`（name/timeline/spec/title，失败码统一 `video_<code>`）→
+  `video_review`（机械对照）；`video_list` 列生成项目 + 内置示例。**成片导出仍屏蔽**
+  （`video_render` 只回 `video_export_disabled`，不落 mp4）。
+  **方案线（未施工）**：视频新增第三种风格 `ink_line`（墨线手绘，2026-11-22 用户裁决）——
+  只借 line-art-animation 的笔宽/开放双笔触/步态求解/昼夜/帧条验收规则，不引入其
+  TS/SVG 库；`silly_skit` / `line_toon` 与 Phaser 3 裁决不变。VFX 层直接引入
+  **pixelfx 特效子集**（只取火焰/冰霜/风/爆炸等，不取人物/stock actor/moves），
+  以 `{f,type:"vfx",cue,...}` 事件接入 `screenplay.json`；cue 走 allowlist。
+  统一创作流程见 `docs/skills/creative-workbench/SKILL.md`。
+  详见 `docs/research/line-art-animation.md`、`docs/research/pixelfx.md`、
+  `docs/research/awesome-opus5-5-videos.md`。
+- **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
+  成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
+- **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，
+  正常 run 死线 30 分钟），另有 `debugForceIdle()` 供自动化。
+- LLM 请求失败走「分类 → 等待重试 → 人话文案」三段（`classifyLlmError` /
+  `isRetryableLlmError` / `toolFailureMessage`）：网络（含 `HttpException` /
+  `Connection closed|reset` 断流）、限流（429）、网关 5xx、超时一律最多
+  **10 次重试、每次 30 秒**（用户裁决 2026-11-20；`debugRetryWaitsOverride`
+  供测试压到毫秒）。失败事件 `error` 带分类码、`detail` 保留原始异常。
+- **交付水位前移后断线 → 断线续跑，不重发、不判死**：重建新鲜项目地图/
+  文档上下文（`_continuationPrompt`），让模型从断点接着做完，最多 10 次；
+  已完成内容绝不重复执行也绝不丢弃。
+- `toolLabel()` 是工具名的唯一出口；新增工具必须同时补文案映射与失败码映射。
+- 流式事件面保持稳定：`assistant_text` / `assistant_thinking`（仅文档阶段）/
+  `thinking_delta` / `doc_delta` / `tool_start` / `tool_end` / `doc_written` /
+  `page_generated` / `preview` / `done` / `failed`。`done` 与 `failed` 必须成对
+  可判——**每条 run 都要有终态**，不能静默结束。
+- 续跑策略：模型只回文本、没有交付文档/画布操作时，自动再跑一轮 nudge；文档阶段仍缺
+  文档则报 `doc_not_written`，不伪装成澄清。
+- **工具结果必须整形**（剥 mbt/svg、节点/数据截断、追加 `state` 卡），避免吃光上下文。
+- **源码编码纪律（2026-11-20 事故）**：本机 `pwsh` 是 Windows PowerShell 5.1，用
+  `(Get-Content -Raw) | Set-Content/Out-File` 往返 UTF-8 源码会把中文尾字节写成 `?`
+  并偶发吞掉相邻 ASCII（一次 `-replace` 就毁掉 `dart_agent.dart` 757 处中文，全仓测试
+  编译失败）。**禁止用 pwsh 管道重写源码文本**；只允许 `write`/`edit` 工具或显式
+  UTF-8 的 Python/Dart（`encoding='utf-8'`, `newline=''`）。PowerShell 显示中文乱码
+  ≠ 文件损坏，判断一律以严格 UTF-8 解码 / `dart format --output=none` 为准；
+  `dart analyze` 对非法 UTF-8 会误报 No issues，不能当编码校验。
+- 上下文分层：静态指令 → 项目地图 → 设计规范/文档 → 会话记忆 + 最新 state；
+  稳定前缀不要插入时间戳/随机序，变更走追加式 state 卡。
+- 取消：`CancellationToken`；取消后也必须发终态事件。
+- 步数预算：`AppSettings.effectiveMaxSteps` 是唯一来源；`unlimitedSteps` 打开时使用
+  `agentUnlimitedSteps` 哨兵（1<<20）并解除本地 run 的 10 分钟总时长（取消仍有效）。
+  不要在循环、设置 UI 或远程参数里写死 600。
 
 ## DDP
 
 - DDP1：`DDP1` + version + salt16 + nonce24 + XChaCha20-Poly1305(zstd(payload))，
   AAD = header。Argon2id m=19*1024 KiB, t=2, p=1, len=32。
-- DDP2：`DDP2` + version + CRC32LE + zstd(payload)。
-- 与 deepDesign Studio 的 Rust codec 已做双向交叉验证；改 codec 必须重新对账。
+- DDP2：`DDP2` + version + CRC32LE + zstd(payload)（免密）。
+- 字节权威是 Rust `vendor/moonviz-ddp`；Dart 实现与它在固定 salt/nonce fixture 下
+  逐字节一致。DDP1 生产写入因随机 salt/nonce 不逐字节，这是密码学设计，不是缺陷。
 - 文档标记：`<!-- nondesign:design {...} -->` / `<!-- nondesign:docs {...} -->` 放文末；
   JSON 中 `>` 必须转义为 `\u003e`，否则引擎注释扫描器会在 `-->` 截断。
 
 ## Flutter 约定
 
 - 状态：`AppStore extends ChangeNotifier`（provider）。所有会改项目的异步操作串行
-  经过 store；不要绕过 store 直接调 API。
-- **右栏结构（2026-11-13 拆分）**：`right_panel.dart` 只是 91 行壳（RightPanel 组合），
-  `agent_panel.dart`（Agent 面板/时间线/模式芯片）与 `inspector_panel.dart`（检查器/
-  字段件/交互/状态/页面健康）走 `part of` 共享私有类——**part 文件不得带 import**，
-  全部依赖声明在库文件（right_panel.dart）头部；往右栏加类时先问归属（Agent vs
-  Inspector），别再往任一 part 塞对方领域的东西。
-- 画布：`CanvasView` + `ArtboardPainter`；节点命中区用透明 `Positioned` 覆盖；
-  拖动只更新本地 ghost，松手才发 `move` op。
+  经过 store；不要绕过 store 直接调 API。`_opQueue` 是 op 串行化的唯一入口。
+- 画布：`CanvasView` + 引擎 SVG 内容层；拖动只更新本地 ghost，松手才发 `move` op。
 - 设计令牌：`core/theme.dart` 的 `NonPalette` 是唯一颜色源；不要在 widget 里散落硬编码色。
-- 本地化：当前简体中文；文案集中在 widgets，后续接入 i18n 时再抽表。
-- **快捷键（2026-11-13 起，全平台）**：绑定与展示标签统一走 `core/keys.dart` 的
-  `modKey()`（macOS=meta/⌘，Windows/Linux=control/Ctrl）与 `modCombo()`（标签把
-  ⌘→Ctrl+、⇧⌘→Ctrl+Shift+）。**不要在 workspace/docs 里手写
-  `SingleActivator(..., meta: true)`、也不要散落硬编码 ⌘ 标签**——加新快捷键时绑定与
-  标签各取一处助手，两处缺一就是「按得动但看不见」或「看得见但按不动」。
-- 平台壳：macOS 为主开发目标；`linux/` `windows/` 由 `flutter create
-  --platforms=linux,windows` 生成（2026-11-13），窗口标题 NoNDesign，快捷键即经
-  keys.dart 自适应；跨平台构建未在本机验证（无 Linux/Windows 环境），首次在对应平台
-  构建时先补依赖再跑门禁。
-- macOS Runner 已关闭 App Sandbox（本地 Python 子进程 + `~/.nondesign`）；不要随手加回
-  sandbox 而不补 network client / app container。
-- 窗口：`MainFlutterWindow.swift` 固定在主显示器居中，避免 macOS 恢复离线显示器坐标。
-- **动效与控件一致性（2026-11-13）**：时长/曲线只取 `NonMotion`
-  （fast 120 / base 180 / slow 240ms，easeOutCubic）——不要散落裸 Duration。
-  对话框统一 `showNonDialog`
-  ——注意：nonSelect 底层是 **M3 DropdownMenu**（菜单行 MenuItemButton，高度可收敛
-  32px）；经典 DropdownButtonFormField 有运行时断言 `itemHeight >= 48`（2026-11-14
-  红屏实证，analyzer 抓不到 runtime assert——改它必须跑一次真机/测试打开菜单）。
-  entry 高度对必须规范化：`Size.fromWidth` 的隐含高度是 Infinity，与
-  `maximumSize` 高 32 组成 min>max 即崩。回归锚：test/nonselect_test.dart。（fade+scale 入场，barrierColor 可覆盖）；下拉统一
-  `nonSelect(context, …)`（菜单配色/圆角 10/高度上限 280/箭头一处定义，
-  inspector/settings 全部 DropdownButtonFormField 走它）；右键菜单与浮层走
-  popupMenuTheme/dialogTheme 全局主题。改这些助手时全端生效，别在调用点
-  再写一份局部样式。
-
-- **引擎渐变/italic 真相（2026-11-16 探针修正）**：引擎原生支持渐变与
-  斜体——语法是 **Paint v2 DSL**：`fill=linear:#c1:#c2@deg`（radial 同形
-  无 @deg）、`italic=true`；**不是 CSS `linear-gradient(...)`**（写入会
-  以原始串存 fill，svg 输出非法属性）。R2 曾把 CSS 解析加进
-  ArtboardPainter——保留为旧信封回退，SVG 在场时由引擎渲染（defs 合成
-  + fill url 引用自动完成）。NoN 侧不再需要自解析新渐变。
-  已知边界：place k=v 对 rotate=/blur= 仍静默丢弃（update 路径 ok），
-  上游 issue 材料已备。
-
-- **引擎自渲染为内容层唯一真源（2026-11-16 用户定案）**：引擎 0.2-dev 的
-  render 信封每板携带完整 svg（<style> 系统字体/defs 三档 feDropShadow/
-  rotate transform/网络 <image>+clip-path/板底 rect 全在，真机探针实证）——
-  **客户端不重复实现节点渲染**：canvas_view/play_view 内容层 = `SvgPicture.
-  string(board.svg)`（flutter_svg），ArtboardPainter 降为覆盖层（overlayOnly：
-  选区环/悬停/手柄/拖拽幽灵框；旧信封无 svg 才回落整节点绘制）。
-  演示入场呼吸改对整 svg 层 FadeTransition。已知引擎侧边界（登记不修）：
-  fill=linear-gradient(…) 以原始串写入 fill 属性、未合成 defs（svg 规范外，
-  上游修）；italic 未落 svg。/engine/render 保留 svg（仅提板底色），agent
-  工具结果的 compact_envelope 仍剥 svg（LLM 上下文不需要）。
-  锚点：test/engine_svg_test.dart（真机 svg fixture 解析契约）。
-
-- **deepDesign 对账补齐（2026-11-15，用户要求对照原版核对）**：
-  ① docs dispose 先 flush 防抖编辑（syncPrdFromEditor 教训——否则 ⌘↵ 生成
-  用旧 PRD）；② build 终态 **designFromEngine**：规范仍是默认时自动从入口
-  板 extract-design-system 合并真实配色（判默认 = palette 与 defaults 全等
-  且 rules 数相同），PLAN 写过/手编过不覆盖；合并逻辑下沉
-  `store.mergeExtractedPalette`，规范页提取与终态钩子共用；③ 源码模式
-  从只读升级为可编辑 +「应用并渲染」（`store.applySource` 走 render 面，
-  比 op 严——deepDesign 整篇 canonical 流程对齐）；④ 演示起始板 = 交互根
-  （出边最多的板，demoStartBoard 教训：落在最后编辑板 = 零热区）。
-  有意差异（不改）：run 中画布编辑 deepDesign 走 rebase_agent_ops，
-  NoNDesign 用 agentBusy 拒绝（op 队列是单独一轮）；撤销是本地快照栈
-  非引擎 history；无 i18n/多窗口。
-
-- **ACP 白名单文档核实（2026-11-15 二轮）**：kimi 官方文档证实 `kimi acp`
-  子命令（catalog 形态已对）；**Solon Code 是 Java 项目**（opensolon/
-  soloncodecli，Java 17+），ACP 经配置启用（acpEnabled + acpTransport:
-  stdio），无独立子命令——note 写明文档指引；mcode 原生 `mcode acp` 存在
-  但 new_session 要求 `mcode login`（认证不代劳，note 指引）。
-  **node 切换升级：按主版本去重**（每个 major 取最新，v24/v22/v20 覆盖，
-  limit 3）——pi 的 bun shim 只在 node22 活，只重试两个 v24 会错过。
-  本机终态 7 verified：qwen/pi(npx)/claude/codex/dsh/stepcode(自研)/omp。
-  已知噪音：probe 期偶发 "cannot reuse already awaited coroutine" 打印
-  （SDK 后台 task 清理，不影响结果正确性），未根治。
-
-- **ACP 最终标准（2026-11-15 用户定案）**：白名单收敛 12 个——qwen/pi/
-  claude/codex/dsh/stepcode/mcode/kimi/omp/gemini/pivot(灰)/solon，cline 等
-  移除。适配策略：有第三方适配走 npx/中间适配器；**只有 stepcode 自研**
-  （`server/acp_adapters/step_adapter.py`：把 `step -p` 打流包成 ACP，
-  stdin 必须 DEVNULL——step 继承 stdin 管道等永不到来的 EOF 会挂起，
-  适配器首版全链路挂起 120s 实证）。多 node 环境：native 候选默认环境
-  失败后按 nvm 版本（新→旧，最多 2 个）切换 PATH 重试（`_alt_node_envs`）。
-  pi 更新实录：`~/.npmrc` 把全局 prefix 钉在 node20（装哪都进 v20），
-  pi@latest 需 node≥22 → `npm i -g --prefix ~/.nvm/versions/node/v24.22.2`
-  强制装 v24；brew 遗留坏副本删除；`_which`/`_scan_dirs` nvm 新版优先，
-  `_child_env()` 让 ACP 子进程（含适配器内部再 spawn）都解析到好副本。
-  **探测/启动/静态解析三条路径必须共用 `_candidate_command`**——
-  `_resolve_entry` 曾与它分叉（静态适配器被跳过 → create 回落 step acp
-  挂起）。真机终态：qwen/pi/claude/codex/dsh(deepseek-harness-acp)/
-  stepcode(自研)/omp(oh-my-pi) 七个 verified 全链路；mcode/kimi/gemini/
-  solon 未安装诚实列出；pivot 置灰。
-
-- **ACP 协议级探测（2026-11-15，用户反馈「通过 acp 协议探测一下」）**：
-  静态猜 argv 不可靠——`probe_entry`/`probe_all` 对每个候选形态真实
-  spawn + initialize + new_session 实测（npx 候选 90s/二进制 15s 超时），
-  verified 才 selectable，失败诚实标注「协议探测失败：<原因>」。
-  `/acp/agents?probe=1` 等待 ≤45s；服务启动即后台热探测。**实测收获：
-  omp=oh-my-pi（pi 系，native `omp acp` 通过）；step 无任何 ACP 入口
-  （`--acp` Unknown option、`acp` 挂起无协议响应）→ StepCode failed 是
-  诚实判定**，等官方适配器往 candidates 加一行即通。pi 本体在本机因
-  node/undici 兼容崩溃（非我方问题）；pi 条目保留 `pi acp` + npx 两候选。
-  探测 fixture 走 _which（X_OK）——fake agent 要 shebang + chmod 755。
-
-- **ACP 扫描完全性（2026-11-15，用户反馈实证）**：R1 目录只探适配器二进制 +
-  用进程裸 PATH——用户装了 claude/codex/pi/stepcode 却全部 MISS。已修：
-  ① 目录升级 candidates 链（适配器二进制 → **npx 官方包** → CLI 本体），
-  claude/codex/pi 的 npx 形态 `npx -y @zed-industries/claude-code-acp` 等
-  （npm view 核实包名）；② `_which()` 合并登录 shell PATH（zsh -lc 缓存）+
-  `~/.local/bin`、`~/.stepcode/bin`、nvm 全部版本 bin——codex 就在 nvm 路径；
-  ③ detect 返回 `selectable`（= 可启动形态存在且非 grayed）——「CLI 在但无
-  适配器」（StepCode → `step` 可执行在 ~/.stepcode/bin）列出让用户看见但不可
-  选。真机验收集：claude-code/codex/pi（npx）/stepcode/omp/pivot/qwen/cline。
-  claude 适配器真机握手通过（spawn→initialize→new_session→close）。
-  改适配器 argv 前先 `npm view <pkg> version` 核实包名。
-
-- **外部智能体 ACP（2026-11-14）**：`server/acp_bridge.py`——模块名**不能叫
-  acp.py**（会遮蔽 site-packages 的 SDK 包 `acp`，ImportError circular）。
-  官方 SDK `agent-client-protocol`（导入名 acp）路由按 **kwargs 直传 hook
-  参数（`session_update(session_id, update)` / `fs_write_text_file(session_id,
-  path, content)`），`on_connect` 是同步调用；SDK 的 Client 钩子事件必须桥进
-  prompt 的 sink 队列（曾因双队列丢失全部 delta——单会话串行 prompt，一个
-  sink 即可）。权限自动放行（选第一个 allow 选项）+ fs 读写限制在工作区。
-  目录在 `AGENT_CATALOG`（Claude Code/Codex/Kimi/Pi/StepCode/MiniMax/OMP/
-  Pivot(置灰)/Gemini/Qwen/Cline），PATH 探测即可见；锚点
-  `scripts/wf/test_acp_client.py`（fake agent 裸 JSON-RPC over stdio）。
-  Flutter：设置 → 外部智能体选 agent（acpAgentId 持久化），AgentPanel 发送
-  分流 `store.runAcp`，会话按 projectPath+agent 幂等，切项目/新建即失效重建。
-
-- **tool 配对消毒（2026-11-14，真机 400 实证）**：压缩（`_compact`/`_budget`）
-  按条目数切历史会把 `function_call` 与 `function_call_output` 切散 → chat wire
-  上就是 `role 'tool' must be a response to a preceding message with
-  'tool_calls'` 的 400。`context.py::_sanitize_tool_pairing` 在 `_load` 与
-  `get_items` 出口只保留 call_id 双向齐全的配对（孤立调用=中断未执行、孤立结果=
-  调用被压缩，一并剔除），旧会话文件自动自愈。**改压缩逻辑时不要去掉这层消毒**；
-  锚点：`scripts/wf/test_context_sanitize.py`。默认步数 300（server 默认、
-  Dart 默认、UI clamp 4–600）。
-
-- **半程任务恢复（2026-11-14）**：`recovery.json` 在运行期也落盘——run 起点
-  （force）、每次 doc_written、每次 preview canonical 渲染成功、终态 finally
-  各写一档；快照新增 `run:{phase,instruction,startedAt,partialMbt}`，非空即
-  「上次运行未正常结束」。重启后 `restoreRecovery` **优先用 partialMbt**
-  （构建进度）并提示阶段（撰写文档/构建原型/调整原型）。改恢复路径时守住：
-  ① doc_written 不置 dirty，别把 guard 收回 `dirty` 条件；② 终态快照必须
-  force（agentBusy=false 后 run 标记随之清空）。
-
-- **提示文案对比度地板（2026-11-15，用户反馈实证）**：ink4（hint/占位/次级
-  说明）对 panel2/panel 的 WCAG 对比度曾只有 2.1–2.4:1——「看不清」的根源。
-  已调整：dark ink4 4D5464→6B7383（3.6–3.9:1）、dark ink3 737B8D→8A93A6（5.6:1）、
-  light ink4 A7ADBA→83899B（3.0+:1）、light ink3 7A8292→6B7383（4.5:1）。
-  **纪律：提示性文案 ≥3:1（WCAG 图形档），正文 ≥4.5:1；改调色板先跑对比度
-  计算再落值，层级 ink2 > ink3 > ink4 的排序必须保持。**
-
-- **字阶与文案（2026-11-14）**：全应用 8 档字阶 10/11/12/13/15/18/22/34，
-  10px 可读性地板（17 档→8 档已重映射 254 处）；加文案先查这档表。运行时栈名
-  （Flutter/Python 等）不进产品文案。已知缺口（深度优化轮分诊 deferred，审查轮
-  2026-11-14 复核：③ 已修，⑦⑧ 新增 to_thread 遗漏已修，其余仍成立，勿丢；
-  2026-11-17 核心状态机批次再收 ①②）：
-  ~~① `applyOp` 无在飞排队——HTTP 在飞窗口内第二个 op 以陈旧 mbt 提交并覆盖
-  （resize 在飞+方向键可复现，high）~~（已修，9c2e246 `_opQueue` 链；2026-11-17
-  批次把 constrainLayout/⌘Z⇧⌘Z/_jumpHistory/engineHistory undo·redo/newProject/
-  openProjectPath 全部收进同一队列（`_chainOp` 单点收口），并补「两 op 在飞被
-  串行化且第二条用刷新后 mbt」回归锚 `test/store_test.dart`——此前队列被回退
-  成直发 await 不会让任何测试变红）；~~② `_jumpHistory` 无在飞守卫（连按 ⌘Z
-  合并成一步，与①同根应随队列一并做）~~（已修，2026-11-17：目标下标在链内
-  计算 + undo/redo 排队）；~~③ `_NodeInteractionsEditor._entries`
-  拉回从未渲染~~（已修，2026-11-14：补渲染 + 解绑按钮；父级 `_ensureNodeInteractions`
-  与本组件各自独立拉取 session_interactions 仍是重复请求，未合并——数据流改动
-  留给专门一轮）；④ SSE 事件契约零测试锚点（已部分缓解：`test/store_test.dart`
-  覆盖 applyOp/undo/redo 核心路径、SSE 空闲超时终态与 run 归属校验，
-  `/agent/run` 全事件契约仍无锚点）；
-  ⑤ 多选拖拽 N 次串行 HTTP（正解是引擎批量 move op，上游提 issue）；⑥ 门禁加固
-  （capability/ddp 不验 sha、compileall 只查语法、ddp_check 依赖本机文件路径）；
-  ~~⑦ `list_templates`/`list_themes` 两端点 + agent compose 阶段 + `_list_templates`
-  工具函数未经 `to_thread`~~（已修，2026-11-14）；~~⑧ `_cleanup_document` 三处
-  `engine.session` 同步调用，每轮 run 收尾必经路径~~（已修，2026-11-14：函数改
-  `async def` + 逐处 `to_thread`）。
-
-- **语义树全局关闭（2026-11-14，崩溃报告实证）**：Flutter macOS 引擎的
-  AccessibilityBridge 在 macOS 27.2 上被 AX 客户端激活后，逐帧语义更新触发
-  `doesNotRecognizeSelector` → SIGABRT（MacOSEventsFromAXEvent）。应用根级
-  `ExcludeSemantics`（main.dart）整树排除——引擎侧不再产生 AX 事件，崩溃
-  不可达；副作用是被 AX 激活驱动的 ~20fps 空闲泵帧同步消失（216 帧/10s →
-  21 帧/10s）。上游修复前不要移除；若要恢复 a11y，先在 macOS 27 上真机回归
-  崩溃面。设置镜像：`saveSettings` 双写 `~/.nondesign/settings.json`
-  （含 apiKey，本机单用户）——SharedPreferences 落 plist，探针/e2e 从镜像
-  文件读。
-
-- **实测与模式纪律（2026-11-14，VM Service 探针实证）**：性能判断先跑
-  `/tmp` 式探针（websockets 连 VM Service：getMemoryUsage + setVMTimelineFlags
-  'all' + getVMTimeline 的 B/E 配对时长），别靠感觉。debug（JIT）与
-  profile（AOT）实测差距：帧均 7.7ms→1.1ms、p90 6.4→0.6ms、堆 122MB→16MB、
-  单消息尖峰 1660ms→53ms——**「卡」的第一嫌疑永远是 debug 模式本身**，
-  `./scripts/dev.sh --profile` 是真实手感。仍待查：空闲期 ~20fps 的
-  BeginFrame 泵（profile 下 1.1ms/帧无害，但来源未定位）；SEMANTICS 每帧
-  走查（canvas 已 ExcludeSemantics，面板未包）。
-
-- **综合性能面（2026-11-14）**：长列表一律 `ListView.builder` 惰性构建
-  （Agent 时间线、设置模型清单——`ListView(children:)` 每次通知重建全部行）；
-  时间线行淡入只给尾部 3 行（`animate` 参数），旧行从 1 起始，滚动回看不重播；
-  SSE 分片直接窄化 `Map<String, dynamic>`（dart:convert 本就产出该形状，
-  `Map.from` 整表拷贝是每秒几十次的白功）；NodeImageCache 经 ResizeImage
-  钳 1024px 解码宽（原图几十 MB 位图进内存只为一枚头像节点）；
-  CanvasView 的 layoutBoards 按 envelope 列表引用记忆化（identical 检查）。
-
-- **渲染性能（2026-11-13）**：① SSE 思考/文档流式增量一律走 80ms 合帧
-  （`_deltaBuffer`/`_thinkingBuffer` + Timer，事件头 `_handleAgentEvent` 入口与
-  finally 双处冲刷）——逐片 notifyListeners 是全树重建放大器，别再手写直推。
-  ② 画布两个 painter（FlowPainter 整层 + ArtboardPainter 每板）都有
-  RepaintBoundary 图层隔离；painter 的 shouldRepaint 是字段级对比，改 painter
-  参数时必须保持（新增字段记得加进对比链）。
+- 动效：只取 `NonMotion`（fast 120 / base 180 / slow 240ms，easeOutCubic）。
+- 下拉：统一 `nonSelect(context, …)`（M3 DropdownMenu；经典 DropdownButton 的
+  `itemHeight >= 48` 运行时断言是历史红屏来源，改它必须跑真机/测试）。
+- 快捷键：绑定与展示标签统一走 `core/keys.dart` 的 `modKey()` / `modCombo()`；
+  不要手写 `SingleActivator(meta:true)` 或散落硬编码 ⌘ 标签。
+- 演示模式：进入态判定必须在 `mode=m` 赋值**前**捕获；起始板 = 交互根；前进导航
+  统一走 `playGo` 单点收口；热区清单 = 出边 flow ∪ 引擎 interactions 导出。
+- 平台壳：macOS 为主开发目标。**所有应用内 WebView 统一走 `webview_all`**
+  （macOS/iOS WKWebView、Windows WebView2、Linux WebKitGTK、Android WebView）：
+  3D 预览、热应用、视频播放和个人资料页共用同一套 `WebViewController`；
+  不要再新增 `Platform.isWindows` 的 WebView 分支或第二套 WebView 依赖。
+  视频工作台的矢量代码动画全平台一致（纯 Dart 逐帧）；mp4 内嵌播放随
+  `webview_all` 全平台，能否解码取决于系统 WebView 自带编码器。
+  见 `docs/plan-cross-platform-runtime.md` §1。
+- macOS Runner 已关闭 App Sandbox（本地文件 + `~/.nondesign`）；不要随手加回 sandbox
+  而不补 network client / app container。
 
 ## 测试与验收
 
-- `flutter test`：Welcome / Canvas / Workspace / Docs 无头渲染 + SSE 解析。
-- **Python 回归锚点在 `scripts/wf/test.sh` 门禁序列里**（先于 flutter test 逐个跑，
-  红即止；`.venv` 缺失直接报错并给建环境指引）：test_hotapp（名称校验 / SQLite 桥 /
-  作品集 + **generate/refine/delete_app 异步写路径与 `_app_locks` 同名串行不变量**，
-  变异验证过必红）、test_three（3D 工作台：ASCII 白名单 / save_spec 解封 blocked +
-  复位 pass 计数 / /three/delete 真删与越界防护 / _chat·spec 解析·损坏读取包
-  ThreeError——逐项变异验证过必红）、test_server_routes（入口顺序 +
-  **hotapp/portfolio 全路由在场**）、
-  test_context_sanitize（tool 配对消毒）、test_acp_client（fake agent JSON-RPC 全链）、
-  test_doc_delta（`_DocDeltaExtractor` 跨片解码：转义 / `\uXXXX` 切断、键名切断、
-  done 惰性自复位）。新增 `scripts/wf/test_*.py` 时同步加进 test.sh 循环。
-- Python 端到端：`server/main.py` + mock OpenAI SSE → Plan/Build 两种 run，
-  验证文档、生成页面、preview、cleanup、canonical 回写。
-- 引擎：`scripts/sync_engine.py` 的 render 探针；`server/engine.py` 的
-  render/apply/generate/session 冒烟。
-- DDP：Python 自身往返 + Rust `vendor` 交叉（历史验证；当前仓库不再 vendored Rust）。
-- 改引擎版本：更新 `scripts/sync_engine.py` 锚点 → 跑 sync → 跑 Python/Flutter 测试。
-- **本地集成模式（ENGINE_LOCAL 标记，2026-11-13，用户决策）**：`engine/ENGINE_LOCAL`
-  （gitignored，一行=构建路径）在场时 sync 默认取 `../moonviz-dev` 本地构建——dev 跑法
-  持续使用本地引擎，rebuild 后重跑 `scripts/sync_engine.py` 即接回；**不会被 Release
-  产物静默覆盖**。标记缺省才回落「校验现存 / 拉取 Release」。**`--release` 当前是
-  死路（2026-11-17 登记）**：锚定的 engine-v0.1.11 资产缺 0.2 面（无 session_event_in
-  导出），sync 在下载前 fail-fast——上游 0.2 出线后同步 RELEASE_TAG/ASSET/SHA512
-  即恢复「生产锚定 Release」语义，在那之前本地 dev 构建是唯一能过探针的来源。
-  引擎自报版本可能滞后 dev 构建（0.2 自报 0.1.11），
-  能力面以 manifest `build_line`（行为探针判定）为准。首次设锚：
-  `.venv/bin/python scripts/sync_engine.py --local ../moonviz-dev/_build/wasm/release/build/wasm/wasm.wasm`。
+- `flutter test` 是唯一运行时门禁。发布前必须跑：
+  `flutter analyze --no-pub` + `flutter test` + `flutter build macos --release` +
+  `scripts/wf/check_desktop_release.dart`。
+- `app/test/acceptance_local_core_test.dart` 是发布验收入口：DDP 往返、项目列表、
+  本地引擎 render + 两道门、3D/热应用/视频 smoke、`app/lib` 无 Python 服务启动面。
+- 发布包检查（`check_desktop_release.dart`）：bundle 无 `.py/.pyc/server/.venv`；
+  默认启动无 TCP/UDP 监听、无 Python 子孙进程、无 `~/.nondesign/server.json`；
+  宿主源码契约默认 loopback + `port=0` + Bearer token。
+- 文案门：`copy_guard_test.dart`（严格模式）+ `copy_screen_test.dart`（五尺寸运行时
+  文本）。改用户可见字符串后必须跑。
+- 引擎：`scripts/sync_engine.py` 的 render 探针；`engine_contract_test.dart` /
+  `engine_host_test.dart` 锁定导出面、槽 ABI、UTF-16、会话缓存、trap 恢复与内存回收。
+- DDP：`ddp_test.dart` 覆盖 DDP1/DDP2 往返、错误码与固定 fixture 字节一致。
+- 远程：`desktop_rpc_host_test.dart` + `remote_host_integration_test.dart` 锁定
+  默认无监听、token、限额、SSE 与真客户端全链。
+- **本地集成模式**：`engine/ENGINE_LOCAL`（gitignored）在场时 `sync_engine.py` 可指向
+  本地引擎构建；发布构建应锚定仓库自带产物。改引擎版本先跑 sync 再跑全部测试。
+- **工作台链路锚点（2026-11-20）**：`workspace_chrome_test.dart`（四工作台共用外壳；
+  面板/主区/状态栏一致）、`workspace_artifact_adoption_test.dart`（成功工具事件 →
+  `settings.*ProjectName` 认领 + notify）、`video_project_test.dart`（视频项目落盘
+  硬门/原子性/坏项目隔离）、`video_workspace_test.dart`（生成项目自动切换 + 读失败
+  人话）、`hotapp_workspace_agent_test.dart`（热应用自动切应用/精修后按 epoch 重挂
+  WebView2）、`dart_agent_tools_test.dart` 的 `workspace mode tool surface`（workspace
+  run 必须暴露 three_*/video_*/hotapp_*，且不含画布/文档工具）。改这些链路必须同步
+  跑对应锚点。
+- **Windows 逐字节契约（2026-11-20）**：`app/assets/a2ui_web/**` 与
+  `app/test/fixtures/**` 由 `.gitattributes` 钉成 LF，DDP 容器 `.ddp` 标 `-text`
+  二进制——这些是 sha256 / golden 逐字节断言，别再让 `core.autocrlf` 改字节。
+  **`app/assets/three/**` 全部 `-text`**：`three.module.js` 被 `three_service.dart`
+  按 `threeModuleByteLength = 1272972` + sha256 硬校验，CRLF 会让它变 1,326,016 B，
+  Windows 上直接报「预览文件缺失」（2026-11-20 实机复现并修复）；`app/assets/engine/*.wasm`
+  同样 `-text`。新增「哈希/golden/字节锁定产物」目录时同样加 `.gitattributes` 规则。
+- **Windows 真机冒烟（2026-11-20，仓库外 diag/）**：`flutter run -d windows --debug`
+  + VM Service 直驱（`diag/vm_smoke_drive.dart` / `diag/smoke_run.ps1`）在真实应用里
+  依次打开设计/3D/视频/热应用四个工作台并截图，验证「同一套外壳」；`diag/seed_video_project.py`
+  造一个生成项目后视频工作台能显示并逐帧播放（实测 240 帧 / 8s，与 seeded 项目一致）；
+  `diag/vm_three_drive.dart` + `diag/smoke_run3d.ps1` 调 `ThreeService.preparePreview`
+  后 3D 工作台 WebView2 真渲染（这条冒烟就是抓出 three 资源 CRLF 字节漂移的入口）。
+- **Windows 路径/时序纪律（2026-11-20）**：源扫描守卫与路径断言必须先把 `\` 归一
+  成 `/` 再比较（`architecture_guard_test` / `acceptance_local_core_test` /
+  `toast_test` / `project_service_test` 已修）；`wasm_run` 的 Windows 加载器会给
+  无扩展名路径补 `.dll`：wasm-spike 测试在缺 `.dll` 垫片时会把 vendored 库复制到
+  带 `.dll` 的临时路径再加载（工作树里不再要求垫片；本机若放垫片也不计入 15 个
+  vendored 目标库）；RPC 宿主超限请求体先有界排空再回 413；`desktop_rpc_host_test`
+  的「对端消失 → keep-alive 取消」在 Windows loopback 不可观测（测试平台跳过，
+  取消链路由 `agent.cancel` 用例覆盖）。`engine_host_test` 的移动端首帧/p95 预算
+  按桌面原生执行器定，Windows（pulley 解释器）上测试按 ×4 余量判定
+  （`budgetFor()`，只放宽预算不断言语义）。
 
-## 已知限制（v0.1）
+## 已知限制（v0.1，2026-11-18 清理后）
 
-- 单一 OpenAI 兼容路径（用户决策 2026-11-13：撤掉 LiteLLM/Anthropic 桥；MiniMax 走 OpenAI 兼容 /v1）。非 openai 协议在 store 与 agent.py 双层拦截。
-- API Key 明文存本机 SharedPreferences；Keychain 未接。
-- 画布图片节点已支持网络图（cover 裁切，异步缓存）。
-- 演示模式使用 flow + 内置返回；尚未接 `session_event` 手势全量状态机。
-- 本地服务无鉴权，仅绑定 loopback；不要暴露到局域网。
-- App Sandbox 关闭；正式分发需重新设计 App Container/entitlement。
+- **Windows 执行器 = wasmtime 50 + pulley 解释器（仅 wasm_run 兜底，2026-11-20）**：
+  生产主路径已不走它（classic wasm 在 WebView2 里执行）；下面记录保留，供兜底排障：
+  原生 Cranelift 陷阱传输在 cdylib+宿主（dart/flutter_tester）环境必然
+  `panic in a function that cannot unwind` abort（wasmtime 20/26/30/50 ×
+  rustc 1.90/1.100 实测；纯 Rust exe 全部正常，属 Windows cdylib 平台缺陷）。
+  vendored DLL 改用 pulley 解释器 target（`config_api.sh wasmtime` +
+  `config.rs` 里 `target("pulley64-unknown-none")`），陷阱回落普通 Rust Err
+  → fuel 看门狗/超时恢复链路可用（engine_host_test 42/42 全绿，含此前在
+  Windows 从未跑通的 fuel spin 用例）。代价 ~5-15x 执行减速，render/apply
+  预算余量充足。DLL sha256 pin 在 `fetch_wasm_run_libs.sh`（07d75e17…）。
+  源码补丁（相对上游 main@23e36bdf）：wasmtime 依赖升级 + WASI 路径移除 +
+  fuel API 迁移（get/set_fuel u64 + 本地记账）+ wasm 执行点 catch_unwind。
+
+- **「连接桌面」宿主已接线**：桌面设置「运行方式」卡内可启停宿主、查看地址与
+  一次性连接码、切换 loopback/局域网并轮换连接码（默认关闭/临时端口/token 必须）。
+  后续项：暂无二维码配对；局域网地址只列 IPv4。
+- **旧 HTTP 路由已清零**：`api_shelf.dart` / `api_nonapp.dart`（死代码）已删除；
+  `play_view.dart` 的热区点击改走 `NoNDesignApi.tap`（本地引擎或 `/v1/rpc`）；
+  `dart_agent.dart` 的 `HttpEngineGate` 已删除（生产桥只有 `LocalEngineGate` 与
+  `_StoreEngineGate`）；`api.dart` 的 `getJson/postJson` 原始 HTTP 逃生口已删除。
+  `app/test/acceptance_local_core_test.dart` 的源码守卫会扫描 `app/lib`（去注释），
+  禁止旧运行时/旧路由回归；`assets/engine|three|video/` 这类资产路径与
+  `core/remote/` 的 `/v1` 契约是允许的。
+- `scripts/wf` 只保留开发期工具：`sync_engine.py`、`sync_models.py`、
+  `video_golden_check.py` 与 shell 入口。只服务旧 Python 服务端的测试/工具
+  （含 `engine_parity.py`、`compileall.sh`）已删除，不要再加回来。
+- 演示模式的热区点击在引擎不可用时仍会回落到本地 flow 导航（不是静默失败）。
+- `api == null` 仍被若干面板当作"未就绪"的早退条件（`inspector_panel.dart`、
+  `left_panel.dart` 等，文件归属批次 11/13）；这些入口在引擎/桌面都不可用时
+  仍是静默 return，需要改成 `CapabilityHub` 的显式提示。发布验收把它列为未清项。
+- **视频是代码动画**（用户裁决 2026-11-18）：时间线脚本 + 规范编译成算式，
+  逐帧 `frameSvg(t)` 在应用内实时播放，全平台同一套行为；**成片导出暂时屏蔽**
+  （`VideoService` 渲染代码保留，界面无入口）。既有 mp4 产物仍由艺术架播放。
+- 移动端本地引擎默认开启（WebView 内 classic wasm）；iOS/Android 真机 smoke 与
+  p95 证据仍待补，失败时如实回落「连接桌面」。
+- **OHOS 离屏 WebView 缺口**：`webview_all_ohos` 目前没有 `supportsOffscreenWebViews`
+  实现，OHOS 上 `startAuto` 会回落到 wasm_run（若该目标没有执行器则 engine_unavailable）；
+  补法是等上游实现或给 OHOS 走隐藏 `WebViewWidget` 宿主。
+- **Windows/Linux WebView 引擎尚未本机真机复验**：macOS WKWebView 已由
+  `integration_test/engine_webview_test.dart` 实跑通过；Windows WebView2 / Linux
+  WebKitGTK 采用同一 `OffscreenWebViewSession` 契约，需在对应机器上跑同一测试。
+- Android debug APK 构建链已修复（`MainActivity.kt` 非空收窄，1fa3a78），可
+  产出 debug APK（本会话未复跑 build 复证产物）；本机无 Android 设备/AVD，
+  arm64 wasmtime 加载与 `_in` ABI 的真机验收仍未完成。
+- 外部智能体（ACP）桌面独占；移动端按设计禁用。
+- **应用内 WebView 已统一**：3D / 热应用 / 视频 / 资料页共用 `webview_all`
+  （macOS/iOS WKWebView、Windows WebView2、Linux WebKitGTK、Android WebView）；
+  旧的 `webview_windows` 依赖与 `*_preview_win.dart` 已删除。视频 mp4 产物内嵌
+  播放的可用性取决于系统 WebView 编码器；失败仍保留「复制路径/在文件夹中显示」
+  降级面（`shelf_video_player_test.dart` 按能力矩阵断言）。
+- API Key 明文存本机 `SharedPreferences`（并镜像 `~/.nondesign/settings.json`）；
+  Keychain 未接。
 
 ## 版本
 
-`VERSION` = `0.1.0`（唯一版本源；`app/pubspec.yaml` 与 `server/main.py` 同步）。
+`VERSION` = `0.1.0`（唯一版本源；`app/pubspec.yaml` 同步）。文档状态见
+[docs/README.md](docs/README.md)（已实施 / 方案定稿 / 历史快照三态总纲）。

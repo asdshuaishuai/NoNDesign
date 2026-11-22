@@ -5,7 +5,7 @@
          服务器（含 WebView 加载 three/hotapp 预览页）都被系统拒绝。 -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="nondesign"
+        android:label="NaN"
         android:name="${applicationName}"
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher">

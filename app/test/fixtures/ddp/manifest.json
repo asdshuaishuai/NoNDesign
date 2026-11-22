@@ -1,0 +1,58 @@
+{
+ "bomb_9mib.ddp": {
+  "container_sha256": "9c6929323f704eaef6636de42bc3d696a0460837210a06771c1fddd03cd02610"
+ },
+ "crc_error.ddp": {
+  "container_sha256": "c26ef4e953892ed4bd3ed62f02593b68693811551c88cf60a8925764eebfca29"
+ },
+ "ddp1_fixed.ddp": {
+  "container_sha256": "a769689435848bc50cb22aad0f6d02807decb00ee1efc0e58a68d8be5645670b",
+  "nonce": "000102030405060708090a0b0c0d0e0f1011121314151617",
+  "plain_sha256": "00c374c84a10b13ed632dcad6b0813934adabe96542654fe23955331e56421af",
+  "salt": "000102030405060708090a0b0c0d0e0f"
+ },
+ "ddp2_mixed5296.ddp": {
+  "container_sha256": "9c3ed3489d6c4d98c17d25edbcd979dcebe3b0a02a7f488eb4bff46f382eacdc",
+  "plain_bytes": 5296,
+  "plain_sha256": "fb5faa4e76758684b915284ea2f7dd3c80f968505f7f0fb2b00d602ed5d89520"
+ },
+ "ddp2_rand1024.ddp": {
+  "container_sha256": "3a62ed693c34141122a296f74237cd52ce8a44169cfbbc2d34e4e05a1220c384",
+  "plain_bytes": 1024,
+  "plain_sha256": "21bd77836564fae72faa3566ee57777cf278b75836311f71a19088ea7b1a98dd"
+ },
+ "ddp2_rand65536.ddp": {
+  "container_sha256": "306c566f8055260f5449781bd665ef4d1329e637d2dbd0ec8fd7d80117d73ca9",
+  "plain_bytes": 65536,
+  "plain_sha256": "6b82004874f087eef162718d39956a66018120d88947674c21fc5879d729b426"
+ },
+ "ddp2_text1320k.ddp": {
+  "container_sha256": "782fefe26ff80038cb563806090d60aae5f298ee4e95a206898a7c61ae48fcb9",
+  "plain_bytes": 1319999,
+  "plain_sha256": "55ad0749b04928999e3bf0e5afe9833268a5036bd7f885be1166d0fb1a5226df"
+ },
+ "magic_invalid.ddp": {
+  "container_sha256": "71eb608ae842e45d76ebde05c6c8d36be4cb6f8e0fd4d4546d45c2b847260594"
+ },
+ "not_utf8.ddp": {
+  "container_sha256": "329ad98c4985bd4c82b5276499260267d53462e606b50c587afb64fff6b9ae09"
+ },
+ "plain_8mib_plus1.ddp": {
+  "container_sha256": "bd4c8d8ecd0504f9e17489eef6c87fe68f9150fac2f328050a515b0b45c155ef"
+ },
+ "short.ddp": {
+  "container_sha256": "908d27e4a551d7d6e1f195cb17a1b3e1210f8de5d2394a8833933e1756cafe2c"
+ },
+ "truncated.ddp": {
+  "container_sha256": "5a0c42fcff52c09a2c69d43d95e9e56c223b07b8989fd0ce7877b455ac61d1bb"
+ },
+ "truncated_frame.ddp": {
+  "container_sha256": "c916e6fdbf131ffc3dd67296e745d98c6b0cf0e1dcf2ab7e8c3cefd1db48ff15"
+ },
+ "version_unsupported.ddp": {
+  "container_sha256": "a7721574562b9cedcae8cf0c50ee980a2fd6fcd0994f19927d922f2f2a046f78"
+ },
+ "window_gt_23.ddp": {
+  "container_sha256": "f315ddb57296e362d7c87089333cdd2893964be6e881a7388fdacb61280ab4fe"
+ }
+}

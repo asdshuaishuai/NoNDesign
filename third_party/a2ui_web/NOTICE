@@ -1,0 +1,32 @@
+NoNDesign offline A2UI web preview page
+
+The generated page (app/assets/a2ui_web/) bundles the official A2UI web
+renderer and its runtime dependencies, all built from the pinned npm packages
+in this directory. The generated page contains no third-party network
+references: it is loaded from an inline HTML string and its Content-Security-
+Policy allows no connections (`default-src 'none'; connect-src 'none'`).
+
+A2UI project (Apache License 2.0, Copyright Google LLC)
+  https://github.com/a2ui-project/a2ui
+  - @a2ui/web_core 0.15.0
+  - @a2ui/lit 0.15.0
+
+Bundled transitive runtime components
+  - lit 3.3.3, lit-element 4.2.2, lit-html 3.3.3,
+    @lit/reactive-element 2.1.2, @lit/context 1.1.6  (BSD-3-Clause)
+  - @preact/signals-core 1.14.5                        (MIT)
+  - signal-polyfill 0.2.3                             (Apache-2.0)
+  - signal-utils 0.21.1                               (MIT)
+  - zod 3.25.76                                       (MIT)
+  - zod-to-json-schema 3.25.2                         (ISC)
+  - redos-detector 6.1.4                              (MIT)
+  - validate-color 2.2.4                              (MIT)
+
+Build-only tooling (never shipped in the app)
+  - esbuild 0.28.2                                    (MIT)
+  - happy-dom 21.0.4                                  (MIT)
+
+The full Apache License 2.0 text is in ./LICENSE. License texts for the
+transitive packages are in each package under node_modules/ after `npm ci`;
+run `node build.mjs` to regenerate the bundle and the exact version manifest
+(app/assets/a2ui_web/build-manifest.json lists every bundled package).

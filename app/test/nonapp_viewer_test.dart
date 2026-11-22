@@ -1,12 +1,17 @@
 // a2ui 载荷查看器（app/lib/widgets/nonapp_viewer.dart）widget 测试。
 //
 // 覆盖：① 静态 surface 渲染出节点（零服务依赖）；② 组件错误经 onError
-// 呈现在顶部红条；③ 动作回流以 SnackBar 明示（不触发网络/续跑）。
-import 'package:flutter/material.dart';
+// 呈现在顶部红条；③ 动作回流以通知（ToastService）明示（不触发网络/续跑）。
+//
+// 文案纪律（docs/copy-glossary.md）：用户可见文字不出现协议名，故断言用
+// 「本地预览」/「这个应用的内容不受支持」等用户词，而不是内部信封名。
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nondesign/core/theme.dart';
+import 'package:nondesign/core/toast_service.dart';
 import 'package:nondesign/widgets/nonapp_viewer.dart';
+import 'package:nondesign/widgets/toast_host.dart';
 
 final List<Object?> _surface = [
   {
@@ -31,10 +36,20 @@ final List<Object?> _surface = [
   },
 ];
 
-Widget _host(Widget child) => MaterialApp(
+Widget _host(Widget child, {ToastService? toasts}) {
+  // 注入独立通知服务：自动消退关闭（autoDismiss: false）——测试结束时不留
+  // 挂起的计时器，也不污染全局 ToastService.instance。
+  final service = toasts ?? ToastService(autoDismiss: false);
+  return ToastScope(
+    service: service,
+    child: MaterialApp(
       theme: AppTheme.build(dark: true),
+      builder: (context, inner) =>
+          ToastHost(service: service, child: inner ?? const SizedBox.shrink()),
       home: child,
-    );
+    ),
+  );
+}
 
 void main() {
   testWidgets('静态 surface 渲染：标题、文本与按钮都在，且无网络依赖', (tester) async {
@@ -44,12 +59,12 @@ void main() {
     expect(find.text('清单应用'), findsOneWidget);
     expect(find.text('旅行偏好'), findsOneWidget);
     expect(find.text('生成行程'), findsOneWidget);
-    expect(find.text('A2UI · 本地渲染'), findsOneWidget);
+    expect(find.text('本地预览'), findsOneWidget);
     // 无错误条
     expect(find.byIcon(Icons.error_outline), findsNothing);
   });
 
-  testWidgets('动作回流：点击按钮 → SnackBar 显示动作名与 context', (tester) async {
+  testWidgets('动作回流：点击按钮 → 通知显示动作名与 context', (tester) async {
     await tester.pumpWidget(_host(NonAppA2uiViewer(title: '清单应用', messages: _surface)));
     await tester.pump(const Duration(milliseconds: 60));
 
@@ -57,7 +72,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 120));
     await tester.pump(const Duration(milliseconds: 120));
 
-    expect(find.textContaining('动作 submit'), findsOneWidget);
+    // 通知（ToastService）而不是 ScaffoldMessenger 弹条（术语表 §7）。
+    expect(find.textContaining('收到一个操作：submit'), findsOneWidget);
     expect(find.textContaining('Tokyo'), findsOneWidget);
   });
 
@@ -89,8 +105,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 60));
 
       expect(find.byIcon(Icons.error_outline), findsOneWidget, reason: '错误必须可见');
-      expect(find.textContaining('组件错误'), findsOneWidget);
-      expect(find.textContaining('无法在本地渲染'), findsOneWidget);
+      expect(find.textContaining('这个应用的内容不受支持'), findsOneWidget);
+      expect(find.textContaining('这个应用暂时无法在本机显示'), findsOneWidget);
       expect(tester.takeException(), isNull, reason: '不得把结构错抛成渲染异常');
     }
   });
@@ -114,8 +130,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 60));
 
     expect(find.byIcon(Icons.error_outline), findsOneWidget, reason: '错误必须可见（顶部红条）');
-    expect(find.textContaining('组件错误'), findsOneWidget);
-    expect(find.textContaining('无法在本地渲染'), findsOneWidget);
+    expect(find.textContaining('这个应用的内容不受支持'), findsOneWidget);
+    expect(find.textContaining('这个应用暂时无法在本机显示'), findsOneWidget);
     expect(tester.takeException(), isNull, reason: '不得把结构错抛成渲染异常');
   });
 }

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../core/theme.dart';
 
@@ -64,7 +64,7 @@ class ArtShelfCard extends StatelessWidget {
                 _Badge(label: kindLabel),
                 if (a2ui) ...[
                   const SizedBox(width: 5),
-                  _Badge(label: 'A2UI', accent2: true),
+                  _Badge(label: '离线预览', accent2: true),
                 ],
                 const Spacer(),
                 _menu(context, p),
@@ -125,8 +125,8 @@ class ArtShelfCard extends StatelessWidget {
       itemBuilder: (ctx) => [
         _item(ctx, 'copy', Icons.copy_all_outlined, '复制路径'),
         if (onReveal != null) _item(ctx, 'reveal', Icons.folder_open_outlined, '在文件夹中显示'),
-        // 原型项目没有服务端作品集条目（kind 白名单只有 hotapp/video/three）：
-        // 对它们显示「移除」= 一条点了必失败、还会被服务端 400 静默吞掉的出路。
+        // 原型项目没有艺术架条目（kind 白名单只有热应用 / 视频 / 3D）：
+        // 对它们显示「移除」= 一条点了必失败、还会被旧后端静默吞掉的出路。
         if (onRemove != null) _item(ctx, 'remove', Icons.hide_source_outlined, '从艺术架移除'),
         if (onDelete3d != null) ...[
           const PopupMenuDivider(),

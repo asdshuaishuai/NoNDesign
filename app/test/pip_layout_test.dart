@@ -1,16 +1,20 @@
-// 画中画工作区 S4（docs/plan-chat-stream-shell.md §2/§5）的布局面回归：
-// - 900 宽（<1100）不并排，右缘出现常驻胶囊/手势条带；
-// - 点胶囊 → PipWindow 浮窗，内含 Workspace(embedded: true)；
-// - 头部拖动改位置；右下手柄缩放改尺寸且钳在 320×280 下限；
-// - 『全屏』铺满堆叠区、『✕』收回浮窗；
-// - 平板竖屏 768 与手机 390 打开浮窗后均无 RenderFlex 溢出。
-import 'package:flutter/material.dart';
+// 手机 / iPad 竖屏的「聊天全屏 + 工作区画中画」布局面回归（批次 12）。
+//
+//  * 聊天是主面，右缘常驻胶囊/手势条带；点胶囊才出现 PipWindow；
+//  * 浮窗内含 Workspace(embedded: true)，头部拖动改位置、右下手柄缩放，
+//    下限 320×280；
+//  * 『全屏』铺满堆叠区、『✕』收回浮窗，最大化态不记忆到下一次打开；
+//  * 浮窗 rect 持久化到 SharedPreferences：重启恢复（含拖动后的新几何）；
+//  * 390×844 / 844×390 / 768×1024 三档开浮窗都没有 RenderFlex 溢出。
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:nondesign/core/models.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
+import 'package:nondesign/widgets/chat_pip_shell.dart';
 import 'package:nondesign/widgets/pip_window.dart';
 import 'package:nondesign/widgets/shell_host.dart';
 import 'package:nondesign/widgets/workspace.dart';
@@ -41,10 +45,9 @@ Widget _app(AppStore store) => ChangeNotifierProvider<AppStore>.value(
       value: store,
       child: MaterialApp(
         theme: AppTheme.build(dark: true),
-        scaffoldMessengerKey: rootMessengerKey,
         builder: (context, child) =>
             withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
-        home: const ChatWorkspaceHost(),
+        home: const ShellHost(),
       ),
     );
 
@@ -54,19 +57,22 @@ Future<void> _pumpAt(WidgetTester tester, AppStore store, Size size) async {
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(_app(store));
-  await tester.pump(const Duration(milliseconds: 150));
+  // 壳层持久化读取是异步的（SharedPreferences），一帧让它落地。
+  await tester.pump(const Duration(milliseconds: 80));
 }
 
 Rect _pipRect(WidgetTester tester) =>
     tester.widget<PipWindow>(find.byType(PipWindow)).rect;
 
 void main() {
-  testWidgets('900 宽：不并排、右缘条带与胶囊在场，无浮窗', (tester) async {
-    await _pumpAt(tester, _store(), const Size(900, 800));
+  setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  testWidgets('390×844：聊天全屏、无工作区；右缘条带与胶囊在场', (tester) async {
+    await _pumpAt(tester, _store(), const Size(390, 844));
+
+    expect(find.byType(ChatPiPShell), findsOneWidget);
     expect(find.byKey(const ValueKey('chat-input')), findsOneWidget);
-    expect(find.byType(Workspace), findsNothing, reason: '<1100 不常驻分栏');
-    expect(find.byKey(const ValueKey('chat-shell-workspace-pane')), findsNothing);
+    expect(find.byType(Workspace), findsNothing, reason: '手机不常驻工作区');
     expect(find.byType(PipWindow), findsNothing);
     expect(find.byKey(const ValueKey('pip-edge-handle')), findsOneWidget);
     expect(find.byKey(const ValueKey('pip-edge-capsule')), findsOneWidget);
@@ -74,7 +80,7 @@ void main() {
   });
 
   testWidgets('点胶囊 → PipWindow 出现且内含嵌入工作区', (tester) async {
-    await _pumpAt(tester, _store(), const Size(900, 800));
+    await _pumpAt(tester, _store(), const Size(390, 844));
 
     await tester.tap(find.byKey(const ValueKey('pip-edge-capsule')));
     await tester.pump(const Duration(milliseconds: 100));
@@ -84,14 +90,13 @@ void main() {
         reason: '开窗后条带让位（收回即恢复）');
     expect(find.byType(Workspace), findsOneWidget);
     expect(tester.widget<Workspace>(find.byType(Workspace)).embedded, isTrue);
-    expect(find.byKey(const ValueKey('chat-pip-workspace-pane')), findsOneWidget);
     expect(find.byKey(const ValueKey('chat-input')), findsOneWidget,
         reason: '浮窗覆盖在聊天之上，聊天仍在下层');
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('头部拖动改位置；右下手柄缩放且不小于 320×280', (tester) async {
-    await _pumpAt(tester, _store(), const Size(900, 800));
+    await _pumpAt(tester, _store(), const Size(390, 844));
     await tester.tap(find.byKey(const ValueKey('pip-edge-capsule')));
     await tester.pump(const Duration(milliseconds: 100));
 
@@ -103,26 +108,25 @@ void main() {
     expect(moved.top, lessThan(before.top), reason: '头部拖动改 top');
     expect(moved.size, before.size, reason: '拖动不改尺寸');
 
-    await tester.drag(find.byKey(const ValueKey('pip-resize')), const Offset(90, 60));
+    await tester.drag(find.byKey(const ValueKey('pip-resize')), const Offset(40, 20));
     await tester.pump(const Duration(milliseconds: 50));
     final resized = _pipRect(tester);
     expect(resized.width, greaterThan(moved.width));
     expect(resized.height, greaterThan(moved.height));
 
-    // 反向大幅拖 → 钳在最小 320×280（host 收口）。
+    // 反向大幅拖 → 钳在最小 320×280（宿主收口）。
     await tester.drag(find.byKey(const ValueKey('pip-resize')), const Offset(-900, -900));
     await tester.pump(const Duration(milliseconds: 50));
     final min = _pipRect(tester);
     // Rect 的 width/height getter 由 LTRB 反推，left 为小数时可能有 1e-13 级
-    // 误差（8.0 + 320.0 - 8.0 在二进制里不总是精确）——断言语义是「不小于
-    // 320×280」，用容差而不是按位相等。
+    // 误差——断言语义是「不小于 320×280」，用容差而不是按位相等。
     expect(min.width, greaterThanOrEqualTo(kPipMinSize.width - 0.001));
     expect(min.height, greaterThanOrEqualTo(kPipMinSize.height - 0.001));
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('右缘左划（向窗内）也能拉出浮窗', (tester) async {
-    await _pumpAt(tester, _store(), const Size(900, 800));
+    await _pumpAt(tester, _store(), const Size(390, 844));
     expect(find.byType(PipWindow), findsNothing);
 
     // kPipOpensFromRightEdge=true：从右缘向左划超过阈值即开（方向常量若
@@ -134,17 +138,17 @@ void main() {
   });
 
   testWidgets('『全屏』铺满堆叠区 → 再点还原；『✕』收回浮窗', (tester) async {
-    await _pumpAt(tester, _store(), const Size(900, 800));
+    await _pumpAt(tester, _store(), const Size(390, 844));
     await tester.tap(find.byKey(const ValueKey('pip-edge-capsule')));
     await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.byKey(const ValueKey('pip-max')));
     await tester.pump(const Duration(milliseconds: 80));
-    expect(_pipRect(tester), const Rect.fromLTWH(0, 0, 900, 800));
+    expect(_pipRect(tester), const Rect.fromLTWH(0, 0, 390, 844));
 
     await tester.tap(find.byKey(const ValueKey('pip-max')));
     await tester.pump(const Duration(milliseconds: 80));
-    expect(_pipRect(tester).width, lessThan(900), reason: '还原回浮窗尺寸');
+    expect(_pipRect(tester).width, lessThan(390), reason: '还原回浮窗尺寸');
 
     await tester.tap(find.byKey(const ValueKey('pip-close')));
     await tester.pump(const Duration(milliseconds: 80));
@@ -154,18 +158,17 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('最大化下关闭 → 重开回到原浮窗尺寸（pip-4：_pipMax 复位）', (tester) async {
-    await _pumpAt(tester, _store(), const Size(900, 800));
+  testWidgets('最大化下关闭 → 重开回到原浮窗尺寸（_pipMax 复位）', (tester) async {
+    await _pumpAt(tester, _store(), const Size(390, 844));
     await tester.tap(find.byKey(const ValueKey('pip-edge-capsule')));
     await tester.pump(const Duration(milliseconds: 100));
 
     final original = _pipRect(tester);
-    expect(original.width, lessThan(900), reason: '起点是普通浮窗，不是最大化');
+    expect(original.width, lessThan(390), reason: '起点是普通浮窗，不是最大化');
 
-    // ✕ 关闭路径：最大化态不得记忆到下一次打开。
     await tester.tap(find.byKey(const ValueKey('pip-max')));
     await tester.pump(const Duration(milliseconds: 80));
-    expect(_pipRect(tester), const Rect.fromLTWH(0, 0, 900, 800));
+    expect(_pipRect(tester), const Rect.fromLTWH(0, 0, 390, 844));
 
     await tester.tap(find.byKey(const ValueKey('pip-close')));
     await tester.pump(const Duration(milliseconds: 80));
@@ -177,59 +180,42 @@ void main() {
     expect(_pipRect(tester), original, reason: '重开回到原浮窗 rect（尺寸与位置）');
     expect(tester.widget<PipWindow>(find.byType(PipWindow)).maximized, isFalse,
         reason: '最大化态随关闭复位');
+    expect(tester.takeException(), isNull);
+  });
 
-    // 面板内「收回浮窗」路径（slim header）同样复位。
-    await tester.tap(find.byKey(const ValueKey('pip-max')));
-    await tester.pump(const Duration(milliseconds: 80));
-    expect(_pipRect(tester), const Rect.fromLTWH(0, 0, 900, 800));
-
-    await tester.tap(find.byKey(const ValueKey('chat-shell-collapse')));
-    await tester.pump(const Duration(milliseconds: 80));
-    expect(find.byType(PipWindow), findsNothing);
-
+  testWidgets('浮窗 rect 持久化：预置几何在重启后恢复', (tester) async {
+    const stored = Rect.fromLTWH(24, 96, 340, 500);
+    SharedPreferences.setMockInitialValues({
+      ShellStorage.pipRectKey: '${stored.left},${stored.top},${stored.width},${stored.height}',
+    });
+    await _pumpAt(tester, _store(), const Size(390, 844));
     await tester.tap(find.byKey(const ValueKey('pip-edge-capsule')));
     await tester.pump(const Duration(milliseconds: 100));
-    expect(_pipRect(tester), original, reason: '收回路径同样回到原 rect');
-    expect(tester.widget<PipWindow>(find.byType(PipWindow)).maximized, isFalse);
+    expect(_pipRect(tester), stored, reason: '重启恢复到持久化的浮窗 rect');
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('分栏『全屏工作区』在宿主内铺满，再点还原（view 不变）', (tester) async {
-    await _pumpAt(tester, _store(), const Size(1280, 860));
-    expect(find.byKey(const ValueKey('chat-input')), findsOneWidget);
-
-    await tester.tap(find.byKey(const ValueKey('chat-shell-fullscreen')));
-    await tester.pump(const Duration(milliseconds: 80));
-    expect(find.byKey(const ValueKey('chat-input')), findsNothing,
-        reason: '工作区铺满宿主（宿主内全屏，不是换路由）');
-    expect(find.byType(Workspace), findsOneWidget);
-    expect(find.byKey(const ValueKey('chat-shell-workspace-pane')), findsOneWidget);
-
-    await tester.tap(find.byKey(const ValueKey('chat-shell-fullscreen')));
-    await tester.pump(const Duration(milliseconds: 80));
-    expect(find.byKey(const ValueKey('chat-input')), findsOneWidget,
-        reason: '还原回分栏');
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('浮窗内『全屏工作区』= 最大化浮窗（不换路由）', (tester) async {
-    await _pumpAt(tester, _store(), const Size(900, 800));
+  testWidgets('拖动后的几何写回 SharedPreferences，重建壳后恢复', (tester) async {
+    await _pumpAt(tester, _store(), const Size(390, 844));
     await tester.tap(find.byKey(const ValueKey('pip-edge-capsule')));
     await tester.pump(const Duration(milliseconds: 100));
 
-    await tester.tap(find.byKey(const ValueKey('chat-shell-fullscreen')));
+    await tester.drag(find.byKey(const ValueKey('pip-header')), const Offset(-60, -40));
+    await tester.pump(const Duration(milliseconds: 60));
+    final dragged = _pipRect(tester);
+    await tester.tap(find.byKey(const ValueKey('pip-close')));
     await tester.pump(const Duration(milliseconds: 80));
-    expect(_pipRect(tester), const Rect.fromLTWH(0, 0, 900, 800));
-    expect(find.byKey(const ValueKey('chat-pip-window')), findsOneWidget,
-        reason: '浮窗仍在（宿主内最大化，review pip-1）');
 
-    await tester.tap(find.byKey(const ValueKey('chat-shell-fullscreen')));
-    await tester.pump(const Duration(milliseconds: 80));
-    expect(_pipRect(tester).width, lessThan(900), reason: '还原回浮窗尺寸');
+    // 「重启」：销毁并重建壳（同一份 SharedPreferences）。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await _pumpAt(tester, _store(), const Size(390, 844));
+    await tester.tap(find.byKey(const ValueKey('pip-edge-capsule')));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(_pipRect(tester), dragged, reason: '拖动后的 rect 被持久化并恢复');
     expect(tester.takeException(), isNull);
   });
 
-  for (final size in const [Size(768, 1024), Size(390, 844)]) {
+  for (final size in const [Size(390, 844), Size(844, 390), Size(768, 1024), Size(834, 1194)]) {
     testWidgets('${size.width.toInt()}×${size.height.toInt()}：聊天流 + 浮窗无溢出', (tester) async {
       await _pumpAt(tester, _store(), size);
       expect(tester.takeException(), isNull, reason: '聊天流单列');

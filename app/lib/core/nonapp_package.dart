@@ -1,7 +1,8 @@
 // `.nonapp` 单文件包（文件即应用 v2）的客户端解析与校验。
 //
-// 容器与字段契约见 docs/plan-chat-stream-shell.md §1.1，服务端权威实现是
-// server/nonapp_agent.py（校验顺序与 code 与本文件一一对齐）：
+// 容器与字段契约见 docs/plan-chat-stream-shell.md §1.1。批次 07 起服务端
+// 不再参与运行时：本文件就是包契约的唯一实现（校验顺序与稳定 code 以这里
+// 为准；旧的在线实现已退役，保留稳定 code 是为了旧包/旧日志仍可对照）：
 //
 //   manifest.json          formatVersion / id / name / title / renderer /
 //                          createdAt / minAppVersion（可选 brief）
@@ -14,28 +15,30 @@
 // OS 关联）。业务数据（app.db / DataModel 运行时数据）不随包走：导入 =
 // 全新实例。
 //
-// 服务端在线时它是权威（/hotapp/import 会重跑全部校验）。因此 HTML 门分两层：
+// HTML 门分两层（历史兼容 + 本机安全）：
 //
-//   · `assertHtmlServerCompat`（parse 用）：**与服务端 _html_ok 同判据**，
-//     不比它严——在线导入若比服务端严，服务端接受的包（如 `<a href="https://…">`，
-//     服务端正则只覆盖 script/link/img）会在客户端解不开，导出→打开自家应用断链。
-//   · `assertHtmlOfflineSafe`（NonAppCache 写缓存 / file:// 打开前用）：允许
-//     比服务端更严（误拒可接受），绝不允许更松（file:// 下没有 CSP 兜底）。
+//   · `assertHtmlServerCompat`（parse 用）：**旧在线实现的宽容判据**，不比它
+//     严——旧包（如 `<a href="https://…">`，旧正则只覆盖 script/link/img）
+//     要能继续被解析，导出→再导入不断链。
+//   · `assertHtmlOfflineSafe`（安装进本地库 / 写预览缓存前用）：允许比宽容
+//     面更严（误拒可接受），绝不允许更松（file:// 下只有 CSP 兜底）。
 //
-// 漂移风险：服务端改了 hotapp_agent.py:185-227 的三条正则，要回来对
-// `assertHtmlServerCompat`（同判据）与 `assertHtmlOfflineSafe`（更严面）。
+// 宽容判据的权威在本文件：旧在线实现 `server/hotapp_agent.py:185-227` 曾用
+// 下面这套正则，已随 de-Python 迁移（批次 15，2026-11-18）退场——不再有
+// 「改一侧必须改另一侧」的漂移对照物，`assertHtmlServerCompat` 以本文件内
+// 实现的这套语义为唯一判据，改动即影响旧包兼容面，须连同测试一起裁决。
 //
-//   服务端（server/hotapp_agent.py:185-227）：
+//   旧正则（考古存档，文件已删）：
 //     _ATTR_REF_RE = <(script|link|img) ... (src|href|srcset)="...">   (re.I|re.S)
 //     _CSS_URL_RE  = url( "..." | '...' | ... )
 //     _CSS_IMPORT_RE = @import ( url( "..."|'...'|... ) | "..." | '...' | ... )
 //     _is_external_ref(v) = v 小写以 http:// | https:// | // 开头，或以 / 开头
 //     srcset 按逗号切分，每段取第一个空白前的 token 再判
 //
-//   离线更严面：属性面更宽（多认 iframe/video/source/a/... 的 src/href/poster/
+//   离线更严面：属性面更宽（多认 iframe、video、source、a 等元素的 src/href/poster/
 //   data），且额外全文扫 http(s)://；`//` 只在引用位置拒（JS 行注释里的
 //   `//` 不是外链）。唯一豁免：内联 SVG 的 xmlns 声明（那是命名空间标识，
-//   不是可加载引用，服务端也不拦）。
+//   不是可加载引用，旧在线实现同样不拦）。
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -47,7 +50,9 @@ import 'package:archive/archive.dart';
 /// `version:` 手工同步——漂移风险已登记在施工记录里。
 const String nonAppClientVersion = '0.1.0';
 
-/// 与 server/nonapp_agent.py 同一套上限（改一侧必须改另一侧）。
+/// 上限以本文件为唯一权威。旧在线实现 server/nonapp_agent.py 曾用同一套值，
+/// 该文件已随 de-Python 迁移（批次 15）退场，无同步对象；改这里的值即改变
+/// 包格式的兼容边界，须连同 nonapp_* 测试一起裁决。
 const int nonAppFormatVersion = 1;
 const int nonAppMaxPackageBytes = 8 * 1024 * 1024;
 const int nonAppMaxEntryBytes = 8 * 1024 * 1024;
@@ -65,7 +70,8 @@ const Set<String> nonAppAllowedEntries = {
   'payload/prompt.txt',
 };
 
-/// 稳定的失败码（与服务端 `nonapp_*` 同形，SnackBar 直接显示）。
+/// 稳定的失败码（沿用 `nonapp_*` 形状，便于日志/测试对照；界面经
+/// `nonAppExceptionMessage` 翻成一句人话，绝不直接显示 code）。
 class NonAppException implements Exception {
   const NonAppException(this.code, this.message);
 
@@ -80,6 +86,12 @@ class NonAppException implements Exception {
 }
 
 /// manifest.json 的强类型视图（字段校验见 [NonAppPackage.parse]）。
+/// 热应用类型：用户直接描述生成的可用应用。
+const String nonAppOriginApp = 'app';
+
+/// 热应用类型：由设计原型生成的验证式 demo（只验证逻辑与交互可行性）。
+const String nonAppOriginPrototype = 'prototype';
+
 class NonAppManifest {
   const NonAppManifest({
     required this.formatVersion,
@@ -90,6 +102,7 @@ class NonAppManifest {
     required this.createdAt,
     required this.minAppVersion,
     this.brief,
+    this.origin = nonAppOriginApp,
   });
 
   final int formatVersion;
@@ -103,7 +116,14 @@ class NonAppManifest {
   final String minAppVersion;
   final String? brief;
 
+  /// `app` = 用户直接描述生成的可用应用；`prototype` = 由设计原型生成的
+  /// 验证式 demo（只验证逻辑与交互可行性）。缺失按 `app` 处理（旧包兼容）。
+  final String origin;
+
   bool get isA2ui => renderer == 'a2ui';
+
+  /// 是否为「原型验证」类型。
+  bool get isPrototypeDemo => origin == nonAppOriginPrototype;
 
   Map<String, dynamic> toJson() => {
         'formatVersion': formatVersion,
@@ -113,6 +133,7 @@ class NonAppManifest {
         'renderer': renderer,
         'createdAt': createdAt,
         'minAppVersion': minAppVersion,
+        'origin': origin,
         if (brief != null) 'brief': brief,
       };
 }
@@ -400,7 +421,7 @@ NonAppManifest _parseManifest(Uint8List raw, String clientVersion) {
   final minAppVersionStr = minAppVersion;
   if (compareVersions(clientVersion, minAppVersionStr) < 0) {
     throw NonAppException(
-        'nonapp_requires_app:$minAppVersionStr', '这个应用需要 NoNDesign $minAppVersionStr 及以上（当前 $clientVersion）');
+        'nonapp_requires_app:$minAppVersionStr', '这个应用需要 NaN $minAppVersionStr 及以上（当前 $clientVersion）');
   }
 
   final brief = doc['brief'];
@@ -417,6 +438,7 @@ NonAppManifest _parseManifest(Uint8List raw, String clientVersion) {
     createdAt: createdAtInt,
     minAppVersion: minAppVersionStr,
     brief: brief as String?,
+    origin: doc['origin'] == nonAppOriginPrototype ? nonAppOriginPrototype : nonAppOriginApp,
   );
 }
 
@@ -682,9 +704,35 @@ void _assertNoA2uiExternalUrls(Object? node) {
         throw NonAppException(
             'nonapp_a2ui_external_refs', 'a2ui 载荷含外链地址（$value）——必须零外链本地渲染');
       }
+      // 运行时拼接的地址在字面量层面看不出来（`'${a}${b}'`），但拼接后的
+      // URL 一定含 `://`；data model 里的碎片也在这里被拦下。
+      if (v.contains('://')) {
+        throw NonAppException(
+            'nonapp_a2ui_external_refs', 'a2ui 载荷含外链地址片段（$value）——必须零外链本地渲染');
+      }
       return;
     }
     if (value is Map) {
+      // 函数调用（v1.0 用 `@call`，v0.9 用 `call`）可以在运行时从 data model
+      // 拼出地址：basic 目录的 formatString 就是官方提供的拼接函数，
+      // Image.network 会把结果直接当 URL 请求。不可信 .nonapp 只允许
+      // 「无绑定的静态模板」，openUrl 一律拒绝（查看器也不提供回调）。
+      final call = value['@call'] ?? value['call'];
+      if (call is String) {
+        final name = call.trim();
+        if (name == 'openUrl') {
+          throw const NonAppException(
+              'nonapp_a2ui_external_refs', 'a2ui 载荷含打开外链的动作——必须零外链本地渲染');
+        }
+        if (name == 'formatString') {
+          final args = value['args'];
+          final template = args is Map ? args['value'] : null;
+          if (template is! String || template.contains(r'$') || template.contains('{')) {
+            throw const NonAppException(
+                'nonapp_a2ui_external_refs', 'a2ui 载荷含动态拼接文本（可能拼出外链）——必须零外链本地渲染');
+          }
+        }
+      }
       final isSurfaceEnvelope = value.containsKey('surfaceId');
       value.forEach((key, child) {
         if (isSurfaceEnvelope && key.toString() == 'catalogId') return;
@@ -749,7 +797,7 @@ final RegExp _serverAttrRefRe = RegExp(
   dotAll: true,
 );
 
-/// 离线预筛的属性面：比服务端更宽（iframe/video/a/... 的 src|href|poster…）
+/// 离线预筛的属性面：比旧后端更宽（iframe、video、a 等元素的 src|href|poster…）
 /// ——只严不松是允许的。
 final RegExp _offlineAttrRefRe = RegExp(
   r'''<(?:script|link|img|iframe|video|audio|source|embed|object|track|input|a)\b[^>]*?\b(?:src|href|srcset|poster|data)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))''',
@@ -801,11 +849,12 @@ void _assertHtmlStructure(String html) {
   }
 }
 
-/// **服务端等价**门（在线导入用）：与 `hotapp._html_ok` 同一引用面。
+/// **旧在线实现的等价**门（parse 用）：与历史 `_html_ok` 同一引用面。
 ///
-/// 在线路径的权威是服务端——客户端这里只做「明显会被服务端拒的包提前拒掉」，
-/// 不能比服务端严：否则服务端接受的包（如 `<a href="https://…">`，服务端
-/// 正则只覆盖 script/link/img）会在客户端解不开，导出→打开自家应用走不通。
+/// 这一层只做「旧实现会拒的包提前拒掉」，不能比它严：否则旧实现接受的包
+/// （如 `<a href="https://…">`，旧正则只覆盖 script/link/img）会在客户端
+/// 解不开，导出→再导入自家应用走不通。真正落盘/打开前的安全门是
+/// `assertHtmlOfflineSafe`。
 void assertHtmlServerCompat(String html) {
   final found = _collectRefs(html, _serverAttrRefRe);
   if (found.isNotEmpty) {
@@ -815,7 +864,7 @@ void assertHtmlServerCompat(String html) {
   _assertHtmlStructure(html);
 }
 
-/// **离线**门（file:// 打开前）：比服务端 `_html_ok` 只严不松。
+/// **离线**门（安装进本地库 / file:// 打开前）：只严不松。
 ///
 /// 抛 [NonAppException]（`nonapp_html_invalid` / `nonapp_html_external_refs`）。
 /// file:// 下没有服务端 CSP 与零外链门，这一层就是唯一防线。
@@ -831,7 +880,7 @@ void assertHtmlOfflineSafe(String html) {
         'nonapp_html_external_refs', 'HTML 含 http(s) 外链引用——离线打开必须全内联零外链');
   }
 
-  // 3) 更宽的引用面（iframe/video/a/... + poster/data）
+  // 3) 更宽的引用面（iframe、video、a 等元素 + poster/data）
   final found = _collectRefs(html, _offlineAttrRefRe);
   if (found.isNotEmpty) {
     throw NonAppException(
@@ -839,28 +888,30 @@ void assertHtmlOfflineSafe(String html) {
   }
 }
 
-/// 服务端 `/hotapp/page` 的 CSP（server/main.py `_HOTAPP_PAGE_CSP`）。
+/// 本地预览的 CSP（沿用历史实现同一条策略）。
 ///
-/// file:// 离线页没有 HTTP 响应头，只能把同一条策略经 `<meta http-equiv>`
-/// 注入——它是「零外链」静态扫描之外的第二道防线：JS 字符串拼接/编码的
-/// 地址绕过扫描，但过不了 CSP（review nonapp-5）。**改服务端策略必须同步
-/// 这里**，`scripts/wf/test_nonapp.py` 对两处字符串做对账。
+/// file:// 页没有 HTTP 响应头，只能把策略经 `<meta http-equiv>` 注入——它是
+/// 「零外链」静态扫描之外的第二道防线：JS 字符串拼接/编码的地址绕过扫描，
+/// 但过不了 CSP（review nonapp-5）。策略收紧/放宽都要同时更新这里的测试
+/// 断言（CSP 必须先于页面内容生效）。
 const String nonAppOfflineCsp =
     "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
     "img-src data: blob:; font-src data:; media-src data: blob:; "
     "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
-/// 把 [nonAppOfflineCsp] 以 meta 注入 `<head>` 的第一个标签之后（无 `<head>`
-/// 则置于文档最前）：策略必须早于页面脚本生效。幂等性不保证——缓存写入是
+/// 把 [nonAppOfflineCsp] 以 meta 注入**文档最前**（DOCTYPE 之后）：策略必须
+/// 早于页面上的第一个脚本生效。
+///
+/// 早期实现插在 `<head>` 的第一个标签之后，但 HTML 解析器允许内联
+/// `<script>` 出现在 `<head>` 之前（"before head" 插入模式）——这样的脚本
+/// 会先执行，CSP meta 反而晚到。把它放在 DOCTYPE 之后（没有 DOCTYPE 就放在
+/// 字节 0），无论包把脚本放在哪里都先吃到策略。幂等性不保证——缓存写入是
 /// 一次性动作，对同一载荷重复注入只会叠一条等价策略。
 String injectNonAppCsp(String html) {
   final meta =
       '<meta http-equiv="Content-Security-Policy" content="$nonAppOfflineCsp">';
-  final lower = html.toLowerCase();
-  final headIdx = lower.indexOf('<head');
-  if (headIdx >= 0) {
-    final headEnd = html.indexOf('>', headIdx);
-    if (headEnd >= 0) return html.replaceRange(headEnd + 1, headEnd + 1, meta);
-  }
-  return '$meta$html';
+  // 保留开头的 DOCTYPE（否则文档进入 quirks mode）；没有就以字节 0 为锚。
+  final doctype = RegExp(r'^\s*<!doctype[^>]*>', caseSensitive: false).firstMatch(html);
+  final index = doctype?.end ?? 0;
+  return html.replaceRange(index, index, meta);
 }

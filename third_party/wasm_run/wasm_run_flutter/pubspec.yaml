@@ -1,0 +1,57 @@
+name: wasm_run_flutter
+description: "Vendored Flutter platform bindings for the wasm_run executor."
+version: 0.2.0+1
+homepage: https://github.com/juancastillo0/wasm_run
+publish_to: none
+
+# Vendored copy of wasm_run_flutter 0.2.0+1 (MIT, LICENSE included).
+#
+# Two intentional changes:
+#  1. iOS/macOS stub: upstream's `EnforceBundling.swift` calls
+#     `dummy_method_to_enforce_bundling()`, which requires the Rust library to be
+#     statically linked. We ship the upstream *dynamic* library through the
+#     wasm_run build hook, so the stub is neutralised (see
+#     ios/Classes/EnforceBundling.swift).
+#  2. android/linux/windows are Dart-only platforms (see the comment below the
+#     plugin map): the executor library arrives as a wasm_run CodeAsset, so this
+#     package has no native code or platform directory there.
+# Everything else (Dart registration, web asset loader) is unchanged.
+
+environment:
+  sdk: ^3.10.0
+  flutter: '>=3.38.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  plugin_platform_interface: ^2.0.2
+  flutter_web_plugins:
+    sdk: flutter
+  wasm_run: ^0.2.0
+
+flutter:
+  plugin:
+    platforms:
+      # android/linux/windows 只做 Dart 注册（dartPluginClass），**不是**
+      # ffiPlugin：本仓启动加载的动态库由 wasm_run 的构建 hook 以 CodeAsset
+      # 交付，wasm_run_flutter 在这三个平台上没有自己的原生代码，也没有
+      # android/linux/windows 目录。上游把它们标成 ffiPlugin 只是因为带了一个
+      # 空的 CMake 桩；照抄会让 Flutter 的 Gradle 插件加载器 (AGP 9) 或桌面
+      # CMake 去 add_subdirectory 一个不存在的目录（Android 门禁曾因此失败：
+      # "Plugin directory does not exist: …/wasm_run_flutter/android"）。
+      # Dart 注册照旧进入 dart_plugin_registrant（asset loader 仍被配置）。
+      android:
+        dartPluginClass: WasmRunFlutterNative
+      ios:
+        ffiPlugin: true
+        dartPluginClass: WasmRunFlutterNative
+      linux:
+        dartPluginClass: WasmRunFlutterNative
+      macos:
+        ffiPlugin: true
+        dartPluginClass: WasmRunFlutterNative
+      windows:
+        dartPluginClass: WasmRunFlutterNative
+      web:
+        pluginClass: WasmRunFlutterWeb
+        fileName: wasm_run_flutter_web.dart

@@ -1,5 +1,5 @@
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -8,6 +8,7 @@ import '../plugins/registry.dart';
 import 'portfolio_view.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import '../core/toast_service.dart';
 import 'canvas_view.dart';
 import 'command_palette.dart';
 import 'common.dart';
@@ -15,33 +16,29 @@ import 'docs_view.dart';
 import 'left_panel.dart';
 import 'play_view.dart';
 import 'rail.dart';
-import 'right_panel.dart';
+import 'workspace_inspector.dart';
+import 'workspace_chrome.dart';
 import 'settings_dialog.dart';
 import 'status_bar.dart';
 import 'title_bar.dart';
 
-/// 插件快捷键数字键池（⌘5 起）；池容量即同时可注册插件数上限。
-/// 消费点在 main.dart 根级 bindings——workspace 级 CallbackShortcuts 在
-/// 插件视图内不挂载（视图路由早退），插件入口键必须活在根级才能
-/// 「进得去也出得来」。
-const pluginDigitKeys = [
-  LogicalKeyboardKey.digit5,
-  LogicalKeyboardKey.digit6,
-  LogicalKeyboardKey.digit7,
-  LogicalKeyboardKey.digit8,
-  LogicalKeyboardKey.digit9,
-];
-
 class Workspace extends StatefulWidget {
   /// 嵌入式宿主（聊天流常驻分栏 / 画中画浮窗，docs/plan-chat-stream-shell.md
-  /// §2 S4）：跳过 TitleBar/StatusBar 与 play/portfolio/plugin 全屏早退，
+  /// §2 S4）：跳过 TitleBar/StatusBar 与 play、portfolio、plugin 全屏早退，
   /// 面板断点收紧（左栏 <760 隐藏、右栏 <1100 走 sheet）——分栏本身已有
   /// chat 占宽，再按全屏断点摊三栏会把画布压到不可用宽度。嵌入时窄轨换
   /// [_EmbeddedRail]（只做面板局部导航）且画板条隐藏全局视图入口：宿主内
   /// 任何 setView 都会把聊天流整块换掉，触屏用户回不来（review pip-1）。
   final bool embedded;
 
-  const Workspace({super.key, this.embedded = false});
+  /// 是否渲染 Workspace 自带的 348 右栏（NaN/检查）。
+  ///
+  /// 桌面壳（批次 12）把右侧唯一窄栏交给 `ChatRail`（聊天/NaN/检查），
+  /// 这里必须传 false——否则 348 的 RightPanel 与窄栏会形成双栏，把画布
+  /// 压到不可用宽度。独立使用 Workspace（手机经典主面、测试）时保持默认 true。
+  final bool showRightPanel;
+
+  const Workspace({super.key, this.embedded = false, this.showRightPanel = true});
 
   @override
   State<Workspace> createState() => _WorkspaceState();
@@ -87,29 +84,38 @@ class _WorkspaceState extends State<Workspace> {
     final store = context.watch<AppStore>();
     final p = context.palette;
     // 全屏视图早退只在完整壳里生效：嵌入式宿主（聊天流分栏 / 画中画）里
-    // store.view 恒为 'chat'，这些分支不适用；portfolio/plugin 是整壳视图，
-    // main.dart 会先路由到全屏 Workspace（embedded=false）。
+    // store.view 恒为 'chat'，这些分支不适用。portfolio / play 由 main.dart
+    // 先路由到全屏 Workspace（embedded=false）。
+    // 插件工作台（`plugin:*`）**不再**在这里早退：四个工作台外壳统一（用户
+    // 裁决 2026-11-20）——3D / 视频 / 热应用与设计共用同一套 TitleBar / 左侧
+    // 图标轨 / 主区 / 状态栏，插件内容只占「设计画布」那块主区（见 _center
+    // 与 workspace_chrome.dart）。桌面壳里它仍是左侧固定工作区、右侧 NaN
+    // 常驻；手机聊天优先壳里由 ChatPiPShell 的 classic face 整屏渲染。
     if (!widget.embedded) {
       if (store.view == 'play') {
         return Scaffold(backgroundColor: p.bg, body: const SafeArea(child: PlayView()));
       }
-      // 作品集/插件工作台：不进设计壳（无项目也可达）。仍包 Scaffold——
-      // 这些视图内的 SnackBar 需要 ScaffoldMessenger 的 Scaffold 祖先
+      // 作品集：不进设计壳（无项目也可达）。仍包 Scaffold——
+      // 视图内的 SnackBar 需要 ScaffoldMessenger 的 Scaffold 祖先
       // （旧实现早退裸视图，debug 断言、release 静默不显示）。
       // SafeArea：移动端状态栏 / Home 指示条不压顶栏与底部操作（真机实证）。
       if (store.view == 'portfolio') {
         return Scaffold(backgroundColor: p.bg, body: const SafeArea(child: PortfolioView()));
       }
-      final pluginView = pluginWorkspaceFor(store.view);
-      if (pluginView != null) {
-        return Scaffold(backgroundColor: p.bg, body: SafeArea(child: pluginView));
-      }
     }
+    // 插件视图在完整壳里进主区；嵌入宿主不路由插件视图（view 恒为 chat）。
+    final pluginView = widget.embedded ? null : pluginWorkspaceFor(store.view);
     return CallbackShortcuts(
       bindings: {
-      // ⌘N/⌘O/⌘S/⌘Z/⌘K 已上移 main.dart 根级 bindings：插件/作品集视图
-      // 不挂载本 CallbackShortcuts，workspace 级绑定在全屏视图不可达。
+      // ⌘N/⌘O/⌘S/⌘Z/⌘K 已上移 main.dart 根级 bindings：portfolio/play 全幅
+      // 视图不挂载本壳，根级绑定是这些视图的唯一来源。插件工作台 2026-11-20
+      // 起与设计共用本壳（外壳统一），这些壳内动作对四个工作台同样可达。
       // 保留的项是设计壳内部动作（设置/快捷键/文档直达原型/导出）。
+      // ⇧⌘F：自动修复当前画板（规范/叠放/可读性一次清偿）——deepDesign 的
+      // 常驻能力，迁移后一度只剩检查器里的两个小按钮，用户找不到入口。
+      modKey(LogicalKeyboardKey.keyF, shift: true): () {
+        if (store.hasProject) store.autoFix();
+      },
       modKey(LogicalKeyboardKey.keyH, shift: true): () {
         // ⇧⌘H：导出 HTML 原型——标题栏菜单同项标注的快捷键，无项目时忽略。
         if (store.hasProject) store.exportHtml();
@@ -142,7 +148,11 @@ class _WorkspaceState extends State<Workspace> {
             builder: (context, constraints) {
               final width = constraints.maxWidth;
               final phone = width < 700;
-              final showLeft = !phone && (!widget.embedded || width >= 760);
+              // 插件视图不挂设计左栏（板/图层/文档/历史都是设计面的内容，
+              // 插件工作台有自己的 46px 工具条管理项目）；左轨保留，四个
+              // 工作台外壳因此一致，插件内容只占「设计画布」那块主区。
+              final showLeft =
+                  !phone && (!widget.embedded || width >= 760) && pluginView == null;
               final wide = width >= (widget.embedded ? 1100 : 1024);
               // 画中画可被缩到 280 高：Rail 是固定 224 的图标列，放不下时
               // 隐藏（画布优先），否则 RenderFlex 溢出。完整壳永不触发。
@@ -153,37 +163,63 @@ class _WorkspaceState extends State<Workspace> {
               // 从嵌入窄轨切回 设计/历史 再恢复。
               final leftPaneSafe = !widget.embedded ||
                   (store.panel != 'docs' && store.panel != 'spec');
-              return Column(
-                children: [
-                  if (!widget.embedded)
-                    TitleBar(
-                      onCommand: _command,
-                      onSettings: _settings,
-                      onNewProject: _newProject,
-                      onOpenProject: () => _openPath(''),
-                      onShortcuts: _shortcuts,
-                      onOpenRecent: (path) => _openPath(path),
-                    ),
-                  Expanded(
-                    child: Row(
-                      children: [
-                        if (showRail)
-                          widget.embedded ? const _EmbeddedRail() : const Rail(),
-                        if (showLeft && leftPaneSafe) const LeftPanel(),
-                        Expanded(child: _center(store)),
-                        if (wide) const RightPanel(),
-                      ],
-                    ),
-                  ),
-                  if (!wide)
-                    _narrowBar(context,
-                        leftAsSheet: !showLeft && leftPaneSafe, rightAsSheet: true),
-                  if (!widget.embedded) StatusBar(onCommand: _command),
-                ],
+              // 窄屏折叠条：左栏收起时给「项目面板」sheet，右栏收起时给
+              // 「NaN 面板」sheet。插件视图没有设计左栏，只保留右栏入口。
+              final leftAsSheet = !showLeft && leftPaneSafe && pluginView == null;
+              final rightAsSheet = widget.showRightPanel;
+              return WorkspaceChrome(
+                titleBar: widget.embedded
+                    ? null
+                    : TitleBar(
+                        onCommand: _command,
+                        onSettings: _settings,
+                        onNewProject: _newProject,
+                        onOpenProject: () => _openPath(''),
+                        onShortcuts: _shortcuts,
+                        onOpenRecent: (path) => _openPath(path),
+                      ),
+                rail: showRail
+                    ? (widget.embedded
+                        ? const _EmbeddedRail()
+                        : Rail(
+                            // 窄屏没有左栏：点「历史」用底部面板给出
+                            // 可见结果，而不是只把图标点亮（nav-4）。
+                            onHistory: showLeft ? null : () => _openLeftSheet(context),
+                          ))
+                    : null,
+                leftPanel: showLeft && leftPaneSafe ? const LeftPanel() : null,
+                main: _center(store, pluginView),
+                rightPanel: wide && widget.showRightPanel ? const WorkspaceRightPanel() : null,
+                narrowBar: !wide && (leftAsSheet || rightAsSheet)
+                    ? _narrowBar(
+                        context,
+                        leftAsSheet: leftAsSheet,
+                        rightAsSheet: rightAsSheet,
+                      )
+                    : null,
+                statusBar: widget.embedded ? null : StatusBar(onCommand: _command),
               );
             },
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// 窄屏（无左栏）时把当前面板放进底部面板。
+  ///
+  /// 左轨「历史」在手机上原本只把 panel 置成 history——左栏根本不渲染，
+  /// 用户只看到图标高亮（审查 nav-4）。这里复用窄条「项目面板」的形态。
+  void _openLeftSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.palette.panel,
+      isScrollControlled: true,
+      builder: (_) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.6,
+          child: const LeftPanel(),
         ),
       ),
     );
@@ -223,10 +259,10 @@ class _WorkspaceState extends State<Workspace> {
               context: context,
               backgroundColor: p.panel,
               isScrollControlled: true,
-              builder: (_) => sheet(const RightPanel()),
+              builder: (_) => sheet(const WorkspaceRightPanel()),
             ),
             icon: const Icon(Icons.auto_awesome, size: 16),
-            label: const Text('NoN 面板', style: TextStyle(fontSize: 12)),
+            label: const Text('NaN 面板', style: TextStyle(fontSize: 12)),
           ),
           const Spacer(),
         ],
@@ -234,7 +270,7 @@ class _WorkspaceState extends State<Workspace> {
     );
   }
 
-  Widget _center(AppStore store) {
+  Widget _center(AppStore store, Widget? pluginView) {
     // 视图切换过渡：fade + 8px 上滑（180ms）。KeyedSubtree 按 view 键控，
     // 同视图内 store 变化不会触发重播。
     return AnimatedSwitcher(
@@ -250,24 +286,33 @@ class _WorkspaceState extends State<Workspace> {
       ),
       child: KeyedSubtree(
         key: ValueKey(store.view),
-        child: switch (store.view) {
-          'docs' => const DocsView(),
-          'source' => const _SourceView(),
-          _ => Column(
-              children: [
-                _BoardTabs(embedded: widget.embedded),
-                Expanded(
-                  // 嵌入宿主且无画板时不吃 CanvasView 的空态卡：那张卡带
-                  // 「先写文档」= setView('docs')（canvas_view.dart:1590），
-                  // 在宿主里点一下同样会把聊天流换掉（review pip-1 同类）。
-                  // 画板条（＋ 新建）仍在，生成入口走聊天。
-                  child: widget.embedded && store.render.artboards.isEmpty
-                      ? const _EmbeddedNoBoardHint()
-                      : const CanvasView(),
+        // 插件工作台就是主区内容：与设计画布共用同一个槽位（外壳由
+        // workspace_chrome.dart 统一提供），不再整页替换 Scaffold。
+        // 插件自己的 46px 工具条仍在内容顶部——那是模块自身的面，不重复
+        // 标题栏/状态栏。
+        child: pluginView ??
+            switch (store.view) {
+              'docs' => const DocsView(),
+              'source' => const _SourceView(),
+              _ => Column(
+                  children: [
+                    _BoardTabs(embedded: widget.embedded),
+                    Expanded(
+                      // 嵌入宿主且无画板时不吃 CanvasView 的空态卡：那张卡带
+                      // 「先写文档」= setView('docs')（canvas_view.dart:1590），
+                      // 在宿主里点一下同样会把聊天流换掉（review pip-1 同类）。
+                      // 画板条（＋ 新建）仍在，生成入口走聊天。
+                      // 打开的项目没有可用画布（手机离线/预览失败）：不能把
+                      // 空画布显示成「还没有画板」的空项目（审查 depython-1）。
+                      child: store.canvasPreviewUnavailable
+                          ? const _CanvasNeedsDesktopHint()
+                          : widget.embedded && store.render.artboards.isEmpty
+                              ? const _EmbeddedNoBoardHint()
+                              : const CanvasView(),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-        },
+            },
       ),
     );
   }
@@ -372,7 +417,7 @@ Future<void> openProjectFlow(BuildContext context, String path) async {
     final picked = await showOpenProjectSheet(context);
     if (picked == null || !context.mounted) return;
     if (picked == '__file__') {
-      const group = XTypeGroup(label: 'NoNDesign 项目', extensions: ['ddp']);
+      const group = XTypeGroup(label: 'NaN 项目', extensions: ['ddp']);
       final file = await openFile(acceptedTypeGroups: const [group]);
       if (file == null) return;
       target = file.path;
@@ -383,7 +428,8 @@ Future<void> openProjectFlow(BuildContext context, String path) async {
   if (!context.mounted) return;
   var result = await store.openProjectPath(target);
   var attempt = 0;
-  while (result == OpenResult.needPassword && attempt < 3 && context.mounted) {
+  while (result == OpenResult.needPassword && attempt < 3) {
+    if (!context.mounted) return;
     final pw = await showNonDialog<String>(
       context: context,
       builder: (context) => PasswordDialog(path: target, retry: attempt > 0),
@@ -394,9 +440,9 @@ Future<void> openProjectFlow(BuildContext context, String path) async {
   }
 }
 
-/// Sheet listing DDPs discovered via /project/list, grouped by source
-/// (workspace dir from /health, then ~/Desktop). Returns the picked file path,
-/// '__file__' for the native picker, or null when cancelled.
+/// Sheet listing DDPs discovered through the connected desktop, grouped by
+/// source (workspace dir from its health face, then ~/Desktop). Returns the
+/// picked file path, '__file__' for the native picker, or null when cancelled.
 Future<String?> showOpenProjectSheet(BuildContext context) async {
   context.read<AppStore>().refreshProjects();
   if (!context.mounted) return null;
@@ -446,7 +492,7 @@ class _OpenProjectDialog extends StatelessWidget {
                     else if (empty)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 18),
-                        child: Text('工作区与桌面暂无 .ddp 项目。', style: TextStyle(fontSize: 11, color: p.ink4)),
+                        child: Text('工作区与桌面还没有项目。', style: TextStyle(fontSize: 11, color: p.ink4)),
                       )
                     else ...[
                       _projectSection(context, '工作区', workspace),
@@ -608,11 +654,23 @@ class _BoardTabs extends StatelessWidget {
             ),
           ),
           if (!embedded) ...[
-            IconAction(icon: Icons.code, tooltip: 'MBT 源码 ${modCombo('⌘3')}', size: 26, onTap: () => store.setView('source')),
+            IconAction(icon: Icons.code, tooltip: '源码 ${modCombo('⌘3')}', size: 26, onTap: () => store.setView('source')),
+            IconAction(
+              key: const ValueKey('design-auto-fix'),
+              icon: Icons.auto_fix_high_outlined,
+              tooltip: '自动修复当前画板 ${modCombo('⇧⌘F')}',
+              size: 26,
+              onTap: () => store.autoFix(),
+            ),
             IconAction(icon: Icons.play_arrow_outlined, tooltip: '演示模式 ${modCombo('⌘4')}', size: 26, onTap: () => store.setView('play')),
             IconAction(icon: Icons.collections_bookmark_outlined, tooltip: '作品集', size: 26, onTap: () => store.setView('portfolio')),
-            for (final def in pluginRegistry)
+            // 架构裁决：设计只与热应用相关（设计可生成热应用）；
+            // 3D / 视频是独立模块，入口在主页工作台，不挂在设计工具条上。
+            for (final def in pluginRegistry.where((d) => d.id == 'hotapp'))
               IconAction(icon: def.icon, tooltip: def.tooltip, size: 26, onTap: () => store.setView('plugin:${def.id}')),
+            // 「由原型生成热应用」只有一个入口，放在热应用工作台顶栏（带进度与
+            // 结果反馈）。设计工具条这里只保留进入热应用工作台的按钮，避免出现
+            // 三个看起来一样、点了没动静的生成入口。
             const SizedBox(width: 4),
             TextButton.icon(
               onPressed: () => store.setView('docs'),
@@ -643,7 +701,43 @@ class _EmbeddedNoBoardHint extends StatelessWidget {
             Icon(Icons.dashboard_customize_outlined, size: 24, color: p.ink4),
             const SizedBox(height: 8),
             Text(
-              '还没有画板——让 NoN 生成，或点画板条 ＋ 新建。',
+              '还没有画板——让 NaN 生成，或点画板条 ＋ 新建。',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 项目已打开、但本机没有可用的画布运行时（手机离线 / 预览失败）。
+///
+/// 空画布不代表空项目：这里必须说清「内容都在，画布要连桌面」，
+/// 而不是渲染 CanvasView 的「还没有画板」空态（审查 depython-1）。
+class _CanvasNeedsDesktopHint extends StatelessWidget {
+  const _CanvasNeedsDesktopHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.desktop_windows_outlined, size: 24, color: p.ink4),
+            const SizedBox(height: 8),
+            Text(
+              '项目已打开，画布需要连接桌面后才能预览',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, height: 1.5, color: p.ink),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '文档与项目内容都已就绪，连接桌面后即可继续查看和编辑画布。',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
             ),
@@ -769,18 +863,14 @@ class _SourceViewState extends State<_SourceView> {
                   icon: const Icon(Icons.chevron_left, size: 14),
                   label: const Text('画布'),
                 ),
-                Text('MBT 源码', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: p.ink2)),
+                Text('源码', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: p.ink2)),
                 const SizedBox(width: 6),
-                Pill(label: 'canonical · ${lines.length} 行'),
+                Pill(label: '当前版本 · ${lines.length} 行'),
                 const Spacer(),
                 TextButton.icon(
                   onPressed: () async {
                     await Clipboard.setData(ClipboardData(text: store.mbt));
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('已复制全文'), behavior: SnackBarBehavior.floating),
-                      );
-                    }
+                    ToastService.instance.success('已复制全文');
                   },
                   icon: const Icon(Icons.copy, size: 12),
                   label: const Text('复制'),
@@ -788,11 +878,15 @@ class _SourceViewState extends State<_SourceView> {
                 TextButton.icon(
                   onPressed: () async {
                     final res = await store.api?.validate(store.mbt);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        behavior: SnackBarBehavior.floating,
-                        content: Text(res?['ok'] == true ? '校验通过' : '校验失败：${res?['error'] ?? ''}'),
-                      ));
+                    if (res == null) {
+                      ToastService.instance.warn('还没连接设计服务', '连上后再试一次校验');
+                      return;
+                    }
+                    if (res['ok'] == true) {
+                      ToastService.instance.success('校验通过');
+                    } else {
+                      // 原始错误码只进日志面（折叠的技术详情），不上通知。
+                      ToastService.instance.error('这次改动没有通过校验', '可以查看源码里的提示后重试');
                     }
                   },
                   icon: const Icon(Icons.verified_outlined, size: 12),
@@ -1013,7 +1107,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                   Row(children: [
                     Icon(Icons.auto_awesome, size: 12, color: p.accent),
                     const SizedBox(width: 5),
-                    Text('让 NoN 生成第一版（可选）', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: p.ink)),
+                    Text('让 NaN 生成第一版（可选）', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: p.ink)),
                   ]),
                   const SizedBox(height: 6),
                   TextField(
@@ -1060,11 +1154,10 @@ class _ShortcutsDialog extends StatelessWidget {
         ('新建 / 打开', modCombo('⌘N / ⌘O')), ('导出 HTML', modCombo('⇧⌘H')),
       ],
       '画布': [('撤销 / 重做', modCombo('⌘Z / ⇧⌘Z')), ('适配窗口', modCombo('⌘0')), ('缩放', modCombo('⌘滚轮')), ('平移', 'space + 拖动')],
+      // 没有插件工作台的数字键（用户裁决 2026-11-19）：工作台类型跟着项目走，
+      // 切换进顶栏项目菜单；设计面自己的四个视图仍保留 ⌘1–⌘4。
       '视图': [
-        ('设计画布', modCombo('⌘1')), ('设计文档', modCombo('⌘2')), ('MBT 源码', modCombo('⌘3')), ('演示模式', modCombo('⌘4')),
-        // 插件入口键（根级 bindings，注册表顺序派生）。
-        for (var i = 0; i < pluginRegistry.length && i < pluginDigitKeys.length; i++)
-          (pluginRegistry[i].title, modCombo('⌘${5 + i}')),
+        ('设计画布', modCombo('⌘1')), ('设计文档', modCombo('⌘2')), ('源码', modCombo('⌘3')), ('演示模式', modCombo('⌘4')),
       ],
       'Agent': [('发送', modCombo('⌘↵')), ('停止', '运行胶囊停止')],
     };

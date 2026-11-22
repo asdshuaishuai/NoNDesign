@@ -1,154 +1,154 @@
-# NoNDesign
+# NaN
 
 AI-native 创作工作台：**一句话 → 产品需求设计文档 → 完整可交互原型**，同一工作台
-还能做 3D 场景、代码生成视频与带 SQLite 数据库的 NoN 热应用。
+还能做 3D 场景、代码动画视频与带本地数据库的 NaN 热应用。
 
-- **桌面端**：Flutter 3.50（macOS）+ 原生 CustomPainter 画布
-- **工作台**：交互原型 / 3D 场景 / 代码生成视频 / NoN 热应用（HTML + SQLite）
-- **智能层**：Python + OpenAI Agents SDK（`openai-agents`）
-- **引擎**：MoonViz classic wasm（wasmtime 进程内宿主；version 字符串报 0.1.11，产物实际含 0.2 手势/历史/规范提取能力）
+- **桌面端**：Flutter 3.50（macOS 主目标；iOS/Android/Linux/Windows 平台壳已就位）
+- **本地核心**：MoonViz classic wasm 引擎跑在**离屏 `webview_all` 会话**里
+  （macOS/iOS WKWebView、Windows WebView2、Linux WebKitGTK、Android WebView；
+  wasm_run 仅启动失败兜底）、纯 Dart DDP1/DDP2、项目库、3D / 热应用 / 视频工作台
+- **内置智能体**：Dart 工具循环（`ai_sdk_dart` 直连当前服务商），画布变更仍经引擎门
+- **可选「连接桌面」**：桌面 App 内的 Dart RPC 宿主（`/v1/health`、`/v1/capabilities`、
+  `/v1/rpc`），默认关闭、默认只听 loopback、token 必填
 - **持久化**：DDP 单文件（zstd + Argon2id + XChaCha20-Poly1305 / 免密 CRC32）
-- **模型与端点**：models.dev 快照（本地 vendored，可运行时刷新）
+- **模型与端点**：models.dev 快照（随包 vendored，离线可用）
 
-没有 Bun、没有 Tauri、没有 JS 运行时。Flutter 只负责界面与画布；Python 服务端负责
-Agent 循环、引擎调用、DDP 与文件 IO。两者只通过本机 HTTP/SSE 交换事件与 canonical
-`.mbt.md` 文本。
+**没有 Python 服务、没有固定端口、没有端口文件。** 应用启动不拉起任何子进程，
+默认也不监听任何端口；唯一可能的监听是你显式开启「手机连接这台电脑」（桌面设置）
+后，桌面宿主绑定的临时端口（系统分配）+ 一次性连接码。仓库里保留的 Python 只是
+**开发期同步工具**（`scripts/sync_engine.py`、`scripts/sync_models.py` 等），
+不参与应用运行时。
 
 ---
 
 ## 架构
 
 ```
-┌──────────────────────────── Flutter 3.50 (macOS) ────────────────────────────┐
-│  Welcome / Workspace / CanvasView(CustomPainter) / Inspector / Docs / Play  │
-│  AppStore (ChangeNotifier)  ── HTTP + SSE ──┐                                │
-└────────────────────────────────────────────┼────────────────────────────────┘
-                                             │ 127.0.0.1:<ephemeral>
-┌────────────────────────────────────────────▼────────────────────────────────┐
-│ Python 3.14 · FastAPI · uvicorn                                              │
-│  /engine/*   MoonViz wasmtime host（`_in` slot ABI + session cache）        │
-│  /agent/run  OpenAI Agents SDK loop（tools / streaming / sessions）          │
-│  /project/*  DDP codec + workspace                                           │
-│  Context: static instructions → project map → design spec/docs → memory     │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────── Flutter 3.50 (macOS / iOS / Android) ──────────────────────┐
+│ UI Shell：手机锁竖屏/iPad 竖屏 Chat + 画中画 · 桌面/iPad 横屏 Workspace + 右侧聊天栏 │
+│           play / portfolio / plugin 全幅                                             │
+├──────────────────────────────────────────────────────────────────────────────────────┤
+│ LocalCore（Dart，进程内）                                                            │
+│  engine/      MoonViz classic wasm 宿主（`_in` 槽 ABI / UTF-16 读 / 会话缓存 / trap）│
+│  ddp.dart     DDP1 / DDP2 编解码（Rust 实现为字节权威）                              │
+│  projects     `.ddp` 保存 / 打开 / 列表（原子写）                                     │
+│  3D / 热应用 / 视频 / 作品集 / 外部智能体（桌面）                                      │
+├──────────────────────────────────────────────────────────────────────────────────────┤
+│ RemoteDesktop（可选，默认关闭）                                                       │
+│  客户端：remote_desktop_client.dart → /v1/health | /v1/capabilities | /v1/rpc         │
+│  宿主：  core/remote/desktop_rpc_host.dart（127.0.0.1:0 或显式 LAN + Bearer token）   │
+└──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-唯一事实源是一份 canonical `.mbt.md`。人类画布操作与 Agent 操作都经引擎门校验后回写
-同一份文档；DDP 只是它的认证加密容器。Flutter 的画布直接绘制引擎返回的节点树
-（rect / fill / radius / text / shadow），不依赖 SVG 或 WebView。
+唯一事实源是一份 canonical 设计稿文本。人类画布操作与智能体操作分别经
+HumanGate / AgentGate 校验后回写同一份文档；DDP 只是它的认证加密容器。
+Flutter 的画布直接绘制引擎返回的节点树（rect / fill / radius / text / shadow），
+不依赖 WebView。
 
 ## 快速开始
 
 ```bash
-# 1) Python 依赖
-python3 -m venv .venv
-.venv/bin/pip install -r server/requirements.txt
-
-# 2) 引擎产物（仓库已带 engine/moonviz.wasm；缺失时）
-.venv/bin/python scripts/sync_engine.py
-
-# 3) 模型快照（仓库已带 server/models.json；需要更新时）
-.venv/bin/python scripts/sync_models.py
-
-# 4) 启动桌面端（会自动拉起 Python 服务，使用临时端口）
+# 1) 依赖（仓库已带 engine/moonviz.wasm 与 app/assets/engine/）
 cd app
+flutter pub get
+
+# 2) 启动桌面端（本地核心，不启动任何服务）
 flutter run -d macos
 
-# 评估流畅度请用 profile（AOT）——debug 是 JIT + 断言 + 调试绘制税，
-# 实测帧均 7.7ms vs 1.1ms（2026-11-14 VM Service 探针）：
-./scripts/dev.sh --profile
+# 评估流畅度请用 profile（AOT）——debug 是 JIT + 断言 + 调试绘制税：
+../scripts/dev.sh --profile
 ```
 
-引擎产物默认锚定仓库自带 wasm；本地集成模式（ENGINE_LOCAL 标记）下
-sync_engine 取 `../moonviz-dev` 本地构建，能力面以 manifest `build_line`
-（行为探针判定）为准——引擎自报版本可能滞后 dev 构建。
+首次使用：右上角 **设置 → 模型与端点** 选择服务商、填入 API Key；模型清单来自
+随包的 models.dev 快照。全部服务商统一走 **OpenAI 兼容端点**（OpenAI / DeepSeek /
+GLM / Kimi / MiniMax / OpenRouter…）。
 
-也可以手动启动服务（调试 / 远程前端）：
+更新引擎或模型快照（开发期工具，可选）：
 
 ```bash
-cd server
-../.venv/bin/python main.py --port 8799
-# Flutter:
-NONDESIGN_SERVER=http://127.0.0.1:8799 flutter run -d macos
+python3 scripts/sync_engine.py      # 校验/下载 wasm，真机 render 探针
+python3 scripts/sync_models.py      # 刷新 models.dev 快照 → app/assets/models.json
 ```
-
-首次使用：右上角 **设置 → 模型与端点** 选择服务商、填入 API Key；
-模型清单来自 models.dev 快照。全部服务商统一走 **OpenAI 兼容端点**（OpenAI /
-DeepSeek / GLM / Kimi / MiniMax / OpenRouter…）——MiniMax 使用其 OpenAI 兼容
-`/v1`；不再支持 Anthropic 原生 Messages 格式（用户决策 2026-11-13）。
 
 ## 已实现
 
-- **AI Native 工作台**：⌘K 命令面板、NoN 侧栏、流式时间线、实时画布预览、停止/重试
+- **AI Native 工作台**：⌘K 命令面板、聊天流 / Agent 时间线、实时画布预览、停止/重试
+- **聊天实况预览卡**：生成中的工作区以卡片形式在对话流内实时预览（取代自动画中画）
 - **一句话 → 文档 → 原型**：PLAN（PRD / UI 说明 / 设计规范）→ BUILD（逐屏生成 / 连线 / 自检）
 - **原生画布**：多画板网格、缩放/平移、节点选择/拖动/双击改字、flow 箭头、演示模式
 - **检查器**：位置/尺寸/填充/文字色/圆角/字号/透明度/可见性/flow 连接、引擎评审与自动修复
 - **文档与规范**：Markdown 编辑/预览、设计令牌、把调色板写回引擎 token
 - **项目**：最近项目、DDP 打开/保存（DDP1 口令 / DDP2 免密）、导出 HTML / SVG、崩溃恢复
-- **上下文与缓存**：稳定前缀分层、项目地图、live state、tool 结果整形、确定性会话压缩、
-  缓存命中遥测（`input_tokens_details.cached_tokens`）
+- **工作台跟随项目**：一个项目对应一种工作台；顶栏项目下拉按类型列项目，打开即进入对应工作台
+- **3D / 热应用 / 视频**：本机服务层 + 应用内预览；热应用带本地数据库
+- **设计 → 热应用**：由产品原型生成可验证的热应用——逐画板 / 逐连线字节级校验，如实上报
+- **动效合成**：HTML/CSS/JS 短片渲染面，应用内实时播放（手绘简笔 / 动效排版 / 界面演示样例）
+- **3D 沙箱**：three-live 沙箱 + 画廊组件在应用内真实播放（旧路径保留为降级面）
+- **外部智能体**：桌面 ACP 探测与对话（移动端按设计禁用）
 - **引擎门**：HumanGate / AgentGate 分离，只读命令走检视路由，不直改文档
-- **交互完备**：多选/对齐/编组、右键菜单、⌘C⌘V、interact 编辑器（长按/滑动/按键）、
-  组件状态、演示模式引擎驱动手势（0.2 session_event）与 flow 过渡
-- **全平台快捷键**：`core/keys.dart` 一处绑定（macOS=⌘，Windows/Linux=Ctrl），
-  标签经 `modCombo` 自适应
-- **UI 一致性**：NonMotion 动效令牌（120/180/240ms）、8 档字阶（10px 可读地板）、
-  M3 DropdownMenu 统一下拉、品牌强调色全量令牌化、原生标题栏随主题（nc/window）
+- **交互完备**：多选/对齐/编组、右键菜单、⌘C⌘V、手势与 flow 过渡
+- **全平台快捷键**：`core/keys.dart` 一处绑定（macOS=⌘，Windows/Linux=Ctrl）
+- **UI 一致性**：NonMotion 动效令牌、8 档字阶、M3 DropdownMenu 统一、原生标题栏随主题
 
 ## 目录
 
 ```
-app/                 Flutter macOS 应用
-  lib/core/          API / models / store / theme / keys（平台自适应快捷键）
-  lib/widgets/       welcome / workspace / canvas / agent_panel / inspector_panel / docs / settings / play
-  test/              无头 widget + SSE + 下拉回归测试
-scripts/wf/          门禁：analyze / test / compileall / capability_dump / ddp_check
-server/              Python 服务端
-  engine.py          MoonViz wasmtime 宿主 + `_in` slot ABI
-  agent.py           OpenAI Agents SDK loop + tools
-  prompts.py         分层系统提示词
-  context.py         项目地图 / 状态卡 / 会话压缩 / 文档标记
-  ddp.py             DDP1/DDP2 codec
-  main.py            FastAPI + SSE
-engine/              moonviz.wasm + components.json + manifest
-scripts/             sync_engine.py / sync_models.py
+app/                 Flutter 应用
+  lib/core/          engine / ddp / project_service / api / store / models / theme
+  lib/core/remote/   连接桌面：协议 / token / 方法表 / Dart RPC 宿主
+  lib/widgets/       shell / welcome / workspace / canvas / chat / 3D / 热应用 / 视频 / 设置
+  assets/            engine 产物、components 快照、models.json、3D/视频示例
+  test/              flutter test（含 acceptance_local_core_test）
+engine/              moonviz.wasm + components.json + manifest（构建源）
+scripts/             开发期同步/对拍工具（sync_engine / sync_models / wf / engine_web_probe）
+third_party/wasm_run/ vendored wasm 执行器（**仅兜底路径**；主路径不加载）
+figma-plugin/        Figma 双向插件
+plugins/             独立插件资产（视频制作说明等）
 ```
 
 ## 测试
 
 ```bash
-cd app && flutter analyze && flutter test
-.venv/bin/python scripts/sync_engine.py
-.venv/bin/python -m compileall server
+cd app && flutter analyze --no-pub && flutter test
 ```
 
-当前测试覆盖：DDP 1/2 往返与 Rust 交叉兼容、引擎 render/apply/generate/session、
-Agents SDK plan/build 两种 run（mock LLM SSE）、sidecar→引擎→canonical 全链路、
-Flutter Welcome/Canvas/Workspace/Docs 无头渲染、Dart SSE 解析、下拉菜单开合与选择
-（锚住 DropdownButton 的 48px 运行时断言迁移）。
-
-完整门禁一次跑齐：
+发布包桌面状态检查（构建后）：
 
 ```bash
-./scripts/wf/analyze.sh && ./scripts/wf/test.sh && ./scripts/wf/compileall.sh
-.venv/bin/python scripts/wf/capability_dump.py     # 引擎 0.2 能力面锚定
-.venv/bin/python scripts/wf/ddp_check.py <真实 .ddp>  # 解密+渲染探针
+cd app && flutter build macos --release
+cd .. && dart run scripts/wf/check_desktop_release.dart \
+  --app app/build/macos/Build/Products/Release/NaN.app --home /tmp/nd-home
 ```
 
-`test.sh` 先跑五个 Python 回归锚点——hotapp（安全 + generate/refine/delete_app
-异步写路径与并发锁不变量）、服务端路由在场（含 hotapp/portfolio 全路由）、tool
-配对消毒、ACP 客户端全链、write_doc 流式增量解码——任何一份红即止，随后才是
-`flutter test`。
+它会断言：发布包内无 `.py` / `server/` / `.venv`；默认启动无监听端口、无 Python
+子进程、无 `~/.nondesign/server.json`；「连接桌面」宿主契约仍是 loopback + 临时端口 +
+token。
 
 ## 安全与边界
 
-- 服务端只绑定 `127.0.0.1`，无远程监听；这是本地桌面工具的信任边界。
+- 默认无监听；「手机连接这台电脑」默认关闭，开启后默认只绑 `127.0.0.1`，局域网需显式开关
+  且每个请求都要 Bearer token。
 - API Key 存在本机 `SharedPreferences`，并镜像 `~/.nondesign/settings.json`
   （探针/e2e 读取口）；明文，与当前桌面单用户场景匹配，OS Keychain 是后续增强项。
-- macOS Runner 的 App Sandbox 已关闭（本地 Python 子进程 + `~/.nondesign` 工作目录需要）；
+- 移动端本地引擎默认关闭，只有 `WasmRuntimeGate` 在真机 p95/内存/fuel 验收通过后才开启；
+  未通过时移动端只能「连接桌面」。
+- `.nonapp` 应用包打开前做格式/路径/大小/零外链校验；页面 WebView 带 CSP 与导航白名单。
+- macOS Runner 的 App Sandbox 已关闭（本地文件与 `~/.nondesign` 工作目录需要）；
   正式分发可改为 App Container + 受限 entitlement。
 - DDP 与 deepDesign Studio 的容器格式**字节兼容**（Rust 交叉验证通过）。
 
+## 已知限制
+
+- 「手机连接这台电脑」宿主已在桌面设置卡接线（启停/地址/连接码/局域网开关）；
+  默认仍不监听。动态验证可覆盖「默认无监听」与显式开启后的 health/rpc。
+- 视频成片导出暂时屏蔽（渲染代码保留、界面无入口）；现行视频面为代码动画 + 动效合成
+  （见 `docs/video-clip-contract.md`），既有 mp4 仍由艺术架播放。
+- 应用内 WebView 已统一到 `webview_all`（含 Linux/Windows）；3D/热应用/视频预览
+  走同一条 `WebViewController` 路径，Windows 专属预览分支已删除。
+- Android 构建已可产出 debug APK；本机无设备/AVD，WebView 本地引擎真机验收未完成。
+- Windows WebView2 / Linux WebKitGTK 的离屏引擎宿主与 macOS 共用契约，需在对应
+  机器跑 `integration_test/engine_webview_test.dart` 复验。
+
 ## 版本
 
-`0.1.0` · 2026-11-14
+`0.1.0` · 2026-11-18

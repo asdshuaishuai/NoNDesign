@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:nondesign/core/hotapp_db.dart';
 import 'package:nondesign/core/nonapp_package.dart';
 
 List<int> _zip(Map<String, Object?> entries) {
@@ -524,6 +525,68 @@ void main() {
     expect(ok.messages, hasLength(2));
   });
 
+  test('a2ui 零外链门：formatString 运行时拼接与 openUrl 动作都拒', () {
+    // 官方 basic 目录的 formatString 可以从 dataModel 取值拼出 URL，
+    // 通过旧的「整串前缀」门后被 Image.network 直接请求（review nonapp-5）。
+    _expectCode(
+      'nonapp_a2ui_external_refs',
+      _pkg({
+        'payload/surface.json': jsonEncode([
+          {
+            'version': '1.0',
+            'createSurface': {
+              'surfaceId': 'demo',
+              'catalogId': nonAppBasicCatalogId,
+              'components': [
+                {
+                  'id': 'root',
+                  'component': 'Image',
+                  'url': {
+                    '@call': 'formatString',
+                    'args': {
+                      'value': r'${/a}${/b}${/c}${/d}${/e}',
+                    },
+                  },
+                },
+              ],
+            },
+          },
+          {
+            'version': '1.0',
+            'updateDataModel': {
+              'surfaceId': 'demo',
+              'path': '/',
+              'value': {'a': 'https', 'b': ':', 'c': '', 'd': '/', 'e': '/evil.example/p?d=1'},
+            },
+          },
+        ]),
+      }, manifest: _manifest(renderer: 'a2ui')),
+    );
+    // 无绑定的静态模板不误伤。
+    final staticText = NonAppPackage.parse(_pkg({
+      'payload/surface.json': jsonEncode([
+        {
+          'version': '1.0',
+          'createSurface': {
+            'surfaceId': 'demo',
+            'catalogId': nonAppBasicCatalogId,
+            'components': [
+              {
+                'id': 'root',
+                'component': 'Text',
+                'text': {
+                  '@call': 'formatString',
+                  'args': {'value': '今日进度'},
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    }, manifest: _manifest(renderer: 'a2ui')));
+    expect(staticText.messages, hasLength(1));
+  });
+
   test('html 零外链保守预筛：http(s)、协议相对、绝对路径、短文档', () {
     _expectCode(
       'nonapp_html_external_refs',
@@ -555,7 +618,7 @@ void main() {
     expect(pkg.renderer, 'html');
   });
 
-  test('CSP 注入：进 <head> 首标签之后（无 head 时置顶），策略早于页面内容', () {
+  test('CSP 注入：文档最前（DOCTYPE 之后），首脚本也必须晚于策略', () {
     final injected = injectNonAppCsp(_html());
     expect(injected, contains('http-equiv="Content-Security-Policy"'));
     expect(injected, contains(nonAppOfflineCsp));
@@ -563,6 +626,16 @@ void main() {
     // 无 <head> 的载荷（结构门通常已拒）：策略仍先于一切内容出现。
     final bare = injectNonAppCsp('<body>x</body>');
     expect(bare.startsWith('<meta http-equiv="Content-Security-Policy"'), isTrue);
+    // 包把内联脚本放在 <head> 之前：策略仍必须先到（review nonapp-5）。
+    final scriptFirst = injectNonAppCsp(
+      "<script>new Image().src='ht'+'tp://127.0.0.1:1/x'</script>"
+      '<html><head><title>t</title></head><body>${'x' * 220}</body></html>',
+    );
+    expect(scriptFirst.indexOf('Content-Security-Policy'),
+        lessThan(scriptFirst.indexOf('<script>')));
+    // DOCTYPE 保留在最前，文档不会掉进 quirks mode。
+    final withDoctype = injectNonAppCsp('<!doctype html><html><head></head><body>x</body></html>');
+    expect(withDoctype.startsWith('<!doctype html><meta http-equiv="Content-Security-Policy"'), isTrue);
   });
 
   test('体积上限与坏 zip', () {
@@ -590,5 +663,35 @@ void main() {
       _pkg({'payload/index.html': _html()}, manifest: _manifest(minAppVersion: '0.0.1')),
     );
     expect(pkg.manifest.minAppVersion, '0.0.1');
+  });
+
+  group('预览运行时（CSP + 本地数据桥）', () {
+    test('注入顺序：策略 → 数据桥 → 页面内容/脚本', () {
+      final injected = injectHotAppRuntime(_html());
+      final csp = injected.indexOf('http-equiv="Content-Security-Policy"');
+      final bridge = injected.indexOf('window.NoN.db');
+      final pageScript = injected.indexOf('requestAnimationFrame');
+      expect(csp, greaterThanOrEqualTo(0));
+      expect(bridge, greaterThan(csp), reason: '数据桥必须排在策略之后');
+      expect(pageScript, greaterThan(bridge), reason: '二者都必须早于页面脚本');
+      expect(injected, contains(hotAppDbChannel));
+      expect(injected, contains(hotAppDbResultFunction));
+    });
+
+    test('桥脚本本身不引入外链、不提前闭合 script 标签', () {
+      expect(hotAppDbBridgeScript.contains('http://'), isFalse);
+      expect(hotAppDbBridgeScript.contains('https://'), isFalse);
+      expect(hotAppDbBridgeScript.contains('</script>'), isFalse);
+      expect(hotAppDbBridgeScript, contains('exec'));
+      expect(hotAppDbBridgeScript, contains('Promise'));
+    });
+
+    test('无 <head> 的文档也能注入（策略仍先于内容）', () {
+      final injected = injectHotAppRuntime('<body>bare</body>');
+      final csp = injected.indexOf('Content-Security-Policy');
+      final bridge = injected.indexOf('window.NoN.db');
+      expect(injected.startsWith('<meta http-equiv="Content-Security-Policy"'), isTrue);
+      expect(bridge, greaterThan(csp));
+    });
   });
 }

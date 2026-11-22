@@ -14,6 +14,8 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundleDisplayName</key>
+	<string>NaN</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -44,7 +46,7 @@
 			<key>UTTypeIdentifier</key>
 			<string>com.nondesign.nonapp</string>
 			<key>UTTypeDescription</key>
-			<string>NoNDesign Application Package</string>
+			<string>NaN Application Package</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.zip-archive</string>
@@ -65,7 +67,7 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>NoNDesign Application Package</string>
+			<string>NaN Application Package</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>

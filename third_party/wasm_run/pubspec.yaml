@@ -1,0 +1,44 @@
+name: wasm_run
+description: "Web Assembly executor. Uses Rust's wasmtime optimizing runtime or wasmi interpreter."
+version: 0.2.0+2
+homepage: https://github.com/juancastillo0/wasm_run
+publish_to: none
+
+# Vendored copy of wasm_run 0.2.0+2 (MIT, see LICENSE and CHANGELOG.md).
+#
+# Differences from the pub.dev release, and why:
+#  1. The stock `hook/build.dart` depends on `build_rust_binaries ^0.1.0`,
+#     which pins `hooks ^1.0.0`. This app also depends on mediapipe_core 0.3.0
+#     (native assets, `hooks >=2.0.0`), so the two hooks APIs cannot coexist in
+#     one resolution. Our hook is written against hooks 2.x.
+#  2. The stock hook downloads the executor from GitHub at build time
+#     (`BuildModeEnum.fetch`). Our hook copies the libraries vendored under
+#     `libs/` (see scripts/fetch_wasm_run_libs.sh), so builds are offline and
+#     pinned by sha256.
+#  3. `bin/build_binaries.dart` and `lib/src/ffi/config_api.dart` were removed
+#     because they are build-time tooling that imports build_rust_binaries.
+# The Dart library code is otherwise byte-identical to 0.2.0+2.
+topics:
+  - wasm
+  - interop
+  - runtime
+  - interpreter
+  - ffi
+
+environment:
+  sdk: ^3.10.0
+
+flutter:
+  assets:
+    - lib/assets/
+
+dependencies:
+  meta: ^1.17.0
+  ffi: ^2.2.0
+  # Exact pin: flutter_rust_bridge refuses to run when the generated code
+  # version (2.12.0 in wasm_run 0.2.0+2) differs from the runtime version.
+  flutter_rust_bridge: 2.12.0
+  freezed_annotation: ^3.0.0
+  logging: ^1.1.0
+  collection: ^1.17.0
+  web: ^1.1.1

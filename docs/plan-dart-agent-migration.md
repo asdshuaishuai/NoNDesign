@@ -1,9 +1,19 @@
 # plan-dart-agent-migration.md — 干掉 Python Agent 运行时的思考与方案
 
-> 状态：**方案（未实施）** · 2026-11-17 · 用户方向：「逐步干掉 Python 的 agent SDK——每次启动都得带一个
-> Python 运行时太费劲」· 触发材料：flutter/agent-plugins、dart-lang/skills、Genkit Dart、genUI、
-> Flutter AI Toolkit、Flutter AI best-practices（均已研究，研究结论在本文；两个 skills 仓库已镜像到
-> `reference/`（gitignored），精选 13 个 skills 装入 `.agents/skills/`）。
+> 状态：**已实施并完成退场（2026-11-18，批次 15）** · 立项 2026-11-17 · 用户方向：
+> 「逐步干掉 Python 的 agent SDK——每次启动都得带一个 Python 运行时太费劲」·
+> 触发材料：flutter/agent-plugins、dart-lang/skills、Genkit Dart、genUI、
+> Flutter AI Toolkit、Flutter AI best-practices（均已研究，研究结论在本文；两个
+> skills 仓库已镜像到 `reference/`（gitignored），精选 13 个 skills 装入
+> `.agents/skills/`）。
+>
+> **退场结果（2026-11-18）**：`server/`、`.venv/`、`plugins/video-engine/` 的
+> Python 管线和 `scripts/wf/test_*.py` 回归锚点已删除；应用启动不再 spawn 任何
+> 进程、不再读端口文件、默认不监听端口。`scripts/sync_models.py` 改为纯标准库、
+> 只写 `app/assets/models.json`。仍保留的 Python 只是开发期同步/黄金对照工具
+> （`sync_engine.py`、`video_golden_check.py` 等），不参与运行时；只服务旧
+> Python 宿主的测试与 `engine_parity.py` 已删除。下方 P0–P3 的路线记录
+> 与 Python 侧对照表保留作历史背景，**不要据此重新引入服务进程**。
 
 ## 0. 结论先行（TL;DR）
 
@@ -88,7 +98,7 @@ ModelSettings`）。把「agent SDK」与「服务运行时」两层分开看：
 
 - 1.0 稳定；`LlmChatView` + provider 抽象（自定义 provider 即插）+ tool calling + 流式 + 序列化。
 - 判定：**可选引入**。我们的 Agent 时间线（op 流/轨迹卡）不是聊天流，整体替换不合适；
-  未来若做「NoN 助手」闲聊/答疑面板，直接用它 + 自定义 provider（指向桌面服务或直连）。
+  未来若做「NaN 助手」闲聊/答疑面板，直接用它 + 自定义 provider（指向桌面服务或直连）。
 
 ### 3.4 genUI → `a2ui_flutter` —— 采纳为第二渲染后端（2026-11-17 更新）
 

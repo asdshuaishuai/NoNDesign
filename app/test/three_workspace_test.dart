@@ -1,33 +1,175 @@
-// 3D 工作台 await 弹窗返回后的 mounted 守卫回归（审查 ui-2）。
-// 触发链：根级 ⌘1–⌘7 绑定不让位浮层（main.dart 无 _overlayRouteActive 守卫），
-// 对话框打开期间切走视图 → workspace.dart 重建并 dispose ThreeWorkspace →
-// 弹窗里继续操作即在死 State 上继续执行：
-// - _createProject 的 setState 在 try 之外 → 未处理异常（本测试的红/绿锚点）；
-// - _pickProject 的 setState 被外层 catch 吞掉 → 项目切换静默失效（语义锚点：
-//   死工作台不得推进项目切换/挂预览）。
-// 对照同型正确实现：hotapp_workspace.dart 的 `if (!mounted || ...) return;`。
+// 3D 工作台（批次 06：全本地）的界面契约测试。
+//
+// 覆盖四组：
+//  1. 本地文件加载：预览按 `loadFile(<项目>/preview.html)` 加载，宿主页、场景
+//     代码、渲染库三件套同目录（WebKit 的读取范围就是父目录）；
+//  2. 通知与错误：全部走 ToastService（不再有 ScaffoldMessenger 散点弹条），
+//     原始诊断只进折叠的「技术详情」；
+//  3. 平台矩阵：无 WebView 的平台不构造控制器，给可复制路径的降级面；
+//  4. 生命周期：弹窗期间切走视图（死 State）不 setState、不写全局设置。
 import 'dart:convert';
+import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_all/webview_all.dart';
 // 平台类（PlatformWebViewController/PlatformNavigationDelegate/PlatformWebViewWidget）
-// 不经 webview_flutter 主库 re-export——桩直接从平台接口库取（测试专用传递依赖）。
+// 不经 webview_all 主库 re-export——桩直接从平台接口库取（测试专用传递依赖）。
 // ignore: depend_on_referenced_packages
-import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+import 'package:webview_platform_interface/webview_platform_interface.dart';
+import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
-import 'package:nondesign/core/api.dart';
+import 'package:nondesign/core/capability_hub.dart';
 import 'package:nondesign/core/models.dart';
+import 'package:nondesign/core/platform_capabilities.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
+import 'package:nondesign/core/three_service.dart';
+import 'package:nondesign/core/toast_service.dart';
 import 'package:nondesign/widgets/three_workspace.dart';
 
-AppStore _store(NoNDesignApi api) {
-  final store = AppStore()
+const Map<String, dynamic> _spec = <String, dynamic>{
+  'title': 'Saturn',
+  'summary': '带环行星',
+  'components': <Map<String, dynamic>>[
+    <String, dynamic>{'id': 'planet', 'what': '球体'},
+  ],
+  'acceptance': <String>['行星在场'],
+};
+
+/// NaN 在 run 里新建的第二个项目：独立规范，切项目后界面必须跟着换。
+const Map<String, dynamic> _moonSpec = <String, dynamic>{
+  'title': 'Moon',
+  'summary': '月球地表',
+  'components': <Map<String, dynamic>>[
+    <String, dynamic>{'id': 'moon-surface', 'what': '球体'},
+  ],
+  'acceptance': <String>['月面在场'],
+};
+
+/// 第二个项目的场景代码（断言「切项目后源码/预览真的换了内容」）。
+const String _moonScene = '''
+export default function build(THREE, scene, camera, controls, renderer) {
+  // moon-surface
+  return {};
+}
+''';
+
+/// run 进行中落盘的场景代码（断言「run 里推进的进度能进界面」）。
+const String _runScene = '''
+export default function build(THREE, scene, camera, controls, renderer) {
+  // generated-during-run
+  return {};
+}
+''';
+
+/// 与生产模板同形：两个内联占位 + 一段宿主代码（预览页自包含）。
+const String _previewTemplate = '''
+<!DOCTYPE html><html><body>
+<script type="module">
+/*__THREE_MODULE__*/
+/*__SCENE_SOURCE__*/
+window.NON3D.postMessage(JSON.stringify({kind:'metrics', payload:{}}));
+</script></body></html>
+''';
+
+/// 与锚点等长、且能被组装器改写成 `const THREE = {...}` 的渲染库。
+final Uint8List _moduleBytes = () {
+  const head = 'const REVISION = "160";\n'
+      'const Scene = class Scene {};\n'
+      'const Mesh = class Mesh {};\n'
+      'const Vector3 = class Vector3 {};\n';
+  const tail = 'export { REVISION, Scene, Mesh, Vector3 };\n';
+  const overhead = 4; // /* */
+  final pad = threeModuleByteLength - head.length - tail.length - overhead;
+  return Uint8List.fromList(utf8.encode('$head/*${'x' * pad}*/$tail'));
+}();
+
+Future<Uint8List> _loadAsset(String key) async {
+  if (key == threePreviewAssetKey) return Uint8List.fromList(utf8.encode(_previewTemplate));
+  if (key == threeModuleAssetKey) return _moduleBytes;
+  if (key == threeLiveAssetKey) {
+    return Uint8List.fromList(utf8.encode('/* three-live vendor (fake) */'));
+  }
+  if (key == threeUiCatalogAssetKey) {
+    return Uint8List.fromList(utf8.encode(_fakeThreeUiCatalog));
+  }
+  throw ThreeFailure('asset_missing', key);
+}
+
+/// 极小的 ThreeUI 清单：画廊 UI 测试只关心「解析出来 → 卡片 → 打开」。
+const String _fakeThreeUiCatalog = '''
+{"version":1,"components":[
+{"id":"spark-badge","name":"火花徽章","description":"一枚会发光的徽章","file":"spark-badge.html","hint":"暗底"},
+{"id":"gallery-heading","name":"画廊标题","description":"颗粒渐变的大标题动效","file":"gallery-heading.html","hint":"大标题"}
+]}
+''';
+
+String _fence(String lang, String body) => '```$lang\n$body\n```';
+
+/// 假模型：按队列返回；队列空时抛与生产同形的失败（llm_error）。
+ThreeLlmCall _llm(List<String> replies) {
+  final queue = List<String>.from(replies);
+  return (request) async {
+    if (queue.isEmpty) throw const ThreeFailure('llm_error', 'fake: no reply left');
+    return queue.removeAt(0);
+  };
+}
+
+const ThreeLlmConfig _config =
+    ThreeLlmConfig(model: 'test-model', baseUrl: 'https://api.example.com/v1', apiKey: 'k');
+
+class _Fixture {
+  _Fixture(this.root, this.service);
+
+  final Directory root;
+  final ThreeService service;
+
+  String get projectDir => '${root.path}/saturn-demo';
+}
+
+/// 每个测试一个独立根目录：预置一个可续接的项目（规范 + 初始进度）。
+Future<_Fixture> _seedProject({String name = 'saturn-demo'}) async {
+  final root = Directory.systemTemp.createTempSync('three_workspace_test');
+  addTearDown(() {
+    if (root.existsSync()) root.deleteSync(recursive: true);
+  });
+  final creator = ThreeService(
+    root: root,
+    llm: _llm(<String>[_fence('json', jsonEncode(_spec))]),
+    assets: _loadAsset,
+  );
+  await creator.newProject(name: name, brief: '带环行星自转', config: _config);
+  return _Fixture(root, ThreeService(root: root, llm: _llm(<String>[]), assets: _loadAsset));
+}
+
+/// 在同一个根目录里再造一个「已生成第一层」的项目：模拟 NaN 的
+/// `three_create` → `three_pass` 在本机磁盘上留下的第二个项目。
+Future<void> _seedSecondProject(_Fixture fixture, {String name = 'moon-scene'}) async {
+  final creator = ThreeService(
+    root: fixture.root,
+    llm: _llm(<String>[_fence('json', jsonEncode(_moonSpec))]),
+    assets: _loadAsset,
+  );
+  await creator.newProject(name: name, brief: '月球地表', config: _config);
+  final runner = ThreeService(
+    root: fixture.root,
+    llm: _llm(<String>[_fence('js', _moonScene)]),
+    assets: _loadAsset,
+  );
+  await runner.runPass(name, _config);
+}
+
+AppStore _store({HostOs os = HostOs.macos}) {
+  // 测试宿主默认钉在 macOS 桌面：flutter_test 默认把 defaultTargetPlatform
+  // 当成 android，会把内嵌预览与文件管理器都关掉。Windows 分支测试显式传
+  // HostOs.windows。
+  final store = AppStore(
+    toasts: ToastService(autoDismiss: false),
+    capabilities: CapabilityHub(platform: PlatformCapabilities.forOs(os)),
+  )
     ..ready = true
     ..view = 'plugin:three'
     ..settings = AppSettings(
@@ -36,34 +178,25 @@ AppStore _store(NoNDesignApi api) {
       baseUrl: 'https://api.example.com/v1',
       apiKey: 'test-key',
     );
-  store.api = api;
   return store;
 }
-
-NoNDesignApi _api() => NoNDesignApi(
-      'http://mock.local',
-      MockClient((request) async {
-        if (request.url.path == '/three/projects') {
-          return http.Response(
-            '{"ok":true,"projects":[{"name":"saturn-demo","current":"blockout"}]}',
-            200,
-          );
-        }
-        return http.Response('{"ok":false,"detail":"no_route"}', 404);
-      }),
-    );
 
 /// 镜像 workspace.dart 的插件视图路由：watch store → view 变化即重建/dispose。
 /// gen 变化时强制重建工作台（const 三连会被 pumpWidget 当同一配置短路，
 /// initState 不会重跑——_pumpProject 的第二次 pump 必须靠换 key 触发）。
-Widget _host(AppStore store, {int gen = 0}) => ChangeNotifierProvider<AppStore>.value(
+Widget _host(AppStore store, ThreeService service, {int gen = 0}) =>
+    ChangeNotifierProvider<AppStore>.value(
       value: store,
       child: MaterialApp(
         theme: AppTheme.build(dark: true),
         home: Consumer<AppStore>(
           builder: (context, s, _) => s.view == 'plugin:three'
               ? Scaffold(
-                  body: KeyedSubtree(key: ValueKey('three-ws-$gen'), child: const ThreeWorkspace()))
+                  body: KeyedSubtree(
+                    key: ValueKey('three-ws-$gen'),
+                    child: ThreeWorkspace(service: service),
+                  ),
+                )
               : const Scaffold(body: SizedBox.expand()),
         ),
       ),
@@ -76,44 +209,40 @@ Future<void> _pumpAt(WidgetTester tester, Widget child, Size size) async {
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(child);
   await tester.pump(const Duration(milliseconds: 50));
+  await tester.pump(const Duration(milliseconds: 50));
 }
 
-// ---- three-5 WebView 平台桩 ----
-// 真 WebKit 控制器在 flutter test 环境构造即抛 UnimplementedError
-//（PlatformWebView 只支持真机目标平台）——fake 让「threeLoadOnOpen 直载 →
-// initState _refresh → _mountPreview → loadRequest/导航回调」全链自然跑通。
-// 装桩时机：initState 的 registerWith 只会在首个 pump 发生（_wkRegistered
-// 全局一次），_pumpProject 先以无项目空态预热一帧确保它已发生，再替换
-// instance——单跑 --plain-name（上方既有测试不执行）也不会被覆盖。
+// ---- WebView 平台桩：记录 loadFile 的绝对路径与桥消息 ----
+
 class _FakeWebViewPlatform extends WebViewPlatform {
-  _FakePlatformWebViewController? lastController;
+  _FakePlatformController? lastController;
+
+  void install() {
+    WebViewPlatform.instance = this;
+  }
 
   @override
   PlatformWebViewController createPlatformWebViewController(
-      PlatformWebViewControllerCreationParams params) {
-    return lastController = _FakePlatformWebViewController(params);
-  }
+          PlatformWebViewControllerCreationParams params) =>
+      lastController = _FakePlatformController(params);
 
   @override
   PlatformNavigationDelegate createPlatformNavigationDelegate(
           PlatformNavigationDelegateCreationParams params) =>
-      _FakePlatformNavigationDelegate(params);
+      _FakeNavigationDelegate(params);
 
   @override
-  PlatformWebViewWidget createPlatformWebViewWidget(
-          PlatformWebViewWidgetCreationParams params) =>
-      _FakePlatformWebViewWidget(params);
+  PlatformWebViewWidget createPlatformWebViewWidget(PlatformWebViewWidgetCreationParams params) =>
+      _FakeWebViewWidget(params);
 }
 
-class _FakePlatformWebViewController extends PlatformWebViewController {
-  _FakePlatformWebViewController(super.params) : super.implementation();
+class _FakePlatformController extends PlatformWebViewController {
+  _FakePlatformController(super.params) : super.implementation();
 
-  final loadedUrls = <Uri>[];
-  // channel/delegate 形参类型（LoadRequestParams/JavaScriptChannelParams/
-  // PlatformNavigationDelegate）不经 webview_flutter 主库 re-export——
-  // 桩里按 contravariance 用 dynamic 形参接住即可。
   dynamic channelParams;
-  _FakePlatformNavigationDelegate? navDelegate;
+  _FakeNavigationDelegate? navDelegate;
+  final List<String> loadedFiles = <String>[];
+  int jsCalls = 0;
 
   @override
   Future<void> setJavaScriptMode(JavaScriptMode mode) async {}
@@ -125,24 +254,28 @@ class _FakePlatformWebViewController extends PlatformWebViewController {
 
   @override
   Future<void> setPlatformNavigationDelegate(dynamic delegate) async {
-    navDelegate = delegate as _FakePlatformNavigationDelegate;
+    navDelegate = delegate as _FakeNavigationDelegate;
   }
 
   @override
-  Future<void> loadRequest(dynamic params) async {
-    loadedUrls.add(params.uri as Uri);
+  Future<void> loadFile(String absoluteFilePath) async {
+    loadedFiles.add(absoluteFilePath);
   }
 
-  /// 模拟 WebView JS 桥消息（NON3D 通道 → _onBridgeMessage）。
+  @override
+  Future<void> runJavaScript(String javaScript) async {
+    jsCalls++;
+  }
+
+  /// 模拟预览页的桥消息（NON3D 通道 → _onBridgeMessage）。
   void fireJsMessage(String text) {
     (channelParams as dynamic).onMessageReceived(JavaScriptMessage(message: text));
   }
 }
 
-class _FakePlatformNavigationDelegate extends PlatformNavigationDelegate {
-  _FakePlatformNavigationDelegate(super.params) : super.implementation();
+class _FakeNavigationDelegate extends PlatformNavigationDelegate {
+  _FakeNavigationDelegate(super.params) : super.implementation();
 
-  void Function(HttpResponseError)? onHttpError;
   void Function(WebResourceError)? onWebResourceError;
   void Function(String)? onPageStarted;
 
@@ -150,81 +283,321 @@ class _FakePlatformNavigationDelegate extends PlatformNavigationDelegate {
   Future<void> setOnPageStarted(PageEventCallback cb) async => onPageStarted = cb;
 
   @override
-  Future<void> setOnHttpError(HttpResponseErrorCallback cb) async => onHttpError = cb;
-
-  @override
   Future<void> setOnWebResourceError(WebResourceErrorCallback cb) async =>
       onWebResourceError = cb;
 
-  /// 模拟 WKNavigationDelegate decidePolicyForNavigationResponse（HTTP ≥400）。
-  void fireHttpError(int statusCode) => onHttpError?.call(HttpResponseError(
-      response: WebResourceResponse(uri: null, statusCode: statusCode)));
-
   /// 模拟 didFail(Navigation)：主帧/子资源两类。
-  void fireResourceError({required bool mainFrame}) =>
-      onWebResourceError?.call(WebResourceError(
+  void fireResourceError({required bool mainFrame}) => onWebResourceError?.call(
+        WebResourceError(
           errorCode: mainFrame ? -1009 : -100,
           description: mainFrame ? 'offline' : 'subresource',
-          isForMainFrame: mainFrame));
+          isForMainFrame: mainFrame,
+        ),
+      );
 
   void firePageStarted(String url) => onPageStarted?.call(url);
 }
 
-class _FakePlatformWebViewWidget extends PlatformWebViewWidget {
-  _FakePlatformWebViewWidget(super.params) : super.implementation();
+class _FakeWebViewWidget extends PlatformWebViewWidget {
+  _FakeWebViewWidget(super.params) : super.implementation();
 
   @override
   Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
-/// /three/project 固定 200（当前层 blockout/pending），其余路径 200 ok。
-NoNDesignApi _projectApi() => NoNDesignApi('http://mock.local', MockClient((request) async {
-      if (request.url.path == '/three/project') {
-        return http.Response(
-          '{"ok":true,"state":{"current":"blockout","passes":[{"id":"blockout","status":"pending"}]},'
-          '"spec":{},"scene_js":""}',
-          200,
-        );
-      }
-      return http.Response('{"ok":true}', 200);
-    }));
+class _Pumped {
+  _Pumped(this.fake);
 
-/// 预热一帧（确保 initState 的 registerWith 已发生）→ 装 fake → 以
-/// threeLoadOnOpen 直载 saturn-demo 重建工作台 → postFrame 的
-/// _refresh/_mountPreview 全链跑完。
-Future<_FakeWebViewPlatform> _pumpProject(WidgetTester tester, AppStore store) async {
-  await tester.pumpWidget(_host(store, gen: 0));
+  final _FakeWebViewPlatform fake;
+
+  _FakePlatformController get controller => fake.lastController!;
+}
+
+/// 预热一帧（确保 initState 的注册只发生一次）→ 装 fake → threeLoadOnOpen
+/// 直载 saturn-demo 重建工作台 → postFrame 的 _boot/_refresh/_mountPreview 跑完。
+Future<_Pumped> _pumpProject(
+  WidgetTester tester,
+  AppStore store,
+  ThreeService service, {
+  Size size = const Size(1440, 900),
+  String project = 'saturn-demo',
+}) async {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+
+  await tester.pumpWidget(_host(store, service, gen: 0));
   await tester.pump(const Duration(milliseconds: 50));
-  final fake = _FakeWebViewPlatform();
-  WebViewPlatform.instance = fake;
+
+  final fake = _FakeWebViewPlatform()..install();
   addTearDown(() => WebViewPlatform.instance = WebKitWebViewPlatform());
   addTearDown(() => threeLoadOnOpen = null);
-  threeLoadOnOpen = 'saturn-demo';
-  // gen 变化强制重建工作台：initState 消费 threeLoadOnOpen →
-  // postFrame 的 _refresh/_mountPreview（此刻 instance 已是 fake）。
-  await tester.pumpWidget(_host(store, gen: 1));
+
+  threeLoadOnOpen = project;
+  await tester.pumpWidget(_host(store, service, gen: 1));
   await tester.pump(const Duration(milliseconds: 50));
-  return fake;
+  await tester.pump(const Duration(milliseconds: 50));
+  return _Pumped(fake);
 }
 
 void main() {
+  tearDown(() {
+    debugThreeWebViewSupported = null;
+    threeLoadOnOpen = null;
+  });
+
+  // ---- 本地文件加载 ----
+
+  testWidgets('预览按文件加载：preview.html / scene.js / three.module.js 同目录', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store();
+    final pumped = await _pumpProject(tester, store, fixture.service);
+
+    final controller = pumped.fake.lastController;
+    expect(controller, isNotNull, reason: '有 WebView 的平台必须挂控制器');
+    expect(controller!.loadedFiles, hasLength(1));
+    final htmlPath = controller.loadedFiles.single;
+    expect(htmlPath, endsWith('/saturn-demo/preview.html'));
+
+    final dir = File(htmlPath).parent;
+    expect(File(htmlPath).existsSync(), isTrue);
+    expect(File('${dir.path}/scene.js').existsSync(), isTrue, reason: '三件套必须同目录');
+    expect(File('${dir.path}/three.module.js').existsSync(), isTrue, reason: '三件套必须同目录');
+    expect(File('${dir.path}/three.module.js').lengthSync(), threeModuleByteLength);
+
+    expect(find.byType(WebViewWidget), findsOneWidget);
+    expect(find.text('占位'), findsOneWidget, reason: '进度条显示当前层');
+    expect(find.byType(SnackBar), findsNothing, reason: '通知不再走 ScaffoldMessenger');
+  });
+
+  testWidgets('截图/四方位：metrics 未到前禁用，到达后可点并真发 JS', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store();
+    final pumped = await _pumpProject(tester, store, fixture.service);
+    final controller = pumped.controller;
+
+    await tester.tap(find.text('截图'));
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(controller.jsCalls, 0, reason: '未就绪不得在预览页里跑脚本');
+
+    // 非 metrics 的桥消息不点亮就绪态。
+    controller.fireJsMessage(jsonEncode(<String, dynamic>{'kind': 'unknown-kind'}));
+    await tester.pump(const Duration(milliseconds: 30));
+    await tester.tap(find.text('截图'));
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(controller.jsCalls, 0);
+
+    controller.fireJsMessage(
+        jsonEncode(<String, dynamic>{'kind': 'metrics', 'payload': <String, dynamic>{}}));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('截图'));
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(controller.jsCalls, 1);
+
+    await tester.tap(find.text('四方位取证'));
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(controller.jsCalls, 2);
+  });
+
+  testWidgets('预览主帧失败：整块换成可重试的占位，截图立刻失效，详情默认折叠', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store();
+    final pumped = await _pumpProject(tester, store, fixture.service);
+    final controller = pumped.controller;
+
+    controller.fireJsMessage(
+        jsonEncode(<String, dynamic>{'kind': 'metrics', 'payload': <String, dynamic>{}}));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('截图'));
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(controller.jsCalls, 1);
+
+    controller.navDelegate!.fireResourceError(mainFrame: true);
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('预览加载失败，请重试'), findsOneWidget);
+    expect(find.text('重试加载'), findsOneWidget);
+    await tester.tap(find.text('截图'));
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(controller.jsCalls, 1, reason: '预览失败后截图必须立刻失效');
+
+    // 技术详情默认折叠：正文不可见，点开才出现原始诊断。
+    expect(find.text('技术详情'), findsOneWidget);
+    expect(find.textContaining('offline'), findsNothing);
+    await tester.tap(find.text('技术详情'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('offline'), findsWidgets);
+
+    // 重试：重新准备并加载同一份宿主页（新建控制器，旧的被替换）。
+    final previous = controller;
+    await tester.tap(find.text('重试加载'));
+    await tester.pump(const Duration(milliseconds: 80));
+    final reloaded = pumped.fake.lastController!;
+    expect(identical(reloaded, previous), isFalse);
+    expect(reloaded.loadedFiles.single, endsWith('/saturn-demo/preview.html'));
+    expect(find.text('重试加载'), findsNothing);
+  });
+
+  testWidgets('子资源错误不清占位，新导航开始清旧占位', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store();
+    final pumped = await _pumpProject(tester, store, fixture.service);
+    final nav = pumped.controller.navDelegate!;
+
+    nav.fireResourceError(mainFrame: false);
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(find.text('预览加载失败，请重试'), findsNothing);
+
+    nav.fireResourceError(mainFrame: true);
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(find.text('预览加载失败，请重试'), findsOneWidget);
+
+    nav.firePageStarted('file:///tmp/preview.html');
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(find.text('预览加载失败，请重试'), findsNothing);
+  });
+
+  // ---- 失败呈现：人话 + 折叠详情 + ToastService ----
+
+  testWidgets('项目不存在：错误横幅说人话，原始诊断折叠，通知走 ToastService', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store();
+    final pumped = await _pumpProject(tester, store, fixture.service, project: 'ghost-scene');
+
+    expect(find.byKey(const ValueKey('three-refresh-error')), findsOneWidget);
+    expect(find.text('没有找到这个 3D 项目'), findsWidgets);
+    expect(find.byType(SnackBar), findsNothing);
+
+    // 状态类失败用常驻横幅表达（不叠通知：同一件事说两遍）。
+    expect(store.toasts.history, isEmpty, reason: '读不到项目是状态，不是事件');
+
+    // 技术详情折叠：默认看不到原始诊断。
+    expect(find.byKey(const ValueKey('three-tech-details-body')), findsNothing);
+    await tester.tap(find.text('技术详情').first);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('three-tech-details-body')), findsOneWidget);
+    // 预览控制器没有挂上（项目不存在）。
+    expect(pumped.fake.lastController, isNull);
+  });
+
+  testWidgets('生成失败（模型不可用）：横幅 + 通知，不写半截场景', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store();
+    final pumped = await _pumpProject(tester, store, fixture.service);
+
+    await tester.tap(find.text('生成当前层'));
+    await tester.pump(const Duration(milliseconds: 80));
+
+    // 注入的假模型没有回复 → llm_error → 人话横幅 + 一条通知。
+    expect(find.byKey(const ValueKey('three-refresh-error')), findsOneWidget);
+    expect(find.text('模型这次没有响应，请稍后重试'), findsWidgets);
+    expect(store.toasts.history.first.title, '模型这次没有响应，请稍后重试');
+    // 预览准备时落的是骨架场景；失败的那一轮没有写进任何生成的代码。
+    final scene = File('${fixture.projectDir}/scene.js');
+    expect(scene.existsSync(), isTrue);
+    expect(scene.readAsStringSync(), contains('GridHelper'));
+    expect(scene.readAsStringSync(), isNot(contains('planet')));
+    // 预览控制器仍在（生成失败不影响已挂载的预览）。
+    expect(pumped.fake.lastController, isNotNull);
+  });
+
+  // ---- 平台矩阵 ----
+
+  testWidgets('Windows：预览走统一 WebView 面（webview_all → WebView2）', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store(os: HostOs.windows);
+    final fake = _FakeWebViewPlatform()..install();
+    addTearDown(() => WebViewPlatform.instance = WebKitWebViewPlatform());
+    addTearDown(() => threeLoadOnOpen = null);
+
+    await _pumpAt(tester, _host(store, fixture.service), const Size(1440, 900));
+    threeLoadOnOpen = 'saturn-demo';
+    await tester.pumpWidget(_host(store, fixture.service, gen: 1));
+    // 预览面挂载是异步的（写宿主页 → 建控制器 → loadFile）。
+    for (var i = 0; i < 8; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+
+    // Windows 不再走独立 WebView2 组件：与 macOS/Linux/Android 同一条
+    // WebViewController 路径，平台差异由 webview_all 吸收。
+    expect(fake.lastController, isNotNull);
+    expect(find.byType(WebViewWidget), findsOneWidget);
+    expect(find.byKey(const ValueKey('three-preview-unsupported')), findsNothing);
+  });
+
+  testWidgets('没有 WebView 的平台：不构造控制器，给可复制路径的降级面', (tester) async {
+    debugThreeWebViewSupported = false;
+    addTearDown(() => debugThreeWebViewSupported = null);
+    final fixture = await _seedProject();
+    final store = _store();
+    final fake = _FakeWebViewPlatform()..install();
+    addTearDown(() => WebViewPlatform.instance = WebKitWebViewPlatform());
+    addTearDown(() => threeLoadOnOpen = null);
+
+    await _pumpAt(tester, _host(store, fixture.service), const Size(1440, 900));
+    threeLoadOnOpen = 'saturn-demo';
+    await tester.pumpWidget(_host(store, fixture.service, gen: 1));
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(fake.lastController, isNull, reason: '不支持平台绝不构造 WebViewController');
+    expect(find.byType(WebViewWidget), findsNothing);
+    expect(find.text('准备预览…'), findsNothing, reason: '不能把加载态当终态');
+    expect(find.byKey(const ValueKey('three-preview-unsupported')), findsOneWidget);
+    expect(find.text('这台设备不能内嵌显示 3D 预览'), findsOneWidget);
+    expect(find.text('复制项目路径'), findsOneWidget);
+    expect(find.text('复制预览文件路径'), findsOneWidget);
+    expect(find.text('在文件夹中显示'), findsOneWidget, reason: '桌面三平台有文件管理器');
+    final pathText = tester.widget<SelectableText>(
+      find.byKey(const ValueKey('three-preview-path')),
+    );
+    expect('${pathText.data}', contains('saturn-demo'));
+
+    // 用户可见文案里不得出现实现名。
+    final visible = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((t) => t.data ?? '')
+        .join(' ');
+    for (final word in <String>['服务器', '桌面服务', 'WebView', 'blockout', 'localhost', '端口', 'scene.js']) {
+      expect(visible.contains(word), isFalse, reason: '降级面出现了内部用词：$word');
+    }
+  });
+
+  testWidgets('存储目录不可用：整块退化提示，不静默空着', (tester) async {
+    // root 指向一个文件（不是目录）→ 工作台必须显性退化。
+    final container = Directory.systemTemp.createTempSync('three_workspace_bad_root');
+    addTearDown(() {
+      if (container.existsSync()) container.deleteSync(recursive: true);
+    });
+    final bogus = File('${container.path}/not-a-dir')..writeAsStringSync('x');
+    final failing = ThreeService(root: Directory(bogus.path), assets: _loadAsset);
+    final store = _store();
+
+    await _pumpAt(tester, _host(store, failing), const Size(1200, 800));
+
+    expect(find.byKey(const ValueKey('three-service-unavailable')), findsOneWidget);
+    expect(find.text('3D 项目的存储目录打不开'), findsOneWidget);
+    expect(find.text('技术详情'), findsOneWidget);
+  });
+
+  // ---- 生命周期 ----
+
   testWidgets('pickProject：弹窗期间切走视图后选项目不复活死 State', (tester) async {
-    final store = _store(_api());
-    await _pumpAt(tester, _host(store), const Size(1440, 900));
+    final fixture = await _seedProject();
+    final store = _store();
+    await _pumpAt(tester, _host(store, fixture.service), const Size(1440, 900));
 
     await tester.tap(find.text('项目'));
     await tester.pumpAndSettle();
     expect(find.text('3D 项目'), findsOneWidget);
+    expect(find.text('saturn-demo（占位）'), findsOneWidget);
 
-    // 对话框在场时切走视图（⌘1 的等价动作）：ThreeWorkspace 被 dispose，
-    // 弹窗路由独立存活。
+    // 对话框在场时切走视图（⌘1 的等价动作）：ThreeWorkspace 被 dispose。
     store.setView('design');
     await tester.pumpAndSettle();
     expect(store.view, 'design');
 
-    // 在仍开着的弹窗里选项目 → await showNonDialog 之后的续体在死 State 上跑。
-    // （Navigator.pop 能成功走通依赖 showNonDialog 把路由 context 传给
-    // builder——推入方 context 已死时 dialog 动作会先在这里崩。）
+    // 在仍开着的弹窗里选项目 → await 之后的续体在死 State 上跑。
     await tester.tap(find.text('saturn-demo（占位）'));
     await tester.pump(const Duration(milliseconds: 100));
 
@@ -234,8 +607,9 @@ void main() {
   });
 
   testWidgets('createProject：弹窗期间切走视图后确认新建不触发 setState-after-dispose', (tester) async {
-    final store = _store(_api());
-    await _pumpAt(tester, _host(store), const Size(1440, 900));
+    final fixture = await _seedProject();
+    final store = _store();
+    await _pumpAt(tester, _host(store, fixture.service), const Size(1440, 900));
 
     await tester.tap(find.text('新建 3D 项目'));
     await tester.pumpAndSettle();
@@ -246,8 +620,6 @@ void main() {
     store.setView('design');
     await tester.pumpAndSettle();
 
-    // 点「生成规范」→ pop(true) → 续体在 try 之外直接 setState(_busy=true)：
-    // 无守卫时是未处理异常（debug 抛 FlutterError），守卫后安静返回。
     await tester.tap(find.text('生成规范'));
     await tester.pump(const Duration(milliseconds: 100));
 
@@ -255,129 +627,193 @@ void main() {
     expect(store.settings.threeProjectName, isEmpty);
   });
 
-  // ---- 2026-11-17 3D 客户端错误呈现批次回归锚（three-5）----
+  // ---- 删除（本地目录，不再有远端调用）----
 
-  testWidgets('refresh 非 ok：错误红条 + toast 显式呈现，状态不被伪造', (tester) async {
-    var projectOk = false;
-    final api = NoNDesignApi('http://mock.local', MockClient((request) async {
-      if (request.url.path == '/three/project') {
-        if (!projectOk) return http.Response('{"detail":"no_project:saturn-demo"}', 400);
-        return http.Response(
-          '{"ok":true,"state":{"current":"blockout","passes":[{"id":"blockout","status":"pending"}]},'
-          '"spec":{},"scene_js":""}',
-          200,
-        );
-      }
-      return http.Response('{"ok":true}', 200);
-    }));
-    final fake = await _pumpProject(tester, _store(api));
+  testWidgets('删除场景：确认后目录消失、当前项目回空态、持久化项目名清空', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store();
+    await _pumpProject(tester, store, fixture.service);
 
-    // 直载路径 initState postFrame 的 _refresh 已失败：红条 + toast；
-    // 盘上无项目 ⇒ pass chips 不被旧状态伪造。
-    expect(find.byKey(const ValueKey('three-refresh-error')), findsOneWidget);
-    expect(find.textContaining('no_project:saturn-demo'), findsWidgets);
-    expect(find.text('项目状态刷新失败'), findsOneWidget);
-    expect(find.text('占位'), findsNothing);
+    await tester.tap(find.text('项目'));
+    await tester.pumpAndSettle();
+    expect(find.text('saturn-demo（占位）'), findsOneWidget);
 
-    // 桥反馈（WebView 每条消息都跟一次 _refresh）——服务器恢复后同路径自愈。
-    projectOk = true;
-    fake.lastController!.fireJsMessage(jsonEncode({'kind': 'metrics', 'payload': <String, dynamic>{}}));
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.byTooltip('删除项目'));
+    await tester.pumpAndSettle();
+    expect(find.text('删除 3D 项目？'), findsOneWidget);
 
-    expect(find.byKey(const ValueKey('three-refresh-error')), findsNothing);
-    expect(find.text('占位'), findsOneWidget);
-    await tester.pumpAndSettle(); // 收掉失败 toast 的展示定时器
+    await tester.tap(find.widgetWithText(FilledButton, '删除'));
+    await tester.pumpAndSettle();
+
+    expect(Directory(fixture.projectDir).existsSync(), isFalse);
+    expect(find.text('直接制作 3D'), findsOneWidget);
+    expect(store.settings.threeProjectName, isEmpty);
   });
 
-  testWidgets('refresh 异常（服务器不可达）：同样红条 + toast，不再静默吞', (tester) async {
-    final api = NoNDesignApi('http://mock.local', MockClient((request) async {
-      if (request.url.path == '/three/project') throw Exception('connection reset');
-      return http.Response('{"ok":true}', 200);
-    }));
-    final fake = await _pumpProject(tester, _store(api));
+  // ---- NaN 生成后的工作台同步（store → 界面）----
+  //
+  // 用户可见问题：让 NaN 在 3D 工作台生成场景，run 结束提示「3D 工作台已
+  // 更新」，但工作台里没有东西——项目列表不刷新、不切新项目、预览空白。
+  // 根因是工作台只用 context.read 读一次 store，不订阅 threeProjectName /
+  // agentBusy 的变化。下面三条用例分别锁死「空工作台自动打开新项目」「切
+  // 项目刷新进度/预览/列表」「run 中推进 + run 结束重载」。
 
-    expect(find.byKey(const ValueKey('three-refresh-error')), findsOneWidget);
-    expect(find.textContaining('connection reset'), findsWidgets);
-    expect(find.text('项目状态刷新失败'), findsOneWidget);
-
-    // 同 detail 去重：桥反馈每条都跟一次 _refresh，重复失败不叠同文 toast。
-    fake.lastController!.fireJsMessage(jsonEncode({'kind': 'metrics', 'payload': <String, dynamic>{}}));
-    await tester.pump(const Duration(milliseconds: 50));
-
-    expect(find.byKey(const ValueKey('three-refresh-error')), findsOneWidget);
-    expect(find.text('项目状态刷新失败'), findsOneWidget);
-    await tester.pumpAndSettle(); // 收掉失败 toast 的展示定时器
-  });
-
-  testWidgets('预览主帧 HTTP ≥400：错误占位替换 WebView 区域，重试可恢复', (tester) async {
-    final fake = await _pumpProject(tester, _store(_projectApi()));
-    expect(find.textContaining('预览加载失败'), findsNothing);
-
-    // /three/preview/<错名> 的 400 JSON 场景
-    //（decidePolicyForNavigationResponse = onNavigationResponse 语义桥）。
-    fake.lastController!.navDelegate!.fireHttpError(400);
-    await tester.pump(const Duration(milliseconds: 50));
-
-    expect(find.textContaining('预览加载失败'), findsOneWidget);
-    expect(find.textContaining('HTTP 400'), findsOneWidget);
-    expect(find.text('重试加载'), findsOneWidget);
-
-    // 重试：重新 loadRequest（初始 1 次 + 重试 1 次），占位退场、WebView 恢复。
-    await tester.tap(find.text('重试加载'));
-    await tester.pump(const Duration(milliseconds: 50));
-
-    expect(find.textContaining('预览加载失败'), findsNothing);
-    expect(find.byType(WebViewWidget), findsOneWidget);
-    expect(fake.lastController!.loadedUrls.length, 2);
-  });
-
-  testWidgets('无 WebView 平台：不构造控制器，预览区给地址/路径提示（shelf-1）', (tester) async {
-    // 测试机是 macOS（Platform.isMacOS=true）：用注入开关走 Linux/Windows
-    // 的同一代码路（与 video_player_surface 的平台矩阵一致）。
-    debugThreeWebViewSupported = false;
-    addTearDown(() => debugThreeWebViewSupported = null);
-    threeLoadOnOpen = 'saturn-demo';
-    addTearDown(() => threeLoadOnOpen = null);
-    // fake 平台同样装上：守卫失效时控制器会在这里被构造出来（断言抓）。
-    final fake = _FakeWebViewPlatform();
-    WebViewPlatform.instance = fake;
+  testWidgets('NaN 生成后 store 项目名变化：空工作台自动打开新项目并挂载预览', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store();
+    final fake = _FakeWebViewPlatform()..install();
     addTearDown(() => WebViewPlatform.instance = WebKitWebViewPlatform());
 
-    await _pumpAt(tester, _host(_store(_projectApi())), const Size(1440, 900));
-    await tester.pump(const Duration(milliseconds: 80));
+    // 空工作台：没有持久化项目名（用户刚打开 3D 工作台就让 NaN 生成）。
+    await _pumpAt(tester, _host(store, fixture.service), const Size(1440, 900));
+    expect(find.text('直接制作 3D'), findsOneWidget);
 
-    expect(fake.lastController, isNull, reason: '不支持平台绝不构造 WebViewController');
-    expect(find.byType(WebViewWidget), findsNothing);
-    expect(find.text('加载预览…'), findsNothing, reason: '不能把加载态当终态');
-    expect(find.byKey(const ValueKey('three-preview-unsupported')), findsOneWidget);
-    expect(find.text('当前平台不支持应用内 3D 预览'), findsOneWidget);
-    // 路径提示（可复制/定位）：预览地址 + 项目目录。
-    expect(find.textContaining('/three/preview/saturn-demo'), findsOneWidget);
-    expect(find.textContaining('3d/saturn-demo'), findsOneWidget);
-    expect(find.text('复制预览地址'), findsOneWidget);
-    expect(find.text('复制项目路径'), findsOneWidget);
-    expect(find.text('在文件夹中显示'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-    await tester.pumpAndSettle();
+    // NaN 的 three_create 成功：tool_end 走 _adoptWorkspaceArtifact，写入
+    // settings.threeProjectName 并 notify。
+    store.setThreeProjectName('saturn-demo');
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(find.text('saturn-demo'), findsWidgets, reason: '工作台必须切到 NaN 新建的项目');
+    expect(find.text('直接制作 3D'), findsNothing);
+    expect(fake.lastController, isNotNull, reason: '切完项目必须挂预览');
+    expect(fake.lastController!.loadedFiles.single, endsWith('/saturn-demo/preview.html'));
+    expect(find.text('占位'), findsOneWidget, reason: '层进度来自磁盘快照');
   });
 
-  testWidgets('子资源错误不清占位，主帧资源错误才置占位', (tester) async {
-    final fake = await _pumpProject(tester, _store(_projectApi()));
-    final nav = fake.lastController!.navDelegate!;
+  testWidgets('store 切到另一个项目：切项目、刷新列表与层状态、重载预览', (tester) async {
+    final fixture = await _seedProject();
+    await _seedSecondProject(fixture);
+    final store = _store();
+    final pumped = await _pumpProject(tester, store, fixture.service);
+    final firstController = pumped.fake.lastController!;
+    expect(firstController.loadedFiles.single, endsWith('/saturn-demo/preview.html'));
 
-    // 子资源（图片/脚本）失败不整块呈现。
-    nav.fireResourceError(mainFrame: false);
-    await tester.pump(const Duration(milliseconds: 50));
-    expect(find.textContaining('预览加载失败'), findsNothing);
+    // NaN 在 run 里改了当前项目 → store 项目名变化 → 工作台必须跟过去，
+    // 而不是停在旧项目/旧预览上。
+    store.setThreeProjectName('moon-scene');
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
 
-    nav.fireResourceError(mainFrame: true);
-    await tester.pump(const Duration(milliseconds: 50));
-    expect(find.textContaining('预览加载失败'), findsOneWidget);
-    expect(find.textContaining('offline'), findsWidgets);
+    expect(find.text('moon-scene'), findsWidgets, reason: '顶栏标题必须换成新项目');
+    final switched = pumped.fake.lastController!;
+    expect(identical(switched, firstController), isFalse, reason: '切项目必须重挂预览控制器');
+    expect(switched.loadedFiles.single, endsWith('/moon-scene/preview.html'));
 
-    // 新导航开始清旧占位（刷新成功页照常渲染，失败会再置）。
-    nav.firePageStarted('http://mock.local/three/preview/saturn-demo');
+    // 层状态/场景代码来自磁盘快照：源码面看到的是新项目自己的代码。
+    await tester.tap(find.text('源码'));
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(find.textContaining('moon-surface'), findsWidgets);
+    expect(find.textContaining('场景代码 · '), findsOneWidget, reason: '场景代码长度必须跟着刷新');
+    expect(find.textContaining('planet'), findsNothing, reason: '不得残留旧项目的场景代码');
+
+    // 项目列表也重扫过：弹窗里两个项目都在（NaN 新建的项目不再缺席）。
+    await tester.tap(find.text('项目'));
+    await tester.pumpAndSettle();
+    expect(find.text('3D 项目'), findsOneWidget);
+    expect(find.text('saturn-demo（占位）'), findsOneWidget);
+    expect(find.text('moon-scene（占位）'), findsOneWidget);
+  });
+
+  testWidgets('run 在飞：周期刷新看到磁盘进度；run 结束：强制刷新并重载预览', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store();
+    final pumped = await _pumpProject(tester, store, fixture.service);
+    final beforeRun = pumped.fake.lastController!;
+
+    // run 起点（真实链路 _runDartLoop 会置 agentBusy 并 notify）。
+    store.agentBusy = true;
+    store.notifyListeners();
+    await tester.pump(const Duration(milliseconds: 60));
+
+    // run 中 NaN 的 three_pass 在磁盘上写了新场景代码（工作台还没收到终态）。
+    final runner = ThreeService(
+      root: fixture.root,
+      llm: _llm(<String>[_fence('js', _runScene)]),
+      assets: _loadAsset,
+    );
+    await runner.runPass('saturn-demo', _config);
+
+    // 运行中的节流轮询（600ms 定时 + 500ms 合并窗口）把进度拉进界面。
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.tap(find.text('源码'));
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(find.textContaining('generated-during-run'), findsWidgets,
+        reason: 'run 进行中工作台也要看到场景代码在变（不能空白/永远转圈）');
+
+    // run 终态：agentBusy true→false → 强制刷新 + 重载预览（最后一层不能漏）。
+    store.agentBusy = false;
+    store.notifyListeners();
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump(const Duration(milliseconds: 150));
+
+    final afterRun = pumped.fake.lastController!;
+    expect(identical(afterRun, beforeRun), isFalse, reason: 'run 结束必须重载预览');
+    expect(afterRun.loadedFiles.single, endsWith('/saturn-demo/preview.html'));
+    expect(find.textContaining('generated-during-run'), findsWidgets);
+  });
+
+  testWidgets('run 中刷新不覆盖用户规范草稿；NaN 切项目后草稿按项目保留/恢复', (tester) async {
+    final fixture = await _seedProject();
+    await _seedSecondProject(fixture);
+    final store = _store();
+    final pumped = await _pumpProject(tester, store, fixture.service);
+
+    await tester.tap(find.text('规范'));
+    await tester.pump(const Duration(milliseconds: 60));
+    const draft = '{"title": "user-edit", "components": [{"id": "planet", "what": "球"}]}';
+    await tester.enterText(find.byType(TextField), draft);
+    await tester.pump(const Duration(milliseconds: 40));
+
+    // run 在飞 → 周期刷新读的是磁盘规范，但用户未保存的编辑不能被冲掉。
+    store.agentBusy = true;
+    store.notifyListeners();
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, draft,
+        reason: '刷新不得覆盖用户正在编辑的规范');
+
+    // NaN 切到另一个项目：旧项目未保存的编辑先落草稿。
+    store.setThreeProjectName('moon-scene');
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(store.threeSpecDraft('saturn-demo'), draft);
+
+    store.agentBusy = false;
+    store.notifyListeners();
+    await tester.pump(const Duration(milliseconds: 60));
+
+    // 切回 saturn-demo：草稿恢复，磁盘上的规范没有把用户编辑冲掉。
+    store.setThreeProjectName('saturn-demo');
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.tap(find.text('规范'));
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, draft,
+        reason: '切回来的项目必须恢复自己的未保存草稿');
+    expect(pumped.fake.lastController!.loadedFiles.single, endsWith('/saturn-demo/preview.html'));
+  });
+
+  // ---- 规范编辑 ----
+
+  testWidgets('规范页：非法内容给出人话提示，不覆盖磁盘上的规范', (tester) async {
+    final fixture = await _seedProject();
+    final store = _store();
+    await _pumpProject(tester, store, fixture.service);
+    final specFile = File('${fixture.projectDir}/three-spec.json');
+    final before = specFile.readAsStringSync();
+
+    await tester.tap(find.text('规范'));
+    await tester.pumpAndSettle();
+    expect(find.text('项目规范'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '{broken');
+    await tester.tap(find.text('保存规范'));
     await tester.pump(const Duration(milliseconds: 50));
-    expect(find.textContaining('预览加载失败'), findsNothing);
+
+    expect(store.toasts.history.first.title, '规范格式不对');
+    expect(find.byType(SnackBar), findsNothing);
+    expect(specFile.readAsStringSync(), before);
   });
 }
