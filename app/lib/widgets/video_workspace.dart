@@ -92,6 +92,9 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   VideoReviewResult? _review;
   // UI-3：导演台当前选中镜头（只读检查器/时间线联动；不写事实源）。
   int? _selectedShotIndex;
+  // 导演台共享播放头（由预览面回调；时间线只读呈现）。
+  double _playheadSeconds = 0;
+  bool _previewPlaying = false;
 
   /// 产物模式：艺术架点开的某个 mp4（非 null 即整个工作台切到播放面）。
   String? _artifactPath;
@@ -797,7 +800,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         final tree = VideoScriptTree(
           shots: shots,
           selectedIndex: selectedShot?.index,
-          onSelect: (shot) => setState(() => _selectedShotIndex = shot.index),
+          onSelect: _selectShot,
         );
         final inspector = VideoShotInspector(
           shot: selectedShot,
@@ -833,9 +836,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
               VideoTimelineStrip(
                 shots: shots,
                 selectedIndex: selectedShot?.index,
-                onSelect: (shot) =>
-                    setState(() => _selectedShotIndex = shot.index),
+                onSelect: _selectShot,
                 fps: fps,
+                playheadSeconds: _playheadSeconds,
+                playing: _previewPlaying,
               ),
             if (layout.isPhone) _playerHint(context),
           ],
@@ -1661,6 +1665,15 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   }
 
   /// 主区：选中的文档直接可播；没有文档时是空态。
+  /// 导演台选镜头：树/时间线/检查器同步，并把只读播放头落到镜头起点。
+  void _selectShot(VideoShotItem shot) {
+    setState(() {
+      _selectedShotIndex = shot.index;
+      _playheadSeconds = shot.start;
+      _previewPlaying = false;
+    });
+  }
+
   Widget _previewPane(BuildContext context) {
     final p = context.palette;
     if (_projectName != null) {
@@ -1717,6 +1730,12 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       document: doc,
       fps: _fps,
       initialTime: selectedStart,
+      onFrame: (seconds, _) {
+        if (mounted) setState(() => _playheadSeconds = seconds);
+      },
+      onPlayingChanged: (playing) {
+        if (mounted) setState(() => _previewPlaying = playing);
+      },
     );
   }
 }

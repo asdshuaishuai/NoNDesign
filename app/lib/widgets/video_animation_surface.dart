@@ -32,6 +32,7 @@ class VideoAnimationSurface extends StatefulWidget {
     this.loop = true,
     this.initialTime = 0,
     this.onFrame,
+    this.onPlayingChanged,
   });
 
   /// 已通过校验、预编译好的脚本。
@@ -51,6 +52,9 @@ class VideoAnimationSurface extends StatefulWidget {
 
   /// 每换一帧回调一次（时间、0 基帧号），供外部做读数/联动。
   final void Function(double seconds, int frameIndex)? onFrame;
+
+  /// 播放状态变化回调（导演台时间线用；控制动作仍在播放器内）。
+  final void Function(bool playing)? onPlayingChanged;
 
   @override
   State<VideoAnimationSurface> createState() => _VideoAnimationSurfaceState();
@@ -103,6 +107,12 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
         ? widget.initialTime.clamp(0.0, _duration)
         : 0;
     _applyFrame(_t);
+    // 首帧也要让外部读到（选中镜头后时间线播放头要立刻落在镜头起点）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.onFrame?.call(_t, _frameIndex);
+      widget.onPlayingChanged?.call(_playing);
+    });
     if (widget.autoplay) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _play();
@@ -205,6 +215,7 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
     });
     _startTimer();
     widget.onFrame?.call(_t, _frameIndex);
+    widget.onPlayingChanged?.call(true);
   }
 
   void _pause() {
@@ -212,6 +223,7 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
     _timer?.cancel();
     _timer = null;
     setState(() => _playing = false);
+    widget.onPlayingChanged?.call(false);
   }
 
   void _togglePlay() => _playing ? _pause() : _play();

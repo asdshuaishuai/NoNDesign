@@ -261,6 +261,15 @@ void main() {
       closeTo(shots[1].start, 1e-6),
       reason: '选中第二个镜头后，预览时间应跳到它的起点',
     );
+    // 共享播放头：底部时间线读数与预览同源（只读呈现，控制在播放器内）。
+    final playhead = tester.widget<Text>(
+      find.byKey(const ValueKey('video-timeline-playhead')),
+    );
+    expect(
+      _secondsOf(playhead.data!),
+      closeTo(shots[1].start, 1e-6),
+      reason: '时间线播放头也应落在镜头起点',
+    );
   });
 
   testWidgets('打开即满幅播放面：编辑动作收进工具条，不再常驻侧栏', (tester) async {

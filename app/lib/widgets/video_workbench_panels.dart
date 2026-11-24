@@ -319,6 +319,9 @@ class VideoShotInspector extends StatelessWidget {
 }
 
 /// 底部镜头时间线（视频专属；按场景时长比例排布）。
+///
+/// 共享播放头只读呈现：播放/暂停控制在预览播放器里；本栏显示时间、播放状态
+/// 与当前播放头在镜头条上的位置，供导演台对齐。
 class VideoTimelineStrip extends StatelessWidget {
   const VideoTimelineStrip({
     super.key,
@@ -326,17 +329,24 @@ class VideoTimelineStrip extends StatelessWidget {
     this.selectedIndex,
     required this.onSelect,
     this.fps = 0,
+    this.playheadSeconds = 0,
+    this.playing = false,
   });
 
   final List<VideoShotItem> shots;
   final int? selectedIndex;
   final ValueChanged<VideoShotItem> onSelect;
   final int fps;
+  final double playheadSeconds;
+  final bool playing;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     final total = shots.fold<double>(0, (sum, shot) => sum + shot.duration);
+    final playhead = total <= 0
+        ? 0.0
+        : playheadSeconds.clamp(0.0, total) / total;
     return Container(
       key: const ValueKey('video-workbench-timeline'),
       height: 92,
@@ -350,9 +360,25 @@ class VideoTimelineStrip extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              Icon(Icons.timeline, size: 12, color: p.ink4),
+              Icon(
+                playing
+                    ? Icons.pause_circle_outline
+                    : Icons.play_circle_outline,
+                size: 13,
+                color: p.ink4,
+              ),
               const SizedBox(width: 6),
               Text('时间线', style: TextStyle(fontSize: 11, color: p.ink3)),
+              const SizedBox(width: 8),
+              Text(
+                _formatSeconds(playheadSeconds),
+                key: const ValueKey('video-timeline-playhead'),
+                style: TextStyle(
+                  fontSize: 10,
+                  fontFamily: 'Menlo',
+                  color: p.ink4,
+                ),
+              ),
               const Spacer(),
               Text(
                 '${total.toStringAsFixed(1)}s · ${fps <= 0 ? '—' : '$fps fps'}',
@@ -369,57 +395,82 @@ class VideoTimelineStrip extends StatelessWidget {
                       style: TextStyle(fontSize: 10, color: p.ink4),
                     ),
                   )
-                : Row(
-                    children: <Widget>[
-                      for (final shot in shots)
-                        Expanded(
-                          flex: (shot.duration * 1000).round().clamp(
-                            1,
-                            1 << 30,
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 2),
-                            child: InkWell(
-                              key: ValueKey(
-                                'video-timeline-shot-${shot.index}',
-                              ),
-                              borderRadius: BorderRadius.circular(5),
-                              onTap: () => onSelect(shot),
-                              child: Container(
-                                alignment: Alignment.centerLeft,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
+                : LayoutBuilder(
+                    builder: (context, constraints) => Stack(
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            for (final shot in shots)
+                              Expanded(
+                                flex: (shot.duration * 1000).round().clamp(
+                                  1,
+                                  1 << 30,
                                 ),
-                                decoration: BoxDecoration(
-                                  color: shot.index == selectedIndex
-                                      ? p.accent.withValues(alpha: 0.24)
-                                      : p.panel2,
-                                  borderRadius: BorderRadius.circular(5),
-                                  border: Border.all(
-                                    color: shot.index == selectedIndex
-                                        ? p.accent
-                                        : p.line,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 2,
+                                  ),
+                                  child: InkWell(
+                                    key: ValueKey(
+                                      'video-timeline-shot-${shot.index}',
+                                    ),
+                                    borderRadius: BorderRadius.circular(5),
+                                    onTap: () => onSelect(shot),
+                                    child: Container(
+                                      alignment: Alignment.centerLeft,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: shot.index == selectedIndex
+                                            ? p.accent.withValues(alpha: 0.24)
+                                            : p.panel2,
+                                        borderRadius: BorderRadius.circular(5),
+                                        border: Border.all(
+                                          color: shot.index == selectedIndex
+                                              ? p.accent
+                                              : p.line,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        '${shot.index + 1}',
+                                        maxLines: 1,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: shot.index == selectedIndex
+                                              ? p.ink
+                                              : p.ink3,
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
-                                child: Text(
-                                  '${shot.index + 1}',
-                                  maxLines: 1,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: shot.index == selectedIndex
-                                        ? p.ink
-                                        : p.ink3,
-                                  ),
-                                ),
                               ),
-                            ),
-                          ),
+                          ],
                         ),
-                    ],
+                        Positioned(
+                          left: (constraints.maxWidth * playhead).clamp(
+                            0.0,
+                            constraints.maxWidth - 2,
+                          ),
+                          top: 0,
+                          bottom: 0,
+                          child: Container(width: 2, color: p.accent),
+                        ),
+                      ],
+                    ),
                   ),
           ),
         ],
       ),
     );
   }
+}
+
+String _formatSeconds(double seconds) {
+  final total = seconds < 0 ? 0.0 : seconds;
+  final minutes = total ~/ 60;
+  final rest = total - minutes * 60;
+  final restText = rest.toStringAsFixed(3).padLeft(6, '0'); // 00.000
+  return '${minutes.toString().padLeft(2, '0')}:$restText';
 }
