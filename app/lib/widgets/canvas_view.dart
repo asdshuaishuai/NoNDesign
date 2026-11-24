@@ -14,6 +14,7 @@ import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import 'common.dart';
+import 'design_selection_toolbar.dart';
 
 class CanvasView extends StatefulWidget {
   const CanvasView({super.key});
@@ -871,6 +872,7 @@ class _CanvasViewState extends State<CanvasView> {
             ),
           ),
             if (active && !store.agentBusy) ..._selectionHandles(store, board),
+            if (active && !store.agentBusy) ..._selectionToolbar(store, board),
           ],
         ),
       );
@@ -880,6 +882,34 @@ class _CanvasViewState extends State<CanvasView> {
   /// 视觉手柄由 ArtboardPainter 绘制；这里只挂手势——拖动期间
   /// setState 更新 ghost 矩形（painter 实时绘制），松手按需提交
   /// moveNode + resizeNode（store 既有方法，不改 store）。
+  /// 选中单个节点时的浮动工具条（节点上方；空间不够则放下方）。
+  List<Widget> _selectionToolbar(AppStore store, Artboard board) {
+    final id = store.selectedNode;
+    if (id == null) return const [];
+    CanvasNode? hit;
+    for (final node in board.nodes) {
+      if (node.id == id) {
+        hit = node;
+        break;
+      }
+    }
+    if (hit == null || !hit.style.visible) return const [];
+    final node = hit;
+    final rect = Rect.fromLTWH(node.x, node.y, node.w, node.h);
+    final double top = rect.top >= 40 ? rect.top - 36 : rect.bottom + 8;
+    return <Widget>[
+      Positioned(
+        left: rect.left,
+        top: top,
+        child: DesignSelectionToolbar(
+          onDuplicate: () => store.duplicateNode(node.id),
+          onDelete: () => store.deleteNode(node.id),
+          onDismiss: () => store.selectNode(null),
+        ),
+      ),
+    ];
+  }
+
   List<Widget> _selectionHandles(AppStore store, Artboard board) {
     final id = store.selectedNode;
     if (id == null) return const [];
