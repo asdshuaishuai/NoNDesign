@@ -187,7 +187,7 @@ wrapper（`webkit_webview_controller.dart:435-437`），页面内联脚本运行
 
 本轮决策：
 
-- AG-UI **暂缓**，不新增依赖、不改传输层；聊天流仍走现有 `ai_sdk_dart` + Dart agent 循环；
+- AG-UI **暂缓**，不新增依赖、不改传输层；聊天流仍走现有 `genkit` + Dart agent 循环（2026-11-23 由 ai_sdk 迁移）；
 - 未来若接 AG-UI，定位是「agent 运行时事件总线」，与渲染器选型（原生 vs Web）解耦，
   不得写成「A2UI 的替代/升级」；
 - npm 上的 `@ag-ui/a2ui-middleware`/`@ag-ui/a2ui-toolkit` 属于 AG-UI 生态的桥接件，

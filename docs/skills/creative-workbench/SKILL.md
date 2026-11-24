@@ -359,6 +359,6 @@ No file-by-file list, no restating the plan, no self-congratulation.
   [3dcodeverse.md](../../research/3dcodeverse.md) ·
   [pixelfx.md](../../research/pixelfx.md) ·
   [line-art-animation.md](../../research/line-art-animation.md) ·
-  [raea.md](../../research/raea.md)（FSL 阻塞，只参考）·
+  [raea.md](../../research/raea.md)（只参考，不引入；3D 视频执行面用 three-live）·
   [material-painter.md](../../research/material-painter.md)（GPL 阻塞，参考/可选外部工作站）·
   [plan-creative-workbench.md](../../plan-creative-workbench.md).

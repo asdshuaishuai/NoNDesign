@@ -31,3 +31,6 @@ key.txt
 # 本地发布产物（dmg / zip / 安装包，勿入库）
 dist/
 .zcode-site/
+
+# 本地工具配置（勿入库）
+.zcode/

@@ -15,6 +15,12 @@
 > Python 宿主的测试与 `engine_parity.py` 已删除。下方 P0–P3 的路线记录
 > 与 Python 侧对照表保留作历史背景，**不要据此重新引入服务进程**。
 
+> **修订注记（2026-11-23 用户裁决）**：Dart agent 循环的 LLM 层已从
+> `ai_sdk_dart` / `ai_sdk_openai` 迁移到 `genkit` + `genkit_openai` +
+> `schemantic`（[AGENTS.md](../AGENTS.md) Agent 层约定 / `app/lib/core/dart_agent.dart`
+> 为现状）。本文中「`ai_sdk_dart 3.1` 为主战武器」「ai_sdk 对应物」等表述只作
+> 历史背景，不再代表现状；`StreamToolNameGuard` 已随 ai_sdk 退场。
+
 ## 0. 结论先行（TL;DR）
 
 1. **两个 GitHub 仓库不是运行时 SDK，是开发期 Agent Skills**——教编码智能体（ZCode/Cursor 等）怎么写

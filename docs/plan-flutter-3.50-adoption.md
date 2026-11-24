@@ -17,7 +17,13 @@
 >
 > **决策记录（2026-11-17）**：① MediaPipe for Flutter —— **采纳，只引入基础 task 能力**
 > （视觉 / 文本 / 检索，见 N6）；**端侧 LLM（LiteRT-LM / Gemma）暂不考虑**（难度大，用户决策）；
-> ② Genkit Dart 1.0 —— **不引入**，维持原判定（见 §2）。
+> ② Genkit Dart 1.0 —— 曾判「不引入」；**2026-11-23 用户裁决已修订为引入**（见头部修订注记与 §2）。
+>
+> **修订注记（2026-11-23 用户裁决）**：LLM 层已从 `ai_sdk_dart` / `ai_sdk_openai`
+> 迁移到 `genkit` + `genkit_openai` + `schemantic`（`app/pubspec.yaml`、
+> `app/lib/core/dart_agent.dart`）。本文 §2「Genkit 不引入」与 §4「明确不做」中的
+> Genkit 条目只作历史决策记录，**不再代表现状或约束**；StepFun 流式空名方言的旧
+> `StreamToolNameGuard` 已随 ai_sdk 退场，真实端点抓包复核仍待补。
 
 ## 0. 版本事实（2026-11-17 实测）
 
@@ -132,7 +138,7 @@ Intel Mac 宿主随 Flutter 3.50 退役）。
 - SwiftPM 退出选项开始告警，CocoaPods 回退未来移除——桌面/移动构建脚本届时核对；
 - 本仓无 web 产品面，Wasm allowList / `--web-content-hash` 仅记录，不实施。
 
-## 2. Genkit Dart 1.0 判定（2026-11-17 结论）
+## 2. Genkit Dart 1.0 判定（2026-11-17 结论；**2026-11-23 已修订为引入**）
 
 **事实**（2026-10-08 发布 1.0，当前 1.0.2）：
 
@@ -144,8 +150,9 @@ Intel Mac 宿主随 Flutter 3.50 退役）。
 - **实验层（`package:genkit/experimental.dart`，不在 semver 保证内）**：`defineAgent`
   多轮 agent、会话持久化、快照、agents 委托、双向层、`genkit_a2ui`（agent 直接吐交互界面）。
 
-**判定：不引入为运行时框架，维持 `docs/plan-dart-agent-migration.md` §3.1 的结论。**
+**判定（历史）：不引入为运行时框架，维持 `docs/plan-dart-agent-migration.md` §3.1 的结论。**
 **2026-11-17 用户确认：维持本建议（Genkit 不引入）。**
+**2026-11-23 用户裁决修订：引入 Genkit（见头部修订注记）；本节以下理由只作历史记录。**
 
 理由：
 1. **架构形态不匹配**：Genkit Dart 的官方路径是 Shelf 后端 + Flutter 经 HTTP 调用——它是
@@ -201,7 +208,7 @@ ImageEmbedder + Semantic Retriever 开始）。
 ## 4. 明确不做（本轮）
 
 - 不因 3.50 升级 SDK——已经在 3.50.0 上；
-- 不引入 Genkit Dart 作为客户端 agent 循环（理由见 §2）；
+- ~~不引入 Genkit Dart 作为客户端 agent 循环~~ —— **2026-11-23 用户裁决已推翻，Genkit 已引入**（见头部修订注记）；
 - 不为 Web 目标适配 Wasm / content hash（本仓无 web 产品面）；
 - 端侧 LLM（LiteRT-LM / Gemma）暂不考虑——用户决策 2026-11-17（GB 级模型、Flutter 侧成熟度
   不足、桌面/移动推理差异大）；MediaPipe 只用基础 task 能力。

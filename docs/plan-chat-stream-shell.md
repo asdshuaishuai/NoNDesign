@@ -26,7 +26,7 @@
    UI / 视频 / 3D 小件）；**工作区**与之并存——桌面常驻分栏，移动端（pad 按屏幕尺寸自适应）
    右划以**画中画浮窗**覆盖在聊天上方。
 3. **agent 循环层**：彻底剔除 Python agents SDK——migration plan 的 P0–P2 从「路线图」升格为
-   **本方案的硬前置**；聊天流的 agent 就是 `ai_sdk_dart` 内置循环。
+   **本方案的硬前置**；聊天流的 agent 是 `genkit` 工具循环（2026-11-23 由 ai_sdk 迁移）。
 4. **桌面保留本地 agent 检测**（ACP 检测/使用不动，移动端维持禁用）。
 
 ## 1. 渲染层评估：a2ui_flutter 能否替代 HTML 热应用
@@ -88,7 +88,7 @@ A2UI 是 a2ui_flutter 实现的那套。下文 A2UI 均指协议/包。）
 └─────────────────────────────────────────────────┘
 ```
 
-- **Chat Stream**：`ai_sdk_dart` 内置循环（P0）驱动；消息模型 = 文本 + 卡片（复用现有
+- **Chat Stream**：`genkit` 工具循环（P0；2026-11-23 由 ai_sdk 迁移）驱动；消息模型 = 文本 + 卡片（复用现有
   TimelineEntry 的分类经验，但改为聊天流布局）；A2UI 交互卡经 a2ui_flutter 的
   `MessageProcessor/A2uiSurface` 渲染，动作用 `unifiedOutbound` 回流。
 - **艺术架**：portfolio_view 升级——货架布局（大卡 + 分类签：热应用/原型/视频/3D），

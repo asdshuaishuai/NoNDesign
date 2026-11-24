@@ -229,12 +229,12 @@ dependency**; the execution surface stays three-live + 3dcodeverse.
 
 | Candidate | What it could cover | Decision | Why |
 | --- | --- | --- | --- |
-| `shinyobjectz/raea` | 3D (Bevy), composition/frame model, story model, short-drama `cut`/`check` P0–P3 | **Reference only** | FSL-1.1-ALv2 *Competing Use* blocks a commercial creative workbench; it is a 230-crate app, not an embeddable library; Rust/Bevy/React/JS stack conflicts with Dart + three-live |
+| `shinyobjectz/raea` | 3D (Bevy), composition/frame model, story model, short-drama `cut`/`check` P0–P3 | **Reference only (user final decision 2026-11-24)** | FSL-1.1-ALv2 *Competing Use* and 230-crate non-library form make it unsuitable to embed; 3D video keeps three-live as the execution surface and borrows only contracts/craft |
 | `alla2001/material-painter` | PBR texture painting, bake maps, material node graph, WGSL nodes, engine export presets | **Reference only; optional external MCP station is a pending user decision** | GPL-3.0-or-later + GUI-only binary, no `[lib]`; embedding/linking would force copyleft. Separate-process MCP use does not vendor the code, but is an external-tool exception |
 
 ### 12.1 What we borrow (ideas, not code)
 
-- **raea**: word-anchored timing (`words.json`), P0–P3 check inputs
+- **raea** (reference only for 3D video): word-anchored timing (`words.json`), P0–P3 check inputs
   (`manifest` + `words` + `taste`), speech-driven cut, typed story
   (world/telling/beat, value turns, setup/payoff). Map to our existing
   `screenplay.json` / `story-short.md`; do not add a React/Bevy runtime.

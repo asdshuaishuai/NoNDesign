@@ -53,9 +53,16 @@
 
 | 文档 | 状态 | 覆盖 |
 | --- | --- | --- |
-| [plan-creative-workbench.md](plan-creative-workbench.md) | **方案定稿，未施工** | 全局交互（右 chat + 执行/结果双面）、设计验证式原型绑定、3D 建模 + 3dcodeverse harness、视频导演台/剧本/三风格 + `toon_3d` 候选/TTS/配乐联动、强绑定强规范框架、施工批次 0–8 |
+| [plan-creative-workbench.md](plan-creative-workbench.md) | **方案定稿；批次 0/1/1b/2/3 已落地，批次 4 仅契约面（2026-11-24 工作树）** | 全局交互（右 chat + 执行/结果双面）、设计验证式原型绑定、3D 建模 + 3dcodeverse harness、视频导演台/剧本/三风格 + `toon_3d` 候选/TTS/配乐联动、强绑定强规范框架、施工批次 0–8 |
+| [plan-next-iterations.md](plan-next-iterations.md) | **方案 v3（2026-11-24，设计先行，未施工）** | 收窄到视频双轨：M0 收口 → D 设计阶段（双轨 ADR/3D 视频 three-live 引擎设计/数据契约/导演台最小面）→ P1 three-live 3D 视频 POC → P2 3D 视频最小纵切；P3 常规视频只回归；音乐/VFX/TTS/视口/GLB/judge 移入 backlog；raea 嵌入已关闭（只参考） |
+| [plan-workbench-ui.md](plan-workbench-ui.md) | **方案（2026-11-24，独立适配，未施工）** | 四工作台内容区交互姿态/布局独立适配：共享外层壳不变；按 设计 → 3D → 视频 → 音乐 分批（UI-0 规格 → UI-1 设计 → UI-2 3D → UI-3 视频导演台 → UI-4 音乐）；热应用暂不改动 |
 | [skills/creative-workbench/SKILL.md](skills/creative-workbench/SKILL.md) | **方案定稿，未接线** | 统一创作 skill：intake → direction → structure → build → check → blind judge → refine → deliver；spec/plan/src/artifacts/judge 标准工作区；视频/3D/设计共用 |
 | [plan-music-module.md](plan-music-module.md) | **方案定稿，未施工** | 音乐（编曲）模块：score.json、五线谱编辑器、Web Audio 编译播放、music_* 工具面 |
+| [creative-refactor-decisions.md](creative-refactor-decisions.md) | **R0 契约核心已落地；设计 R1、3D R3 契约面已实施（2026-11-24 工作树），视频/音乐未施工** | R0 决策冻结：轮次版本化、blind judge 通道、Phaser 版本、`ink_line` 首版、TTS 随包策略、`scene.json` 双 authoring、评分默认参数；**Genkit 迁移冲突（2026-11-23 同日裁决：保留 genkit、移除 ai_sdk，见 §2 台账）** |
+| [design-contract.md](design-contract.md) | **已实施（R1 设计模块，2026-11-24）** | 设计模块契约：验证原型绑定项目本身（`.ddp` 内 `prototype/`）、覆盖验证规则、`design_verify_prototype` 收口、热应用列表迁移过滤、只借 intake/judge |
+| [three-contract.md](three-contract.md) | **R3 契约面已落地（2026-11-24 工作树；视口/GLB/多视角/judge 待后续）** | 3D 模块契约：三轨 + 双 authoring、工作区、plan schema、确定性门阈值、盲评、10 个 `three_*` 工具（拟实现）、GLB/许可/迁移 |
+| [video-screenplay-contract.md](video-screenplay-contract.md) | **草案（R0，2026-11-23）· 未施工** | 视频模块契约：`screenplay.json` 唯一事实源、30fps 确定性、TimingCompiler、cutout rig/clip、Phaser 锁版本、三风格、pixelfx 子集、TTS、桥 v2、导出仍屏蔽、v1 兼容 |
+| [music-contract.md](music-contract.md) | **草案（R0，2026-11-23）· 未施工** | 音乐模块契约：`score.json` v1、整数 tick（ppq 3840）、`verifyScore`、Web Audio 播放页、Bravura/SIL OFL、`music_*` 工具（拟实现）、存储与验收 |
 | [plan-flutter-3.50-adoption.md](plan-flutter-3.50-adoption.md) | backlog（待排期） | Flutter 3.50 采纳清单 |
 
 ### 1.5 历史快照 / 审查（只读，不作为待办）
@@ -87,16 +94,20 @@
 | [research/3dcodeverse.md](research/3dcodeverse.md) | 调研结论（**3D 线直接引入**） | 3DCodeVerse 论文/harness：代码即真相、四轨七运行时、plan → check → blind judge → refine、contract/connectivity/placement/shader 门、cap 规则；附录 A 量化 threejs.cc 1,018 案例的 13 类分布/特征词/五槽 prompt 模型；Python/Blender 运行时不入产品 |
 | [research/pixelfx.md](research/pixelfx.md) | 调研结论（**特效子集直接引入**） | `patch-gg/pixelfx`（MIT，v0.3.1，244 effects）：color+light 双缓冲、seeded RNG、纯/模拟 effect、sprite sheet、质量 bar；只引入火焰/冰霜/风/爆炸等特效，**不引入人物/stock actor/moves** |
 | [research/claude-animated-shorts.md](research/claude-animated-shorts.md) | 调研结论（**只参考，不引入**） | `mromidev/claude-animated-shorts`（MIT，TypeScript）：55–70s 竖屏动画短剧；8 段脚本、词级时间、镜头表、2D billboard 角色 + three.js 手绘世界、墨线/景深/滑翔相机、合成声音、逐帧 QA；只借工艺/look 数值，不引入 Remotion/React/Node，`toon_3d` 候选风格 |
-| [research/raea.md](research/raea.md) | 调研结论（**FSL 许可阻塞，只参考**） | `shinyobjectz/raea`（FSL-1.1-ALv2，Rust + Bevy 0.20 + React/TS）：3D/视频/动效/游戏引擎与短剧工艺；230 crate 完整应用、私有 SDK、非可嵌入库；*Competing Use* 挡住商业创作工作台；只借 composition/词级时间/check/story 契约 |
+| [research/raea.md](research/raea.md) | 调研结论（**只参考，不引入；2026-11-24 用户最终裁决**） | `shinyobjectz/raea`（FSL-1.1-ALv2，Rust + Bevy 0.20 + React/TS）：3D/视频/动效/游戏与短剧工艺；230 crate 完整应用、私有 SDK、非可嵌入库；*Competing Use* 与形态均不适合引入。**用户复核后撤回嵌入方向，只借鉴 composition/词级时间/check/story 契约与工艺**；3D 视频执行面仍用现有 three-live，常规视频保持 v1 |
 | [research/material-painter.md](research/material-painter.md) | 调研结论（**GPL 阻塞，参考 / 可选外部工作站**） | `alla2001/material-painter`（GPL-3.0-or-later，Rust + wgpu）：8 通道 PBR 绘制、烘焙、节点图、WGSL、UDIM、引擎导出预设；GUI-only 无 lib，不能嵌入；v1 自建 PBR 材质层，MCP 外部工作站为未裁决候选 |
 
 ## 2. 决策台账（按时间倒序）
 
 | 日期 | 裁决 | 状态 | 事实源 |
 | --- | --- | --- | --- |
-| 2026-11-24 | **raea 不直接引入（FSL 许可阻塞）**：技术上覆盖 3D/短剧，但 FSL-1.1-ALv2 的 *Competing Use* 限制商业替代品；230 crate 完整应用、私有 SDK、Rust/Bevy/React/JS 栈，不是可嵌入库。只借 composition/词级时间/check/story 契约；未来需商业许可或满两年转 Apache-2.0 + 有边界 API + 产品允许外部引擎 | 调研结论（许可阻塞） | research/raea.md |
+| 2026-11-24 | **raea 不引入（用户最终裁决）**：复核许可（FSL-1.1-ALv2 的 *Competing Use*）与形态（230 crate 完整应用、无公开库 ABI）后**撤回嵌入方向，只借鉴**；视频仍拆常规视频（保持 v1 表面）与 3D 视频（执行面用现有 three-live），raea 只提供 composition/词级时间/`check`/story 契约与工艺参考，**不 vendor、不嵌入、不引 React/Bevy/JS 运行时** | **已裁决（只参考，不引入）** | [research/raea.md](research/raea.md) · [plan-next-iterations.md](plan-next-iterations.md) |
 | 2026-11-24 | **Material Painter 不嵌入（GPL 阻塞）**：能力面覆盖全领域 3D 材质（绘制/烘焙/节点图/导出预设），但 GPL-3.0-or-later + 仅 GUI 二进制、无 `[lib]`；不 vendor、不随包分发。v1 自建 PBR 材质层；可选外部 MCP 工作站是**未裁决**的外部工具例外候选 | 调研结论（GPL 阻塞） | research/material-painter.md |
 | 2026-11-24 | **动画短剧候选风格 `toon_3d`（2D 角色 + 3D 世界）**：参考 `mromidev/claude-animated-shorts` 的 8 段脚本/词级时间/镜头表/look 数值/QA；**不引入 Remotion/React/Node/Chromium**，不复制参考帧/角色/脚本/镜头；执行面用 three-live。候选待裁决与 spike | 调研结论（候选，待裁决） | research/claude-animated-shorts.md · skills/creative-workbench/references/story-short.md |
+| 2026-11-24 | **3D 工作台 R3 基础批（v2 工作区/迁移/plan 校验/确定性门/测量/构建）**：spec/plan/src|scene/artifacts/judge 布局；旧项目只增不删迁移；`three_workspace_migrate` / `three_plan_validate` / `three_measure` / `three_build` / `three_check`；对象门纯函数 + caps/fix hints；scene.json 确定性编译；3D 双面阶段线/结果卡 | **已实施（2026-11-24，工作树；视口/GLB/多视角待后续）** | [three-contract.md](three-contract.md) · [creative-refactor-decisions.md](creative-refactor-decisions.md) |
+| 2026-11-24 | **设计模块 R1 落地 + agent 流补齐**：项目内验证原型（`.ddp` docs `prototype` 段，确定性构建/覆盖验证/预览）→ `design_verify_prototype` 工具收口（`hotapp_from_prototype` 退役）、热应用列表过滤旧 prototype demo、双面进度线/产物卡接入设计画布；agent 侧 workspace 工具面按模块收窄、统一创作 skill 注入、盲评通道 `creative_judge`（fresh context + 图证据 + 显性降级） | **已实施（2026-11-24，工作树）** | [design-contract.md](design-contract.md) · [AGENTS.md](../AGENTS.md) Agent 层约定 · [creative-refactor-decisions.md](creative-refactor-decisions.md) §6 |
+| 2026-11-23 | **LLM 层迁移到 Genkit（用户裁决）**：Dart agent 循环改用 `genkit` + `genkit_openai` + `schemantic`，**移除 `ai_sdk_dart` / `ai_sdk_openai`**，删除 `agent_model_middleware.dart`（`StreamToolNameGuard` 退场）；错误面改为 `GenkitException` / `finishReason`，`llm_no_such_tool` 的 Available tools 重试保留，近名改写随 ai_sdk 方言退场（StepFun 空名方言待真实端点抓包复核） | **已实施（2026-11-23，工作树）** | AGENTS.md Agent 层约定 · `app/lib/core/dart_agent.dart` · `app/pubspec.yaml` · [plan-dart-agent-migration.md](plan-dart-agent-migration.md) · [plan-flutter-3.50-adoption.md](plan-flutter-3.50-adoption.md) §2 修订 |
+| 2026-11-23 | **创意工作台大重构 R0：五份契约文档冻结**（四份模块契约 design / three / video-screenplay / music + 决策台账）；契约测试模板口径；**Genkit 迁移冲突（同日已裁决：保留并完成 genkit 迁移、移除 ai_sdk；AGENTS/plan-flutter 已回填，见 §2 上一行）** | R0（2026-11-23）契约核心已落地；设计模块 R1、3D R3 基础批已实施（2026-11-24，工作树） | [creative-refactor-decisions.md](creative-refactor-decisions.md) · [design-contract.md](design-contract.md) · [three-contract.md](three-contract.md) · [video-screenplay-contract.md](video-screenplay-contract.md) · [music-contract.md](music-contract.md) |
 | 2026-11-22 | **3D 直接引入 threejs-live + 3dcodeverse**：采用 3dcodeverse 的 skill/harness 契约（Apache-2.0）与 three-live 执行面；双 authoring（`scene.json` / `src/*.js`）；Python/Blender/CadQuery/URDF 运行时不入产品，检查器用 Dart/JS 等价实现 | 方案定稿（未施工） | plan-creative-workbench §4 · research/3dcodeverse.md |
 | 2026-11-22 | **视频直接引入 pixelfx 特效子集**：只取火焰/冰霜/风/爆炸/闪电等**特效**，**不含人物/角色**；`actor`/`rig`/`poses`/`act`/`moves`/on-body 特效不引入；角色仍用我们自己的 rig | 方案定稿（未施工） | plan-creative-workbench §5.3/§5.6 · research/pixelfx.md |
 | 2026-11-22 | **统一创作 skill `creative-workbench`**：intake/direction/structure/build/check/blind-judge/refine/deliver 标准化；`awesome-opus5-5-videos` 只借六段 prompt 结构与质量规则，不引入作品/服务 | 方案定稿（未接线） | skills/creative-workbench/SKILL.md · research/awesome-opus5-5-videos.md |
@@ -129,7 +140,7 @@ plan-cross-platform-runtime §1（已落地：webview_all 全平台）
         ├──> plan-creative-workbench §4（3D 建模视口 + 3dcodeverse plan/check/judge；three-live）
         ├──> plan-creative-workbench §5（视频导演台 / Phaser；`ink_line` 走 Canvas2D 笔触；pixelfx 特效子集）
         │          ├──> plan-music-module（§5.5 配乐联动依赖音乐模块）
-        │          └──> story-short（`toon_3d` 候选；只参考 claude-animated-shorts）
+        │          └──> 3D 视频（执行面 three-live；只借鉴 raea/story-short 契约）
         └──> wasm_run B4 退役（待 Windows/Linux/移动真机复验）
 ```
 
@@ -164,11 +175,13 @@ plan-cross-platform-runtime §1（已落地：webview_all 全平台）
 ---
 
 最后对账：2026-11-24（与 `AGENTS.md`、`vision.md`、四份方案、已实施契约头部交叉核对；
-**批次 A（webview_all 全平台）+ B1（classic wasm WebView 宿主）已落地**；
-macOS WKWebView 真实集成测试通过；Windows/Linux/移动真机复验与 wasm_run B4 退役
-仍是未清项；OHOS 离屏 WebView 缺口已登记；本轮新增 `creative-workbench` skill、
-3dcodeverse 3D harness、pixelfx VFX 子集、`ink_line` 风格与 `toon_3d` 动画短剧
-候选调研；`3dcodeverse.md` 附录 A 补 threejs.cc 1,018 案例的 3D prompt 量化；
-新增 `raea.md`（FSL 许可阻塞）与 `material-painter.md`（GPL 阻塞）两份候选评估——
-除 3D 线（three-live + 3dcodeverse）与 pixelfx 特效子集外，仍坚持「只参考、
-不引入」；Material Painter 的可选外部 MCP 工作站仍是未裁决候选）。
+**批次 A（webview_all 全平台）+ B1（classic wasm WebView 宿主）已落地**，macOS WKWebView
+真实集成测试通过；本轮新增 `creative-workbench` skill、3dcodeverse 3D harness、pixelfx
+VFX 子集、`ink_line` 风格与 `toon_3d` 动画短剧候选调研；`3dcodeverse.md` 附录 A 补
+threejs.cc 1,018 案例的 3D prompt 量化；新增 `raea.md` 与 `material-painter.md` 两份候选评估——**用户 2026-11-24 最终裁决：
+raea 不引入、只借鉴**（许可/形态在前，嵌入方向已撤回；3D 视频执行面仍用 three-live），
+Material Painter（GPL）同样只参考；可选外部 MCP 工作站仍是未裁决候选；同时已实施创意工作台大重构 R0 契约核心、Genkit 迁移、设计模块 R1
+（项目内验证原型 + 双面 + 盲评通道）与 3D R3 基础批（v2 工作区/迁移/plan 校验/确定性门/
+测量/构建/摆放门 + 双面），均为**工作树未提交**；剩余 3D 视口/GLB/多视角/judge、视频与
+音乐模块，以及 Windows/Linux/移动真机复验、wasm_run B4 退役、OHOS 离屏 WebView 缺口
+仍是未清项；未施工批次不得当现状引用）。

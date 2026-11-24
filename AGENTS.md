@@ -75,14 +75,17 @@ plugins/             独立插件资产（视频制作说明）
   词级时间、镜头表、look 数值与 QA；**不引入 Remotion / `@remotion/three` / React /
   Node / Chromium**，不复制其参考帧/角色/脚本/镜头/配音/音乐。`toon_3d`
   （2D 角色 + 3D 世界）是候选风格，待裁决与 spike。
-- **2026-11-24 追加两个「只参考」候选**：`shinyobjectz/raea`（FSL-1.1-ALv2）技术上
-  覆盖 3D/短剧，但它是 230 crate 的完整 Rust/Bevy + React/TS 应用、SDK 私有，且
-  *Competing Use* 限制商业替代品——**不 vendor、不捆绑、不引 Bevy/React/JS 运行时**，
-  只借 composition/词级时间/`check`/story 契约（未来重开需商业许可或满两年转
-  Apache-2.0 + 有边界 API + 产品裁决）。`alla2001/material-painter`（GPL-3.0-or-later）
+- **raea 只参考、不引入（2026-11-24 用户最终裁决）**：视频拆为 **常规视频**（保持
+  现有 v1 表面：Dart 矢量 / DOM clip；不迁移底座）与 **3D 视频**（执行面仍用现有
+  **three-live**）。`shinyobjectz/raea` 的 230 crate Rust/Bevy + React/TS 完整应用、
+  私有 SDK、FSL-1.1-ALv2（*Competing Use*）与无公开库 ABI 使其不适合引入；只借鉴
+  composition/词级时间/`check`/story 契约与工艺，**不 vendor、不嵌入、不引
+  React/Bevy/JS 运行时**。详见 `docs/research/raea.md` 与
+  [plan-next-iterations.md](docs/plan-next-iterations.md)。
+- **Material Painter 只参考（2026-11-24）**：`alla2001/material-painter`（GPL-3.0-or-later）
   能力面覆盖全领域 3D 材质，但仅 GUI 二进制、无 `[lib]`——**不嵌入、不链接、不随包
   分发**；v1 自建 `nan.material/1` PBR 层，可选外部 MCP 工作站是**未裁决**的外部
-  工具例外。详见 `docs/research/raea.md` 与 `docs/research/material-painter.md`。
+  工具例外。详见 `docs/research/material-painter.md`。
 - **创作线引入例外（2026-11-22 用户裁决）**：
   ① **3D 线直接引入** `threejs-live`（已在库）+ **3dcodeverse skill/harness 契约**
   （Apache-2.0：plan schema、确定性门阈值、blind judge rubric、spec/src/artifacts/judge
@@ -137,7 +140,14 @@ plugins/             独立插件资产（视频制作说明）
   `WorkspaceMainArea`（与设计画布同一内边距/边框语义），插件自己只保留内容顶部
   46px 工具条。**不要**再给 `plugin:*` 视图裸 `Scaffold` 早退。`play` / `portfolio`
   仍是全屏早退；手机/iPad 竖屏仍由 `ChatPiPShell` 整屏渲染插件工作台。
+  **2026-11-24 增补**：共享的只是**外层壳**（标题栏/左轨/右 chat/状态栏）；
+  每个工作台**内容区的交互姿态与布局独立适配**（设计=画布优先、3D=视口+大纲/
+  检查器、视频=导演台/时间线、音乐=谱面+运输条），各自用独立 `WorkbenchLayout`
+  规格，不再套用设计面 252/348 面板几何；按 设计→3D→视频→音乐 分批，热应用
+  布局暂不动。见 [plan-workbench-ui.md](docs/plan-workbench-ui.md)。
 - 断点与判据唯一来源是 `app/lib/core/layout.dart`；`shell_host.dart` 只做路由。
+  **每个工作台自己的断点/面板策略在 `app/lib/core/workbench_layout.dart`**，
+  widget 内不再散落魔法数。
 - 聊天窄栏默认 360、折叠后 44px；窄 PC（<1100）默认折叠，<1024 强制折叠。
 - 设置面板四档（手机 / iPad 竖 / iPad 横 / 桌面）不共用同一套堆叠；内置服务商端点
   打开即填且只读，模型选择走底部 sheet；「连接桌面」是一张合并卡片
@@ -224,22 +234,32 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
 
 - 循环在 `app/lib/core/dart_agent.dart`；`design_op` 必须经
   `EngineGateBridge`（生产是进程内 `EngineService`，`gate:'agent'`），绝不直写 mbt。
-- 生产 LLM 调用套 `StreamToolNameGuard`（`app/lib/core/agent_model_middleware.dart`）：
-  StepFun step_plan 流式把工具名只放首个 delta、后续 delta 重复 `name:""`，
-  ai_sdk_openai_compatible 逐 delta 覆盖会以空名发出工具调用
-  （`AiNoSuchToolError` 打死整轮）；守护按 toolCallId 回填首个非空名。换 SDK
-  版本时抓包复核该方言是否仍在。
-- **工具修复（tool fix，2026-11-20）**：守护同时做模型笔误的近名修复——先严格同名，
-  再命名规范变体归一（`namespace.tool` 逐段剥前缀 / `tool()` 去括号 / 结尾冒号分号 /
-  前后空白 / 全角折叠 / 大小写 / `_-.` 空格归一），最后编辑距离 ≤4 且唯一最近且
-  公共前缀 ≥2 才改写（宁可不修不可修错）；`llm_no_such_tool` 的等待重试轮会在
-  prompt 顶部追加 `Available tools: …` 清单，让模型从真实工具名里挑正确的，
-  而不是同一错名再撞一次。新增工具/改名时同步 `knownTools` 来源（`_buildTools` keys）。
+- **LLM 层 = Genkit（2026-11-23 用户裁决）**：`genkit` + `genkit_openai` 直连当前
+  服务商（`app/lib/core/dart_agent.dart` 的 `runDartAgent`），`schemantic` 出类型化
+  schema；`ai.generate(tools:…)` 在内部跑工具循环（`maxTurns`，不设时按模式夹到
+  4–40），取消走 `CancellationController`。**不要再引入 `ai_sdk_dart` /
+  `ai_sdk_openai`，也不要恢复 `agent_model_middleware.dart` / `StreamToolNameGuard`。**
+  换 SDK 版本时同步跑 `agent_retry_test` / `dart_agent_test` 并复核方言。
+- **genkit 错误面**：模型错误不抛异常，统一收敛为 `finishReason`（`failed` /
+  `aborted` / `blocked`）与 `cause`；循环把它翻回异常形状后走既有
+  `classifyLlmError` 分类（`GenkitException.status.httpStatus` → `llm_http_<code>`，
+  `unknown tool` / `Tool … not found` → `llm_no_such_tool`）。工具名拼错的等待
+  重试轮仍会把 `Available tools: …` 追加到 prompt 顶部让模型改叫正确名字；
+  **流内空名回填/近名改写是 ai_sdk 方言 workaround，已随迁移退场**。
+  StepFun 空名方言在 genkit 下是否仍出现未抓包验证（缺真实端点 Key），
+  发现回归先补测试再修，不要凭猜测改流解析。
+- **盲评通道（2026-11-24）**：`app/lib/core/creative/creative_judge.dart` 是 fresh
+  context judge——不注册工具、不带历史消息，只吃 brief + 渲染图（MediaPart），返回
+  six-dimension judgment JSON；分数由 `CreativeScore.compute` 按 rubric/penalty/floor/cap
+  算，caps 最后应用。通道失败/无图/坏 JSON 一律**显性降级**（`judged_degraded` 语义），
+  不得静默冒充盲评分。agent 侧工具 `creative_judge` 只在 3D/视频 workspace run 暴露，
+  图像路径必须位于本机项目目录（≤8 张、单张 ≤8MB、PNG/JPEG/WebP）。
 - **模型方言（MiniMax）**：M3.x「自适应思考」模型强制开启思考，
   `thinking.type=disabled` / `reasoning.effort=none` 会 400；且 `auto`
-  默认单轮 60–163 s。`providerThinkingOptions` 把 `auto/off/none/minimal/空`
-  统一落线为 `reasoning_effort: low`（实测 ~19.5 s/轮，工具调用正常），
-  显式档位原样透传。新增 provider 前先抓包/探针确认方言，再写映射。
+  默认单轮 60–163 s。`providerThinkingOptions` 的落线值是
+  `OpenAIChatOptions(reasoningEffort:)`：`auto/off/none/minimal/空` → `low`，
+  显式档位原样透传（实测 ~19.5 s/轮，工具调用正常）。新增 provider 前先
+  抓包/探针确认方言，再写映射。
 - **答题卡纪律（2026-11-20 用户裁决变更）**：`ask_user` 在**所有模式**（含钉死工作台的
   workspace run）都真能出答题卡——不再有 `ask_user_unavailable` 拒答死路。内容/方向
   决策照常问；只有「确实需要换到另一个工作台」时才带 `switch_to`（工作台枚举）。
@@ -394,6 +414,16 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   （`budgetFor()`，只放宽预算不断言语义）。
 
 ## 已知限制（v0.1，2026-11-18 清理后）
+
+- **Linux x86_64 兜底执行器（2026-11-23）**：上游 wasm_run v0.2.0 的
+  `x86_64-unknown-linux-gnu` 预编译资产实际是 wasmi（无 SIMD），Linux 上
+  `flutter test` 的 engine 用例全部 `SIMD support is not enabled`（44 个）。
+  已按 Windows 同法自建 wasmtime 14.0.4（原生 Cranelift，不需要 pulley）替换
+  vendored 资产并钉 sha256（`scripts/fetch_wasm_run_libs.sh` 的
+  `LOCAL_OVERRIDES`；engine_host/engine_contract 42/42 绿）。aarch64 Linux 仍是
+  上游 wasmi。生产主路径（classic wasm 跑在 WebView）不受影响，只影响兜底与
+  纯 Dart 契约测试。另：`desktop_rpc_host_test` 的「对端消失 → keep-alive 取消」
+  在无 root 的 linglong 容器 loopback 下观测不到（30s 超时），需真机 Linux 复核。
 
 - **Windows 执行器 = wasmtime 50 + pulley 解释器（仅 wasm_run 兜底，2026-11-20）**：
   生产主路径已不走它（classic wasm 在 WebView2 里执行）；下面记录保留，供兜底排障：

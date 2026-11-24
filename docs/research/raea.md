@@ -1,14 +1,14 @@
-# raea 调研：3D / 短剧引擎候选（FSL 许可阻塞，只参考）
+# raea 调研：3D / 短剧引擎候选（不引入，只借鉴）
 
-> 状态：**调研结论（2026-11-24）**，供 3D 工作台与视频短剧线评估。
-> **未安装、未运行**；事实来自 `README.md`、`LICENSE`、`Cargo.toml`、`sdk/raea/`、
-> `engine/cli/`、`docs/engine.md`、`apps/check/` 与 GitHub Release 元数据。
->
-> 用户假设（2026-11-24）：raea 可作 **3D 适配 / 短剧制作的引擎**。本文结论：
-> **技术契合度高，但当前许可证、产品形态与我们的架构都不允许直接引入**；
-> 只借契约与工艺，不作为依赖、不 vendor、不捆绑。
+> 状态：**调研结论（2026-11-24）→ 同日用户最终裁决：不引入，只借鉴**。
+> 复核许可（FSL-1.1-ALv2 的 *Competing Use*）与形态（230 crate 完整应用、私有
+> SDK、无公开库 ABI）后，**嵌入方向已撤回**；3D 视频执行面仍用现有 **three-live**，
+> raea 只提供 composition/词级时间/`check`/story 契约与工艺参考。**未安装、未运行**；
+> 事实来自 `README.md`、`LICENSE`、`Cargo.toml`、`sdk/raea/`、`engine/cli/`、
+> `docs/engine.md`、`apps/check/` 与 GitHub Release 元数据。
 >
 > 关联：[plan-creative-workbench.md](../plan-creative-workbench.md) §4 ·
+> [plan-next-iterations.md](../plan-next-iterations.md)（设计先行排期） ·
 > [skills/creative-workbench/references/3d-pipeline.md](../skills/creative-workbench/references/3d-pipeline.md) §12 ·
 > [research/material-painter.md](material-painter.md)（另一条材质候选） ·
 > [research/3dcodeverse.md](3dcodeverse.md)（我们已采用的 3D harness）。
@@ -38,7 +38,7 @@
      带进来。
 4. **正确用法**：把它当**对标实现与工艺来源**——借 composition/时间/检查/
    story 的**契约形状**，不复制代码、不复制 skills 文本、不引入运行时。
-   我们已选的 **three-live + 3dcodeverse** 继续作为 3D 执行面。
+   three-live + 3dcodeverse 继续作为 **3D 建模/3D 视频**执行面。
 5. **未来重开的门槛**（四者同时满足才评估）：① 作者给出书面商业许可，或
    目标版本已过两年转 Apache-2.0；② 提供有边界的库/API（不是整仓 CLI）；
    ③ 产品裁决允许独立进程/可选外部引擎；④ 工程上只增加一个边界清晰的
@@ -219,3 +219,14 @@ raea 自带 agent、studio、timeline、review、Index、skills；它本身就�
 - `engine/cli/package.json`、`engine/cli/src/cli.rs`、`engine/cli/src/usage.rs`
 - `apps/check/src/lib.rs`、`apps/check/src/{sound,picture,defects}.rs`
 - GitHub Release `v0.1.9` 资产与仓库元数据（2026-11-24 核验）
+
+## 10. 用户最终裁决（2026-11-24）与后续
+
+* **不引入，只借鉴**：复核许可与形态后撤回嵌入方向；不 vendor、不嵌入、不随包
+  分发，不把 `raea` CLI 作为产品依赖。
+* **视频双轨**：常规视频保持现有 v1 表面（Dart 矢量 / DOM clip，不迁移底座）；
+  3D 视频执行面仍用现有 **three-live**。
+* **只借契约**：composition/帧模型、词级时间、`check` 的输入面与检查项、
+  typed story（world/telling/beat、value turns、setup/payoff）作为设计参考。
+* **设计先行**：双轨 ADR、3D 视频数据契约与 three-live 执行面设计见
+  [plan-next-iterations.md](../plan-next-iterations.md)；不因本调研引入 React/Bevy/JS。

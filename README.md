@@ -7,7 +7,7 @@ AI-native 创作工作台：**一句话 → 产品需求设计文档 → 完整�
 - **本地核心**：MoonViz classic wasm 引擎跑在**离屏 `webview_all` 会话**里
   （macOS/iOS WKWebView、Windows WebView2、Linux WebKitGTK、Android WebView；
   wasm_run 仅启动失败兜底）、纯 Dart DDP1/DDP2、项目库、3D / 热应用 / 视频工作台
-- **内置智能体**：Dart 工具循环（`ai_sdk_dart` 直连当前服务商），画布变更仍经引擎门
+- **内置智能体**：Dart 工具循环（`genkit` / `genkit_openai` 直连当前服务商；2026-11-23 起不再用 ai_sdk），画布变更仍经引擎门
 - **可选「连接桌面」**：桌面 App 内的 Dart RPC 宿主（`/v1/health`、`/v1/capabilities`、
   `/v1/rpc`），默认关闭、默认只听 loopback、token 必填
 - **持久化**：DDP 单文件（zstd + Argon2id + XChaCha20-Poly1305 / 免密 CRC32）
