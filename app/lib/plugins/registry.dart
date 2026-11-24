@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../widgets/hotapp_workspace.dart';
+import '../widgets/music_workspace.dart';
 import '../widgets/three_workspace.dart';
 import '../widgets/video_workspace.dart';
 
@@ -46,6 +47,13 @@ final List<PluginDef> pluginRegistry = [
     tooltip: '视频工作台',
     icon: Icons.movie_outlined,
     builder: () => const VideoWorkspace(),
+  ),
+  PluginDef(
+    id: 'music',
+    title: '音乐工作台',
+    tooltip: '音乐工作台',
+    icon: Icons.library_music_outlined,
+    builder: () => const MusicWorkspace(),
   ),
   PluginDef(
     id: 'hotapp',

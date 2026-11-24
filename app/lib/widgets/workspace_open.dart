@@ -47,6 +47,11 @@ void openVideoWorkspace(AppStore store) {
   store.setView('plugin:video');
 }
 
+/// 进音乐工作台：项目由工作台自己的项目库列表切换（顶栏菜单暂不列音乐项目）。
+void openMusicWorkspace(AppStore store) {
+  store.setView('plugin:music');
+}
+
 /// 按作品集条目的类型打开对应工作台（主页作品集 / 艺术架共用）。
 void openPortfolioEntry(AppStore store, PortfolioEntry entry) {
   switch (entry.kind) {
