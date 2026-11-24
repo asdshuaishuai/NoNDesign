@@ -22,6 +22,47 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../core/theme.dart';
 import '../core/video_service.dart';
 
+/// 外部控制器（导演台运输条用）：只暴露播放/暂停与播放状态。
+///
+/// 查找/时间跳转仍由导演台通过重建播放面（initialTime）完成；这里不接管
+/// seek，避免两套时间源。控制动作最终仍落在播放面自己的 `_togglePlay`。
+class VideoAnimationController extends ChangeNotifier {
+  _VideoAnimationSurfaceState? _surface;
+  bool _playing = false;
+
+  bool get playing => _playing;
+
+  void togglePlay() => _surface?._togglePlayFromController();
+
+  void play() {
+    final surface = _surface;
+    if (surface != null && !_playing) surface._togglePlayFromController();
+  }
+
+  void pause() {
+    final surface = _surface;
+    if (surface != null && _playing) surface._togglePlayFromController();
+  }
+
+  void _attach(_VideoAnimationSurfaceState surface) => _surface = surface;
+
+  void _detach(_VideoAnimationSurfaceState surface) {
+    if (_surface == surface) _surface = null;
+  }
+
+  void _reportPlaying(bool playing) {
+    if (_playing == playing) return;
+    _playing = playing;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _surface = null;
+    super.dispose();
+  }
+}
+
 /// 逐帧播放一份 [VideoDocument]。
 class VideoAnimationSurface extends StatefulWidget {
   const VideoAnimationSurface({
@@ -33,6 +74,7 @@ class VideoAnimationSurface extends StatefulWidget {
     this.initialTime = 0,
     this.onFrame,
     this.onPlayingChanged,
+    this.controller,
   });
 
   /// 已通过校验、预编译好的脚本。
@@ -53,8 +95,11 @@ class VideoAnimationSurface extends StatefulWidget {
   /// 每换一帧回调一次（时间、0 基帧号），供外部做读数/联动。
   final void Function(double seconds, int frameIndex)? onFrame;
 
-  /// 播放状态变化回调（导演台时间线用；控制动作仍在播放器内）。
+  /// 播放状态变化回调（导演台时间线用）。
   final void Function(bool playing)? onPlayingChanged;
+
+  /// 可选外部控制器（导演台运输条播放/暂停）；不传则只有播放面自身控件。
+  final VideoAnimationController? controller;
 
   @override
   State<VideoAnimationSurface> createState() => _VideoAnimationSurfaceState();
@@ -102,6 +147,7 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
   @override
   void initState() {
     super.initState();
+    widget.controller?._attach(this);
     _loop = widget.loop;
     _t = widget.initialTime.isFinite
         ? widget.initialTime.clamp(0.0, _duration)
@@ -112,6 +158,7 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
       if (!mounted) return;
       widget.onFrame?.call(_t, _frameIndex);
       widget.onPlayingChanged?.call(_playing);
+      widget.controller?._reportPlaying(_playing);
     });
     if (widget.autoplay) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -123,6 +170,11 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
   @override
   void didUpdateWidget(VideoAnimationSurface oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._detach(this);
+      widget.controller?._attach(this);
+      widget.controller?._reportPlaying(_playing);
+    }
     if (!identical(oldWidget.document, widget.document)) {
       // 换了脚本：停表回到片头，画面立刻换成新文档的第一帧。
       _timer?.cancel();
@@ -144,6 +196,7 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
 
   @override
   void dispose() {
+    widget.controller?._detach(this);
     _timer?.cancel();
     _timer = null;
     super.dispose();
@@ -216,6 +269,7 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
     _startTimer();
     widget.onFrame?.call(_t, _frameIndex);
     widget.onPlayingChanged?.call(true);
+    widget.controller?._reportPlaying(true);
   }
 
   void _pause() {
@@ -224,9 +278,15 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
     _timer = null;
     setState(() => _playing = false);
     widget.onPlayingChanged?.call(false);
+    widget.controller?._reportPlaying(false);
   }
 
   void _togglePlay() => _playing ? _pause() : _play();
+
+  void _togglePlayFromController() {
+    if (!mounted) return;
+    _togglePlay();
+  }
 
   void _restart() {
     _setTime(0);

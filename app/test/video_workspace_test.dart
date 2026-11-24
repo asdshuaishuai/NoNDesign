@@ -272,6 +272,31 @@ void main() {
     );
   });
 
+  testWidgets('导演台外部运输条：时间线播放/暂停驱动预览', (tester) async {
+    final store = _store();
+    final service = _FakeVideoService(sample: _sampleDoc());
+    await _pump(tester, store, service);
+
+    expect(_secondsOf(_timeText(tester).data!), 0.0);
+    final transport = find.byKey(const ValueKey('video-transport-play'));
+    expect(transport, findsOneWidget);
+    await tester.tap(transport);
+    await tester.pump(const Duration(milliseconds: 400));
+    final advanced = _secondsOf(_timeText(tester).data!);
+    expect(advanced, greaterThan(0.0), reason: '外部播放按钮应驱动预览走表');
+
+    // 再点一次暂停：时间冻结。
+    await tester.tap(transport);
+    await tester.pump(const Duration(milliseconds: 50));
+    final pausedAt = _secondsOf(_timeText(tester).data!);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      _secondsOf(_timeText(tester).data!),
+      closeTo(pausedAt, 1e-6),
+      reason: '暂停后计时器必须停掉',
+    );
+  });
+
   testWidgets('打开即满幅播放面：编辑动作收进工具条，不再常驻侧栏', (tester) async {
     final store = _store();
     final service = _FakeVideoService(sample: _sampleDoc());

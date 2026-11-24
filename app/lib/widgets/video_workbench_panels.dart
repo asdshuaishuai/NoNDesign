@@ -8,6 +8,7 @@ library;
 import 'package:material_ui/material_ui.dart';
 
 import '../core/theme.dart';
+import 'video_animation_surface.dart';
 
 /// 一个镜头（timeline.scenes[i] 的只读视图）。
 final class VideoShotItem {
@@ -331,6 +332,7 @@ class VideoTimelineStrip extends StatelessWidget {
     this.fps = 0,
     this.playheadSeconds = 0,
     this.playing = false,
+    this.controller,
   });
 
   final List<VideoShotItem> shots;
@@ -339,6 +341,9 @@ class VideoTimelineStrip extends StatelessWidget {
   final int fps;
   final double playheadSeconds;
   final bool playing;
+
+  /// 导演台外部运输条控制器（null = 只读指示，不假装可点）。
+  final VideoAnimationController? controller;
 
   @override
   Widget build(BuildContext context) {
@@ -360,13 +365,33 @@ class VideoTimelineStrip extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              Icon(
-                playing
-                    ? Icons.pause_circle_outline
-                    : Icons.play_circle_outline,
-                size: 13,
-                color: p.ink4,
-              ),
+              if (controller == null)
+                Icon(
+                  playing
+                      ? Icons.pause_circle_outline
+                      : Icons.play_circle_outline,
+                  size: 13,
+                  color: p.ink4,
+                )
+              else
+                IconButton(
+                  key: const ValueKey('video-transport-play'),
+                  onPressed: controller!.togglePlay,
+                  tooltip: playing ? '暂停' : '播放',
+                  iconSize: 16,
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(
+                    minWidth: 24,
+                    minHeight: 24,
+                  ),
+                  padding: EdgeInsets.zero,
+                  icon: Icon(
+                    playing
+                        ? Icons.pause_circle_outline
+                        : Icons.play_circle_outline,
+                    color: p.ink3,
+                  ),
+                ),
               const SizedBox(width: 6),
               Text('时间线', style: TextStyle(fontSize: 11, color: p.ink3)),
               const SizedBox(width: 8),

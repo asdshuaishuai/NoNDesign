@@ -95,6 +95,8 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   // 导演台共享播放头（由预览面回调；时间线只读呈现）。
   double _playheadSeconds = 0;
   bool _previewPlaying = false;
+  final VideoAnimationController _previewController =
+      VideoAnimationController();
 
   /// 产物模式：艺术架点开的某个 mp4（非 null 即整个工作台切到播放面）。
   String? _artifactPath;
@@ -211,6 +213,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     _appStore?.removeListener(_onStoreChanged);
     _appStore = null;
     _releaseClipPlayback();
+    _previewController.dispose();
     super.dispose();
   }
 
@@ -840,6 +843,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                 fps: fps,
                 playheadSeconds: _playheadSeconds,
                 playing: _previewPlaying,
+                controller: _previewController,
               ),
             if (layout.isPhone) _playerHint(context),
           ],
@@ -1736,6 +1740,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       onPlayingChanged: (playing) {
         if (mounted) setState(() => _previewPlaying = playing);
       },
+      controller: _previewController,
     );
   }
 }
