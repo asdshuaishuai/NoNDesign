@@ -28,7 +28,7 @@
 /// ```
 ///
 /// 三条边界：
-///  1. 模型调用只走 `ai_sdk`（[defaultThreeLlmCall]），不经过任何本地端口或
+///  1. 模型调用只走 genkit（[defaultThreeLlmCall]），不经过任何本地端口或
 ///     内部路由；测试注入 [ThreeLlmCall]，不碰网络。
 ///  2. 预览页与渲染库从**应用资源**拷贝到项目目录，离线可用，绝不引用远端
 ///     CDN（unpkg 等一律不出现）。
@@ -37,15 +37,22 @@
 library;
 
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:ai_sdk_dart/ai_sdk_dart.dart' show TimeoutConfiguration, generateText;
-import 'package:ai_sdk_openai/ai_sdk_openai.dart' show OpenAIProvider;
+import 'package:genkit/genkit.dart';
+import 'package:genkit_openai/genkit_openai.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import 'app_paths.dart';
+import 'creative/creative_schema.dart';
 import 'platform_capabilities.dart';
+import 'three/three_gates.dart';
+import 'three/three_plan.dart';
+import 'three/three_scene.dart';
+import 'three/three_scene_gates.dart';
+import 'three/three_workspace.dart';
 
 // ---------------------------------------------------------------------------
 // 常量：分层、上限、资源
@@ -92,7 +99,11 @@ const int threeEvidenceMaxFiles = 48;
 
 /// 一层的定义：内部 id、给模型看的目标、给用户看的名字。
 class ThreePassSpec {
-  const ThreePassSpec({required this.id, required this.goal, required this.label});
+  const ThreePassSpec({
+    required this.id,
+    required this.goal,
+    required this.label,
+  });
 
   /// 内部代号（只出现在状态文件与提示词里，绝不直接上屏）。
   final String id;
@@ -157,20 +168,20 @@ String threePassGoal(Object? id) {
 
 /// 初始进度：第一层待生成，其余排好队。
 Map<String, dynamic> initialThreeState() => <String, dynamic>{
-      'current': threePasses.first.id,
-      'passes': <Map<String, dynamic>>[
-        for (final pass in threePasses)
-          <String, dynamic>{
-            'id': pass.id,
-            'status': 'pending',
-            'attempts': 0,
-            'evidence': <String>[],
-          },
-      ],
-      'loop_max': threeLoopMax,
-      'blocked': false,
-      'blocked_reason': '',
-    };
+  'current': threePasses.first.id,
+  'passes': <Map<String, dynamic>>[
+    for (final pass in threePasses)
+      <String, dynamic>{
+        'id': pass.id,
+        'status': 'pending',
+        'attempts': 0,
+        'evidence': <String>[],
+      },
+  ],
+  'loop_max': threeLoopMax,
+  'blocked': false,
+  'blocked_reason': '',
+};
 
 /// 没有代码时的骨架场景：让首帧预览不是空白，也能先收一轮环境测量。
 const String threeSceneSkeleton = '''
@@ -197,7 +208,8 @@ class ThreeFailure implements Exception {
   final String detail;
 
   @override
-  String toString() => 'ThreeFailure($code${detail.isEmpty ? '' : ': $detail'})';
+  String toString() =>
+      'ThreeFailure($code${detail.isEmpty ? '' : ': $detail'})';
 }
 
 /// 内部代号 → 用户可见句子。
@@ -251,7 +263,7 @@ String threeFailureMessage(Object? error) {
 }
 
 // ---------------------------------------------------------------------------
-// 模型调用（ai_sdk）
+// 模型调用（genkit）
 // ---------------------------------------------------------------------------
 
 /// 一次单轮模型调用的入参。
@@ -291,7 +303,8 @@ class ThreeLlmConfig {
   final String thinkingLevel;
 
   /// 地址与密钥都在场才谈得上调用。
-  bool get isConfigured => baseUrl.trim().isNotEmpty && apiKey.trim().isNotEmpty;
+  bool get isConfigured =>
+      baseUrl.trim().isNotEmpty && apiKey.trim().isNotEmpty;
 }
 
 /// 思考等级 → `reasoning_effort` 取值。
@@ -303,35 +316,55 @@ String? threeReasoningEffort(String level) {
   return null;
 }
 
-/// `ai_sdk` 的 providerOptions 形状（null = 不注入）。
-Map<String, Map<String, dynamic>>? threeProviderOptions(String level) {
-  final effort = threeReasoningEffort(level);
-  if (effort == null) return null;
-  return <String, Map<String, dynamic>>{
-    'openai': <String, dynamic>{'reasoning_effort': effort},
-  };
-}
+/// genkit openai 插件实例名（3D 链路独立于主循环）。
+const String _threeLlmPluginName = 'nondesign-three';
 
-/// 默认模型调用：`ai_sdk` 单轮补全，OpenAI 兼容协议。
+/// 默认模型调用：genkit 单轮补全，OpenAI 兼容协议。
 ///
-/// 温度 0.4 与旧流程一致（结构化产出要稳，不要发散）。SDK 的异常族统一
-/// 包成 [ThreeFailure]——界面只看到一句人话，原始信息进技术详情。
+/// 温度 0.4 与旧流程一致（结构化产出要稳，不要发散）。异常统一包成
+/// [ThreeFailure]——界面只看到一句人话，原始信息进技术详情。
 Future<String> defaultThreeLlmCall(ThreeLlmRequest request) async {
-  final provider = OpenAIProvider(apiKey: request.apiKey, baseUrl: request.baseUrl);
+  final ai = Genkit(
+    plugins: [
+      openAI(
+        name: _threeLlmPluginName,
+        apiKey: request.apiKey,
+        baseUrl: request.baseUrl,
+      ),
+    ],
+  );
+  final controller = CancellationController();
+  final timer = Timer(
+    const Duration(minutes: 3),
+    () => controller.cancel('three llm timeout'),
+  );
   try {
-    final result = await generateText<Object?>(
-      model: provider.call(request.model.isEmpty ? 'gpt-5.1' : request.model),
+    final effort = threeReasoningEffort(request.thinkingLevel);
+    final result = await ai.generate<Map<String, dynamic>, dynamic>(
+      model: openAI.model(
+        request.model.isEmpty ? 'gpt-5.1' : request.model,
+        namespace: _threeLlmPluginName,
+      ),
       system: request.system,
       prompt: request.prompt,
-      temperature: 0.4,
-      providerOptions: threeProviderOptions(request.thinkingLevel),
-      timeout: const TimeoutConfiguration(total: Duration(minutes: 3)),
+      config: effort == null
+          ? OpenAIChatOptions(temperature: 0.4)
+          : OpenAIChatOptions(temperature: 0.4, reasoningEffort: effort),
+      cancel: controller.token,
     );
+    if (result.finishReason.value == 'failed' ||
+        result.finishReason.value == 'aborted') {
+      throw (result.cause ??
+          GenkitException(
+            result.finishMessage ?? 'llm failed',
+            status: StatusCode.internal,
+          ));
+    }
     return result.text;
   } catch (error) {
     throw ThreeFailure('llm_error', '$error');
   } finally {
-    provider.dispose();
+    timer.cancel();
   }
 }
 
@@ -381,14 +414,18 @@ class ThreeProjectSnapshot {
   bool get blocked => state['blocked'] == true;
 
   List<Map<String, dynamic>> get passes => <Map<String, dynamic>>[
-        for (final pass in (state['passes'] as List? ?? const []))
-          if (pass is Map) pass.cast<String, dynamic>(),
-      ];
+    for (final pass in (state['passes'] as List? ?? const []))
+      if (pass is Map) pass.cast<String, dynamic>(),
+  ];
 }
 
 /// 项目列表里的一行。
 class ThreeProjectEntry {
-  const ThreeProjectEntry({required this.name, required this.current, required this.blocked});
+  const ThreeProjectEntry({
+    required this.name,
+    required this.current,
+    required this.blocked,
+  });
 
   final String name;
 
@@ -530,14 +567,18 @@ List<ThreeUiComponent> parseThreeUiCatalog(String raw) {
     if (id.isEmpty || name.isEmpty || description.isEmpty) continue;
     if (!idPattern.hasMatch(id) || !seen.add(id)) continue;
     // 只允许同目录 .html：清单不能把 WebView 引到目录外或远端 URL。
-    if (!file.endsWith('.html') || file.contains('/') || file.contains('\\')) continue;
-    out.add(ThreeUiComponent(
-      id: id,
-      name: name,
-      description: description,
-      assetKey: 'assets/three/threeui/$file',
-      hint: hint,
-    ));
+    if (!file.endsWith('.html') || file.contains('/') || file.contains('\\')) {
+      continue;
+    }
+    out.add(
+      ThreeUiComponent(
+        id: id,
+        name: name,
+        description: description,
+        assetKey: 'assets/three/threeui/$file',
+        hint: hint,
+      ),
+    );
   }
   if (out.isEmpty) {
     throw ThreeFailure('asset_missing', 'threeui catalog: no valid components');
@@ -570,8 +611,8 @@ class ThreeService {
     required this._root,
     ThreeLlmCall? llm,
     ThreeAssetLoader? assets,
-  })  : _llm = llm ?? defaultThreeLlmCall,
-        _assets = assets ?? _bundleAssetLoader;
+  }) : _llm = llm ?? defaultThreeLlmCall,
+       _assets = assets ?? _bundleAssetLoader;
 
   /// 生产入口：`<用户文档>/NoNDesign/3d`。
   ///
@@ -607,7 +648,8 @@ class ThreeService {
   }
 
   /// 预览宿主页的绝对路径（给 WebView 按文件加载用）。
-  String previewHtmlPath(String name) => '${projectDir(name).path}/preview.html';
+  String previewHtmlPath(String name) =>
+      '${projectDir(name).path}/preview.html';
 
   // -- 读 -------------------------------------------------------------------
 
@@ -617,7 +659,9 @@ class ThreeService {
     final dir = projectDir(name);
     if (!dir.existsSync()) throw ThreeFailure('no_project', name);
     final specFile = File('${dir.path}/three-spec.json');
-    final spec = specFile.existsSync() ? _readSpecSync(name) : <String, dynamic>{};
+    final spec = specFile.existsSync()
+        ? _readSpecSync(name)
+        : <String, dynamic>{};
     final sceneFile = File('${dir.path}/scene.js');
     final scene = sceneFile.existsSync() ? sceneFile.readAsStringSync() : '';
     return ThreeProjectSnapshot(
@@ -634,10 +678,7 @@ class ThreeService {
   Future<List<ThreeProjectEntry>> listProjects() async {
     final entries = <ThreeProjectEntry>[];
     if (!_root.existsSync()) return entries;
-    final dirs = _root
-        .listSync()
-        .whereType<Directory>()
-        .toList()
+    final dirs = _root.listSync().whereType<Directory>().toList()
       ..sort((a, b) => a.path.compareTo(b.path));
     for (final dir in dirs) {
       final stateFile = File('${dir.path}/build-state.json');
@@ -646,13 +687,17 @@ class ThreeService {
       try {
         final decoded = jsonDecode(stateFile.readAsStringSync());
         if (decoded is! Map) throw const FormatException('not an object');
-        entries.add(ThreeProjectEntry(
-          name: name,
-          current: '${decoded['current'] ?? ''}',
-          blocked: decoded['blocked'] == true,
-        ));
+        entries.add(
+          ThreeProjectEntry(
+            name: name,
+            current: '${decoded['current'] ?? ''}',
+            blocked: decoded['blocked'] == true,
+          ),
+        );
       } catch (_) {
-        entries.add(ThreeProjectEntry(name: name, current: 'corrupt', blocked: true));
+        entries.add(
+          ThreeProjectEntry(name: name, current: 'corrupt', blocked: true),
+        );
       }
     }
     return entries;
@@ -677,7 +722,8 @@ class ThreeService {
       config: config,
     );
     final spec = _extractJson(raw);
-    if (!_hasNonEmptyList(spec['components']) || !_hasNonEmptyList(spec['acceptance'])) {
+    if (!_hasNonEmptyList(spec['components']) ||
+        !_hasNonEmptyList(spec['acceptance'])) {
       throw ThreeFailure('spec_invalid', 'components/acceptance');
     }
     dir.createSync(recursive: true);
@@ -732,7 +778,11 @@ class ThreeService {
     }
     final pid = '${current['id']}';
     final request = _passPrompt(name);
-    final raw = await _chat(system: request.system, prompt: request.prompt, config: config);
+    final raw = await _chat(
+      system: request.system,
+      prompt: request.prompt,
+      config: config,
+    );
     final js = _extractJs(raw);
     _atomicWrite(File('${projectDir(name).path}/scene.js'), js);
 
@@ -746,12 +796,26 @@ class ThreeService {
         'stale': true,
         'chars': js.length,
       });
-      return ThreePassResult(pass: pid, stale: true, chars: js.length, state: fresh);
+      return ThreePassResult(
+        pass: pid,
+        stale: true,
+        chars: js.length,
+        state: fresh,
+      );
     }
     freshPass['status'] = 'generated';
     _writeState(name, fresh);
-    appendHistory(name, <String, dynamic>{'action': 'generate', 'pass': pid, 'chars': js.length});
-    return ThreePassResult(pass: pid, stale: false, chars: js.length, state: fresh);
+    appendHistory(name, <String, dynamic>{
+      'action': 'generate',
+      'pass': pid,
+      'chars': js.length,
+    });
+    return ThreePassResult(
+      pass: pid,
+      stale: false,
+      chars: js.length,
+      state: fresh,
+    );
   }
 
   /// 预览页回传的三类反馈。
@@ -760,7 +824,11 @@ class ThreeService {
   ///  * `metrics`：只记账（测量是环境事实，不是通过依据）。
   ///  * `screenshot`：写 `evidence/`，并只在**已有真实生成痕迹**时把状态转
   ///    generated——骨架页的截图不能穿透推进门。
-  Future<ThreeFeedbackResult> feedback(String name, String kind, Object? payload) async {
+  Future<ThreeFeedbackResult> feedback(
+    String name,
+    String kind,
+    Object? payload,
+  ) async {
     final dir = projectDir(name);
     final state = _readStateSync(name);
     if (state['current'] == 'done') throw ThreeFailure('already_done');
@@ -787,16 +855,40 @@ class ThreeService {
         'kind': 'metrics',
         'summary': _clip(payload == null ? '' : jsonEncode(payload), 200),
       });
+      // v2 测量落 artifacts/measurement.json：three_check 直接消费这份事实。
+      if (payload is Map) {
+        final Map<String, dynamic> measurement = Map<String, dynamic>.from(
+          payload,
+        );
+        final Map<String, dynamic> envelope = <String, dynamic>{
+          'v': 1,
+          'name': name,
+          'pass': pass,
+          'captured_at': DateTime.now().toUtc().toIso8601String(),
+          ...measurement,
+        };
+        final Directory artifacts = Directory('${dir.path}/artifacts')
+          ..createSync(recursive: true);
+        _atomicWrite(
+          File('${artifacts.path}/measurement.json'),
+          const JsonEncoder.withIndent('  ').convert(envelope),
+        );
+      }
       status = 'metrics-ok';
     } else if (kind == 'screenshot') {
       final evidence = _evidenceOf(current);
       final extracted = _screenshotPayload(payload);
-      if (extracted.data.isEmpty) throw ThreeFailure('evidence_invalid', 'empty payload');
+      if (extracted.data.isEmpty) {
+        throw ThreeFailure('evidence_invalid', 'empty payload');
+      }
       // 体积上限先于解码：base64 长度换算成「上限对应的编码长度」，避免把
       // 巨串先解码进内存再拒绝。
       final maxEncoded = (threeEvidenceMaxBytes ~/ 3 + 1) * 4;
       if (extracted.data.length > maxEncoded) {
-        throw ThreeFailure('evidence_too_large', '${extracted.data.length} chars');
+        throw ThreeFailure(
+          'evidence_too_large',
+          '${extracted.data.length} chars',
+        );
       }
       // 文件数上限：预览页可以反复发截图，没有上限就是一个无限写入面。
       final total = _evidenceTotal(state);
@@ -812,14 +904,17 @@ class ThreeService {
       if (bytes.length > threeEvidenceMaxBytes) {
         throw ThreeFailure('evidence_too_large', '${bytes.length} bytes');
       }
-      final evidenceDir = Directory('${dir.path}/evidence')..createSync(recursive: true);
+      final evidenceDir = Directory('${dir.path}/evidence')
+        ..createSync(recursive: true);
       final index = evidence.length + 1;
       final fileName =
           '$pass-${extracted.tag.isEmpty ? 'shot' : extracted.tag}-${index.toString().padLeft(2, '0')}.png';
-      File('${evidenceDir.path}/$fileName').writeAsBytesSync(bytes, flush: true);
+      File('${evidenceDir.path}/$fileName')
+          .writeAsBytesSync(bytes, flush: true);
       evidence.add(fileName);
       current['evidence'] = evidence;
-      if (_asInt(current['attempts']) > 0 || File('${dir.path}/scene.js').existsSync()) {
+      if (_asInt(current['attempts']) > 0 ||
+          File('${dir.path}/scene.js').existsSync()) {
         current['status'] = 'generated';
       }
       appendHistory(name, <String, dynamic>{
@@ -860,7 +955,10 @@ class ThreeService {
   /// 评审通过：推进到下一层；最后一层通过即完成。
   ///
   /// 门禁：当前层必须是「已生成/已通过」且**有证据**（每步必带证据）。
-  Future<ThreeContinueResult> continuePass(String name, [String summary = '']) async {
+  Future<ThreeContinueResult> continuePass(
+    String name, [
+    String summary = '',
+  ]) async {
     final state = _readStateSync(name);
     if (state['current'] == 'done') throw ThreeFailure('already_done');
     final current = _passOf(state, state['current']);
@@ -876,7 +974,9 @@ class ThreeService {
       'pass': pass,
       'summary': _clip(summary, 200),
     });
-    final index = (state['passes'] as List).indexWhere((p) => p is Map && p['id'] == pass);
+    final index = (state['passes'] as List).indexWhere(
+      (p) => p is Map && p['id'] == pass,
+    );
     if (index >= 0 && index + 1 < (state['passes'] as List).length) {
       state['current'] = '${(state['passes'] as List)[index + 1]['id']}';
       _writeState(name, state);
@@ -896,12 +996,16 @@ class ThreeService {
   ///
   /// 成功保存顺带解除阻塞：把标记为 blocked 的层复位成待生成、修复轮清零
   /// ——携带新规范从该层重跑；旧计数不清零会在下一次生成后立刻再次撞上限。
-  Future<ThreeSpecSaveResult> saveSpec(String name, Map<String, dynamic> spec) async {
+  Future<ThreeSpecSaveResult> saveSpec(
+    String name,
+    Map<String, dynamic> spec,
+  ) async {
     final dir = projectDir(name);
     if (!File('${dir.path}/build-state.json').existsSync()) {
       throw ThreeFailure('no_project', name);
     }
-    if (!_hasNonEmptyList(spec['components']) || !_hasNonEmptyList(spec['acceptance'])) {
+    if (!_hasNonEmptyList(spec['components']) ||
+        !_hasNonEmptyList(spec['acceptance'])) {
       throw ThreeFailure('spec_invalid', 'components/acceptance');
     }
     _atomicWrite(File('${dir.path}/three-spec.json'), _prettyJson(spec));
@@ -947,7 +1051,10 @@ class ThreeService {
   ///
   /// 每次挂载都会重写宿主页（`?v=` 用当前时间戳，改完代码重新加载不命中
   /// 模块缓存）；渲染库按字节长度比对，缺失/被裁剪时从资源重拷。
-  Future<ThreePreviewBundle> preparePreview(String name, {bool force = false}) async {
+  Future<ThreePreviewBundle> preparePreview(
+    String name, {
+    bool force = false,
+  }) async {
     final dir = projectDir(name);
     if (!File('${dir.path}/three-spec.json').existsSync()) {
       throw ThreeFailure('no_project', name);
@@ -963,7 +1070,9 @@ class ThreeService {
       moduleBytes = await _assets(threeModuleAssetKey);
       // 只有模板真的要沙箱执行面时才要求 three-live 在场：测试与旧模板
       // 不带该占位时不该被迫提供 225KB 资源（缺了仍由组装器显性失败）。
-      final needsLive = utf8.decode(templateBytes).contains('/*__THREE_LIVE__*/');
+      final needsLive = utf8
+          .decode(templateBytes)
+          .contains('/*__THREE_LIVE__*/');
       liveBytes = needsLive ? await _assets(threeLiveAssetKey) : null;
     } on ThreeFailure {
       rethrow;
@@ -991,7 +1100,9 @@ class ThreeService {
     }
 
     final module = File('${dir.path}/three.module.js');
-    if (force || !module.existsSync() || module.lengthSync() != moduleBytes.length) {
+    if (force ||
+        !module.existsSync() ||
+        module.lengthSync() != moduleBytes.length) {
       module.writeAsBytesSync(moduleBytes, flush: true);
     }
 
@@ -1020,6 +1131,361 @@ class ThreeService {
     return parseThreeUiCatalog(utf8.decode(bytes));
   }
 
+  // -- v2 工作区（spec/plan/src/artifacts；旧布局只读迁移） --------------------
+  late final ThreeWorkspaceStore workspaceStore = ThreeWorkspaceStore(_root);
+
+  Future<Map<String, dynamic>> workspaceMigrate(String name) async {
+    final ThreeMigrationResult result = await workspaceStore.migrateLegacy(
+      name,
+    );
+    return result.toJson();
+  }
+
+  /// v2 build：scene 模式编译 scene.json → src/scene.js；code 模式清点 src。
+  /// 只写派生产物与 build manifest，不改事实源；GLB 导出留后续批次。
+  /// 场景轨 placement/census 门：measurement + plan.zones/placements → gates。
+  Future<Map<String, dynamic>> workspaceCheckPlacement(
+    String name, [
+    Map<String, dynamic>? measurement,
+  ]) async {
+    final ThreeWorkspaceProject project = await workspaceStore.read(name);
+    if (project.plan == null) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_plan_missing',
+        'message': '还没有可用的 plan：先补 plan 再跑摆放门',
+      };
+    }
+    if (project.plan!.track != CreativeTrack.scene) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_track_not_scene',
+        'message': '这个项目的计划不是场景轨：对象轨用 three_check',
+      };
+    }
+    Map<String, dynamic>? rawMeasurement = measurement;
+    if (rawMeasurement == null) {
+      final latest = await latestMeasurement(name);
+      if (latest['ok'] != true) return latest;
+      rawMeasurement = latest['measurement'] is Map
+          ? Map<String, dynamic>.from(latest['measurement'] as Map)
+          : null;
+    }
+    if (rawMeasurement == null) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_measure_missing',
+        'message': '还没有测量：先让预览页跑起来再跑摆放门',
+      };
+    }
+    final ThreeObjectMeasure measure = ThreeObjectMeasure.parse(rawMeasurement);
+    if (measure.parts.isEmpty) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_measure_invalid',
+        'message': '测量里没有有效 parts：先让预览页回传包围盒',
+      };
+    }
+    final gates = evaluateThreeSceneGates(project.plan!, measure);
+    await workspaceStore.writeArtifact(
+      name,
+      'measurement.json',
+      rawMeasurement,
+    );
+    await workspaceStore.writeArtifact(
+      name,
+      'placement-gates.json',
+      gates.toJson(),
+    );
+    return <String, dynamic>{
+      'ok': true,
+      'name': name,
+      'verdict': gates.verdict.wire,
+      'caps': gates.caps,
+      'fix_hints': gates.gates
+          .where((gate) => gate.verdict.isBlocking && gate.fixHint.isNotEmpty)
+          .map((gate) => '${gate.id}: ${gate.fixHint}')
+          .toList(growable: false),
+      'gates': gates.gates
+          .map(
+            (gate) => <String, Object?>{
+              'id': gate.id,
+              'verdict': gate.verdict.wire,
+              'metrics': gate.metrics,
+              if (gate.fixHint.isNotEmpty) 'fix_hint': gate.fixHint,
+            },
+          )
+          .toList(growable: false),
+      'saved': '${ThreeWorkspaceLayout.artifactsDir}/placement-gates.json',
+    };
+  }
+
+  Future<Map<String, dynamic>> workspaceBuild(String name) async {
+    final ThreeWorkspaceProject project = await workspaceStore.read(name);
+    if (project.migrated) workspaceStore.ensureLayout(name);
+    if (!project.migrated) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_no_legacy',
+        'message': '这个项目还是旧布局：先 three_workspace_migrate 再构建',
+      };
+    }
+    if (project.plan == null) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_plan_missing',
+        'message': '还没有可用的 plan：先补 plan 再构建',
+      };
+    }
+    final ThreePlanValidation validation = validateThreePlan(
+      project.plan!.toJson(),
+    );
+    if (!validation.ok) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_plan_invalid',
+        'message': '计划还没通过校验，先修 plan 再构建',
+        'fix_hints': validation.fixHints,
+      };
+    }
+    final List<String> planWarnings = validation.allIssues
+        .where((issue) => !issue.blocking)
+        .map((issue) => issue.message)
+        .toList(growable: false);
+    final Map<String, Object?> manifest = <String, Object?>{
+      'v': 1,
+      'name': name,
+      'status': 'built',
+      'mode': project.mode.name,
+      'built_at': DateTime.now().toUtc().toIso8601String(),
+      'plan_warnings': planWarnings,
+    };
+    String source = '';
+    if (project.mode == ThreeAuthoringMode.scene) {
+      final Map<String, Object?>? rawScene = project.sceneJson;
+      if (rawScene == null) {
+        return <String, dynamic>{
+          'ok': false,
+          'error': 'three_scene_missing',
+          'message': 'scene 模式缺 scene.json：先写场景再构建',
+        };
+      }
+      final ({ThreeSceneDocument? document, List<ThreeSceneIssue> issues})
+      parsed = ThreeSceneDocument.parse(rawScene);
+      final ThreeSceneDocument? doc = parsed.document;
+      if (doc == null) {
+        return <String, dynamic>{
+          'ok': false,
+          'error': 'three_scene_invalid',
+          'message': 'scene.json 还没通过校验，先修场景再构建',
+          'issues': parsed.issues
+              .where((issue) => issue.blocking)
+              .map(
+                (issue) => <String, Object?>{
+                  'pointer': issue.pointer,
+                  'code': issue.code,
+                  'message': issue.message,
+                },
+              )
+              .toList(growable: false),
+        };
+      }
+      final String js = compileThreeScene(doc);
+      await workspaceStore.writeSource(name, 'scene.js', js);
+      source = '${ThreeWorkspaceLayout.srcDir}/scene.js';
+      manifest['source'] = source;
+      manifest['scene_nodes'] = doc.nodes.length;
+    } else {
+      if (project.sourceFiles.isEmpty) {
+        return <String, dynamic>{
+          'ok': false,
+          'error': 'three_code_missing',
+          'message': 'code 模式还没有 src 源码：先写 part 文件再构建',
+        };
+      }
+      manifest['source_files'] = project.sourceFiles;
+      source = project.sourceFiles.first;
+    }
+    await workspaceStore.writeArtifact(name, 'build.json', manifest);
+    return <String, dynamic>{
+      'ok': true,
+      'name': name,
+      'mode': project.mode.name,
+      'status': 'built',
+      'source': source,
+      'source_files': project.sourceFiles,
+      'plan_warnings': planWarnings,
+      'saved': '${ThreeWorkspaceLayout.artifactsDir}/build.json',
+    };
+  }
+
+  Future<Map<String, dynamic>> workspacePlanValidate(String name) async {
+    final ThreeWorkspaceProject project = await workspaceStore.read(name);
+    if (!project.migrated) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_no_legacy',
+        'message': '这个项目还是旧布局：先 three_workspace_migrate，或新建一个 v2 项目',
+      };
+    }
+    if (project.plan == null) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_plan_missing',
+        'message': '还没有可用的 plan：先让 NaN 写 spec/plan 再校验',
+        if (project.issues.isNotEmpty) 'detail': project.issues.join('；'),
+      };
+    }
+    final ThreePlanValidation validation = validateThreePlan(
+      project.plan!.toJson(),
+    );
+    return <String, dynamic>{
+      'ok': validation.ok,
+      'name': name,
+      'valid': validation.ok,
+      'issues': validation.allIssues
+          .map(
+            (issue) => <String, Object?>{
+              'code': issue.code,
+              'pointer': issue.pointer,
+              'message': issue.message,
+              'blocking': issue.blocking,
+            },
+          )
+          .toList(growable: false),
+      'fix_hints': validation.fixHints,
+      'warnings': validation.allIssues
+          .where((issue) => !issue.blocking)
+          .map((issue) => issue.message)
+          .toList(growable: false),
+      'plan_summary': project.plan!.summary,
+      'track': project.plan!.track.wire,
+    };
+  }
+
+  /// 读取预览页最新一次测量（v2 `artifacts/measurement.json`）。
+  Future<Map<String, dynamic>> latestMeasurement(String name) async {
+    final File file = File(
+      '${projectDir(name).path}/artifacts/measurement.json',
+    );
+    if (!file.existsSync()) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_measure_missing',
+        'message': '还没有测量：先让预览页跑起来（首帧会回传 bbox/三角面）',
+      };
+    }
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(file.readAsStringSync());
+    } catch (error) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_measure_corrupt',
+        'message': '测量文件读不出来，重开预览再测一次',
+        'detail': '$error',
+      };
+    }
+    if (decoded is! Map) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_measure_corrupt',
+        'message': '测量文件格式不对，重开预览再测一次',
+      };
+    }
+    final ThreeObjectMeasure measure = ThreeObjectMeasure.parse(decoded);
+    final int triangles = measure.parts.fold<int>(
+      0,
+      (sum, part) => sum + part.triangles,
+    );
+    return <String, dynamic>{
+      'ok': true,
+      'name': name,
+      'measurement': decoded,
+      'path': decoded['path']?.toString() ?? '',
+      'part_count': measure.parts.length,
+      'triangles': triangles,
+      'parts': measure.parts
+          .map(
+            (part) => <String, Object?>{
+              'id': part.id,
+              'bbox': <String, Object?>{
+                'min': part.box.min.toJson(),
+                'max': part.box.max.toJson(),
+              },
+              'triangles': part.triangles,
+              if (part.material.isNotEmpty) 'material': part.material,
+            },
+          )
+          .toList(growable: false),
+    };
+  }
+
+  Future<Map<String, dynamic>> workspaceCheckGates(
+    String name, [
+    Map<String, dynamic>? measurement,
+  ]) async {
+    final ThreeWorkspaceProject project = await workspaceStore.read(name);
+    if (project.plan == null) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_plan_missing',
+        'message': '还没有可用的 plan：先补 plan 再跑门',
+      };
+    }
+    Map<String, dynamic>? rawMeasurement = measurement;
+    if (rawMeasurement == null) {
+      final latest = await latestMeasurement(name);
+      if (latest['ok'] != true) return latest;
+      rawMeasurement = latest['measurement'] is Map
+          ? Map<String, dynamic>.from(latest['measurement'] as Map)
+          : null;
+    }
+    if (rawMeasurement == null) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_measure_missing',
+        'message': '还没有测量：先让预览页跑起来再跑门',
+      };
+    }
+    final ThreeObjectMeasure measure = ThreeObjectMeasure.parse(rawMeasurement);
+    if (measure.parts.isEmpty) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'three_measure_invalid',
+        'message': '测量里没有有效 parts：先让预览页回传包围盒/三角面',
+      };
+    }
+    final gates = evaluateThreeGates(project.plan!, measure);
+    await workspaceStore.writeArtifact(
+      name,
+      'measurement.json',
+      rawMeasurement,
+    );
+    await workspaceStore.writeArtifact(name, 'gates.json', gates.toJson());
+    return <String, dynamic>{
+      'ok': true,
+      'name': name,
+      'verdict': gates.verdict.wire,
+      'caps': gates.caps,
+      'fix_hints': gates.gates
+          .where((gate) => gate.verdict.isBlocking && gate.fixHint.isNotEmpty)
+          .map((gate) => '${gate.id}: ${gate.fixHint}')
+          .toList(growable: false),
+      'gates': gates.gates
+          .map(
+            (gate) => <String, Object?>{
+              'id': gate.id,
+              'verdict': gate.verdict.wire,
+              'metrics': gate.metrics,
+              if (gate.fixHint.isNotEmpty) 'fix_hint': gate.fixHint,
+            },
+          )
+          .toList(growable: false),
+      'saved': true,
+    };
+  }
+
   // -- 内部：提示词 ---------------------------------------------------------
 
   static const String _specSystemPrompt =
@@ -1038,7 +1504,9 @@ class ThreeService {
       '2. 返回 `{ metrics: {...}, update(dt) {...} }`（可选）：metrics 进测量反馈，update 为逐帧动画。\n'
       '3. **只实现/完善当前 pass 的层**，其余层保持已有代码不退化（重写整文件，但不得删除其他层的成果）。\n'
       '4. 所有反馈（错误/测量）都已修完才可能收到本任务；blocked 时先改 spec 不写代码。\n'
-      '5. 只输出完整 scene.js 代码（```js 围栏或裸码，必须含 export default）。';
+      '5. 每个 part 的 Mesh 用 `mesh.name = \'<plan part id>\'` 命名（测量与确定性门按'
+      ' name 对齐 plan；不命名会让门只能确认「有几何」而不能确认「就是这个 part」）。\n'
+      '6. 只输出完整 scene.js 代码（```js 围栏或裸码，必须含 export default）。';
 
   ({String system, String prompt}) _passPrompt(String name) {
     final spec = _readSpecSync(name);
@@ -1053,8 +1521,10 @@ class ThreeService {
       ..writeln(_prettyJson(spec))
       ..writeln()
       ..writeln('# 当前 pass：$pass —— $goal')
-      ..writeln('# 修复轮：${_asInt(current['attempts'])}/${_asInt(state['loop_max'], threeLoopMax)}'
-          '（本 pass 已失败 ${_asInt(current['attempts'])} 次；若有失败原因见下方反馈记录）');
+      ..writeln(
+        '# 修复轮：${_asInt(current['attempts'])}/${_asInt(state['loop_max'], threeLoopMax)}'
+        '（本 pass 已失败 ${_asInt(current['attempts'])} 次；若有失败原因见下方反馈记录）',
+      );
     if (existing.isNotEmpty) {
       prompt
         ..writeln('# 当前 scene.js（在此基础上完善，勿退化其他层）')
@@ -1076,15 +1546,19 @@ class ThreeService {
     required String prompt,
     required ThreeLlmConfig config,
   }) async {
-    if (!config.isConfigured) throw ThreeFailure('llm_error', 'missing credentials');
-    return _llm(ThreeLlmRequest(
-      system: system,
-      prompt: prompt,
-      model: config.model,
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      thinkingLevel: config.thinkingLevel,
-    ));
+    if (!config.isConfigured) {
+      throw ThreeFailure('llm_error', 'missing credentials');
+    }
+    return _llm(
+      ThreeLlmRequest(
+        system: system,
+        prompt: prompt,
+        model: config.model,
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        thinkingLevel: config.thinkingLevel,
+      ),
+    );
   }
 
   /// 从回复里取 JSON：```json 围栏优先，其次裸 JSON 的花括号区间。
@@ -1102,7 +1576,9 @@ class ThreeService {
     }
     final start = text.indexOf('{');
     final end = text.lastIndexOf('}');
-    if (start < 0 || end <= start) throw ThreeFailure('spec_parse_failed', 'no json object');
+    if (start < 0 || end <= start) {
+      throw ThreeFailure('spec_parse_failed', 'no json object');
+    }
     try {
       final decoded = jsonDecode(text.substring(start, end + 1));
       if (decoded is! Map) throw const FormatException('not an object');
@@ -1186,7 +1662,9 @@ class ThreeService {
   /// 再改名。进度文件自称权威，绝不能写出半截 JSON。
   void _atomicWrite(File file, String text) {
     file.parent.createSync(recursive: true);
-    final tmp = File('${file.path}.${DateTime.now().microsecondsSinceEpoch}.tmp');
+    final tmp = File(
+      '${file.path}.${DateTime.now().microsecondsSinceEpoch}.tmp',
+    );
     final handle = tmp.openSync(mode: FileMode.writeOnly);
     try {
       handle.writeStringSync(text);
@@ -1205,7 +1683,11 @@ class ThreeService {
   List<Map<String, dynamic>> _readHistory(String name) {
     final file = File('${projectDir(name).path}/history.jsonl');
     if (!file.existsSync()) return const <Map<String, dynamic>>[];
-    final lines = file.readAsStringSync().split('\n').where((l) => l.trim().isNotEmpty).toList();
+    final lines = file
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => l.trim().isNotEmpty)
+        .toList();
     final tail = lines.length > 50 ? lines.sublist(lines.length - 50) : lines;
     final out = <Map<String, dynamic>>[];
     for (final line in tail) {
@@ -1280,13 +1762,16 @@ class ThreeService {
     return data.startsWith(prefix) ? data.substring(prefix.length) : data;
   }
 
-  String _sanitizeTag(String tag) => tag.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
+  String _sanitizeTag(String tag) =>
+      tag.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
 
   bool _hasNonEmptyList(Object? value) => value is List && value.isNotEmpty;
 
-  String _prettyJson(Object? value) => const JsonEncoder.withIndent(' ').convert(value);
+  String _prettyJson(Object? value) =>
+      const JsonEncoder.withIndent(' ').convert(value);
 
-  String _clip(String text, int max) => text.length <= max ? text : text.substring(0, max);
+  String _clip(String text, int max) =>
+      text.length <= max ? text : text.substring(0, max);
 
   String _basename(String path) {
     final normalized = path.replaceAll('\\', '/');
@@ -1306,9 +1791,14 @@ class ThreeService {
 /// 就是一个合法的内联模块：既保留了内部作用域，又把全部 416 个出口聚成一个
 /// 可直接传给场景的对象——不需要 importmap，也不需要取第二个文件。
 String threeModuleAsInlineNamespace(String source) {
-  final matches = RegExp(r'export\s*\{([\s\S]*?)\}\s*;?\s*$').allMatches(source).toList();
+  final matches = RegExp(r'export\s*\{([\s\S]*?)\}\s*;?\s*$')
+      .allMatches(source)
+      .toList();
   if (matches.isEmpty) {
-    throw ThreeFailure('asset_missing', 'three.module.js: no export block at the end');
+    throw ThreeFailure(
+      'asset_missing',
+      'three.module.js: no export block at the end',
+    );
   }
   final block = matches.last;
   final names = block
@@ -1323,9 +1813,12 @@ String threeModuleAsInlineNamespace(String source) {
   final entries = <String>[];
   for (final name in names) {
     final alias = name.split(RegExp(r'\s+as\s+'));
-    entries.add(alias.length == 2 ? '${alias[1].trim()}: ${alias[0].trim()}' : name);
+    entries.add(
+      alias.length == 2 ? '${alias[1].trim()}: ${alias[0].trim()}' : name,
+    );
   }
-  final replacement = 'const THREE = {\n${entries.map((e) => '  $e,').join('\n')}\n};\n';
+  final replacement =
+      'const THREE = {\n${entries.map((e) => '  $e,').join('\n')}\n};\n';
   return source.replaceRange(block.start, block.end, replacement);
 }
 
@@ -1339,25 +1832,38 @@ String threeModuleAsInlineNamespace(String source) {
 ({String source, String entry}) threeSceneAsInlineFunction(String source) {
   var code = source.replaceAll(RegExp(r'(^|\n)\s*import\s+[^;]*;'), '\n');
   if (RegExp(r'(^|\n)\s*import\b').hasMatch(code)) {
-    throw ThreeFailure('code_parse_failed', 'scene.js still contains an import statement');
+    throw ThreeFailure(
+      'code_parse_failed',
+      'scene.js still contains an import statement',
+    );
   }
   if (RegExp(r'export\s+default\s+class').hasMatch(code)) {
-    throw ThreeFailure('code_parse_failed', 'scene.js exports a class, not a build function');
+    throw ThreeFailure(
+      'code_parse_failed',
+      'scene.js exports a class, not a build function',
+    );
   }
-  final named = RegExp(r'export\s+default\s+(async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)')
-      .firstMatch(code);
+  final named = RegExp(
+    r'export\s+default\s+(async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)',
+  ).firstMatch(code);
   String entry;
   if (named != null) {
     entry = named.group(2)!;
     code = code.replaceFirst(RegExp(r'export\s+default\s+'), '');
   } else if (RegExp(r'export\s+default\b').hasMatch(code)) {
     entry = '__build';
-    code = code.replaceFirst(RegExp(r'export\s+default\s+'), 'const __build = ');
+    code = code.replaceFirst(
+      RegExp(r'export\s+default\s+'),
+      'const __build = ',
+    );
   } else {
     throw ThreeFailure('code_parse_failed', 'scene.js has no export default');
   }
   if (RegExp(r'(^|\n)\s*export\b').hasMatch(code)) {
-    throw ThreeFailure('code_parse_failed', 'scene.js has other export statements');
+    throw ThreeFailure(
+      'code_parse_failed',
+      'scene.js has other export statements',
+    );
   }
   return (source: code, entry: entry);
 }
@@ -1374,7 +1880,8 @@ String threeModuleAsInlineNamespace(String source) {
 ///  * `connect-src 'none'`：关闭 fetch/XHR/WebSocket/beacon 等全部外联通道；
 ///  * `default-src 'none'`：其余资源（远端脚本/样式/图片/字体）一律不加载；
 ///  * `frame-ancestors 'none'`：不允许被任何页面嵌套。
-const String threePreviewCsp = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; "
+const String threePreviewCsp =
+    "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; "
     "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; "
     "connect-src 'none'; worker-src blob:; frame-ancestors 'none'";
 
@@ -1384,8 +1891,12 @@ const String _cspMetaMarker = 'http-equiv="Content-Security-Policy"';
 /// DOCTYPE 之后（没有就字节 0）注入——保证策略早于第一个脚本生效。
 String ensureThreePreviewCsp(String html) {
   if (html.contains(_cspMetaMarker)) return html;
-  final meta = '<meta http-equiv="Content-Security-Policy" content="$threePreviewCsp">';
-  final doctype = RegExp(r'^\s*<!doctype[^>]*>', caseSensitive: false).firstMatch(html);
+  final meta =
+      '<meta http-equiv="Content-Security-Policy" content="$threePreviewCsp">';
+  final doctype = RegExp(
+    r'^\s*<!doctype[^>]*>',
+    caseSensitive: false,
+  ).firstMatch(html);
   final index = doctype?.end ?? 0;
   return html.replaceRange(index, index, meta);
 }
@@ -1408,42 +1919,66 @@ String assembleThreePreview({
   const liveSlot = '/*__THREE_LIVE__*/';
   const sandboxSlot = '/*__SCENE_SANDBOX__*/';
   if (!template.contains(threeSlot) || !template.contains(sceneSlot)) {
-    throw ThreeFailure('asset_missing', 'preview.html: inline placeholders missing');
+    throw ThreeFailure(
+      'asset_missing',
+      'preview.html: inline placeholders missing',
+    );
   }
   // 占位必须**恰好出现一次**：模板注释里再写一遍占位会把注入点顶到注释里，
   // 生成一个白屏页面（实测事故）。宁可显性失败。
   if (threeSlot.allMatches(template).length != 1) {
-    throw ThreeFailure('asset_missing', 'preview.html: THREE placeholder must appear exactly once');
+    throw ThreeFailure(
+      'asset_missing',
+      'preview.html: THREE placeholder must appear exactly once',
+    );
   }
   if (sceneSlot.allMatches(template).length != 1) {
-    throw ThreeFailure('asset_missing', 'preview.html: scene placeholder must appear exactly once');
+    throw ThreeFailure(
+      'asset_missing',
+      'preview.html: scene placeholder must appear exactly once',
+    );
   }
   final hasLive = template.contains(liveSlot);
   final hasSandbox = template.contains(sandboxSlot);
   if (hasLive && liveSlot.allMatches(template).length != 1) {
-    throw ThreeFailure('asset_missing', 'preview.html: three-live placeholder must appear exactly once');
+    throw ThreeFailure(
+      'asset_missing',
+      'preview.html: three-live placeholder must appear exactly once',
+    );
   }
   if (hasSandbox && sandboxSlot.allMatches(template).length != 1) {
-    throw ThreeFailure('asset_missing', 'preview.html: sandbox placeholder must appear exactly once');
+    throw ThreeFailure(
+      'asset_missing',
+      'preview.html: sandbox placeholder must appear exactly once',
+    );
   }
   if (hasLive && threeLiveSource.isEmpty) {
     // 模板要求沙箱执行面，却没拿到 three-live 源码：显性失败，不产出
     // 「占位没被替换」的半成品页面（那会白屏）。
-    throw ThreeFailure('asset_missing', 'preview.html: three-live source missing');
+    throw ThreeFailure(
+      'asset_missing',
+      'preview.html: three-live source missing',
+    );
   }
   final namespace = threeModuleAsInlineNamespace(threeSource);
   final scene = threeSceneAsInlineFunction(sceneSource);
-  final callable = '${scene.source}\n'
+  final callable =
+      '${scene.source}\n'
       'const __non3d_scene_build__ = ${scene.entry};\n'
       '// build $version\n';
-  var injected = template.replaceFirst(threeSlot, namespace).replaceFirst(sceneSlot, callable);
+  var injected = template
+      .replaceFirst(threeSlot, namespace)
+      .replaceFirst(sceneSlot, callable);
   if (hasLive) injected = injected.replaceFirst(liveSlot, threeLiveSource);
   if (hasSandbox) injected = injected.replaceFirst(sandboxSlot, callable);
   if (injected.contains(threeSlot) ||
       injected.contains(sceneSlot) ||
       (hasLive && injected.contains(liveSlot)) ||
       (hasSandbox && injected.contains(sandboxSlot))) {
-    throw ThreeFailure('asset_missing', 'preview.html: placeholders left after assembly');
+    throw ThreeFailure(
+      'asset_missing',
+      'preview.html: placeholders left after assembly',
+    );
   }
   // CSP 是预览页的第二道防线（第一道是内容自包含）：模板没带就补上，
   // 保证任何组装路径产出的页面都零外联。
@@ -1458,7 +1993,10 @@ String assembleThreePreview({
 ///
 /// 只做平台矩阵允许的事：[host] 不支持（手机/平板）或目录不在时返回 false，
 /// 调用方据此隐藏入口——不在移动端假装成功。
-Future<bool> revealThreeProject(String path, {required PlatformCapabilities host}) async {
+Future<bool> revealThreeProject(
+  String path, {
+  required PlatformCapabilities host,
+}) async {
   if (path.isEmpty || !host.supportsRevealInFolder) return false;
   if (!Directory(path).existsSync()) return false;
   try {

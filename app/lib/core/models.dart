@@ -1,4 +1,5 @@
-double _num(dynamic v, [double fallback = 0]) => (v is num) ? v.toDouble() : fallback;
+double _num(dynamic v, [double fallback = 0]) =>
+    (v is num) ? v.toDouble() : fallback;
 
 class NodeStyle {
   final String fill;
@@ -12,18 +13,25 @@ class NodeStyle {
   final String shadow;
   final bool visible;
   final String align;
+
   /// 入场动效档（engine-0.2 白名单仅 fade_in；空串/none 不参与）。
   final String motion;
+
   /// 绕节点中心旋转（度，引擎 svg transform 实证）。
   final double rotate;
+
   /// 高斯模糊半径（引擎 feGaussianBlur 语义）。
   final double blur;
+
   /// 描边线型：solid / dashed / dotted。
   final String dash;
+
   /// 行高倍数（引擎信封默认 1.5；<=0 时消费侧回落 1.5）。
   final double line;
+
   /// 字距（em 比例 ×fontSize，引擎 letter-spacing 语义）。
   final double tracking;
+
   /// 斜体：italic / normal。
   final String italic;
 
@@ -85,9 +93,11 @@ class CanvasNode {
   final double w;
   final double h;
   final NodeStyle style;
+
   /// 尺寸模式：fixed / hug / fill（引擎 update 词表 width_mode/height_mode）。
   final String widthMode;
   final String heightMode;
+
   /// 容器布局：layout.dir none/vertical/horizontal + gap/padding/justify。
   final String layoutDir;
   final double layoutGap;
@@ -145,8 +155,10 @@ class Artboard {
   final double width;
   final double height;
   final List<CanvasNode> nodes;
+
   /// 板底色（hex；server 从引擎 svg 的全幅背景 rect 提取，空 = 白底）。
   final String background;
+
   /// 引擎自渲染 SVG（内容层唯一真源；空 = 旧信封，客户端回落节点绘制）。
   final String svg;
 
@@ -161,17 +173,17 @@ class Artboard {
   });
 
   factory Artboard.fromJson(Map<String, dynamic> m) => Artboard(
-        id: (m['id'] ?? '').toString(),
-        name: (m['name'] ?? m['id'] ?? '').toString(),
-        width: _num(m['width'], 390),
-        height: _num(m['height'], 844),
-        nodes: ((m['nodes'] as List?) ?? const [])
-            .whereType<Map>()
-            .map((e) => CanvasNode.fromJson(Map<String, dynamic>.from(e)))
-            .toList(),
-        background: (m['background'] ?? '').toString(),
-        svg: (m['svg'] ?? '').toString(),
-      );
+    id: (m['id'] ?? '').toString(),
+    name: (m['name'] ?? m['id'] ?? '').toString(),
+    width: _num(m['width'], 390),
+    height: _num(m['height'], 844),
+    nodes: ((m['nodes'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => CanvasNode.fromJson(Map<String, dynamic>.from(e)))
+        .toList(),
+    background: (m['background'] ?? '').toString(),
+    svg: (m['svg'] ?? '').toString(),
+  );
 }
 
 class Flow {
@@ -180,16 +192,22 @@ class Flow {
   final String trigger;
   final String transition;
 
-  const Flow({required this.from, required this.to, required this.trigger, this.transition = 'push'});
+  const Flow({
+    required this.from,
+    required this.to,
+    required this.trigger,
+    this.transition = 'push',
+  });
 
   factory Flow.fromJson(Map<String, dynamic> m) => Flow(
-        from: (m['from'] ?? '').toString(),
-        to: (m['to'] ?? '').toString(),
-        trigger: (m['trigger'] ?? '').toString(),
-        transition: (m['transition'] ?? 'push').toString(),
-      );
+    from: (m['from'] ?? '').toString(),
+    to: (m['to'] ?? '').toString(),
+    trigger: (m['trigger'] ?? '').toString(),
+    transition: (m['transition'] ?? 'push').toString(),
+  );
 
-  String get nodeId => trigger.startsWith('tap:') ? trigger.substring(4) : trigger;
+  String get nodeId =>
+      trigger.startsWith('tap:') ? trigger.substring(4) : trigger;
 }
 
 class RenderEnvelope {
@@ -214,24 +232,27 @@ class RenderEnvelope {
   factory RenderEnvelope.empty() => const RenderEnvelope(ok: true);
 
   factory RenderEnvelope.fromJson(Map<String, dynamic> m) => RenderEnvelope(
-        ok: m['ok'] != false,
-        error: m['error']?.toString(),
-        entry: (m['entry'] ?? '').toString(),
-        revision: (m['revision'] is num) ? (m['revision'] as num).toInt() : 0,
-        mbt: (m['mbt'] ?? '').toString(),
-        artboards: ((m['artboards'] as List?) ?? const [])
-            .whereType<Map>()
-            .map((e) => Artboard.fromJson(Map<String, dynamic>.from(e)))
-            .toList(),
-        flows: ((m['flows'] as List?) ?? const [])
-            .whereType<Map>()
-            .map((e) => Flow.fromJson(Map<String, dynamic>.from(e)))
-            .toList(),
-      );
+    ok: m['ok'] != false,
+    error: m['error']?.toString(),
+    entry: (m['entry'] ?? '').toString(),
+    revision: (m['revision'] is num) ? (m['revision'] as num).toInt() : 0,
+    mbt: (m['mbt'] ?? '').toString(),
+    artboards: ((m['artboards'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => Artboard.fromJson(Map<String, dynamic>.from(e)))
+        .toList(),
+    flows: ((m['flows'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => Flow.fromJson(Map<String, dynamic>.from(e)))
+        .toList(),
+  );
 
   Artboard? board(String? id) {
     if (artboards.isEmpty) return null;
-    return artboards.firstWhere((b) => b.id == id, orElse: () => artboards.first);
+    return artboards.firstWhere(
+      (b) => b.id == id,
+      orElse: () => artboards.first,
+    );
   }
 }
 
@@ -287,7 +308,9 @@ class DesignSpec {
     final radius = raw['radius'] is Map ? raw['radius'] as Map : const {};
     final palette = <String, String>{...defaults.palette};
     if (raw['palette'] is Map) {
-      (raw['palette'] as Map).forEach((k, v) => palette[k.toString()] = v.toString());
+      (raw['palette'] as Map).forEach(
+        (k, v) => palette[k.toString()] = v.toString(),
+      );
     }
     return DesignSpec(
       palette: palette,
@@ -301,20 +324,22 @@ class DesignSpec {
       radiusSm: _num(radius['sm'], defaults.radiusSm),
       radiusMd: _num(radius['md'], defaults.radiusMd),
       radiusLg: _num(radius['lg'], defaults.radiusLg),
-      rules: ((raw['rules'] as List?) ?? defaults.rules).map((e) => e.toString()).toList(),
+      rules: ((raw['rules'] as List?) ?? defaults.rules)
+          .map((e) => e.toString())
+          .toList(),
       notes: (raw['notes'] ?? '').toString(),
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'v': 1,
-        'palette': palette,
-        'typography': {'h1': h1, 'h2': h2, 'body': body},
-        'spacing': spacing,
-        'radius': {'sm': radiusSm, 'md': radiusMd, 'lg': radiusLg},
-        'rules': rules,
-        'notes': notes,
-      };
+    'v': 1,
+    'palette': palette,
+    'typography': {'h1': h1, 'h2': h2, 'body': body},
+    'spacing': spacing,
+    'radius': {'sm': radiusSm, 'md': radiusMd, 'lg': radiusLg},
+    'rules': rules,
+    'notes': notes,
+  };
 }
 
 class Docs {
@@ -322,7 +347,12 @@ class Docs {
   String ui;
   DesignSpec design;
 
-  Docs({this.prd = '', this.ui = '', DesignSpec? design}) : design = design ?? DesignSpec.defaults;
+  /// 设计模块的项目内验证原型元数据（`DesignPrototypeDocument.toProjectMetadata()`）。
+  /// null = 项目还没有验证原型；随 `.ddp` 一起走，不另开 sidecar。
+  Map<String, dynamic>? prototype;
+
+  Docs({this.prd = '', this.ui = '', DesignSpec? design, this.prototype})
+    : design = design ?? DesignSpec.defaults;
 
   factory Docs.fromJson(dynamic raw) {
     if (raw is! Map) return Docs();
@@ -330,10 +360,18 @@ class Docs {
       prd: (raw['prd'] ?? '').toString(),
       ui: (raw['ui'] ?? '').toString(),
       design: DesignSpec.fromJson(raw['design']),
+      prototype: raw['prototype'] is Map
+          ? Map<String, dynamic>.from(raw['prototype'] as Map)
+          : null,
     );
   }
 
-  Map<String, dynamic> toJson() => {'prd': prd, 'ui': ui, 'design': design.toJson()};
+  Map<String, dynamic> toJson() => {
+    'prd': prd,
+    'ui': ui,
+    'design': design.toJson(),
+    if (prototype != null) 'prototype': prototype,
+  };
 
   bool get hasContent => prd.trim().isNotEmpty || ui.trim().isNotEmpty;
 }
@@ -371,14 +409,15 @@ class ModelRegistry {
   const ModelRegistry({required this.providers, required this.fetchedAt});
 
   factory ModelRegistry.fromJson(Map<String, dynamic> m) => ModelRegistry(
-        providers: Map<String, dynamic>.from((m['providers'] as Map?) ?? const {}),
-        fetchedAt: (m['fetched_at'] ?? '').toString(),
-      );
+    providers: Map<String, dynamic>.from((m['providers'] as Map?) ?? const {}),
+    fetchedAt: (m['fetched_at'] ?? '').toString(),
+  );
 
   List<String> get providerIds => providers.keys.toList();
 
-  Map<String, dynamic>? provider(String id) =>
-      providers[id] is Map ? Map<String, dynamic>.from(providers[id] as Map) : null;
+  Map<String, dynamic>? provider(String id) => providers[id] is Map
+      ? Map<String, dynamic>.from(providers[id] as Map)
+      : null;
 
   List<ModelInfo> flatten() {
     final list = <ModelInfo>[];
@@ -390,18 +429,22 @@ class ModelRegistry {
         if (m is! Map) return;
         final mm = Map<String, dynamic>.from(m);
         final limit = mm['limit'] is Map ? mm['limit'] as Map : const {};
-        list.add(ModelInfo(
-          providerId: pid,
-          providerName: (p['name'] ?? pid).toString(),
-          id: mid.toString(),
-          name: (mm['name'] ?? mid).toString(),
-          baseUrl: (p['api'] ?? '').toString(),
-          protocol: (p['protocol'] ?? 'openai').toString(),
-          context: (limit['context'] is num) ? (limit['context'] as num).toInt() : 128000,
-          toolCall: mm['tool_call'] == true,
-          reasoning: mm['reasoning'] == true,
-          reasoningOptions: (mm['reasoning_options'] as List?) ?? const [],
-        ));
+        list.add(
+          ModelInfo(
+            providerId: pid,
+            providerName: (p['name'] ?? pid).toString(),
+            id: mid.toString(),
+            name: (mm['name'] ?? mid).toString(),
+            baseUrl: (p['api'] ?? '').toString(),
+            protocol: (p['protocol'] ?? 'openai').toString(),
+            context: (limit['context'] is num)
+                ? (limit['context'] as num).toInt()
+                : 128000,
+            toolCall: mm['tool_call'] == true,
+            reasoning: mm['reasoning'] == true,
+            reasoningOptions: (mm['reasoning_options'] as List?) ?? const [],
+          ),
+        );
       });
     });
     return list;
@@ -422,7 +465,9 @@ class ModelRegistry {
       name: (mm['name'] ?? modelId).toString(),
       baseUrl: (p['api'] ?? '').toString(),
       protocol: (p['protocol'] ?? 'openai').toString(),
-      context: (limit['context'] is num) ? (limit['context'] as num).toInt() : 128000,
+      context: (limit['context'] is num)
+          ? (limit['context'] as num).toInt()
+          : 128000,
       toolCall: mm['tool_call'] == true,
       reasoning: mm['reasoning'] == true,
       reasoningOptions: (mm['reasoning_options'] as List?) ?? const [],
@@ -520,8 +565,8 @@ String builtInBaseUrlFor(String providerId) =>
 
 /// agent 循环的「无限步骤」哨兵：远高于任何真实会话的步数。
 ///
-/// 选择有限大数而不是 0/负数：ai_sdk 的 `maxSteps` 语义是「最多循环几次」，
-/// 0 等于不执行；哨兵值让循环实际永不因步数耗尽而停（真正的边界仍是
+/// 选择有限大数而不是 0/负数：genkit 的 `maxTurns` 是「一次 generate 内允许
+/// 的模型步数」，0/负数没有意义；哨兵值让循环实际永不因步数耗尽而停（真正的边界仍是
 /// 模型上下文与用户取消）。1,048,576 步按每步 1 秒计约 12 天。
 const int agentUnlimitedSteps = 1 << 20;
 
@@ -539,48 +584,64 @@ class AppSettings {
   String apiKey;
   String thinkingLevel;
   int maxSteps;
+
   /// 无限步骤：开启后 agent 循环不设步数上限（仍可随时取消）。
   /// [maxSteps] 保留为关闭后的回退值，界面上也不丢用户填过的数。
   bool unlimitedSteps;
   String theme;
+
   /// 外部智能体（ACP）：null 或空 = NaN 内置管线；否则发给该 ACP agent。
   String? acpAgentId;
+
   /// 选中 agent 的显示名（选定时随 id 一起持久化，输入框 pill 用）。
   String? acpAgentName;
+
   /// 3D 工作台当前项目名（'' = 无）。工作台视图切换会 dispose 状态，
   /// 项目名持久化让「切走再回来」续接同一项目（跨会话亦然）。
   String threeProjectName;
+
   /// NaN 热应用工作台当前应用名（'' = 无）：工作台 dispose 后回来仍停在原应用。
   String hotappApp;
+
   /// 视频工作台：当前示例下标 + 在飞/最近的渲染 job（回来可接回轮询）。
   int videoSampleIdx;
+
   /// 视频工作台当前选中的动效合成短片 id（'' = 停在矢量动画）。
   /// 选择是工作台级状态，但「检查」面板/回到工作台都要续接同一支片，
   /// 所以按既有 threeProjectName / hotappApp 的同样做法持久化。
   String videoClipId;
   String videoJob;
+
   /// 视频工作台当前**生成项目**名（'' = 不在生成项目上）：NaN 的 `video_create`
   /// 成功落盘后由 store 写入，工作台据此切到该项目（与 threeProjectName 同理）。
   String videoProjectName;
+
   /// 3D 规范手编草稿（项目名 → JSON 文本）：未保存的编辑跨视图保留。
   Map<String, String> threeSpecDrafts;
+
   /// 「连接桌面」模式：桌面端地址（如 http://192.168.1.5:12345）。
   /// 非空时运行方式可切换到桌面端执行（移动端不能在本机提供全部桌面能力）；
   /// 留空则只使用内置本机运行时。地址与连接码都由用户显式填写。
   String serverUrl;
+
   /// Agent 循环运行时（`local` | `server`）。缺省 [agentRuntimeLocal]；
   /// 旧存档的 `dart` 与未知值读入即回落 `local`，显式 `server` 保留。
   String _agentRuntime;
   String get agentRuntime => _agentRuntime;
-  set agentRuntime(String value) => _agentRuntime = normalizeAgentRuntime(value);
+  set agentRuntime(String value) =>
+      _agentRuntime = normalizeAgentRuntime(value);
+
   /// 聊天优先壳（手机——锁竖屏、iPad 竖屏）的主面选择：true = 聊天流，
   /// false = 经典 Welcome。桌面/iPad 横屏的工作区壳不使用该值——设置面
   /// 只在聊天优先壳展示这一项，避免「开关打开却在桌面无效果」。
   bool chatStreamHome;
+
   /// 让手机/iPad 连接这台桌面电脑（本机连接宿主）。桌面独占，默认关。
   bool desktopHostEnabled;
+
   /// 连接宿主是否允许局域网访问（默认只监听 127.0.0.1）。
   bool desktopHostAllowLan;
+
   /// 主页一句话输入的目标工作台（见 `workspaceModeAuto` 一族）。
   /// 只决定「这次任务先落到哪个工作台」，不影响四个模块互相独立。
   String chatWorkspaceMode;
@@ -609,72 +670,78 @@ class AppSettings {
     this.desktopHostEnabled = false,
     this.desktopHostAllowLan = false,
     String? chatWorkspaceMode,
-  })  : threeSpecDrafts = threeSpecDrafts ?? {},
-        chatWorkspaceMode = normalizeWorkspaceMode(chatWorkspaceMode),
-        // 默认内置；旧存档的 `dart`/未知值归一 local，显式 `server` 保留。
-        _agentRuntime = normalizeAgentRuntime(agentRuntime);
+  }) : threeSpecDrafts = threeSpecDrafts ?? {},
+       chatWorkspaceMode = normalizeWorkspaceMode(chatWorkspaceMode),
+       // 默认内置；旧存档的 `dart`/未知值归一 local，显式 `server` 保留。
+       _agentRuntime = normalizeAgentRuntime(agentRuntime);
 
   /// 实际发给 agent 循环的步数上限：无限开关打开时用哨兵值。
   int get effectiveMaxSteps => unlimitedSteps ? agentUnlimitedSteps : maxSteps;
 
   Map<String, dynamic> toJson() => {
-        'providerId': providerId,
-        'modelId': modelId,
-        'baseUrl': baseUrl,
-        'apiKey': apiKey,
-        'thinkingLevel': thinkingLevel,
-        'maxSteps': maxSteps,
-        'unlimitedSteps': unlimitedSteps,
-        'theme': theme,
-        'acpAgentId': acpAgentId,
-        'acpAgentName': acpAgentName,
-        'threeProjectName': threeProjectName,
-        'hotappApp': hotappApp,
-        'videoSampleIdx': videoSampleIdx,
-        'videoClipId': videoClipId,
-        'videoJob': videoJob,
-        'videoProjectName': videoProjectName,
-        'threeSpecDrafts': threeSpecDrafts,
-        'serverUrl': serverUrl,
-        'agentRuntime': agentRuntime,
-        'chatStreamHome': chatStreamHome,
-        'desktopHostEnabled': desktopHostEnabled,
-        'desktopHostAllowLan': desktopHostAllowLan,
-        'chatWorkspaceMode': chatWorkspaceMode,
-      };
+    'providerId': providerId,
+    'modelId': modelId,
+    'baseUrl': baseUrl,
+    'apiKey': apiKey,
+    'thinkingLevel': thinkingLevel,
+    'maxSteps': maxSteps,
+    'unlimitedSteps': unlimitedSteps,
+    'theme': theme,
+    'acpAgentId': acpAgentId,
+    'acpAgentName': acpAgentName,
+    'threeProjectName': threeProjectName,
+    'hotappApp': hotappApp,
+    'videoSampleIdx': videoSampleIdx,
+    'videoClipId': videoClipId,
+    'videoJob': videoJob,
+    'videoProjectName': videoProjectName,
+    'threeSpecDrafts': threeSpecDrafts,
+    'serverUrl': serverUrl,
+    'agentRuntime': agentRuntime,
+    'chatStreamHome': chatStreamHome,
+    'desktopHostEnabled': desktopHostEnabled,
+    'desktopHostAllowLan': desktopHostAllowLan,
+    'chatWorkspaceMode': chatWorkspaceMode,
+  };
 
   factory AppSettings.fromJson(Map<String, dynamic> m) => AppSettings(
-        providerId: (m['providerId'] ?? 'deepseek').toString(),
-        modelId: (m['modelId'] ?? 'deepseek-v4.1-flash').toString(),
-        baseUrl: (m['baseUrl'] ?? '').toString(),
-        apiKey: (m['apiKey'] ?? '').toString(),
-        thinkingLevel: (m['thinkingLevel'] ?? 'auto').toString(),
-        maxSteps: (m['maxSteps'] is num) ? (m['maxSteps'] as num).toInt() : 300,
-        unlimitedSteps: m['unlimitedSteps'] == true,
-        theme: (m['theme'] ?? 'dark').toString(),
-        acpAgentId: m['acpAgentId']?.toString(),
-        acpAgentName: m['acpAgentName']?.toString(),
-        threeProjectName: (m['threeProjectName'] ?? '').toString(),
-        hotappApp: (m['hotappApp'] ?? '').toString(),
-        videoSampleIdx: (m['videoSampleIdx'] is num) ? (m['videoSampleIdx'] as num).toInt() : 0,
-        videoClipId: (m['videoClipId'] ?? '').toString(),
-        videoJob: (m['videoJob'] ?? '').toString(),
-        videoProjectName: (m['videoProjectName'] ?? '').toString(),
-        threeSpecDrafts: (m['threeSpecDrafts'] is Map)
-            ? Map<String, String>.fromEntries(
-                (m['threeSpecDrafts'] as Map).entries
-                    .map((e) => MapEntry(e.key.toString(), e.value.toString())))
-            : <String, String>{},
-        serverUrl: (m['serverUrl'] ?? '').toString(),
-        // 默认 local；旧存档的 `dart` / 未知值回落 local，显式 `server` 保留。
-        agentRuntime: normalizeAgentRuntime(m['agentRuntime']?.toString()),
-        // 旧存档无此键：默认开（用户决策 2026-11-17，聊天流是主面）。
-        chatStreamHome: m['chatStreamHome'] is bool ? m['chatStreamHome'] as bool : true,
-        desktopHostEnabled: m['desktopHostEnabled'] == true,
-        desktopHostAllowLan: m['desktopHostAllowLan'] == true,
-        // 旧存档无此键：默认自动（交给 NaN 判断）。
-        chatWorkspaceMode: (m['chatWorkspaceMode'] ?? workspaceModeAuto).toString(),
-      );
+    providerId: (m['providerId'] ?? 'deepseek').toString(),
+    modelId: (m['modelId'] ?? 'deepseek-v4.1-flash').toString(),
+    baseUrl: (m['baseUrl'] ?? '').toString(),
+    apiKey: (m['apiKey'] ?? '').toString(),
+    thinkingLevel: (m['thinkingLevel'] ?? 'auto').toString(),
+    maxSteps: (m['maxSteps'] is num) ? (m['maxSteps'] as num).toInt() : 300,
+    unlimitedSteps: m['unlimitedSteps'] == true,
+    theme: (m['theme'] ?? 'dark').toString(),
+    acpAgentId: m['acpAgentId']?.toString(),
+    acpAgentName: m['acpAgentName']?.toString(),
+    threeProjectName: (m['threeProjectName'] ?? '').toString(),
+    hotappApp: (m['hotappApp'] ?? '').toString(),
+    videoSampleIdx: (m['videoSampleIdx'] is num)
+        ? (m['videoSampleIdx'] as num).toInt()
+        : 0,
+    videoClipId: (m['videoClipId'] ?? '').toString(),
+    videoJob: (m['videoJob'] ?? '').toString(),
+    videoProjectName: (m['videoProjectName'] ?? '').toString(),
+    threeSpecDrafts: (m['threeSpecDrafts'] is Map)
+        ? Map<String, String>.fromEntries(
+            (m['threeSpecDrafts'] as Map).entries.map(
+              (e) => MapEntry(e.key.toString(), e.value.toString()),
+            ),
+          )
+        : <String, String>{},
+    serverUrl: (m['serverUrl'] ?? '').toString(),
+    // 默认 local；旧存档的 `dart` / 未知值回落 local，显式 `server` 保留。
+    agentRuntime: normalizeAgentRuntime(m['agentRuntime']?.toString()),
+    // 旧存档无此键：默认开（用户决策 2026-11-17，聊天流是主面）。
+    chatStreamHome: m['chatStreamHome'] is bool
+        ? m['chatStreamHome'] as bool
+        : true,
+    desktopHostEnabled: m['desktopHostEnabled'] == true,
+    desktopHostAllowLan: m['desktopHostAllowLan'] == true,
+    // 旧存档无此键：默认自动（交给 NaN 判断）。
+    chatWorkspaceMode: (m['chatWorkspaceMode'] ?? workspaceModeAuto).toString(),
+  );
 }
 
 /// ACP 目录项（外部智能体探测结果）。
@@ -699,15 +766,15 @@ class AcpAgentInfo {
   });
 
   factory AcpAgentInfo.fromJson(Map<String, dynamic> m) => AcpAgentInfo(
-        id: (m['id'] ?? '').toString(),
-        name: (m['name'] ?? '').toString(),
-        installed: m['installed'] == true,
-        selectable: m['selectable'] == true,
-        executable: m['executable']?.toString(),
-        grayed: m['grayed'] == true,
-        note: (m['note'] ?? '').toString(),
-        probeState: (m['probeState'] ?? 'unprobed').toString(),
-      );
+    id: (m['id'] ?? '').toString(),
+    name: (m['name'] ?? '').toString(),
+    installed: m['installed'] == true,
+    selectable: m['selectable'] == true,
+    executable: m['executable']?.toString(),
+    grayed: m['grayed'] == true,
+    note: (m['note'] ?? '').toString(),
+    probeState: (m['probeState'] ?? 'unprobed').toString(),
+  );
 }
 
 // ============================================================
@@ -737,7 +804,13 @@ class ChatStep {
   int? ms;
   String? detail;
 
-  ChatStep({required this.label, this.running = false, this.ok = true, this.ms, this.detail});
+  ChatStep({
+    required this.label,
+    this.running = false,
+    this.ok = true,
+    this.ms,
+    this.detail,
+  });
 
   factory ChatStep.fromJson(dynamic raw) {
     final m = raw is Map ? raw : const {};
@@ -751,12 +824,12 @@ class ChatStep {
   }
 
   Map<String, dynamic> toJson() => {
-        'label': label,
-        'running': running,
-        'ok': ok,
-        if (ms != null) 'ms': ms,
-        if (detail != null && detail!.isNotEmpty) 'detail': detail,
-      };
+    'label': label,
+    'running': running,
+    'ok': ok,
+    if (ms != null) 'ms': ms,
+    if (detail != null && detail!.isNotEmpty) 'detail': detail,
+  };
 }
 
 /// 聊天流的一条消息。进度卡的 steps/running/ok 与正文 text 可变（run 中
@@ -768,6 +841,7 @@ class ChatMessage {
   bool running;
   bool ok;
   String? detail;
+
   /// A2UI 卡的 surface 消息序列（与 A2uiCard.messages 静态路径同形——
   /// 已解码的信封 map 列表，如 `{'version': '1.0', 'createSurface': {...}}`）。
   final List<Object?>? a2uiMessages;
@@ -786,12 +860,14 @@ class ChatMessage {
     this.artifactKind,
     this.artifactName,
     DateTime? ts,
-  })  : steps = steps ?? [],
-        ts = ts ?? DateTime.now();
+  }) : steps = steps ?? [],
+       ts = ts ?? DateTime.now();
 
-  factory ChatMessage.user(String text) => ChatMessage(kind: chatKindUser, text: text);
+  factory ChatMessage.user(String text) =>
+      ChatMessage(kind: chatKindUser, text: text);
 
-  factory ChatMessage.assistant(String text) => ChatMessage(kind: chatKindAssistant, text: text);
+  factory ChatMessage.assistant(String text) =>
+      ChatMessage(kind: chatKindAssistant, text: text);
 
   factory ChatMessage.progress(String title) =>
       ChatMessage(kind: chatKindProgress, text: title, running: true);
@@ -800,20 +876,25 @@ class ChatMessage {
       ChatMessage(kind: chatKindA2ui, text: text ?? '', a2uiMessages: messages);
 
   /// 产物卡：标题进 artifactName，text 留给一句话描述。
-  factory ChatMessage.artifact({required String kind, required String title, String? detail}) =>
-      ChatMessage(
-        kind: chatKindArtifact,
-        text: detail ?? '',
-        artifactKind: kind,
-        artifactName: title,
-      );
+  factory ChatMessage.artifact({
+    required String kind,
+    required String title,
+    String? detail,
+  }) => ChatMessage(
+    kind: chatKindArtifact,
+    text: detail ?? '',
+    artifactKind: kind,
+    artifactName: title,
+  );
 
   factory ChatMessage.fromJson(dynamic raw) {
     final m = raw is Map ? raw : const {};
     return ChatMessage(
       kind: (m['kind'] ?? '').toString(),
       text: (m['text'] ?? '').toString(),
-      steps: ((m['steps'] as List?) ?? const []).map(ChatStep.fromJson).toList(),
+      steps: ((m['steps'] as List?) ?? const [])
+          .map(ChatStep.fromJson)
+          .toList(),
       running: m['running'] == true,
       ok: m['ok'] != false,
       detail: m['detail']?.toString(),
@@ -825,17 +906,17 @@ class ChatMessage {
   }
 
   Map<String, dynamic> toJson() => {
-        'kind': kind,
-        'text': text,
-        if (steps.isNotEmpty) 'steps': [for (final s in steps) s.toJson()],
-        'running': running,
-        'ok': ok,
-        if (detail != null && detail!.isNotEmpty) 'detail': detail,
-        if (a2uiMessages != null) 'a2ui': a2uiMessages,
-        if (artifactKind != null) 'artifactKind': artifactKind,
-        if (artifactName != null) 'artifactName': artifactName,
-        'ts': ts.toIso8601String(),
-      };
+    'kind': kind,
+    'text': text,
+    if (steps.isNotEmpty) 'steps': [for (final s in steps) s.toJson()],
+    'running': running,
+    'ok': ok,
+    if (detail != null && detail!.isNotEmpty) 'detail': detail,
+    if (a2uiMessages != null) 'a2ui': a2uiMessages,
+    if (artifactKind != null) 'artifactKind': artifactKind,
+    if (artifactName != null) 'artifactName': artifactName,
+    'ts': ts.toIso8601String(),
+  };
 }
 
 class TimelineEntry {
@@ -848,6 +929,7 @@ class TimelineEntry {
   int? ms;
   String? preview;
   String? error;
+
   /// 服务层给出的人话失败句（`tool_end.message`）；原始码只留在 [error]。
   String? message;
   bool running;
@@ -868,10 +950,12 @@ class TimelineEntry {
     DateTime? ts,
   }) : ts = ts ?? DateTime.now();
 
-  static TimelineEntry user(String text) => TimelineEntry(kind: 'user', text: text);
+  static TimelineEntry user(String text) =>
+      TimelineEntry(kind: 'user', text: text);
   static TimelineEntry note(String title, [String? detail]) =>
       TimelineEntry(kind: 'note', title: title, text: detail ?? '');
-  static TimelineEntry assistant(String text) => TimelineEntry(kind: 'assistant', text: text);
+  static TimelineEntry assistant(String text) =>
+      TimelineEntry(kind: 'assistant', text: text);
   static TimelineEntry finish(bool ok, String title, [String? detail]) =>
       TimelineEntry(kind: 'finish', ok: ok, title: title, text: detail ?? '');
 }

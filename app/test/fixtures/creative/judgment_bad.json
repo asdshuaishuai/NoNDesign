@@ -1,0 +1,19 @@
+{
+  "criteria": {
+    "idea": {"score": 1.2, "why": ""},
+    "composition": {"score": 0.7, "why": "构图尚可"}
+  },
+  "summary": "",
+  "issues": [
+    {"criterion": "motion", "evidence": "无 tile", "fix": "加缓动"}
+  ],
+  "improvement_plan": [
+    {"priority": 0, "target": "", "action": "全部重做", "evidence": ""}
+  ],
+  "acceptance": [
+    {"item": "座高 0.45m", "pass": "yes"}
+  ],
+  "defects": [
+    {"id": "Floating Part", "present": "no"}
+  ]
+}

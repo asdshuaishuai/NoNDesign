@@ -6,47 +6,15 @@
 // cleanup 的聊天卡分支才有可能被覆盖）。断言同时覆盖「store.mbt 与循环
 // ctx.mbt 锁步」——清扫/修复的 canonical 必须被 store 采纳，否则后续 op
 // 会以陈旧文档提交。
-import 'dart:convert';
+
 import 'dart:io';
 
-import 'package:ai_sdk_dart/test.dart';
-// ai_sdk_provider 是 ai_sdk_dart 的传递依赖（pubspec 未声明）；scripted mock
-// 需要其流片段/工具类型来覆写 doStream。
-// ignore: depend_on_referenced_packages
-import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nondesign/core/api.dart';
 import 'package:nondesign/core/models.dart';
 import 'package:nondesign/core/store.dart';
 
-/// 多轮脚本化模型：每次 doStream 依序取下一步响应；脚本耗尽回纯文本。
-class _ScriptedModel extends MockLanguageModelV4 {
-  final List<List<LanguageModelV4ContentPart>> script;
-  int _i = 0;
-  _ScriptedModel(this.script) : super(provider: 'scripted', modelId: 'scripted-model');
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(LanguageModelV4CallOptions options) async {
-    streamCalls.add(options);
-    final step = _i < script.length ? script[_i++] : <LanguageModelV4ContentPart>[mockText('done')];
-    var seq = 0;
-    final parts = <LanguageModelV4StreamPart>[const StreamPartStreamStart(warnings: [])];
-    for (final part in step) {
-      if (part is LanguageModelV4ToolCallPart) {
-        parts.add(StreamPartToolInputStart(id: 't$seq', toolName: part.toolName));
-        parts.add(StreamPartToolInputDelta(id: 't$seq', delta: jsonEncode(part.input)));
-        parts.add(StreamPartToolInputEnd(id: 't$seq'));
-        parts.add(StreamPartToolCall(toolCall: part));
-      }
-      seq++;
-    }
-    parts.add(const StreamPartFinish(
-      finishReason: LanguageModelV4FinishReason.stop,
-      rawFinishReason: 'stop',
-    ));
-    return LanguageModelV4StreamResult(stream: Stream.fromIterable(parts));
-  }
-}
+import 'helpers/genkit_test_model.dart';
 
 /// 伪造 api：只覆写内置循环消费的五条路径（session/apply/render/templates/
 /// components）。引擎语义按真实信封形状回：变更信封带 canonical，检视
@@ -182,12 +150,12 @@ void main() {
     store.mbt = _mbt0;
     // 已有文档 → sendChat 直接走 BUILD（fresh=false），并建立聊天进度卡。
     store.docs = Docs(prd: '# PRD', ui: '## UI');
-    store.debugAgentModelOverride = _ScriptedModel([
+    store.debugAgentModelOverride = ScriptedAgentModel([
       [
-        mockToolCall(toolName: 'design_op', input: {'op': 'create home 390 844'}),
+        scriptToolCall(toolName: 'design_op', input: {'op': 'create home 390 844'}),
       ],
-      [mockToolCall(toolName: 'finish', input: {'summary': '首页已生成'})],
-    ]);
+      [scriptToolCall(toolName: 'finish', input: {'summary': '首页已生成'})],
+    ]).model;
 
     try {
       final ok = await store.sendChat('搭一个记账首页');
@@ -249,15 +217,15 @@ void main() {
     store.projectName = 'demo';
     store.mbt = _mbt0;
     store.docs = Docs(prd: '# PRD', ui: '## UI');
-    store.debugAgentModelOverride = _ScriptedModel([
+    store.debugAgentModelOverride = ScriptedAgentModel([
       [
-        mockToolCall(toolName: 'generate_page', input: {
+        scriptToolCall(toolName: 'generate_page', input: {
           'intent': '登录首页',
           'name': 'home',
         }),
       ],
-      [mockToolCall(toolName: 'finish', input: {'summary': '首页生成'})],
-    ]);
+      [scriptToolCall(toolName: 'finish', input: {'summary': '首页生成'})],
+    ]).model;
 
     try {
       final ok = await store.sendChat('生成登录首页');

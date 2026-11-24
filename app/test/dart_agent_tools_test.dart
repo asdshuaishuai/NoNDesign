@@ -14,62 +14,27 @@
 //  * Figma 导出：本地逐板 SVG + manifest、节点 cap、不可见过滤、文件名清洗、
 //    移动端明示不可用。
 
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:ai_sdk_dart/test.dart';
-// ai_sdk_provider 是 ai_sdk_dart 的传递依赖；scripted mock 需要其流片段类型。
-// ignore: depend_on_referenced_packages
-import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nondesign/core/api.dart';
 import 'package:nondesign/core/capability.dart';
 import 'package:nondesign/core/dart_agent.dart';
+
+import 'package:genkit/genkit.dart';
+
+import 'helpers/genkit_test_model.dart';
+
 import 'package:nondesign/core/figma_export.dart';
-import 'package:nondesign/core/hotapp_service.dart' show PrototypeLinkSpec, PrototypeScreenSpec;
+import 'package:nondesign/core/hotapp_service.dart'
+    show PrototypeLinkSpec, PrototypeScreenSpec;
 import 'package:nondesign/core/models.dart';
 import 'package:nondesign/core/video_project.dart';
 import 'package:nondesign/core/video_samples.dart';
 
 /// 多轮脚本化模型（与 dart_agent_test 的 _ScriptedModel 同构）。
-class _ScriptedModel extends MockLanguageModelV4 {
-  _ScriptedModel(this.script) : super(provider: 'scripted', modelId: 'scripted-model');
-
-  final List<List<LanguageModelV4ContentPart>> script;
-  final List<LanguageModelV4CallOptions> calls = <LanguageModelV4CallOptions>[];
-  int _index = 0;
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(LanguageModelV4CallOptions options) async {
-    calls.add(options);
-    final step = _index < script.length
-        ? script[_index++]
-        : <LanguageModelV4ContentPart>[mockText('done')];
-    var seq = 0;
-    String nextId() => 'id-${seq++}';
-    final parts = <LanguageModelV4StreamPart>[const StreamPartStreamStart(warnings: [])];
-    for (final part in step) {
-      if (part is LanguageModelV4TextPart) {
-        final id = nextId();
-        parts.add(StreamPartTextStart(id: id));
-        parts.add(StreamPartTextDelta(id: id, delta: part.text));
-        parts.add(StreamPartTextEnd(id: id));
-      } else if (part is LanguageModelV4ToolCallPart) {
-        parts.add(StreamPartToolInputStart(id: part.toolCallId, toolName: part.toolName));
-        parts.add(StreamPartToolInputDelta(id: part.toolCallId, delta: jsonEncode(part.input)));
-        parts.add(StreamPartToolInputEnd(id: part.toolCallId));
-        parts.add(StreamPartToolCall(toolCall: part));
-      }
-    }
-    parts.add(const StreamPartFinish(
-      finishReason: LanguageModelV4FinishReason.stop,
-      rawFinishReason: 'stop',
-    ));
-    return LanguageModelV4StreamResult(stream: Stream.fromIterable(parts));
-  }
-}
 
 /// 进程内假引擎：实现 [LocalEngine]，只记录调用与返回固定信封。
 class _FakeEngine implements LocalEngine {
@@ -84,7 +49,8 @@ class _FakeEngine implements LocalEngine {
   final Map<String, int> autoFixPerBoard = <String, int>{};
   int deleteCount = 0;
 
-  String mbt = '---\nmoonviz:\n  format: visual-document\n  revision: 1\n  entry: home\n---\n\n'
+  String mbt =
+      '---\nmoonviz:\n  format: visual-document\n  revision: 1\n  entry: home\n---\n\n'
       '# home\n\n<!-- moonviz:artboard home -->\n```mbt\nfn visual_home() -> @decl.Prototype {\n'
       '  let page = @decl.prototype(name="home", width=390.0, height=844.0)\n  page\n}\n```\n';
 
@@ -105,51 +71,57 @@ class _FakeEngine implements LocalEngine {
 
   @override
   CapabilityAvailability probeAvailability() => CapabilityAvailability(
-        id: CapabilityId.localDesignEngine,
-        state: ready ? CapabilityState.available : CapabilityState.unavailable,
-      );
+    id: CapabilityId.localDesignEngine,
+    state: ready ? CapabilityState.available : CapabilityState.unavailable,
+  );
 
   @override
   Future<Map<String, dynamic>> render(String mbt) async => <String, dynamic>{
-        'ok': true,
-        'revision': 1,
-        'entry': 'home',
-        'mbt': mbt,
-        'artboards': <dynamic>[
+    'ok': true,
+    'revision': 1,
+    'entry': 'home',
+    'mbt': mbt,
+    'artboards': <dynamic>[
+      <String, dynamic>{
+        'id': 'home',
+        'name': '首页',
+        'width': 390,
+        'height': 844,
+        'background': '#FFFFFF',
+        'svg': '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+        'nodes': <dynamic>[
           <String, dynamic>{
-            'id': 'home',
-            'name': '首页',
-            'width': 390,
-            'height': 844,
-            'background': '#FFFFFF',
-            'svg': '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
-            'nodes': <dynamic>[
-              <String, dynamic>{
-                'id': 'title',
-                'kind': 'text',
-                'component': 'body_text',
-                'text': '你好',
-                'rect': <String, dynamic>{'x': 20, 'y': 40, 'w': 120, 'h': 24},
-                'style': <String, dynamic>{
-                  'fill': '#FFFFFF',
-                  'text_color': '#111827',
-                  'font_size': 16,
-                  'radius': 4,
-                  'opacity': 1,
-                  'visible': true,
-                },
-              },
-            ],
+            'id': 'title',
+            'kind': 'text',
+            'component': 'body_text',
+            'text': '你好',
+            'rect': <String, dynamic>{'x': 20, 'y': 40, 'w': 120, 'h': 24},
+            'style': <String, dynamic>{
+              'fill': '#FFFFFF',
+              'text_color': '#111827',
+              'font_size': 16,
+              'radius': 4,
+              'opacity': 1,
+              'visible': true,
+            },
           },
         ],
-        'flows': <dynamic>[],
-      };
+      },
+    ],
+    'flows': <dynamic>[],
+  };
 
   @override
-  Future<Map<String, dynamic>> validate(String mbt) async => <String, dynamic>{'ok': true};
+  Future<Map<String, dynamic>> validate(String mbt) async => <String, dynamic>{
+    'ok': true,
+  };
 
   @override
-  Future<Map<String, dynamic>> apply(String mbt, String op, {String gate = 'human'}) async {
+  Future<Map<String, dynamic>> apply(
+    String mbt,
+    String op, {
+    String gate = 'human',
+  }) async {
     gates.add(gate);
     applyCount += 1;
     if (op.contains('gate_me')) {
@@ -164,7 +136,11 @@ class _FakeEngine implements LocalEngine {
   }
 
   @override
-  Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) async {
+  Future<Map<String, dynamic>> session(
+    String mbt,
+    String name, [
+    String? arg,
+  ]) async {
     switch (name) {
       case 'session_list_artboards':
         return <String, dynamic>{
@@ -172,7 +148,10 @@ class _FakeEngine implements LocalEngine {
           'data': boards.map((b) => Map<String, dynamic>.from(b)).toList(),
         };
       case 'session_flows':
-        return <String, dynamic>{'ok': true, 'data': flows.map((f) => Map<String, dynamic>.from(f)).toList()};
+        return <String, dynamic>{
+          'ok': true,
+          'data': flows.map((f) => Map<String, dynamic>.from(f)).toList(),
+        };
       case 'session_query_nodes':
         return <String, dynamic>{
           'ok': true,
@@ -186,7 +165,11 @@ class _FakeEngine implements LocalEngine {
           'ok': true,
           'data': <String, dynamic>{
             'results': <dynamic>[
-              <String, dynamic>{'principle': 'hierarchy', 'score': 2, 'verdict': 'poor'},
+              <String, dynamic>{
+                'principle': 'hierarchy',
+                'score': 2,
+                'verdict': 'poor',
+              },
             ],
           },
         };
@@ -218,7 +201,12 @@ class _FakeEngine implements LocalEngine {
     Map<String, dynamic> spec,
   ) async {
     generateCount += 1;
-    boards.add(<String, dynamic>{'id': name, 'width': 390, 'height': 844, 'nodes': 4});
+    boards.add(<String, dynamic>{
+      'id': name,
+      'width': 390,
+      'height': 844,
+      'nodes': 4,
+    });
     this.mbt = '$mbt<!-- generate:$name -->\n';
     return <String, dynamic>{
       'ok': true,
@@ -231,17 +219,26 @@ class _FakeEngine implements LocalEngine {
   }
 
   @override
-  Future<Map<String, dynamic>> tap(String mbt, String artboard, double x, double y) async =>
-      <String, dynamic>{'ok': true, 'data': <String, dynamic>{}};
+  Future<Map<String, dynamic>> tap(
+    String mbt,
+    String artboard,
+    double x,
+    double y,
+  ) async => <String, dynamic>{'ok': true, 'data': <String, dynamic>{}};
 
   @override
   Future<Map<String, dynamic>> constrainIntent(
-          String mbt, String artboard, String intent) async =>
-      <String, dynamic>{'ok': true, 'mbt': mbt};
+    String mbt,
+    String artboard,
+    String intent,
+  ) async => <String, dynamic>{'ok': true, 'mbt': mbt};
 
   @override
-  Future<Map<String, dynamic>> event(String mbt, String artboard, String spec) async =>
-      <String, dynamic>{'ok': true, 'mbt': mbt};
+  Future<Map<String, dynamic>> event(
+    String mbt,
+    String artboard,
+    String spec,
+  ) async => <String, dynamic>{'ok': true, 'mbt': mbt};
 
   @override
   Future<Map<String, dynamic>> history(String mbt, String command) async =>
@@ -255,12 +252,15 @@ class _FakeEngine implements LocalEngine {
   Future<Map<String, dynamic>> tokens() async => <String, dynamic>{'ok': true};
 
   @override
-  Future<Map<String, dynamic>> versionInfo() async =>
-      <String, dynamic>{'ok': true, 'engine': 'fake'};
+  Future<Map<String, dynamic>> versionInfo() async => <String, dynamic>{
+    'ok': true,
+    'engine': 'fake',
+  };
 
   @override
-  Future<List<dynamic>> templates() async =>
-      <dynamic>[<String, dynamic>{'id': 'mobile_app', 'name': 'Mobile', 'device': 'mobile'}];
+  Future<List<dynamic>> templates() async => <dynamic>[
+    <String, dynamic>{'id': 'mobile_app', 'name': 'Mobile', 'device': 'mobile'},
+  ];
 
   @override
   Future<List<dynamic>> components() async => <dynamic>['button', 'body_text'];
@@ -298,7 +298,12 @@ class _FakeWorkspace implements AgentWorkspaceServices {
   Map<String, dynamic> videoListResult = <String, dynamic>{
     'ok': true,
     'videos': <dynamic>[
-      <String, dynamic>{'name': 'demo', 'title': '示例动画', 'seconds': 6.0, 'builtin': false},
+      <String, dynamic>{
+        'name': 'demo',
+        'title': '示例动画',
+        'seconds': 6.0,
+        'builtin': false,
+      },
       <String, dynamic>{
         'name': 'physics-friction',
         'title': '物理 · 斜面摩擦力',
@@ -345,7 +350,10 @@ class _FakeWorkspace implements AgentWorkspaceServices {
   }
 
   @override
-  Future<Map<String, dynamic>> threeContinue(String name, [String summary = '']) async {
+  Future<Map<String, dynamic>> threeContinue(
+    String name, [
+    String summary = '',
+  ]) async {
     calls.add('three_continue:$name');
     return <String, dynamic>{'ok': true, 'current': 'scene', 'done': false};
   }
@@ -358,6 +366,111 @@ class _FakeWorkspace implements AgentWorkspaceServices {
   }) async {
     calls.add('three_feedback:$name:$kind');
     return <String, dynamic>{'ok': true, 'status': 'failed', 'attempts': 1};
+  }
+
+  @override
+  Future<Map<String, dynamic>> threeWorkspaceMigrate(String name) async {
+    calls.add('three_workspace_migrate:$name');
+    return <String, dynamic>{
+      'ok': true,
+      'name': name,
+      'already_migrated': false,
+      'wrote_spec': true,
+      'wrote_plan': true,
+      'copied_scene': true,
+      'mode': 'code',
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> threePlanValidate(String name) async {
+    calls.add('three_plan_validate:$name');
+    return <String, dynamic>{
+      'ok': true,
+      'name': name,
+      'valid': true,
+      'issues': <dynamic>[],
+      'fix_hints': <dynamic>[],
+      'warnings': <dynamic>[],
+    };
+  }
+
+  Map<String, dynamic>? lastCheckMeasurement;
+
+  @override
+  Future<Map<String, dynamic>> threeCheckPlacement({
+    required String name,
+    Map<String, dynamic>? measurement,
+  }) async {
+    calls.add('three_check_placement:$name');
+    return <String, dynamic>{
+      'ok': true,
+      'name': name,
+      'verdict': 'PASS',
+      'caps': <String, dynamic>{},
+      'fix_hints': <dynamic>[],
+      'gates': <dynamic>[],
+      'saved': 'artifacts/placement-gates.json',
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> threeBuild(String name) async {
+    calls.add('three_build:$name');
+    return <String, dynamic>{
+      'ok': true,
+      'name': name,
+      'mode': 'scene',
+      'status': 'built',
+      'source': 'src/scene.js',
+      'plan_warnings': <dynamic>[],
+      'saved': 'artifacts/build.json',
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> threeMeasure(String name) async {
+    calls.add('three_measure:$name');
+    return <String, dynamic>{
+      'ok': true,
+      'name': name,
+      'part_count': 1,
+      'triangles': 120,
+      'parts': <dynamic>[
+        <String, Object?>{
+          'id': 'seat',
+          'bbox': <String, Object?>{
+            'min': <double>[0, 0.4, 0],
+            'max': <double>[0.5, 0.45, 0.5],
+          },
+          'triangles': 120,
+        },
+      ],
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> threeCheck({
+    required String name,
+    Map<String, dynamic>? measurement,
+  }) async {
+    calls.add('three_check:$name');
+    lastCheckMeasurement = measurement;
+    return <String, dynamic>{
+      'ok': true,
+      'name': name,
+      'verdict': 'ERROR',
+      'caps': <String, dynamic>{'floating': 0.6},
+      'fix_hints': <String>['connectivity: 沿 y 平移 -0.050 m 落地'],
+      'gates': <dynamic>[
+        <String, Object?>{
+          'id': 'connectivity',
+          'verdict': 'ERROR',
+          'metrics': <String, double>{'floating_parts': 1},
+        },
+      ],
+      'saved': true,
+    };
   }
 
   @override
@@ -390,29 +503,65 @@ class _FakeWorkspace implements AgentWorkspaceServices {
     return <String, dynamic>{'ok': true, 'app': name};
   }
 
-  List<PrototypeScreenSpec>? lastFromPrototypeScreens;
-  List<PrototypeLinkSpec>? lastFromPrototypeFlows;
-  String? lastFromPrototypeMbt;
-  bool fromPrototypeVerified = true;
+  List<PrototypeScreenSpec>? lastVerifyScreens;
+  List<PrototypeLinkSpec>? lastVerifyFlows;
+  String? lastVerifyMbt;
+  bool verifyOk = true;
+
+  bool judgeDegraded = false;
+  Map<String, dynamic>? lastJudgeArgs;
 
   @override
-  Future<Map<String, dynamic>> hotAppFromPrototype({
-    required String name,
-    required String prototypeMbt,
+  Future<Map<String, dynamic>> creativeJudge({
+    required String brief,
+    required String kind,
+    required String track,
+    required List<String> imagePaths,
+    String planDigest = '',
+    List<String> acceptance = const <String>[],
+    List<String> measuredFacts = const <String>[],
+    Map<String, dynamic>? gates,
+  }) async {
+    calls.add('creative_judge');
+    lastJudgeArgs = <String, dynamic>{
+      'brief': brief,
+      'kind': kind,
+      'track': track,
+      'imagePaths': imagePaths,
+      'gates': gates,
+    };
+    if (judgeDegraded) {
+      return <String, dynamic>{
+        'ok': false,
+        'degraded': true,
+        'reason': 'judge_no_images',
+        'detail': 'no evidence',
+      };
+    }
+    return <String, dynamic>{
+      'ok': true,
+      'judgment': <String, dynamic>{'summary': 'stub judgment'},
+      'score': <String, dynamic>{'overall': 0.8},
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> designVerifyPrototype({
+    required String mbt,
     required List<PrototypeScreenSpec> screens,
     required List<PrototypeLinkSpec> flows,
   }) async {
-    calls.add('hotapp_from_prototype:$name');
-    lastFromPrototypeScreens = screens;
-    lastFromPrototypeFlows = flows;
-    lastFromPrototypeMbt = prototypeMbt;
+    calls.add('design_verify_prototype');
+    lastVerifyScreens = screens;
+    lastVerifyFlows = flows;
+    lastVerifyMbt = mbt;
     return <String, dynamic>{
       'ok': true,
-      'app': name,
-      'bytes': 140,
+      'verified': verifyOk,
+      'saved': true,
       'screens': screens.length,
       'flows': flows.length,
-      'verified': fromPrototypeVerified,
+      if (!verifyOk) 'failures': '缺少画板 empty',
     };
   }
 
@@ -422,7 +571,11 @@ class _FakeWorkspace implements AgentWorkspaceServices {
     Map<String, dynamic>? spec,
   }) async {
     calls.add('video_review');
-    return <String, dynamic>{'ok': true, 'summary': '对照检查通过', 'problems': <dynamic>[]};
+    return <String, dynamic>{
+      'ok': true,
+      'summary': '对照检查通过',
+      'problems': <dynamic>[],
+    };
   }
 
   @override
@@ -488,59 +641,64 @@ class _FakeWorkspace implements AgentWorkspaceServices {
     calls.add('figma_export');
     lastRender = render;
     lastDirectory = directory;
-    return <String, dynamic>{'ok': true, 'boards': render.artboards.length, 'dir': directory};
+    return <String, dynamic>{
+      'ok': true,
+      'boards': render.artboards.length,
+      'dir': directory,
+    };
   }
 }
 
 DartAgentRequest _buildRequest(_FakeEngine engine) => DartAgentRequest(
-      mode: 'build',
-      instruction: '做原型',
-      mbt: engine.mbt,
-      model: 'scripted-model',
-      baseUrl: 'https://example.invalid/v1',
-      apiKey: 'k',
-    );
+  mode: 'build',
+  instruction: '做原型',
+  mbt: engine.mbt,
+  model: 'scripted-model',
+  baseUrl: 'https://example.invalid/v1',
+  apiKey: 'k',
+);
 
 Map<String, dynamic> _node({
   required String id,
   bool visible = true,
   String kind = 'rect',
   String text = '',
-}) =>
-    <String, dynamic>{
-      'id': id,
-      'kind': kind,
-      'component': kind == 'text' ? 'body_text' : 'card',
-      'text': text,
-      'rect': <String, dynamic>{'x': 1, 'y': 2, 'w': 30, 'h': 40},
-      'style': <String, dynamic>{
-        'fill': '#FFFFFF',
-        'text_color': '#111827',
-        'font_size': 14,
-        'radius': 8,
-        'opacity': 1,
-        'visible': visible,
-      },
-    };
+}) => <String, dynamic>{
+  'id': id,
+  'kind': kind,
+  'component': kind == 'text' ? 'body_text' : 'card',
+  'text': text,
+  'rect': <String, dynamic>{'x': 1, 'y': 2, 'w': 30, 'h': 40},
+  'style': <String, dynamic>{
+    'fill': '#FFFFFF',
+    'text_color': '#111827',
+    'font_size': 14,
+    'radius': 8,
+    'opacity': 1,
+    'visible': visible,
+  },
+};
 
-RenderEnvelope _renderEnvelope({String boardId = 'home', List<Map<String, dynamic>>? nodes}) =>
-    RenderEnvelope.fromJson(<String, dynamic>{
-      'ok': true,
-      'revision': 1,
-      'entry': boardId,
-      'artboards': <dynamic>[
-        <String, dynamic>{
-          'id': boardId,
-          'name': '首页',
-          'width': 390,
-          'height': 844,
-          'background': '#FFFFFF',
-          'svg': '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
-          'nodes': nodes ?? <dynamic>[_node(id: 'title', kind: 'text', text: '你好')],
-        },
-      ],
-      'flows': <dynamic>[],
-    });
+RenderEnvelope _renderEnvelope({
+  String boardId = 'home',
+  List<Map<String, dynamic>>? nodes,
+}) => RenderEnvelope.fromJson(<String, dynamic>{
+  'ok': true,
+  'revision': 1,
+  'entry': boardId,
+  'artboards': <dynamic>[
+    <String, dynamic>{
+      'id': boardId,
+      'name': '首页',
+      'width': 390,
+      'height': 844,
+      'background': '#FFFFFF',
+      'svg': '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+      'nodes': nodes ?? <dynamic>[_node(id: 'title', kind: 'text', text: '你好')],
+    },
+  ],
+  'flows': <dynamic>[],
+});
 
 void main() {
   group('copy mapping', () {
@@ -562,7 +720,9 @@ void main() {
         'nonapp_list': '应用包',
         'figma_export': '导出 Figma 包',
       };
-      mapping.forEach((tool, label) => expect(toolLabel(tool), label, reason: tool));
+      mapping.forEach(
+        (tool, label) => expect(toolLabel(tool), label, reason: tool),
+      );
       expect(toolLabel('three_future_tool'), '3D 场景');
       expect(toolLabel('hotapp_future_tool'), '热应用');
       expect(toolLabel('video_future_tool'), '视频');
@@ -594,30 +754,55 @@ void main() {
       expect(toolFailureMessage('download_failed'), '模型下载失败');
       expect(toolFailureMessage('sha256_mismatch'), '模型文件校验失败，已删除，请重试');
       expect(toolFailureMessage('nonapp_unsupported_version'), '应用版本过新，请更新本应用');
-      expect(toolFailureMessage('engine_generate_failed: timeout'), '页面生成没有完成，请重试');
+      expect(
+        toolFailureMessage('engine_generate_failed: timeout'),
+        '页面生成没有完成，请重试',
+      );
       expect(toolFailureMessage('unknown_artboard:home'), '找不到这个画板，请重试');
-      expect(toolFailureMessage('canvas_empty'), '画布还是空的：先用 generate_page 生成第一屏，再做设计操作');
-      expect(toolFailureMessage('unknown_component: polyline'), '这个组件名不存在：先用 list_components 查合法组件名');
-      expect(toolFailureMessage('place_unknown_key:parent'), 'place 的 k=v 键不在编辑词表里（text/fill/stroke/radius/opacity/motion…）');
+      expect(
+        toolFailureMessage('canvas_empty'),
+        '画布还是空的：先用 generate_page 生成第一屏，再做设计操作',
+      );
+      expect(
+        toolFailureMessage('unknown_component: polyline'),
+        '这个组件名不存在：先用 list_components 查合法组件名',
+      );
+      expect(
+        toolFailureMessage('place_unknown_key:parent'),
+        'place 的 k=v 键不在编辑词表里（text/fill/stroke/radius/opacity/motion…）',
+      );
       expect(toolFailureMessage('id_exists: stat_v0'), '这个 id 已经存在：换一个新 id');
-      expect(toolFailureMessage('generate_multi_too_many:4'), '一次生成的画板数超限：拆成多次 generate_page');
+      expect(
+        toolFailureMessage('generate_multi_too_many:4'),
+        '一次生成的画板数超限：拆成多次 generate_page',
+      );
       expect(toolFailureMessage('something_else'), '这次操作没有成功，请重试');
       expect(toolFailureMessage(null), '这次操作没有成功，请重试');
       // 视频生成落盘（video_create）的失败码：每一码都有人话，无裸代号。
       expect(toolFailureMessage('video_invalid_name'), '视频名只能用字母、数字、下划线和连字符');
-      expect(toolFailureMessage('video_project_exists'),
-          '已经有同名视频了，换一个名字再新建（已生成的视频不会被覆盖）');
+      expect(
+        toolFailureMessage('video_project_exists'),
+        '已经有同名视频了，换一个名字再新建（已生成的视频不会被覆盖）',
+      );
       expect(toolFailureMessage('video_spec_missing'), '这份脚本还缺一份说明规范，先补齐规范再新建');
       expect(toolFailureMessage('video_spec_invalid'), '说明规范不完整，请按模板补齐后再试');
-      expect(toolFailureMessage('video_timeline_invalid'), '脚本格式不对，请检查括号、引号与逗号');
+      expect(
+        toolFailureMessage('video_timeline_invalid'),
+        '脚本格式不对，请检查括号、引号与逗号',
+      );
       expect(toolFailureMessage('video_no_scenes'), '脚本里还没有任何场景');
       expect(toolFailureMessage('video_no_frames'), '所有场景的时长都是 0，算不出画面');
       expect(toolFailureMessage('video_io_error'), '视频项目没有保存成功，请检查磁盘空间后重试');
-      expect(toolFailureMessage('video_export_disabled'),
-          '视频现在是代码动画，直接在工作台里播放；暂不导出成片');
+      expect(
+        toolFailureMessage('video_export_disabled'),
+        '视频现在是代码动画，直接在工作台里播放；暂不导出成片',
+      );
       // 细分码按模块自己的人话表分派（three_/hotapp_ 前缀不再落回通用句）。
       expect(toolFailureMessage('three_invalid_name'), '场景名只能用字母、数字和短横线');
-      expect(toolFailureMessage('three_project_exists'), '已经有同名的 3D 项目了，换个名字再试');
+      expect(
+        toolFailureMessage('three_project_exists'),
+        '已经有同名的 3D 项目了，换个名字再试',
+      );
       expect(toolFailureMessage('hotapp_name_taken'), '已经有同名应用了，换一个名字');
       expect(toolFailureMessage('hotapp_brief_empty'), '先写一句想要的动画或玩法');
       // 映射结果里不出现裸错误码。
@@ -641,7 +826,10 @@ void main() {
     });
 
     test('normalizedErrorCode 取复合码基码', () {
-      expect(normalizedErrorCode('engine_generate_failed: boom'), 'engine_generate_failed');
+      expect(
+        normalizedErrorCode('engine_generate_failed: boom'),
+        'engine_generate_failed',
+      );
       expect(normalizedErrorCode('unknown_artboard：home'), 'unknown_artboard');
       expect(normalizedErrorCode('  '), '');
     });
@@ -651,7 +839,10 @@ void main() {
     test('design_op 走 AgentGate；未就绪 → engine_unavailable；render 面可用', () async {
       final engine = _FakeEngine();
       final gate = LocalEngineGate(engine);
-      final applied = await gate.applyAgent(engine.mbt, 'place home button cta - 30 110 140 44');
+      final applied = await gate.applyAgent(
+        engine.mbt,
+        'place home button cta - 30 110 140 44',
+      );
       expect(applied['ok'], isTrue);
       expect(engine.gates, <String>['agent'], reason: '唯一写路径必须是 AgentGate');
       expect(await gate.templates(), isNotEmpty);
@@ -670,97 +861,114 @@ void main() {
   });
 
   group('build 全链（mock LLM + LocalEngineGate）', () {
-    test('design_op → read_mbt 分层 → generate_page → critique/auto_fix（≤2 轮）→ 清扫', () async {
-      final engine = _FakeEngine();
-      final events = <Map<String, dynamic>>[];
-      final model = _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-        <LanguageModelV4ContentPart>[
-          mockToolCall(
-            toolName: 'design_op',
-            input: <String, dynamic>{'op': 'place home button cta - 30 110 140 44'},
-          ),
-        ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'read_mbt', input: <String, dynamic>{}),
-        ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(
-            toolName: 'generate_page',
-            input: <String, dynamic>{'intent': '设置页', 'name': 'settings'},
-          ),
-        ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(
-            toolName: 'inspect',
-            input: <String, dynamic>{'kind': 'critique', 'artboard': 'home'},
-          ),
-        ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '完成'}),
-        ],
-      ]);
+    test(
+      'design_op → read_mbt 分层 → generate_page → critique/auto_fix（≤2 轮）→ 清扫',
+      () async {
+        final engine = _FakeEngine();
+        final events = <Map<String, dynamic>>[];
+        final model = ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
+              toolName: 'design_op',
+              input: <String, dynamic>{
+                'op': 'place home button cta - 30 110 140 44',
+              },
+            ),
+          ],
+          <Part>[
+            scriptToolCall(toolName: 'read_mbt', input: <String, dynamic>{}),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'generate_page',
+              input: <String, dynamic>{'intent': '设置页', 'name': 'settings'},
+            ),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'inspect',
+              input: <String, dynamic>{'kind': 'critique', 'artboard': 'home'},
+            ),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '完成'},
+            ),
+          ],
+        ]);
 
-      final result = await runDartAgent(
-        request: _buildRequest(engine),
-        modelOverride: model,
-        bridge: LocalEngineGate(engine),
-        onEvent: events.add,
-      );
+        final result = await runDartAgent(
+          request: _buildRequest(engine),
+          modelOverride: model.model,
+          bridge: LocalEngineGate(engine),
+          onEvent: events.add,
+        );
 
-      expect(result.ok, isTrue);
-      expect(result.stopReason, 'done');
-      // 写路径全部是 AgentGate，一次也没走 human。
-      expect(engine.gates, isNotEmpty);
-      expect(engine.gates.every((g) => g == 'agent'), isTrue);
-      expect(engine.applyCount, 1);
-      expect(engine.generateCount, 1);
-      expect(result.ops, contains('place home button cta - 30 110 140 44'));
-      expect(result.ops, contains('generate 设置页'));
+        expect(result.ok, isTrue);
+        expect(result.stopReason, 'done');
+        // 写路径全部是 AgentGate，一次也没走 human。
+        expect(engine.gates, isNotEmpty);
+        expect(engine.gates.every((g) => g == 'agent'), isTrue);
+        expect(engine.applyCount, 1);
+        expect(engine.generateCount, 1);
+        expect(result.ops, contains('place home button cta - 30 110 140 44'));
+        expect(result.ops, contains('generate 设置页'));
 
-      // read_mbt 分层：outline 是 PROJECT MAP（不是整篇文档）。
-      final readStart = events.firstWhere(
-        (e) => e['type'] == 'tool_start' && e['tool'] == 'read_mbt',
-      );
-      expect(readStart, isNotNull);
-      final readEnd = events.firstWhere(
-        (e) => e['type'] == 'tool_end' && e['tool'] == 'read_mbt',
-      );
-      expect(readEnd['ok'], isTrue);
-      expect(readEnd['preview'].toString(), contains('PROJECT MAP'));
-      expect(readEnd['preview'].toString(), contains('home'));
+        // read_mbt 分层：outline 是 PROJECT MAP（不是整篇文档）。
+        final readStart = events.firstWhere(
+          (e) => e['type'] == 'tool_start' && e['tool'] == 'read_mbt',
+        );
+        expect(readStart, isNotNull);
+        final readEnd = events.firstWhere(
+          (e) => e['type'] == 'tool_end' && e['tool'] == 'read_mbt',
+        );
+        expect(readEnd['ok'], isTrue);
+        expect(readEnd['preview'].toString(), contains('PROJECT MAP'));
+        expect(readEnd['preview'].toString(), contains('home'));
 
-      // 空板清扫：__seed 与 only-root 空板被删，且经 session 变更面（AgentGate）。
-      expect(engine.deleteCount, 2);
-      final cleanup = events.where((e) => e['type'] == 'cleanup').toList();
-      expect(cleanup, hasLength(1));
-      expect((cleanup.single['removed'] as List), containsAll(<String>['__seed', 'empty']));
+        // 空板清扫：__seed 与 only-root 空板被删，且经 session 变更面（AgentGate）。
+        expect(engine.deleteCount, 2);
+        final cleanup = events.where((e) => e['type'] == 'cleanup').toList();
+        expect(cleanup, hasLength(1));
+        expect(
+          (cleanup.single['removed'] as List),
+          containsAll(<String>['__seed', 'empty']),
+        );
 
-      // RSI：critique 恒 poor → 最多 2 轮；每轮对每块板最多一次 auto_fix，
-      // 绝不无限重试（两轮后无论是否修好都必须收手）。
-      expect(events.where((e) => e['type'] == 'review_round').length, 2);
-      expect(engine.autoFixPerBoard.keys, containsAll(<String>['home', 'settings']));
-      expect(
-        engine.autoFixPerBoard.values.every((count) => count <= 2),
-        isTrue,
-        reason: '单板修复不得跨过 2 轮上限：${engine.autoFixPerBoard}',
-      );
-      expect(result.mbt, contains('autofix'));
+        // RSI：critique 恒 poor → 最多 2 轮；每轮对每块板最多一次 auto_fix，
+        // 绝不无限重试（两轮后无论是否修好都必须收手）。
+        expect(events.where((e) => e['type'] == 'review_round').length, 2);
+        expect(
+          engine.autoFixPerBoard.keys,
+          containsAll(<String>['home', 'settings']),
+        );
+        expect(
+          engine.autoFixPerBoard.values.every((count) => count <= 2),
+          isTrue,
+          reason: '单板修复不得跨过 2 轮上限：${engine.autoFixPerBoard}',
+        );
+        expect(result.mbt, contains('autofix'));
 
-      // 工具事件都带人话标签（toolLabel 可映射）。
-      final bare = RegExp(r'^[a-z0-9]+(_[a-z0-9]+)+$');
-      for (final event in events.where((e) => e['type'] == 'tool_start')) {
-        expect(bare.hasMatch(toolLabel(event['tool'].toString())), isFalse);
-      }
+        // 工具事件都带人话标签（toolLabel 可映射）。
+        final bare = RegExp(r'^[a-z0-9]+(_[a-z0-9]+)+$');
+        for (final event in events.where((e) => e['type'] == 'tool_start')) {
+          expect(bare.hasMatch(toolLabel(event['tool'].toString())), isFalse);
+        }
 
-      // 无工作区服务 → 工作区工具不暴露给模型。
-      final toolNames = model.calls.first.tools
-          .whereType<LanguageModelV4FunctionTool>()
-          .map((t) => t.name)
-          .toSet();
-      expect(toolNames, containsAll(<String>['design_op', 'read_mbt', 'generate_page']));
-      expect(toolNames.contains('three_list'), isFalse);
-      expect(toolNames.contains('figma_export'), isFalse);
-    }, timeout: const Timeout(Duration(minutes: 2)));
+        // 无工作区服务 → 工作区工具不暴露给模型。
+        final toolNames = (model.calls.first.tools ?? const <ToolDefinition>[])
+            .map((t) => t.name)
+            .toSet();
+        expect(
+          toolNames,
+          containsAll(<String>['design_op', 'read_mbt', 'generate_page']),
+        );
+        expect(toolNames.contains('three_list'), isFalse);
+        expect(toolNames.contains('figma_export'), isFalse);
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
 
     test('空画布上 design_op → canvas_empty 人话，不打引擎、不烧步数', () async {
       final engine = _FakeEngine()
@@ -769,17 +977,20 @@ void main() {
       final events = <Map<String, dynamic>>[];
       final result = await runDartAgent(
         request: _buildRequest(engine),
-        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-          <LanguageModelV4ContentPart>[
-            mockToolCall(
+        modelOverride: ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
               toolName: 'design_op',
               input: <String, dynamic>{'op': 'place home card c1 10 10 100 40'},
             ),
           ],
-          <LanguageModelV4ContentPart>[
-            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '停'}),
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '停'},
+            ),
           ],
-        ]),
+        ]).model,
         bridge: LocalEngineGate(engine),
         onEvent: events.add,
       );
@@ -798,14 +1009,20 @@ void main() {
       final events = <Map<String, dynamic>>[];
       final result = await runDartAgent(
         request: _buildRequest(engine),
-        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-          <LanguageModelV4ContentPart>[
-            mockToolCall(toolName: 'design_op', input: <String, dynamic>{'op': 'gate_me'}),
+        modelOverride: ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
+              toolName: 'design_op',
+              input: <String, dynamic>{'op': 'gate_me'},
+            ),
           ],
-          <LanguageModelV4ContentPart>[
-            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '停'}),
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '停'},
+            ),
           ],
-        ]),
+        ]).model,
         bridge: LocalEngineGate(engine),
         onEvent: events.add,
       );
@@ -824,14 +1041,20 @@ void main() {
       final events = <Map<String, dynamic>>[];
       final result = await runDartAgent(
         request: _buildRequest(engine),
-        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-          <LanguageModelV4ContentPart>[
-            mockToolCall(toolName: 'design_op', input: <String, dynamic>{'op': 'place a b c'}),
+        modelOverride: ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
+              toolName: 'design_op',
+              input: <String, dynamic>{'op': 'place a b c'},
+            ),
           ],
-          <LanguageModelV4ContentPart>[
-            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '停'}),
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '停'},
+            ),
           ],
-        ]),
+        ]).model,
         bridge: LocalEngineGate(engine),
         onEvent: events.add,
       );
@@ -846,106 +1069,115 @@ void main() {
   });
 
   group('workspace tools', () {
-    test('three_* / hotapp_* / video_* / nonapp_* / figma_export 全部接线', () async {
-      final engine = _FakeEngine();
-      final workspace = _FakeWorkspace();
-      final events = <Map<String, dynamic>>[];
-      final exportDir = Directory.systemTemp.createTempSync('figma-tool-');
-      addTearDown(() => exportDir.deleteSync(recursive: true));
-      final model = _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-        <LanguageModelV4ContentPart>[
-          mockToolCall(
-            toolName: 'three_create',
-            input: <String, dynamic>{'name': 'island', 'brief': '一座浮岛'},
-          ),
-          mockToolCall(
-            toolName: 'hotapp_generate',
-            input: <String, dynamic>{'name': 'counter', 'brief': '计数器'},
-          ),
-        ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'nonapp_list', input: <String, dynamic>{}),
-          mockToolCall(
-            toolName: 'nonapp_inspect',
-            input: <String, dynamic>{'name': 'counter'},
-          ),
-        ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(
-            toolName: 'video_review',
-            input: <String, dynamic>{
-              'timeline': <String, dynamic>{
-                'width': 1280,
-                'height': 720,
-                'fps': 30,
-                'scenes': <dynamic>[],
+    test(
+      'three_* / hotapp_* / video_* / nonapp_* / figma_export 全部接线',
+      () async {
+        final engine = _FakeEngine();
+        final workspace = _FakeWorkspace();
+        final events = <Map<String, dynamic>>[];
+        final exportDir = Directory.systemTemp.createTempSync('figma-tool-');
+        addTearDown(() => exportDir.deleteSync(recursive: true));
+        final model = ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
+              toolName: 'three_create',
+              input: <String, dynamic>{'name': 'island', 'brief': '一座浮岛'},
+            ),
+            scriptToolCall(
+              toolName: 'hotapp_generate',
+              input: <String, dynamic>{'name': 'counter', 'brief': '计数器'},
+            ),
+          ],
+          <Part>[
+            scriptToolCall(toolName: 'nonapp_list', input: <String, dynamic>{}),
+            scriptToolCall(
+              toolName: 'nonapp_inspect',
+              input: <String, dynamic>{'name': 'counter'},
+            ),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'video_review',
+              input: <String, dynamic>{
+                'timeline': <String, dynamic>{
+                  'width': 1280,
+                  'height': 720,
+                  'fps': 30,
+                  'scenes': <dynamic>[],
+                },
+                'spec': <String, dynamic>{'kind': 'screenplay'},
               },
-              'spec': <String, dynamic>{'kind': 'screenplay'},
-            },
-          ),
-        ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(
-            toolName: 'figma_export',
-            input: <String, dynamic>{'directory': exportDir.path},
-          ),
-        ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '完成'}),
-        ],
-      ]);
+            ),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'figma_export',
+              input: <String, dynamic>{'directory': exportDir.path},
+            ),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '完成'},
+            ),
+          ],
+        ]);
 
-      final result = await runDartAgent(
-        request: _buildRequest(engine),
-        modelOverride: model,
-        bridge: LocalEngineGate(engine),
-        workspace: workspace,
-        onEvent: events.add,
-      );
-
-      expect(result.ok, isTrue);
-      expect(workspace.calls, contains('three_create:island'));
-      expect(workspace.calls, contains('hotapp_generate:counter'));
-      expect(workspace.calls, contains('nonapp_list'));
-      expect(workspace.calls, contains('nonapp_inspect:counter'));
-      expect(workspace.calls, contains('video_review'));
-      expect(workspace.calls, contains('figma_export'));
-      expect(workspace.lastDirectory, exportDir.path);
-      expect(workspace.lastRender?.artboards.length, 1,
-          reason: 'Figma 导出消费本地渲染信封');
-      for (final tool in <String>[
-        'three_create',
-        'hotapp_generate',
-        'nonapp_list',
-        'nonapp_inspect',
-        'video_review',
-        'figma_export',
-      ]) {
-        final end = events.firstWhere(
-          (e) => e['type'] == 'tool_end' && e['tool'] == tool,
-          orElse: () => <String, dynamic>{},
+        final result = await runDartAgent(
+          request: _buildRequest(engine),
+          modelOverride: model.model,
+          bridge: LocalEngineGate(engine),
+          workspace: workspace,
+          onEvent: events.add,
         );
-        expect(end['ok'], isTrue, reason: tool);
-      }
-      // 有工作区服务 → 工作区工具暴露给模型。
-      final toolNames = model.calls.first.tools
-          .whereType<LanguageModelV4FunctionTool>()
-          .map((t) => t.name)
-          .toSet();
-      expect(
-        toolNames,
-        containsAll(<String>[
-          'three_list',
+
+        expect(result.ok, isTrue);
+        expect(workspace.calls, contains('three_create:island'));
+        expect(workspace.calls, contains('hotapp_generate:counter'));
+        expect(workspace.calls, contains('nonapp_list'));
+        expect(workspace.calls, contains('nonapp_inspect:counter'));
+        expect(workspace.calls, contains('video_review'));
+        expect(workspace.calls, contains('figma_export'));
+        expect(workspace.lastDirectory, exportDir.path);
+        expect(
+          workspace.lastRender?.artboards.length,
+          1,
+          reason: 'Figma 导出消费本地渲染信封',
+        );
+        for (final tool in <String>[
           'three_create',
           'hotapp_generate',
-          'video_review',
+          'nonapp_list',
           'nonapp_inspect',
+          'video_review',
           'figma_export',
-        ]),
-      );
-    }, timeout: const Timeout(Duration(minutes: 2)));
+        ]) {
+          final end = events.firstWhere(
+            (e) => e['type'] == 'tool_end' && e['tool'] == tool,
+            orElse: () => <String, dynamic>{},
+          );
+          expect(end['ok'], isTrue, reason: tool);
+        }
+        // 有工作区服务 → 工作区工具暴露给模型。
+        final toolNames = (model.calls.first.tools ?? const <ToolDefinition>[])
+            .map((t) => t.name)
+            .toSet();
+        expect(
+          toolNames,
+          containsAll(<String>[
+            'three_list',
+            'three_create',
+            'hotapp_generate',
+            'video_review',
+            'nonapp_inspect',
+            'figma_export',
+          ]),
+        );
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
 
-    test('hotapp_from_prototype：设计→热应用链路（提取屏/跳转 + 验证结果如实上报）', () async {
+    test('design_verify_prototype：提取屏/跳转并调用项目内验证（不调模型）', () async {
       final engine = _FakeEngine()
         ..flows = <Map<String, dynamic>>[
           <String, dynamic>{'from': 'home', 'to': 'empty', 'trigger': 'tap'},
@@ -954,69 +1186,230 @@ void main() {
       final events = <Map<String, dynamic>>[];
       final result = await runDartAgent(
         request: _buildRequest(engine),
-        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-          <LanguageModelV4ContentPart>[
-            mockToolCall(
-              toolName: 'hotapp_from_prototype',
-              input: <String, dynamic>{'name': 'proto-demo'},
+        modelOverride: ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
+              toolName: 'design_verify_prototype',
+              input: <String, dynamic>{},
             ),
           ],
-          <LanguageModelV4ContentPart>[
-            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '原型已转热应用'}),
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '原型已过覆盖门'},
+            ),
           ],
-        ]),
+        ]).model,
         bridge: LocalEngineGate(engine),
         workspace: workspace,
         onEvent: events.add,
       );
 
       expect(result.ok, isTrue);
-      expect(workspace.calls, contains('hotapp_from_prototype:proto-demo'));
+      expect(workspace.calls, contains('design_verify_prototype'));
       // 屏提取：__seed 剔除，home + empty 保留；跳转来自 session_flows。
-      final protoScreens = workspace.lastFromPrototypeScreens;
-      expect(protoScreens?.map((s) => s.id).toList(), <String>['home', 'empty']);
-      expect(workspace.lastFromPrototypeFlows, hasLength(1));
-      expect(workspace.lastFromPrototypeFlows?.single.to, 'empty');
-      // 原型文档随调用下发（截断上限 12000 与 store 路径一致）。
-      expect(workspace.lastFromPrototypeMbt, isNotNull);
-      expect(workspace.lastFromPrototypeMbt!.length, lessThanOrEqualTo(12000));
+      expect(workspace.lastVerifyScreens?.map((s) => s.id).toList(), <String>[
+        'home',
+        'empty',
+      ]);
+      expect(workspace.lastVerifyFlows, hasLength(1));
+      expect(workspace.lastVerifyFlows?.single.to, 'empty');
+      expect(workspace.lastVerifyMbt, isNotNull);
 
       final end = events.firstWhere(
-        (e) => e['type'] == 'tool_end' && e['tool'] == 'hotapp_from_prototype',
+        (e) =>
+            e['type'] == 'tool_end' && e['tool'] == 'design_verify_prototype',
       );
       expect(end['ok'], isTrue);
     }, timeout: const Timeout(Duration(minutes: 2)));
 
-    test('hotapp_from_prototype：画布没有原型 → prototype_empty 人话，不打服务', () async {
+    test('design_verify_prototype：画布没有原型 → prototype_empty 人话，不打服务', () async {
       final engine = _FakeEngine()..boards.clear();
       final workspace = _FakeWorkspace();
       final events = <Map<String, dynamic>>[];
       await runDartAgent(
         request: _buildRequest(engine),
-        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-          <LanguageModelV4ContentPart>[
-            mockToolCall(
-              toolName: 'hotapp_from_prototype',
-              input: <String, dynamic>{'name': 'proto-demo'},
+        modelOverride: ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
+              toolName: 'design_verify_prototype',
+              input: <String, dynamic>{},
             ),
           ],
-          <LanguageModelV4ContentPart>[
-            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '停'}),
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '停'},
+            ),
           ],
-        ]),
+        ]).model,
         bridge: LocalEngineGate(engine),
         workspace: workspace,
         onEvent: events.add,
       );
 
       final end = events.firstWhere(
-        (e) => e['type'] == 'tool_end' && e['tool'] == 'hotapp_from_prototype',
+        (e) =>
+            e['type'] == 'tool_end' && e['tool'] == 'design_verify_prototype',
       );
       expect(end['ok'], isFalse);
       expect(end['error'], 'prototype_empty');
-      expect(end['message'], '画布上还没有原型，先生成原型再转热应用');
-      expect(workspace.calls.where((c) => c.startsWith('hotapp_from_prototype')), isEmpty,
-          reason: '没有原型就不该打到服务');
+      expect(end['message'], '画布上还没有原型，先生成原型再验证');
+      expect(workspace.calls, isEmpty, reason: '没有原型就不该打到服务');
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('three_plan_validate / three_check：v2 工作区校验与门评估接线', () async {
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      final result = await runDartAgent(
+        request: DartAgentRequest(
+          mode: 'workspace',
+          instruction: '校验计划并跑门',
+          model: 'scripted-model',
+          baseUrl: 'https://example.invalid/v1',
+          apiKey: 'k',
+          workspaceHint: 'three',
+        ),
+        modelOverride: ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
+              toolName: 'three_plan_validate',
+              input: <String, dynamic>{'name': 'chair'},
+            ),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'three_measure',
+              input: <String, dynamic>{'name': 'chair'},
+            ),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'three_build',
+              input: <String, dynamic>{'name': 'chair'},
+            ),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'three_check_placement',
+              input: <String, dynamic>{'name': 'chair'},
+            ),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'three_check',
+              input: <String, dynamic>{'name': 'chair'},
+            ),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '门跑完'},
+            ),
+          ],
+        ]).model,
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      expect(result.ok, isTrue);
+      expect(
+        workspace.calls,
+        containsAll(<String>['three_plan_validate:chair', 'three_check:chair']),
+      );
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'three_check',
+      );
+      expect(end['ok'], isTrue);
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('creative_judge：盲评走 fresh context 回调，成功返回 judgment/score', () async {
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      final result = await runDartAgent(
+        request: DartAgentRequest(
+          mode: 'workspace',
+          instruction: '盲评',
+          model: 'scripted-model',
+          baseUrl: 'https://example.invalid/v1',
+          apiKey: 'k',
+          workspaceHint: 'three',
+        ),
+        modelOverride: ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
+              toolName: 'creative_judge',
+              input: <String, dynamic>{
+                'brief': '一把橡木餐椅',
+                'kind': '3d',
+                'track': 'static_object',
+                'image_paths': <String>['/projects/3d/chair/artifacts/m1.png'],
+                'plan_digest': 'seat 0.45m',
+                'acceptance': <String>['座高 0.45m'],
+                'measured_facts': <String>['connectivity: PASS'],
+              },
+            ),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '盲评完成'},
+            ),
+          ],
+        ]).model,
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      expect(result.ok, isTrue);
+      expect(workspace.calls, contains('creative_judge'));
+      expect(workspace.lastJudgeArgs?['kind'], '3d');
+      expect(workspace.lastJudgeArgs?['imagePaths'], hasLength(1));
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'creative_judge',
+      );
+      expect(end['ok'], isTrue);
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('creative_judge：通道降级 → 显性错误码与人话，不冒充分数', () async {
+      final workspace = _FakeWorkspace()..judgeDegraded = true;
+      final events = <Map<String, dynamic>>[];
+      final result = await runDartAgent(
+        request: DartAgentRequest(
+          mode: 'workspace',
+          instruction: '盲评',
+          model: 'scripted-model',
+          baseUrl: 'https://example.invalid/v1',
+          apiKey: 'k',
+          workspaceHint: 'video',
+        ),
+        modelOverride: ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
+              toolName: 'creative_judge',
+              input: <String, dynamic>{
+                'brief': '15s 片头',
+                'kind': 'video',
+                'track': 'silly_skit',
+                'image_paths': <String>['/projects/video/x/artifacts/f1.png'],
+              },
+            ),
+          ],
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '停'},
+            ),
+          ],
+        ]).model,
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      expect(result.ok, isTrue);
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'creative_judge',
+      );
+      expect(end['ok'], isFalse);
+      expect(end['error'], 'judge_no_images');
+      expect(end['message'], '没有渲染图证据，不能做盲评');
     }, timeout: const Timeout(Duration(minutes: 2)));
 
     test('服务失败码 → tool_end.message 人话（原始码保留）', () async {
@@ -1030,17 +1423,20 @@ void main() {
       final events = <Map<String, dynamic>>[];
       await runDartAgent(
         request: _buildRequest(engine),
-        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-          <LanguageModelV4ContentPart>[
-            mockToolCall(
+        modelOverride: ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
               toolName: 'nonapp_inspect',
               input: <String, dynamic>{'name': 'future'},
             ),
           ],
-          <LanguageModelV4ContentPart>[
-            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '停'}),
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '停'},
+            ),
           ],
-        ]),
+        ]).model,
         bridge: LocalEngineGate(engine),
         workspace: workspace,
         onEvent: events.add,
@@ -1061,17 +1457,20 @@ void main() {
       final events = <Map<String, dynamic>>[];
       await runDartAgent(
         request: _buildRequest(engine),
-        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-          <LanguageModelV4ContentPart>[
-            mockToolCall(
+        modelOverride: ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
               toolName: 'figma_export',
               input: <String, dynamic>{'directory': '/tmp/x'},
             ),
           ],
-          <LanguageModelV4ContentPart>[
-            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '停'}),
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '停'},
+            ),
           ],
-        ]),
+        ]).model,
         // 只实现门、不实现渲染面的桥。
         bridge: _GateOnlyBridge(engine),
         workspace: workspace,
@@ -1095,12 +1494,15 @@ void main() {
       final engine = _FakeEngine();
       final workspace = _FakeWorkspace();
       final events = <Map<String, dynamic>>[];
-      final model = _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'video_sample', input: <String, dynamic>{'index': 1}),
+      final model = ScriptedAgentModel(<List<Part>>[
+        <Part>[
+          scriptToolCall(
+            toolName: 'video_sample',
+            input: <String, dynamic>{'index': 1},
+          ),
         ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(
+        <Part>[
+          scriptToolCall(
             toolName: 'video_create',
             input: <String, dynamic>{
               'name': 'tagline-6s',
@@ -1121,17 +1523,20 @@ void main() {
             },
           ),
         ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'video_list', input: <String, dynamic>{}),
+        <Part>[
+          scriptToolCall(toolName: 'video_list', input: <String, dynamic>{}),
         ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '视频已生成'}),
+        <Part>[
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '视频已生成'},
+          ),
         ],
       ]);
 
       final result = await runDartAgent(
         request: _buildRequest(engine),
-        modelOverride: model,
+        modelOverride: model.model,
         bridge: LocalEngineGate(engine),
         workspace: workspace,
         onEvent: events.add,
@@ -1141,7 +1546,11 @@ void main() {
       expect(result.stopReason, 'done', reason: '成功落地的工作区调用不是 text_only');
       expect(
         workspace.calls,
-        containsAll(<String>['video_sample:1', 'video_create:tagline-6s', 'video_list']),
+        containsAll(<String>[
+          'video_sample:1',
+          'video_create:tagline-6s',
+          'video_list',
+        ]),
       );
       expect(workspace.lastVideoSampleIndex, 1);
       expect(workspace.lastVideoName, 'tagline-6s');
@@ -1160,15 +1569,18 @@ void main() {
       expect(createStart['args']['name'], 'tagline-6s');
       expect(createStart['args']['timeline'], '<object 4 keys>');
       expect(createStart['args']['spec'], '<object 3 keys>');
-      for (final tool in <String>['video_sample', 'video_create', 'video_list']) {
+      for (final tool in <String>[
+        'video_sample',
+        'video_create',
+        'video_list',
+      ]) {
         final end = events.firstWhere(
           (e) => e['type'] == 'tool_end' && e['tool'] == tool,
           orElse: () => <String, dynamic>{},
         );
         expect(end['ok'], isTrue, reason: tool);
       }
-      final names = model.calls.first.tools
-          .whereType<LanguageModelV4FunctionTool>()
+      final names = (model.calls.first.tools ?? const <ToolDefinition>[])
           .map((t) => t.name)
           .toSet();
       expect(
@@ -1188,9 +1600,9 @@ void main() {
       final events = <Map<String, dynamic>>[];
       await runDartAgent(
         request: _buildRequest(engine),
-        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-          <LanguageModelV4ContentPart>[
-            mockToolCall(
+        modelOverride: ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
               toolName: 'video_create',
               input: <String, dynamic>{
                 'name': 'tagline-6s',
@@ -1199,10 +1611,13 @@ void main() {
               },
             ),
           ],
-          <LanguageModelV4ContentPart>[
-            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '停'}),
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '停'},
+            ),
           ],
-        ]),
+        ]).model,
         bridge: LocalEngineGate(engine),
         workspace: workspace,
         onEvent: events.add,
@@ -1222,9 +1637,9 @@ void main() {
       final events = <Map<String, dynamic>>[];
       await runDartAgent(
         request: _buildRequest(engine),
-        modelOverride: _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-          <LanguageModelV4ContentPart>[
-            mockToolCall(
+        modelOverride: ScriptedAgentModel(<List<Part>>[
+          <Part>[
+            scriptToolCall(
               toolName: 'video_create',
               input: <String, dynamic>{
                 'name': 'bad',
@@ -1232,10 +1647,13 @@ void main() {
               },
             ),
           ],
-          <LanguageModelV4ContentPart>[
-            mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '停'}),
+          <Part>[
+            scriptToolCall(
+              toolName: 'finish',
+              input: <String, dynamic>{'summary': '停'},
+            ),
           ],
-        ]),
+        ]).model,
         bridge: LocalEngineGate(engine),
         workspace: workspace,
         onEvent: events.add,
@@ -1246,17 +1664,22 @@ void main() {
       expect(end['ok'], isFalse);
       expect(end['error'], 'invalid_args');
       expect(end['message'], '时间线格式不对：先看一份完整示例，再按同样结构填写');
-      expect(workspace.calls.where((c) => c.startsWith('video_create')), isEmpty,
-          reason: '参数不对就不该打到服务');
+      expect(
+        workspace.calls.where((c) => c.startsWith('video_create')),
+        isEmpty,
+        reason: '参数不对就不该打到服务',
+      );
     });
   });
 
   // 真实落地面：LocalWorkspaceServices → VideoProjectStore（先校验后落盘）。
   group('LocalWorkspaceServices 视频生成（真实项目库）', () {
-    Map<String, dynamic> sampleTimeline(int index) =>
-        Map<String, dynamic>.from(jsonDecode(videoSamples[index].timelineJson) as Map);
-    Map<String, dynamic> sampleSpec(int index) =>
-        Map<String, dynamic>.from(jsonDecode(videoSamples[index].specJson) as Map);
+    Map<String, dynamic> sampleTimeline(int index) => Map<String, dynamic>.from(
+      jsonDecode(videoSamples[index].timelineJson) as Map,
+    );
+    Map<String, dynamic> sampleSpec(int index) => Map<String, dynamic>.from(
+      jsonDecode(videoSamples[index].specJson) as Map,
+    );
 
     test('video_sample 给完整示例；video_create 落盘三件套；video_list 含内置+生成', () async {
       final root = Directory.systemTemp.createTempSync('video-agent-');
@@ -1302,10 +1725,15 @@ void main() {
       expect(listed['ok'], isTrue);
       final videos = (listed['videos'] as List).cast<Map>();
       expect(
-        videos.any((v) => v['name'] == 'cell-division' && v['builtin'] == false),
+        videos.any(
+          (v) => v['name'] == 'cell-division' && v['builtin'] == false,
+        ),
         isTrue,
       );
-      expect(videos.where((v) => v['builtin'] == true), hasLength(videoSamples.length));
+      expect(
+        videos.where((v) => v['builtin'] == true),
+        hasLength(videoSamples.length),
+      );
       expect(videos.map((v) => v['name']), contains('cell-division'));
     });
 
@@ -1395,11 +1823,22 @@ void main() {
       final result = await exporter.export(render: render, directory: dir.path);
       expect(result.ok, isTrue);
       expect(result.boards, 1);
-      expect(result.files, containsAll(<String>['board-home_v2.svg', 'nondesign.json', 'README.txt']));
-      expect(File('${dir.path}/board-home_v2.svg').readAsStringSync(), '<svg id="home"></svg>');
+      expect(
+        result.files,
+        containsAll(<String>[
+          'board-home_v2.svg',
+          'nondesign.json',
+          'README.txt',
+        ]),
+      );
+      expect(
+        File('${dir.path}/board-home_v2.svg').readAsStringSync(),
+        '<svg id="home"></svg>',
+      );
 
-      final manifest = jsonDecode(File('${dir.path}/nondesign.json').readAsStringSync())
-          as Map<String, dynamic>;
+      final manifest = jsonDecode(
+        File('${dir.path}/nondesign.json').readAsStringSync(),
+      ) as Map<String, dynamic>;
       expect(manifest['exportedAt'], 1700000000);
       final board = (manifest['boards'] as List).single as Map<String, dynamic>;
       expect(board['id'], 'home/v2', reason: 'manifest 保留原始 id');
@@ -1410,7 +1849,12 @@ void main() {
       final node = nodes.single as Map<String, dynamic>;
       expect(node['id'], 'title');
       expect(node['component'], 'body_text');
-      expect(node['rect'], <String, dynamic>{'x': 1.0, 'y': 2.0, 'w': 30.0, 'h': 40.0});
+      expect(node['rect'], <String, dynamic>{
+        'x': 1.0,
+        'y': 2.0,
+        'w': 30.0,
+        'h': 40.0,
+      });
       expect((node['style'] as Map)['text_color'], '#111827');
     });
 
@@ -1429,7 +1873,10 @@ void main() {
       final dir = Directory.systemTemp.createTempSync('figma-mobile-');
       addTearDown(() => dir.deleteSync(recursive: true));
       final exporter = FigmaExporter(platform: FigmaExportPlatform.mobile);
-      final result = await exporter.export(render: _renderEnvelope(), directory: dir.path);
+      final result = await exporter.export(
+        render: _renderEnvelope(),
+        directory: dir.path,
+      );
       expect(result.ok, isFalse);
       expect(result.error, 'figma_mobile_unavailable');
       expect(result.message, '这台设备暂不支持导出 Figma 包，请在电脑上导出');
@@ -1463,34 +1910,41 @@ void main() {
   // 这里锚定工作区 run 的工具面：工作区工具在、画布/文档工具不在。
   group('workspace mode tool surface', () {
     DartAgentRequest workspaceRequest(String hint) => DartAgentRequest(
-          mode: 'workspace',
-          instruction: '在工作台里做东西',
-          mbt: '',
-          model: 'scripted-model',
-          baseUrl: 'https://example.invalid/v1',
-          apiKey: 'k',
-          workspaceHint: hint,
-        );
+      mode: 'workspace',
+      instruction: '在工作台里做东西',
+      mbt: '',
+      model: 'scripted-model',
+      baseUrl: 'https://example.invalid/v1',
+      apiKey: 'k',
+      workspaceHint: hint,
+    );
 
-    Set<String> toolsOf(LanguageModelV4CallOptions options) => options.tools
-        .whereType<LanguageModelV4FunctionTool>()
-        .map((t) => t.name)
-        .toSet();
+    Set<String> toolsOf(ModelRequest request) =>
+        (request.tools ?? const <ToolDefinition>[]).map((t) => t.name).toSet();
 
-    test('3D / 视频 / 热应用工具全部可用，画布与文档工具不可见', () async {
+    Future<Set<String>> surfaceFor(String hint) async {
       final workspace = _FakeWorkspace();
-      final model = _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '看看工具面'}),
+      final model = ScriptedAgentModel(<List<Part>>[
+        <Part>[
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '看工具面'},
+          ),
         ],
       ]);
       final result = await runDartAgent(
-        request: workspaceRequest('three'),
-        modelOverride: model,
+        request: workspaceRequest(hint),
+        modelOverride: model.model,
         workspace: workspace,
       );
       expect(result.ok, isTrue);
-      final names = toolsOf(model.calls.first);
+      return (model.calls.first.tools ?? const <ToolDefinition>[])
+          .map((t) => t.name)
+          .toSet();
+    }
+
+    test('three 收窄：只暴露 three_*，其他工作台/画布/文档工具不可见', () async {
+      final names = await surfaceFor('three');
       expect(
         names,
         containsAll(<String>[
@@ -1500,15 +1954,24 @@ void main() {
           'three_pass',
           'three_continue',
           'three_feedback',
-          'video_create',
-          'video_list',
-          'video_sample',
-          'video_review',
-          'hotapp_generate',
-          'nonapp_list',
-          'figma_export',
+          'three_workspace_migrate',
+          'three_plan_validate',
+          'three_measure',
+          'three_build',
+          'three_check',
+          'three_check_placement',
         ]),
       );
+      for (final other in <String>[
+        'video_create',
+        'video_list',
+        'hotapp_generate',
+        'nonapp_list',
+        'figma_export',
+        'design_verify_prototype',
+      ]) {
+        expect(names.contains(other), isFalse, reason: 'three run 不该暴露 $other');
+      }
       for (final canvas in <String>[
         'design_op',
         'generate_page',
@@ -1521,38 +1984,84 @@ void main() {
       }
     });
 
+    test('video 收窄：只暴露 video_*', () async {
+      final names = await surfaceFor('video');
+      expect(
+        names,
+        containsAll(<String>[
+          'video_list',
+          'video_sample',
+          'video_create',
+          'video_review',
+        ]),
+      );
+      expect(
+        names.where(
+          (n) =>
+              n.startsWith('three_') ||
+              n.startsWith('hotapp_') ||
+              n.startsWith('nonapp_'),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('hotapp 收窄：热应用 + 应用包，不暴露 3D/视频', () async {
+      final names = await surfaceFor('hotapp');
+      expect(
+        names,
+        containsAll(<String>[
+          'hotapp_list',
+          'hotapp_generate',
+          'hotapp_refine',
+          'hotapp_inspect',
+          'nonapp_list',
+          'nonapp_inspect',
+        ]),
+      );
+      expect(
+        names.where((n) => n.startsWith('three_') || n.startsWith('video_')),
+        isEmpty,
+      );
+    });
+
     test('3D 工作台 run：three_create 真执行（不再 unknown tool）', () async {
       final workspace = _FakeWorkspace();
       final events = <Map<String, dynamic>>[];
-      final model = _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-        <LanguageModelV4ContentPart>[
-          mockToolCall(
+      final model = ScriptedAgentModel(<List<Part>>[
+        <Part>[
+          scriptToolCall(
             toolName: 'three_create',
             input: <String, dynamic>{'name': 'island', 'brief': '一座浮岛'},
           ),
         ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '完成'}),
+        <Part>[
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '完成'},
+          ),
         ],
       ]);
       final result = await runDartAgent(
         request: workspaceRequest('three'),
-        modelOverride: model,
+        modelOverride: model.model,
         workspace: workspace,
         onEvent: events.add,
       );
       expect(result.ok, isTrue);
       expect(workspace.calls, contains('three_create:island'));
-      final end = events.firstWhere((e) => e['type'] == 'tool_end' && e['tool'] == 'three_create');
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'three_create',
+      );
       expect(end['ok'], isTrue);
     });
 
     test('视频工作台 run：video_review 真执行（不再 unknown tool）', () async {
       final workspace = _FakeWorkspace();
       final events = <Map<String, dynamic>>[];
-      final model = _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-        <LanguageModelV4ContentPart>[
-          mockToolCall(
+      final model = ScriptedAgentModel(<List<Part>>[
+        <Part>[
+          scriptToolCall(
             toolName: 'video_review',
             input: <String, dynamic>{
               'timeline': <String, dynamic>{
@@ -1565,27 +2074,35 @@ void main() {
             },
           ),
         ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '完成'}),
+        <Part>[
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '完成'},
+          ),
         ],
       ]);
       final result = await runDartAgent(
         request: workspaceRequest('video'),
-        modelOverride: model,
+        modelOverride: model.model,
         workspace: workspace,
         onEvent: events.add,
       );
       expect(result.ok, isTrue);
       expect(workspace.calls, contains('video_review'));
-      final end = events.firstWhere((e) => e['type'] == 'tool_end' && e['tool'] == 'video_review');
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'video_review',
+      );
       expect(end['ok'], isTrue);
     });
 
     test('plan 模式工具面不变：注入工作区服务也不暴露工作区/画布写工具', () async {
       final workspace = _FakeWorkspace();
-      final model = _ScriptedModel(<List<LanguageModelV4ContentPart>>[
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '看工具面'}),
+      final model = ScriptedAgentModel(<List<Part>>[
+        <Part>[
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '看工具面'},
+          ),
         ],
       ]);
       final planRequest = DartAgentRequest(
@@ -1599,7 +2116,7 @@ void main() {
       );
       await runDartAgent(
         request: planRequest,
-        modelOverride: model,
+        modelOverride: model.model,
         workspace: workspace,
         // 工作区工具只在非 plan 暴露（runDartAgent 对 plan 置 null）。
       );
@@ -1633,8 +2150,11 @@ class _GateOnlyBridge implements EngineGateBridge {
       engine.apply(mbt, op, gate: 'agent');
 
   @override
-  Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) =>
-      engine.session(mbt, name, arg);
+  Future<Map<String, dynamic>> session(
+    String mbt,
+    String name, [
+    String? arg,
+  ]) => engine.session(mbt, name, arg);
 
   @override
   Future<List<dynamic>> templates() => engine.templates();

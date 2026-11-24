@@ -1,0 +1,33 @@
+{
+  "schema": "nan.creative.plan/1",
+  "kind": "video",
+  "track": "silly_skit",
+  "fps": 30,
+  "durationFrames": 450,
+  "summary": "按钮状态循环：8 个状态各 4 拍。",
+  "acceptance": ["最后一帧等于第一帧", "十秒内有一个笑点"],
+  "beats": {"bpm": 120, "beatsPerBar": 4, "offsetFrames": 0},
+  "shots": [
+    {
+      "id": "s01",
+      "start": 0,
+      "duration": 90,
+      "camera": {"from": {"zoom": 1.0}, "to": {"zoom": 1.2}, "ease": "outCubic"},
+      "cast": [
+        {"id": "hero", "rig": "cutout_01", "x": 540, "y": 960, "scale": 1, "flip": false}
+      ],
+      "events": [
+        {"f": 18, "type": "vfx", "cue": "fire/fireball", "x": 540, "y": 820, "seed": 7, "layer": "front"},
+        {"f": 20, "type": "sfx", "cue": "impact"},
+        {"f": 24, "type": "camera.shake", "amp": 4, "freq": 18, "dur": 8}
+      ],
+      "caption": {"text": "点击之后会发生什么？", "preset": "bottom_bold", "in": "pop"}
+    },
+    {
+      "id": "s02",
+      "start": 90,
+      "duration": 360,
+      "transitionIn": {"type": "wipe", "duration": 8, "direction": "left"}
+    }
+  ]
+}

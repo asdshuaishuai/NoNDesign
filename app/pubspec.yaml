@@ -54,8 +54,13 @@ dependencies:
   # 3.6.1 与它无解；ZipDecoder.decodeBytes 在 4.x 仍可用（N6 mediapipe 集成的硬前置，
   # 2026-11-17 经协调者批准；nonapp 侧已按 archive 4 API 迁移）。
   archive: ^4.2.0
-  ai_sdk_dart: ^3.1.0
-  ai_sdk_openai: ^3.1.0
+  # LLM 层（2026-11-23 用户裁决）：只走 Genkit——genkit + genkit_openai 直连
+  # 当前服务商，schemantic 提供类型化 schema；思考档位经
+  # `OpenAIChatOptions(reasoningEffort:)` 落线。**不要再引入 ai_sdk_dart /
+  # ai_sdk_openai，也不要恢复 agent_model_middleware.dart。**
+  genkit: ^1.0.3
+  genkit_openai: ^1.0.3
+  schemantic: ^1.0.0
 
   # A2UI 渲染底座（S0，见 docs/plan-chat-stream-shell.md §1/§5）：三个包独立
   # 发版——a2ui_flutter 渲染 surface（钉 0.3.x 防 API 漂移），a2ui_agent 出

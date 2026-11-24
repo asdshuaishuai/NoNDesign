@@ -32,7 +32,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:ai_sdk_dart/ai_sdk_dart.dart' show CancellationToken;
+import 'package:genkit/genkit.dart' show CancellationController, CancellationToken;
 
 import 'package:nondesign/core/engine/engine_types.dart';
 
@@ -492,7 +492,8 @@ class RpcMethodTable {
 
   final Map<String, _UnaryHandler> _unary = <String, _UnaryHandler>{};
   final Map<String, _StreamHandler> _streaming = <String, _StreamHandler>{};
-  final Map<int, CancellationToken> _runs = <int, CancellationToken>{};
+  final Map<int, CancellationController> _runs =
+      <int, CancellationController>{};
   final Map<String, RpcAcpSession> _acpSessions = <String, RpcAcpSession>{};
   final Set<String> _videoJobs = <String>{};
   int _runSeq = 0;
@@ -573,7 +574,7 @@ class RpcMethodTable {
 
   /// Cancels a built-in agent run by id. Returns whether anything was running.
   bool cancelRun(int runId) {
-    final token = _runs.remove(runId);
+    final token = _runs.remove(runId); // CancellationController
     if (token == null) return false;
     token.cancel();
     return true;
@@ -817,9 +818,9 @@ class RpcMethodTable {
       workspaceHint: _str(params, 'workspace_hint'),
     );
 
-    final token = CancellationToken();
-    _runs[runId] = token;
-    final source = services.agent.run(run, token);
+    final cancelCtrl = CancellationController();
+    _runs[runId] = cancelCtrl;
+    final source = services.agent.run(run, cancelCtrl.token);
     final controller = StreamController<Map<String, dynamic>>();
     late final StreamSubscription<Map<String, dynamic>> sub;
     var terminal = false;
@@ -858,7 +859,7 @@ class RpcMethodTable {
     return RpcStreamHandle(
       controller.stream,
       onClientGone: () {
-        token.cancel();
+        cancelCtrl.cancel();
         _runs.remove(runId);
         unawaited(sub.cancel());
       },

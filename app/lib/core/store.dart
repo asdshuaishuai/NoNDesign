@@ -2,9 +2,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:ai_sdk_dart/ai_sdk_dart.dart' show CancellationToken;
+import 'package:genkit/genkit.dart' show CancellationController, Model;
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/foundation.dart' show debugPrint, defaultTargetPlatform, kDebugMode, kIsWeb, visibleForTesting;
+import 'package:flutter/foundation.dart'
+    show
+        debugPrint,
+        defaultTargetPlatform,
+        kDebugMode,
+        kIsWeb,
+        visibleForTesting;
 import 'package:material_ui/material_ui.dart' hide Flow;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,6 +19,12 @@ import 'api.dart';
 import 'app_paths.dart';
 import 'capability.dart';
 import 'capability_hub.dart';
+import 'creative/creative_gates.dart';
+import 'creative/creative_judge.dart';
+import 'creative/creative_score.dart';
+import 'creative/creative_schema.dart';
+import 'design_prototype.dart';
+import 'workspace_stage.dart';
 import 'dart_agent.dart';
 import 'ddp.dart';
 import 'engine/engine_service.dart';
@@ -33,7 +45,8 @@ import 'toast_service.dart';
 /// Store-originated notices no longer go through it (batch 04 owns the
 /// [ToastService]/ToastHost outlet); the key stays until the shell migration
 /// (batch 12) removes the remaining call sites.
-final GlobalKey<ScaffoldMessengerState> rootMessengerKey = GlobalKey<ScaffoldMessengerState>();
+final GlobalKey<ScaffoldMessengerState> rootMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
 
 const String _settingsKey = 'nondesign.settings';
 const String _serverTokenKey = 'nondesign.serverToken';
@@ -80,7 +93,9 @@ String _quote(Object? value) {
 /// 进程在写到一半被杀/断电时目标保持旧内容，不会留下半截 JSON——正是
 /// 崩溃恢复快照与聊天记录最需要的那条保证（此前是就地截断写）。
 Future<void> _writeStringAtomic(File target, String contents) async {
-  final temp = File('${target.path}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}');
+  final temp = File(
+    '${target.path}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}',
+  );
   try {
     await temp.writeAsString(contents, flush: true);
     await temp.rename(target.path);
@@ -116,7 +131,8 @@ class AppStore extends ChangeNotifier {
   /// 嵌在 [_handleAgentEvent] 里；没有这个缝，单测只能起真 run 才能覆盖，
   /// 而真 run 会打网络/写用户目录。事件形状按 `dart_agent` 的稳定事件面给。
   @visibleForTesting
-  Future<void> debugHandleAgentEvent(Map<String, dynamic> event) => _handleAgentEvent(event);
+  Future<void> debugHandleAgentEvent(Map<String, dynamic> event) =>
+      _handleAgentEvent(event);
 
   /// 发起一次模块 run（design 走完整管线，其余走工作区 run）。VM Service
   /// eval 调用后轮询 [debugRunVerdict] 拿终态——eval 无法直接 await Future。
@@ -137,11 +153,12 @@ class AppStore extends ChangeNotifier {
     ToastService? toasts,
     CapabilityHub? capabilities,
     LocalCore? localCore,
-  })  : projects = projects ?? ProjectService(),
-        toasts = toasts ?? ToastService.instance,
-        capabilities =
-            capabilities ?? CapabilityHub(platform: PlatformCapabilities.current()),
-        local = localCore {
+  }) : projects = projects ?? ProjectService(),
+       toasts = toasts ?? ToastService.instance,
+       capabilities =
+           capabilities ??
+           CapabilityHub(platform: PlatformCapabilities.current()),
+       local = localCore {
     // Test/embedded hosts may hand over a ready local runtime; production
     // builds it in [boot] from the bundled artifact.
     if (localCore != null) {
@@ -265,10 +282,13 @@ class AppStore extends ChangeNotifier {
   // 首页「作品集」展开卡（与艺术架同源，但只列热应用 / 3D / 视频）。
   /// 最近一次扫描到的作品集条目（新建工程/回主页时刷新）。
   List<PortfolioEntry> portfolioEntries = const [];
+
   /// 正在扫描（卡片上显示轻量进度，不占位）。
   bool portfolioLoading = false;
+
   /// 最近一次成功扫描的时间（毫秒）；null = 还没扫过。
   int? portfolioLoadedAt;
+
   /// 扫描失败的可见提示（人话）；null = 正常。
   String? portfolioError;
 
@@ -299,22 +319,27 @@ class AppStore extends ChangeNotifier {
   /// ask 卡在运行中点下的选项队列（先进先出）：本轮收尾后逐个自动续跑，
   /// 一轮收一个（run 的三个收尾 finally 统一调 [continueQueuedChatAction]）。
   final List<({String summary, String instruction})> _queuedChatActions = [];
+
   /// PLAN 阶段 write_doc 的流式正文缓冲（doc_delta 累积；doc_written 清空）。
   String liveDocText = '';
   String thinkingText = '';
   Map<String, dynamic> usage = const {};
   String? agentError;
+
   /// 失败事件的人话版本（`failed.message`）；不上屏的原始码只在 [agentError]。
   String? agentUserMessage;
 
   // chat stream 主面（docs/plan-chat-stream-shell.md §2 S1）
   /// 聊天流消息（用户/进度/A2UI/产物卡），随 chat.json 落盘。
   List<ChatMessage> chatMessages = [];
+
   /// 本轮 sendChat 的活动进度卡（对象引用——下标会被容量截断挪位）。
   ChatMessage? _chatCard;
+
   /// 本轮 run 由聊天流驱动：run 内不跳 view/rightTab（聊天流是主面，
   /// PLAN 不把用户拽去 docs 视图、BUILD 不拽去 design 视图）。
   bool chatActive = false;
+
   /// 嵌入式工作区宿主登记计数（`Workspace(embedded: true)` 的
   /// initState/dispose 各记一次；聊天分栏与画中画浮窗会各挂一份）。
   ///
@@ -331,6 +356,7 @@ class AppStore extends ChangeNotifier {
 
   /// 视图锁：聊天流驱动（本轮 run）或嵌入宿主在场时，view 不离开 'chat'。
   bool get _keepChatView => chatActive || embeddedHostActive;
+
   /// chat.json 串行写链（与 recovery.json 同一撕裂治理）。
   Future<void> _chatWriteQueue = Future.value();
 
@@ -346,11 +372,13 @@ class AppStore extends ChangeNotifier {
 
   String _deltaBuffer = '';
   Timer? _deltaTimer;
+
   /// thinking_delta 的 80ms 合帧缓冲：SSE 思考分片可达几十 Hz，逐片
   /// notifyListeners 会让全树（画布+左右栏）跟着重建——与 assistant_delta
   /// 同一治理。
   String _thinkingBuffer = '';
   Timer? _thinkingTimer;
+
   /// doc_delta 同一 80ms 合帧治理（PLAN 文档正文逐片 notify 是全树放大器）。
   String _docBuffer = '';
   Timer? _docTimer;
@@ -361,27 +389,33 @@ class AppStore extends ChangeNotifier {
   /// 崩溃/意外退出后重启可识别「半程任务」并保留文档与画布进度。
   String? _runInstruction;
   String _runStartedAt = '';
+
   /// ACP 外部智能体会话句柄（与 projectPath+agentId 绑定）。
   String? _acpSessionId;
   String? _acpSessionAgent;
   String? _acpSessionProject;
+
   /// 最近一次成功渲染的 preview canonical（run 期间的实时画布进度）。
   String? _liveCanonical;
   Timer? _recoveryTimer;
+
   /// 内置 Dart 循环（core/dart_agent.dart）在飞请求的本地取消令牌——
   /// dart 运行时无论移动/桌面都无服务器取消端点可调，取消即本地中断。
-  CancellationToken? _dartAgentCancel;
+  CancellationController? _dartAgentCancel;
+
   /// agentBusy 的置位时刻：卡死锁自愈的判据（热重载/进程级中断会跳过
   /// finally 清理，锁若不灭则之后所有 run 被 2s 静默拒绝——2026-11-20 实测）。
   DateTime? _agentBusySince;
+
   /// 工作区工具产出的「当前项目」：tool_start 记住请求名，tool_end 成功才
   /// 落进设置（失败的项目不存在，绝不假装工作台已经打开它）。
   String? _pendingWorkspaceArtifact;
   String? _pendingWorkspaceName;
+
   /// 测试注入：Build 循环的模型覆盖（scripted mock），生产恒 null——
   /// runDartAgent 经 OpenAIProvider 直连。
   @visibleForTesting
-  Object? debugAgentModelOverride;
+  Model? debugAgentModelOverride;
   String? _recoveryDirOverride;
 
   /// 进度快照 / 聊天记录所在根目录。
@@ -455,7 +489,10 @@ class AppStore extends ChangeNotifier {
     if (all.isEmpty) return null;
     return all.firstWhere(
       (m) => m.providerId == 'deepseek' && m.id.contains('v4.1'),
-      orElse: () => all.firstWhere((m) => m.providerId == 'deepseek', orElse: () => all.first),
+      orElse: () => all.firstWhere(
+        (m) => m.providerId == 'deepseek',
+        orElse: () => all.first,
+      ),
     );
   }
 
@@ -513,14 +550,19 @@ class AppStore extends ChangeNotifier {
       // independent of the "连接桌面" *client* mode below: a desktop may both
       // serve phones and use its own local engine.
       if (settings.desktopHostEnabled && canServeDesktop) {
-        await _startDesktopHostInternal(allowLan: settings.desktopHostAllowLan, persist: false);
+        await _startDesktopHostInternal(
+          allowLan: settings.desktopHostAllowLan,
+          persist: false,
+        );
       }
 
       // Probe a connected desktop only when the user actually chose that
       // runtime. A stale address saved from an earlier session must not turn
       // every cold start into the boot-error screen after the user switched
       // back to 内置.
-      remote = settings.agentRuntime == agentRuntimeServer ? _buildRemoteClient() : null;
+      remote = settings.agentRuntime == agentRuntimeServer
+          ? _buildRemoteClient()
+          : null;
       if (remote != null) {
         final status = await remote!.probe(attempts: 2);
         remoteStatus = status;
@@ -533,7 +575,8 @@ class AppStore extends ChangeNotifier {
           // A configured desktop that cannot be reached is a visible failure:
           // never a silent local fallback, or the user believes the desktop is
           // connected until a 3D/hot-app entry fails.
-          bootError = mobileDegradedBootError(
+          bootError =
+              mobileDegradedBootError(
                 status.technicalDetail ?? status.reason ?? status.message,
                 settings.serverUrl,
               ) ??
@@ -586,7 +629,10 @@ class AppStore extends ChangeNotifier {
         setView(envView);
       }
       ready = true;
-      _recoveryTimer = Timer.periodic(const Duration(seconds: 20), (_) => _persistRecovery());
+      _recoveryTimer = Timer.periodic(
+        const Duration(seconds: 20),
+        (_) => _persistRecovery(),
+      );
       notifyListeners();
     } catch (e) {
       // Defensive: nothing above should throw (engine/desktop failures are
@@ -599,7 +645,10 @@ class AppStore extends ChangeNotifier {
       ready = true;
       await _loadRecovery();
       await _loadChat();
-      _recoveryTimer ??= Timer.periodic(const Duration(seconds: 20), (_) => _persistRecovery());
+      _recoveryTimer ??= Timer.periodic(
+        const Duration(seconds: 20),
+        (_) => _persistRecovery(),
+      );
       notifyListeners();
     }
   }
@@ -608,7 +657,9 @@ class AppStore extends ChangeNotifier {
   /// [AppPaths.stateRoot] 指向真实持久位置。失败不致命：恢复功能降级但
   /// 不影响主流程（写入失败会有一条可见提示）。
   Future<void> _ensureDurableStateRoot() async {
-    if (!(Platform.isIOS || Platform.isAndroid || !AppPaths.hasDurableHome)) return;
+    if (!(Platform.isIOS || Platform.isAndroid || !AppPaths.hasDurableHome)) {
+      return;
+    }
     try {
       await AppPaths.appDocumentsDirectory();
     } catch (e) {
@@ -636,7 +687,10 @@ class AppStore extends ChangeNotifier {
         'local engine is disabled on this host until the device verification passes',
       );
       engine = service;
-      local = LocalCore(engine: EngineServiceAdapter(service), projects: projects);
+      local = LocalCore(
+        engine: EngineServiceAdapter(service),
+        projects: projects,
+      );
       capabilities.update(service.probeAvailability());
       return;
     }
@@ -644,9 +698,14 @@ class AppStore extends ChangeNotifier {
     List<dynamic>? snapshot;
     try {
       final data = await rootBundle.load('assets/engine/moonviz.wasm');
-      final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+      final bytes = data.buffer.asUint8List(
+        data.offsetInBytes,
+        data.lengthInBytes,
+      );
       try {
-        final raw = await rootBundle.loadString('assets/engine/components.json');
+        final raw = await rootBundle.loadString(
+          'assets/engine/components.json',
+        );
         final decoded = jsonDecode(raw);
         if (decoded is List) snapshot = decoded;
       } catch (_) {
@@ -655,8 +714,13 @@ class AppStore extends ChangeNotifier {
       // Full-platform path: classic wasm in an offscreen WebView. The native
       // wasm_run host remains a fallback only; `runtime.runtime` records which
       // one actually served the session.
-      service = await EngineService.startAuto(wasmBytes: bytes, componentsSnapshot: snapshot);
-      debugPrint('[engine] runtime: ${service.runtime ?? service.startupError}');
+      service = await EngineService.startAuto(
+        wasmBytes: bytes,
+        componentsSnapshot: snapshot,
+      );
+      debugPrint(
+        '[engine] runtime: ${service.runtime ?? service.startupError}',
+      );
     } catch (e) {
       service = EngineService.unavailable('$e');
       // 启动失败原因落盘 + 挂到服务上，用户侧 toast 的技术详情能直接看到
@@ -698,7 +762,9 @@ class AppStore extends ChangeNotifier {
   /// 幂等：registry 已有快照时不覆盖。
   /// [load] 仅供测试注入（widget test 的 flutter/assets 通道无人应答，
   /// rootBundle 会挂死而非抛错）。
-  Future<void> ensureBundledRegistry({Future<String> Function(String path)? load}) async {
+  Future<void> ensureBundledRegistry({
+    Future<String> Function(String path)? load,
+  }) async {
     if (registry.providers.isNotEmpty) return;
     try {
       final raw = await (load ?? rootBundle.loadString)('assets/models.json');
@@ -737,7 +803,10 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
     await _loadRecovery();
     await _loadChat();
-    _recoveryTimer ??= Timer.periodic(const Duration(seconds: 20), (_) => _persistRecovery());
+    _recoveryTimer ??= Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => _persistRecovery(),
+    );
     notifyListeners();
   }
 
@@ -783,7 +852,9 @@ class AppStore extends ChangeNotifier {
         workspaceDir = root.path;
         final localList = await projects.list(dir: root.path);
         if (localList.ok) {
-          await merge([for (final e in localList.projects) e.toJson()], 'workspace');
+          await merge([
+            for (final e in localList.projects) e.toJson(),
+          ], 'workspace');
         }
       } catch (_) {
         // Keep whatever the other sources produce.
@@ -793,7 +864,9 @@ class AppStore extends ChangeNotifier {
         try {
           final desktopList = await projects.list(dir: '$home/Desktop');
           if (desktopList.ok) {
-            await merge([for (final e in desktopList.projects) e.toJson()], 'desktop');
+            await merge([
+              for (final e in desktopList.projects) e.toJson(),
+            ], 'desktop');
           }
         } catch (_) {}
       }
@@ -850,7 +923,12 @@ class AppStore extends ChangeNotifier {
   List<Map<String, dynamic>> _loadRecent(SharedPreferences prefs) {
     try {
       final raw = jsonDecode(prefs.getString(_recentKey) ?? '[]');
-      if (raw is List) return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      if (raw is List) {
+        return raw
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
     } catch (_) {}
     return [];
   }
@@ -894,7 +972,8 @@ class AppStore extends ChangeNotifier {
   ///
   /// 与 [recoveryDir] 同一平台感知回退：没有 HOME 的受限沙箱不再写空。
   @visibleForTesting
-  String get settingsMirrorDir => _settingsMirrorDirOverride ?? AppPaths.stateRoot();
+  String get settingsMirrorDir =>
+      _settingsMirrorDirOverride ?? AppPaths.stateRoot();
   @visibleForTesting
   set settingsMirrorDir(String value) => _settingsMirrorDirOverride = value;
 
@@ -932,7 +1011,10 @@ class AppStore extends ChangeNotifier {
       if (view != pluginView) setView(pluginView);
       return;
     }
-    if (view == 'home' || view == 'docs' || view == 'play' || view == 'source') {
+    if (view == 'home' ||
+        view == 'docs' ||
+        view == 'play' ||
+        view == 'source') {
       setView('design');
     } else if (view.startsWith('plugin:')) {
       setView('design');
@@ -1025,7 +1107,7 @@ class AppStore extends ChangeNotifier {
       case 'hotapp_generate':
       case 'hotapp_refine':
       case 'hotapp_inspect':
-      case 'hotapp_from_prototype':
+      case 'design_verify_prototype':
       case 'video_create':
         return true;
       default:
@@ -1052,7 +1134,9 @@ class AppStore extends ChangeNotifier {
     final tool = (event['tool'] ?? '').toString();
     final pendingTool = _pendingWorkspaceArtifact;
     final pendingName = _pendingWorkspaceName;
-    if (pendingTool != tool || pendingName == null || pendingName.isEmpty) return;
+    if (pendingTool != tool || pendingName == null || pendingName.isEmpty) {
+      return;
+    }
     _pendingWorkspaceArtifact = null;
     _pendingWorkspaceName = null;
     if (event['ok'] == false) return; // 失败的调用没有产出项目
@@ -1083,7 +1167,9 @@ class AppStore extends ChangeNotifier {
 
   /// 视频工作台：示例下标 + 渲染 job（回来可重新接回轮询）。
   void setVideoState({int? sampleIdx, String? clipId, String? job}) {
-    if (clipId != null && clipId != settings.videoClipId) settings.videoClipId = clipId;
+    if (clipId != null && clipId != settings.videoClipId) {
+      settings.videoClipId = clipId;
+    }
     if (sampleIdx != null) settings.videoSampleIdx = sampleIdx;
     if (job != null) settings.videoJob = job;
     saveSettings();
@@ -1121,33 +1207,52 @@ class AppStore extends ChangeNotifier {
 
   /// 带墨迹块的文档（保存用）；无墨迹时剥旧块返回干净文档。
   String get mbtWithInk {
-    final clean = mbt.replaceFirst(RegExp(r'<!--\s*nondesign:ink[\s\S]*?-->\s*'), '').trimRight();
+    final clean = mbt
+        .replaceFirst(RegExp(r'<!--\s*nondesign:ink[\s\S]*?-->\s*'), '')
+        .trimRight();
     if (demoInks.isEmpty) return clean;
     return '$clean\n\n<!-- nondesign:ink ${jsonEncode(_inksJson)} -->';
   }
 
   /// 墨迹的可序列化形态（保存与崩溃快照共用；点坐标保留 4 位小数）。
-  Map<String, dynamic> get _inksJson => demoInks.map((k, v) => MapEntry(
+  Map<String, dynamic> get _inksJson => demoInks.map(
+    (k, v) => MapEntry(
       k,
       v
-          .map((s) => s
-              .map((o) => [
+          .map(
+            (s) => s
+                .map(
+                  (o) => [
                     double.parse(o.dx.toStringAsFixed(4)),
                     double.parse(o.dy.toStringAsFixed(4)),
-                  ])
-              .toList())
-          .toList()));
+                  ],
+                )
+                .toList(),
+          )
+          .toList(),
+    ),
+  );
 
   void _applyInksJson(Object? raw) {
     demoInks = {};
     if (raw is! Map || raw.isEmpty) return;
     try {
-      demoInks = raw.map((k, v) => MapEntry(
+      demoInks = raw.map(
+        (k, v) => MapEntry(
           k.toString(),
-          ((v as List).map((s) => ((s as List).map((pt) {
-                final pair = pt as List;
-                return Offset((pair[0] as num).toDouble(), (pair[1] as num).toDouble());
-              }).toList())).toList())));
+          ((v as List)
+              .map(
+                (s) => ((s as List).map((pt) {
+                  final pair = pt as List;
+                  return Offset(
+                    (pair[0] as num).toDouble(),
+                    (pair[1] as num).toDouble(),
+                  );
+                }).toList()),
+              )
+              .toList()),
+        ),
+      );
     } catch (_) {
       demoInks = {};
     }
@@ -1161,7 +1266,8 @@ class AppStore extends ChangeNotifier {
 
   void _parseInk(String documentMbt) {
     demoInks = {};
-    final m = RegExp(r'<!--\s*nondesign:ink\s*([\s\S]*?)-->').firstMatch(documentMbt);
+    final m = RegExp(r'<!--\s*nondesign:ink\s*([\s\S]*?)-->')
+        .firstMatch(documentMbt);
     if (m == null) return;
     try {
       _applyInksJson(jsonDecode(m.group(1) ?? ''));
@@ -1275,7 +1381,8 @@ class AppStore extends ChangeNotifier {
 
   /// True when a "连接桌面" runtime is configured (and, in production, probed
   /// good). Tests that inject a router directly are treated as configured.
-  bool get hasConnectedDesktop => remoteStatus.connected || (api?.hasRemote ?? false);
+  bool get hasConnectedDesktop =>
+      remoteStatus.connected || (api?.hasRemote ?? false);
 
   /// Gate used by every engine-touching entry point: when no runtime can
   /// answer, say so through the capability hub instead of doing nothing.
@@ -1306,12 +1413,17 @@ class AppStore extends ChangeNotifier {
     if (code.contains('llm_network')) return '连不上模型服务，请检查网络后重试';
     if (code.contains('llm_no_such_tool')) return '模型调用了一个不可用的操作，请重试';
     if (code.contains('timeout')) return '操作超时，请重试';
-    if (code.contains('not_found') || code.contains('file_not_found')) return '文件不存在或已移动';
+    if (code.contains('not_found') || code.contains('file_not_found')) {
+      return '文件不存在或已移动';
+    }
     return '操作没有完成，请重试';
   }
 
   /// 连接桌面的运行态快照（设置面板「检测连接」直接消费）。
-  Future<RemoteDesktopStatus> testRemoteConnection(String url, {String? token}) async {
+  Future<RemoteDesktopStatus> testRemoteConnection(
+    String url, {
+    String? token,
+  }) async {
     // An empty field means "use the code saved from last time", not "send no
     // credential": the host rejects every /v1 request without a token.
     final typed = (token ?? '').trim();
@@ -1336,7 +1448,10 @@ class AppStore extends ChangeNotifier {
   /// An unreachable desktop is recorded as such (capability unavailable) and
   /// [RemoteDesktopStatus.message] is returned for the settings surface — the
   /// local runtime keeps working, but nothing pretends the desktop is there.
-  Future<RemoteDesktopStatus> applyRemoteDesktop(String url, {String? token}) async {
+  Future<RemoteDesktopStatus> applyRemoteDesktop(
+    String url, {
+    String? token,
+  }) async {
     final normalized = RemoteDesktopClient.normalizeBaseUrl(url);
     settings.serverUrl = normalized;
     // Empty input keeps the saved code (the field is never "no auth"); only a
@@ -1436,7 +1551,10 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> _startDesktopHostInternal({bool? allowLan, required bool persist}) async {
+  Future<bool> _startDesktopHostInternal({
+    bool? allowLan,
+    required bool persist,
+  }) async {
     if (!canServeDesktop) {
       desktopHostError = '这台设备不能开启手机连接';
       notifyListeners();
@@ -1504,7 +1622,11 @@ class AppStore extends ChangeNotifier {
     historyIndex = stack.length - 1;
   }
 
-  bool _commit(Map<String, dynamic> raw, {bool recordHistory = true, bool markDirty = true}) {
+  bool _commit(
+    Map<String, dynamic> raw, {
+    bool recordHistory = true,
+    bool markDirty = true,
+  }) {
     final env = RenderEnvelope.fromJson(raw);
     if (!env.ok) {
       _toastWarn(failureMessage(env.error), env.error);
@@ -1526,16 +1648,20 @@ class AppStore extends ChangeNotifier {
     previewRender = null;
     // 拿到真实画板即不再是「空画布冒充空项目」的降级态（depython-1）。
     if (env.artboards.isNotEmpty) canvasPreviewDegraded = false;
-    if (env.artboards.isNotEmpty && !env.artboards.any((b) => b.id == activeBoard)) {
+    if (env.artboards.isNotEmpty &&
+        !env.artboards.any((b) => b.id == activeBoard)) {
       activeBoard = env.entry.isNotEmpty ? env.entry : env.artboards.first.id;
     }
     final activeB = render.board(activeBoard);
     if (activeB != null) {
-      if (selectedNode != null && !activeB.nodes.any((n) => n.id == selectedNode)) {
+      if (selectedNode != null &&
+          !activeB.nodes.any((n) => n.id == selectedNode)) {
         selectedNode = null;
       }
       if (selectedNodes.isNotEmpty) {
-        selectedNodes = selectedNodes.where((id) => activeB.nodes.any((n) => n.id == id)).toList();
+        selectedNodes = selectedNodes
+            .where((id) => activeB.nodes.any((n) => n.id == id))
+            .toList();
       }
     } else {
       selectedNode = null;
@@ -1560,7 +1686,8 @@ class AppStore extends ChangeNotifier {
   bool get canvasPreviewUnavailable =>
       hasProject && canvasPreviewDegraded && render.artboards.isEmpty;
 
-  bool get _switchAlreadyApproved => _switchApprovedGeneration == _editGeneration;
+  bool get _switchAlreadyApproved =>
+      _switchApprovedGeneration == _editGeneration;
 
   /// 项目切换审批：未保存改动 → 保存 / 放弃 / 取消。
   ///
@@ -1652,7 +1779,11 @@ class AppStore extends ChangeNotifier {
     String? templateId,
     bool empty = false,
   }) async {
-    final sizes = {'mobile': [390, 844], 'web': [1280, 800], 'desktop': [1440, 900]};
+    final sizes = {
+      'mobile': [390, 844],
+      'web': [1280, 800],
+      'desktop': [1440, 900],
+    };
     final size = sizes[device] ?? sizes['mobile']!;
     final resolvedName = name.trim().isEmpty ? 'untitled' : name.trim();
     // 移动端没有文件选择器：新项目在应用文档目录先分配默认保存路径，
@@ -1692,7 +1823,9 @@ class AppStore extends ChangeNotifier {
         notifyListeners();
         return true;
       }
-      final op = templateId != null ? 'template $templateId home' : 'create home ${size[0]} ${size[1]}';
+      final op = templateId != null
+          ? 'template $templateId home'
+          : 'create home ${size[0]} ${size[1]}';
       final res = await api!.apply('', op);
       // 往返期间有 run 启动（入口门之后的小竞态窗口）：此刻换项目
       // 会把 run 的终态 canonical 提交进新项目——放弃交换（apply
@@ -1762,11 +1895,16 @@ class AppStore extends ChangeNotifier {
         .replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '-')
         .replaceAll(RegExp(r'^\.+'), '')
         .trim();
-    final base = cleaned.isEmpty ? 'project-${DateTime.now().millisecondsSinceEpoch}' : cleaned;
+    final base = cleaned.isEmpty
+        ? 'project-${DateTime.now().millisecondsSinceEpoch}'
+        : cleaned;
     return base.length > 60 ? base.substring(0, 60) : base;
   }
 
-  Future<OpenResult> openProjectPath(String path, {String password = ''}) async {
+  Future<OpenResult> openProjectPath(
+    String path, {
+    String password = '',
+  }) async {
     // agentBusy 门（core-1）：与 newProject 同根——run 在飞时切项目，
     // 在飞 run 的终态 canonical 会覆盖刚打开的项目。
     if (agentBusy) {
@@ -1784,7 +1922,10 @@ class AppStore extends ChangeNotifier {
     });
   }
 
-  Future<OpenResult> _openProjectPathNow(String path, {String password = ''}) async {
+  Future<OpenResult> _openProjectPathNow(
+    String path, {
+    String password = '',
+  }) async {
     _invalidateAcpSession(); // 切项目 → 外部智能体会话重建
     try {
       // Project files live on the client: the local library opens them, and a
@@ -1909,8 +2050,11 @@ class AppStore extends ChangeNotifier {
       // 人话失败提示，别让异常从保存入口逸出（聊天面的保存按钮）。
       try {
         final location = await getSaveLocation(
-          suggestedName: '${projectName.isEmpty ? 'untitled' : projectName}.ddp',
-          acceptedTypeGroups: const [XTypeGroup(label: 'NaN 项目', extensions: ['ddp'])],
+          suggestedName:
+              '${projectName.isEmpty ? 'untitled' : projectName}.ddp',
+          acceptedTypeGroups: const [
+            XTypeGroup(label: 'NaN 项目', extensions: ['ddp']),
+          ],
         );
         if (location == null) return false;
         target = location.path;
@@ -1962,7 +2106,9 @@ class AppStore extends ChangeNotifier {
       }
       final location = await getSaveLocation(
         suggestedName: '$projectName.html',
-        acceptedTypeGroups: const [XTypeGroup(label: 'HTML', extensions: ['html'])],
+        acceptedTypeGroups: const [
+          XTypeGroup(label: 'HTML', extensions: ['html']),
+        ],
       );
       if (location == null) return false;
       await File(location.path).writeAsString(res['html'] as String);
@@ -1977,7 +2123,9 @@ class AppStore extends ChangeNotifier {
   /// 导出 Figma 包：桌面端落盘后返回目录，不弹保存框。
   Future<bool> exportFigma() async {
     try {
-      final res = await api?.exportFigma(mbt) ?? {'ok': false, 'error': 'remote_unavailable'};
+      final res =
+          await api?.exportFigma(mbt) ??
+          {'ok': false, 'error': 'remote_unavailable'};
       if (res['ok'] != true || res['dir'] is! String) {
         if (res['error'] == 'remote_unavailable') {
           _toastWarn('导出 Figma 包需要先连接桌面');
@@ -2006,7 +2154,9 @@ class AppStore extends ChangeNotifier {
       }
       final location = await getSaveLocation(
         suggestedName: '$projectName-$activeBoard.svg',
-        acceptedTypeGroups: const [XTypeGroup(label: 'SVG', extensions: ['svg'])],
+        acceptedTypeGroups: const [
+          XTypeGroup(label: 'SVG', extensions: ['svg']),
+        ],
       );
       if (location == null) return false;
       await File(location.path).writeAsString(data['svg'] as String);
@@ -2053,11 +2203,16 @@ class AppStore extends ChangeNotifier {
   /// 清扫的成果覆盖回去。render 失败也采纳 canonical（mbt + dirty），
   /// 画面等下一次渲染恢复——生成成果绝不丢。
   Future<Map<String, dynamic>> applyGeneratePage(
-          String intent, String name, Map<String, dynamic> spec) =>
-      _chainOp(() => _applyGeneratePageNow(intent, name, spec));
+    String intent,
+    String name,
+    Map<String, dynamic> spec,
+  ) => _chainOp(() => _applyGeneratePageNow(intent, name, spec));
 
   Future<Map<String, dynamic>> _applyGeneratePageNow(
-      String intent, String name, Map<String, dynamic> spec) async {
+    String intent,
+    String name,
+    Map<String, dynamic> spec,
+  ) async {
     if (!engineReady) return {'ok': false, 'error': 'engine_unavailable'};
     try {
       final res = await api!.generate(mbt, intent, name, spec);
@@ -2076,7 +2231,10 @@ class AppStore extends ChangeNotifier {
   Future<Map<String, dynamic>> applySessionMutation(String name, String? arg) =>
       _chainOp(() => _applySessionMutationNow(name, arg));
 
-  Future<Map<String, dynamic>> _applySessionMutationNow(String name, String? arg) async {
+  Future<Map<String, dynamic>> _applySessionMutationNow(
+    String name,
+    String? arg,
+  ) async {
     if (!engineReady) return {'ok': false, 'error': 'engine_unavailable'};
     try {
       final res = await api!.session(mbt, name, arg);
@@ -2131,12 +2289,32 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  Future<bool> createBoard({String? templateId, String? name, double? width, double? height}) async {
+  Future<bool> createBoard({
+    String? templateId,
+    String? name,
+    double? width,
+    double? height,
+  }) async {
     final count = render.artboards.length + 1;
-    final id = (name ?? templateId ?? 'screen_$count').replaceAll(RegExp(r'[^A-Za-z0-9_]'), '_');
-    final w = (width ?? (render.artboards.isNotEmpty ? render.artboards.first.width : 390)).round();
-    final h = (height ?? (render.artboards.isNotEmpty ? render.artboards.first.height : 844)).round();
-    final op = templateId != null ? 'template $templateId $id' : 'create $id $w $h';
+    final id = (name ?? templateId ?? 'screen_$count').replaceAll(
+      RegExp(r'[^A-Za-z0-9_]'),
+      '_',
+    );
+    final w =
+        (width ??
+                (render.artboards.isNotEmpty
+                    ? render.artboards.first.width
+                    : 390))
+            .round();
+    final h =
+        (height ??
+                (render.artboards.isNotEmpty
+                    ? render.artboards.first.height
+                    : 844))
+            .round();
+    final op = templateId != null
+        ? 'template $templateId $id'
+        : 'create $id $w $h';
     final ok = await applyOp(op);
     if (ok) {
       activeBoard = templateId ?? id;
@@ -2196,7 +2374,8 @@ class AppStore extends ChangeNotifier {
   /// ⌘V：把剪贴板节点复制一份（偏移 24,24），返回新节点 id（失败为 null）。
   Future<String?> pasteNode() async {
     if (clipboardNodeId == null || activeBoard == null) return null;
-    final newId = '${clipboardNodeId}_p${DateTime.now().millisecondsSinceEpoch % 100000}';
+    final newId =
+        '${clipboardNodeId}_p${DateTime.now().millisecondsSinceEpoch % 100000}';
     final ok = await applyOp('copy $activeBoard $clipboardNodeId $newId 24 24');
     return ok ? newId : null;
   }
@@ -2231,7 +2410,11 @@ class AppStore extends ChangeNotifier {
 
   /// Define a state patch on a node. Engine-accepted k=v keys:
   /// fill / text_color / stroke / text / radius / font_size.
-  Future<bool> setNodeState(String id, String stateName, Map<String, dynamic> props) async {
+  Future<bool> setNodeState(
+    String id,
+    String stateName,
+    Map<String, dynamic> props,
+  ) async {
     if (activeBoard == null) return false;
     final parts = props.entries
         .where((e) => e.value != null)
@@ -2243,7 +2426,8 @@ class AppStore extends ChangeNotifier {
 
   /// Switch a node's current state with a toggle (persists a [cur:<name>]
   /// marker). The set-state op takes no artboard: `set-state <node> <state> toggle`.
-  Future<bool> toggleNodeState(String id, String state) => applyOp('set-state $id $state toggle');
+  Future<bool> toggleNodeState(String id, String state) =>
+      applyOp('set-state $id $state toggle');
 
   /// 引擎对齐：left/right/top/bottom/hcenter/vcenter，≥2 节点。
   Future<bool> alignNodes(List<String> ids, String mode) {
@@ -2286,7 +2470,8 @@ class AppStore extends ChangeNotifier {
 
   Future<bool> setTheme(String theme) => applyOp('theme $theme');
 
-  Future<bool> setToken(String name, String value) => applyOp('token $name $value');
+  Future<bool> setToken(String name, String value) =>
+      applyOp('token $name $value');
 
   /// Regenerate the active board against responsive breakpoints (engine creates
   /// _tablet/_desktop variants). Standard apply envelope; commits directly.
@@ -2347,34 +2532,49 @@ class AppStore extends ChangeNotifier {
   void mergeExtractedPalette(Map<String, dynamic> data) {
     final raw = data['color_tokens'];
     if (raw is! List) return;
-    final tokens = raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
-      ..sort((a, b) {
-        final ua = (a['usage'] as num?) ?? 0;
-        final ub = (b['usage'] as num?) ?? 0;
-        return ub.compareTo(ua);
-      });
+    final tokens =
+        raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+          ..sort((a, b) {
+            final ua = (a['usage'] as num?) ?? 0;
+            final ub = (b['usage'] as num?) ?? 0;
+            return ub.compareTo(ua);
+          });
     final palette = Map.of(docs.design.palette);
     for (final t in tokens) {
       final name = t['name']?.toString();
       final value = t['value']?.toString();
-      if (name != null && value != null && value.isNotEmpty) palette[name] = value;
+      if (name != null && value != null && value.isNotEmpty) {
+        palette[name] = value;
+      }
     }
     final d = docs.design;
-    setDocs(design: DesignSpec(
-      palette: palette,
-      h1: d.h1, h2: d.h2, body: d.body,
-      spacing: d.spacing,
-      radiusSm: d.radiusSm, radiusMd: d.radiusMd, radiusLg: d.radiusLg,
-      rules: d.rules, notes: d.notes,
-    ));
+    setDocs(
+      design: DesignSpec(
+        palette: palette,
+        h1: d.h1,
+        h2: d.h2,
+        body: d.body,
+        spacing: d.spacing,
+        radiusSm: d.radiusSm,
+        radiusMd: d.radiusMd,
+        radiusLg: d.radiusLg,
+        rules: d.rules,
+        notes: d.notes,
+      ),
+    );
   }
 
   /// 规范是否仍是默认值（未被 PLAN 写入/未手编/未提取过）。
   bool get designIsDefault {
     final d = docs.design;
-    if (d.notes.isNotEmpty || d.rules.length != DesignSpec.defaults.rules.length) return false;
+    if (d.notes.isNotEmpty ||
+        d.rules.length != DesignSpec.defaults.rules.length) {
+      return false;
+    }
     for (final e in DesignSpec.defaults.palette.entries) {
-      if (d.palette[e.key]?.toUpperCase() != e.value.toUpperCase()) return false;
+      if (d.palette[e.key]?.toUpperCase() != e.value.toUpperCase()) {
+        return false;
+      }
     }
     return true;
   }
@@ -2382,7 +2582,8 @@ class AppStore extends ChangeNotifier {
   /// deepDesign「校验并渲染」对齐：把源码编辑器的整篇提交走引擎校验
   /// （render 面，比 op 路径更严——真实重叠债会拒绝），通过即 commit。
   /// 与 applyOp/autoFix 同队列串行（整篇覆盖型提交更需要排队防交错）。
-  Future<bool> applySource(String text) => _chainOp(() => _applySourceNow(text));
+  Future<bool> applySource(String text) =>
+      _chainOp(() => _applySourceNow(text));
 
   Future<bool> _applySourceNow(String text) async {
     if (agentBusy) {
@@ -2445,7 +2646,8 @@ class AppStore extends ChangeNotifier {
   /// so we re-render before committing (same guard shape as the agent done path).
   /// 与 applyOp/autoFix 同队列串行（core-2）：与在飞 op 的 HTTP 往返交错
   /// 会以陈旧 mbt 为基底提交——队列注释宣称的不变量对所有变更入口成立。
-  Future<bool> constrainLayout(String intent) => _chainOp(() => _constrainLayoutNow(intent));
+  Future<bool> constrainLayout(String intent) =>
+      _chainOp(() => _constrainLayoutNow(intent));
 
   Future<bool> _constrainLayoutNow(String intent) async {
     if (agentBusy) {
@@ -2465,7 +2667,9 @@ class AppStore extends ChangeNotifier {
         return false;
       }
       final canonical = res['mbt']?.toString() ?? '';
-      final rendered = canonical.isNotEmpty ? await api!.render(canonical) : null;
+      final rendered = canonical.isNotEmpty
+          ? await api!.render(canonical)
+          : null;
       if (rendered == null || rendered['ok'] != true) {
         _toastWarn('布局没有生效，请重试', rendered?['error'] ?? 'render_failed');
         return false;
@@ -2541,7 +2745,9 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> _jumpHistoryNow(int index) async {
-    if (!engineReady || agentBusy || index < 0 || index >= history.length) return;
+    if (!engineReady || agentBusy || index < 0 || index >= history.length) {
+      return;
+    }
     final target = history[index];
     final res = await api!.render(target);
     if (res['ok'] != true) {
@@ -2553,7 +2759,9 @@ class AppStore extends ChangeNotifier {
     historyIndex = index;
     previewRender = null;
     selectedNode = null;
-    activeBoard = render.entry.isNotEmpty ? render.entry : (render.artboards.isEmpty ? null : render.artboards.first.id);
+    activeBoard = render.entry.isNotEmpty
+        ? render.entry
+        : (render.artboards.isEmpty ? null : render.artboards.first.id);
     dirty = true;
     notifyListeners();
   }
@@ -2576,7 +2784,8 @@ class AppStore extends ChangeNotifier {
 
   Future<bool> runBuild(String instruction) => _runAgent('build', instruction);
 
-  Future<bool> runRefine(String instruction) => _runAgent('refine', instruction);
+  Future<bool> runRefine(String instruction) =>
+      _runAgent('refine', instruction);
 
   /// 发消息给外部 ACP 智能体（设置里选择后生效）。会话幂等：同一
   /// 项目+agent 复用已建立的连接；事件形状与 NaN 管线同族，时间线直接复用。
@@ -2637,10 +2846,14 @@ class AppStore extends ChangeNotifier {
     try {
       // 会话幂等：项目或 agent 变了就重建。
       final project = projectPath ?? '~';
-      if (_acpSessionId == null || _acpSessionAgent != agentId || _acpSessionProject != project) {
+      if (_acpSessionId == null ||
+          _acpSessionAgent != agentId ||
+          _acpSessionProject != project) {
         final res = await api!.acpNewSession(agentId, projectPath);
         if (res['ok'] != true) {
-          throw Exception('${res['error'] ?? 'session failed'}${res['note'] != null ? ' · ${res['note']}' : ''}');
+          throw Exception(
+            '${res['error'] ?? 'session failed'}${res['note'] != null ? ' · ${res['note']}' : ''}',
+          );
         }
         _acpSessionId = res['sessionId']?.toString();
         _acpSessionAgent = agentId;
@@ -2665,11 +2878,13 @@ class AppStore extends ChangeNotifier {
           case 'tool_start':
             _flushDelta();
             _flushThinking();
-            timeline.add(TimelineEntry(
-              kind: 'tool',
-              tool: (ev['tool'] ?? 'tool').toString(),
-              running: true,
-            ));
+            timeline.add(
+              TimelineEntry(
+                kind: 'tool',
+                tool: (ev['tool'] ?? 'tool').toString(),
+                running: true,
+              ),
+            );
             notifyListeners();
             break;
           case 'tool_end':
@@ -2677,7 +2892,9 @@ class AppStore extends ChangeNotifier {
               if (timeline[i].kind == 'tool' && timeline[i].running) {
                 timeline[i].running = false;
                 timeline[i].ok = ev['ok'] != false;
-                timeline[i].ms = (ev['ms'] is num) ? (ev['ms'] as num).toInt() : null;
+                timeline[i].ms = (ev['ms'] is num)
+                    ? (ev['ms'] as num).toInt()
+                    : null;
                 timeline[i].preview = ev['preview']?.toString();
                 timeline[i].error = ev['error']?.toString();
                 timeline[i].message = ev['message']?.toString();
@@ -2687,7 +2904,12 @@ class AppStore extends ChangeNotifier {
             notifyListeners();
             break;
           case 'note':
-            timeline.add(TimelineEntry.note((ev['label'] ?? '').toString(), (ev['detail'] ?? '').toString()));
+            timeline.add(
+              TimelineEntry.note(
+                (ev['label'] ?? '').toString(),
+                (ev['detail'] ?? '').toString(),
+              ),
+            );
             notifyListeners();
             break;
           case 'done':
@@ -2701,9 +2923,19 @@ class AppStore extends ChangeNotifier {
       }
       _flushDelta();
       _flushThinking();
-      timeline.add(success
-          ? TimelineEntry.finish(true, '外部智能体完成', agentLabel.isEmpty ? null : agentLabel)
-          : TimelineEntry.finish(false, '外部智能体异常结束', failureMessage(agentError)));
+      timeline.add(
+        success
+            ? TimelineEntry.finish(
+                true,
+                '外部智能体完成',
+                agentLabel.isEmpty ? null : agentLabel,
+              )
+            : TimelineEntry.finish(
+                false,
+                '外部智能体异常结束',
+                failureMessage(agentError),
+              ),
+      );
     } catch (e) {
       agentError = e.toString();
       _flushDelta();
@@ -2736,7 +2968,9 @@ class AppStore extends ChangeNotifier {
 
   void _clearStaleAgentLock() {
     if (!_agentLockStale) return;
-    debugPrint('[store] stale agent lock cleared (busy since $_agentBusySince)');
+    debugPrint(
+      '[store] stale agent lock cleared (busy since $_agentBusySince)',
+    );
     _agentBusySince = null;
     agentBusy = false;
     chatActive = false;
@@ -2769,15 +3003,24 @@ class AppStore extends ChangeNotifier {
       return false;
     }
     if (!hasProject) {
-      final name = brief.replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), '').trim();
-      await newProject(name: name.length > 18 ? name.substring(0, 18) : (name.isEmpty ? 'untitled' : name), empty: true);
+      final name = brief
+          .replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), '')
+          .trim();
+      await newProject(
+        name: name.length > 18
+            ? name.substring(0, 18)
+            : (name.isEmpty ? 'untitled' : name),
+        empty: true,
+      );
     }
     final planned = await runPlan(brief);
     if (!planned || docs.prd.trim().isEmpty) {
       _toastWarn('文档还没有写完，继续补全或先调整画布');
       return false;
     }
-    return runBuild('请根据 PRD 与 UI 说明生成完整可交互原型。先规划页面连接，再逐屏生成，最后连线并自检。\n\nBRIEF:\n$brief');
+    return runBuild(
+      '请根据 PRD 与 UI 说明生成完整可交互原型。先规划页面连接，再逐屏生成，最后连线并自检。\n\nBRIEF:\n$brief',
+    );
   }
 
   Future<void> cancelAgent() async {
@@ -2786,9 +3029,9 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
     // 内置 Dart 循环在飞：无论移动/桌面都没有服务器取消端点可调——
     // 取消即本地中断（token 透传到 streamText 的 abortSignal）。
-    final token = _dartAgentCancel;
-    if (token != null) {
-      token.cancel();
+    final controller = _dartAgentCancel;
+    if (controller != null) {
+      controller.cancel();
       _toast('正在停止…');
       return;
     }
@@ -2861,9 +3104,13 @@ class AppStore extends ChangeNotifier {
         // 目标工作台是 3D / 视频 / 热应用时不建设计项目：四个工作区互相独立，
         // 给视频任务塞一个空设计项目只会污染最近项目列表（用户裁决 2026-11-18）。
         if (!workspaceRun && !hasProject && api != null) {
-          final name = brief.replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), '').trim();
+          final name = brief
+              .replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), '')
+              .trim();
           final created = await newProject(
-            name: name.length > 18 ? name.substring(0, 18) : (name.isEmpty ? 'untitled' : name),
+            name: name.length > 18
+                ? name.substring(0, 18)
+                : (name.isEmpty ? 'untitled' : name),
             empty: true,
           );
           if (!created) {
@@ -2875,7 +3122,8 @@ class AppStore extends ChangeNotifier {
         }
         if (workspaceRun) {
           // 用户已经选好工作台：直接进工作区，面板里能看见 NaN 正在干活。
-          if (view != workspaceView && view != 'play' &&
+          if (view != workspaceView &&
+              view != 'play' &&
               PlatformCapabilities.current().isDesktop) {
             setView(workspaceView);
           }
@@ -2908,13 +3156,17 @@ class AppStore extends ChangeNotifier {
         card.ok = false;
         card.detail = failureMessage('text_only');
       } else if (ok && built) {
-        card.text = workspaceRun ? '${workspaceModeLabel(targetMode)}已更新' : '原型已生成';
+        card.text = workspaceRun
+            ? '${workspaceModeLabel(targetMode)}已更新'
+            : '原型已生成';
         if (!workspaceRun) {
-          appendChat(ChatMessage.artifact(
-            kind: artifactPrototype,
-            title: projectName,
-            detail: '可交互原型已生成，点开进入工作区',
-          ));
+          appendChat(
+            ChatMessage.artifact(
+              kind: artifactPrototype,
+              title: projectName,
+              detail: '可交互原型已生成，点开进入工作区',
+            ),
+          );
         }
       } else {
         card.ok = ok;
@@ -2931,7 +3183,9 @@ class AppStore extends ChangeNotifier {
     if (card == null) return;
     switch (type) {
       case 'tool_start':
-        card.steps.add(ChatStep(label: (event['tool'] ?? 'tool').toString(), running: true));
+        card.steps.add(
+          ChatStep(label: (event['tool'] ?? 'tool').toString(), running: true),
+        );
       case 'tool_end':
         final tool = (event['tool'] ?? '').toString();
         for (final s in card.steps.reversed) {
@@ -2947,44 +3201,59 @@ class AppStore extends ChangeNotifier {
           }
         }
       case 'note':
-        card.steps.add(ChatStep(
-          label: (event['label'] ?? '').toString(),
-          detail: (event['detail'] ?? '').toString(),
-        ));
+        card.steps.add(
+          ChatStep(
+            label: (event['label'] ?? '').toString(),
+            detail: (event['detail'] ?? '').toString(),
+          ),
+        );
       case 'page_generated':
-        card.steps.add(ChatStep(
-          label: '生成画板 ${event['artboard'] ?? ''}',
-          detail: event['summary']?.toString(),
-        ));
+        card.steps.add(
+          ChatStep(
+            label: '生成画板 ${event['artboard'] ?? ''}',
+            detail: event['summary']?.toString(),
+          ),
+        );
       case 'assistant_text':
         // 助手正文独立成卡（不在进度卡里折叠）；streamText 此时仍被
         // _handleAgentEvent 的同名分支持有，读同一份不清空。
         if (event['final'] == true) {
-          final text =
-              streamText.trim().isNotEmpty ? streamText : (event['text'] ?? '').toString();
-          if (text.trim().isNotEmpty) chatMessages.add(ChatMessage.assistant(text));
+          final text = streamText.trim().isNotEmpty
+              ? streamText
+              : (event['text'] ?? '').toString();
+          if (text.trim().isNotEmpty) {
+            chatMessages.add(ChatMessage.assistant(text));
+          }
         }
       case 'doc_written':
         final kind = (event['kind'] ?? '').toString();
         final content = event['content'];
-        card.steps.add(ChatStep(
-          label: kind == 'prd' ? '撰写产品文档' : '撰写 UI 说明',
-          detail: content is String && content.isNotEmpty ? '${content.length} 字' : null,
-        ));
+        card.steps.add(
+          ChatStep(
+            label: kind == 'prd' ? '撰写产品文档' : '撰写 UI 说明',
+            detail: content is String && content.isNotEmpty
+                ? '${content.length} 字'
+                : null,
+          ),
+        );
       case 'design_spec_written':
         card.steps.add(ChatStep(label: '写入设计规范'));
       case 'review_round':
-        card.steps.add(ChatStep(
-          label: '质量审查 第${event['round']}轮',
-          detail: (event['detail'] ?? '').toString(),
-        ));
+        card.steps.add(
+          ChatStep(
+            label: '质量审查 第${event['round']}轮',
+            detail: (event['detail'] ?? '').toString(),
+          ),
+        );
       case 'cleanup':
         final removed = event['removed'];
-        card.steps.add(ChatStep(
-          label: removed is List && removed.isNotEmpty
-              ? '清理 ${removed.length} 块空画板'
-              : '清理空画板',
-        ));
+        card.steps.add(
+          ChatStep(
+            label: removed is List && removed.isNotEmpty
+                ? '清理 ${removed.length} 块空画板'
+                : '清理空画板',
+          ),
+        );
       case 'failed':
         final message = event['message'];
         card.detail = message is String && message.isNotEmpty
@@ -3015,19 +3284,25 @@ class AppStore extends ChangeNotifier {
   /// 动作摘要作为用户消息入列并自动续跑一轮。agentBusy 时**入队不丢**——
   /// ask 卡的本意就是「选择作为下一条指令回来」，模型经常边问边继续手头的
   /// 交付；本轮收尾的 finally 统一调 [continueQueuedChatAction] 自动续跑。
-  Future<void> handleChatAction(String name, Map<String, dynamic> context) async {
+  Future<void> handleChatAction(
+    String name,
+    Map<String, dynamic> context,
+  ) async {
     // 用户气泡只放人话（「选择：X」）；结构化上下文只进本轮运行指令——
     // 此前把 jsonEncode(context) 与会话内部标签一起拼进气泡，并且随
     // chat.json 落盘（审查 a2ui-action-summary-json）。
     final label = name.trim().isEmpty ? '这个选项' : name.trim();
     final summary = '选择：$label';
-    final instruction = context.isEmpty ? summary : '$summary\n${jsonEncode(context)}';
+    final instruction = context.isEmpty
+        ? summary
+        : '$summary\n${jsonEncode(context)}';
     // 答题卡带 switch_to：用户选定目标工作台——真正切换（设置+视图）再
     // 续跑，而不是在当前工作台里换个措辞再问一遍（2026-11-20 用户裁决）。
     final switchTo = normalizeWorkspaceMode(context['switch_to']?.toString());
     if (agentBusy) {
       _queuedChatActions.add((summary: summary, instruction: instruction));
-      if (switchTo != workspaceModeAuto && switchTo != settings.chatWorkspaceMode) {
+      if (switchTo != workspaceModeAuto &&
+          switchTo != settings.chatWorkspaceMode) {
         // 切换立即生效：本轮收尾后续跑时已在目标工作台。
         await setChatWorkspaceMode(switchTo);
         _switchViewForWorkspace(switchTo);
@@ -3038,7 +3313,8 @@ class AppStore extends ChangeNotifier {
     }
     appendChat(ChatMessage.user(summary));
     unawaited(_persistChat());
-    if (switchTo != workspaceModeAuto && switchTo != settings.chatWorkspaceMode) {
+    if (switchTo != workspaceModeAuto &&
+        switchTo != settings.chatWorkspaceMode) {
       await setChatWorkspaceMode(switchTo);
       _switchViewForWorkspace(switchTo);
       // _runChatTurn 按 settings.chatWorkspaceMode 分流——先切再跑。
@@ -3093,8 +3369,9 @@ class AppStore extends ChangeNotifier {
         .where((a) => a.id != '__seed')
         .map((a) => PrototypeScreenSpec(id: a.id, title: a.name))
         .toList();
-    final links =
-        render.flows.map((f) => PrototypeLinkSpec(from: f.from, to: f.to)).toList();
+    final links = render.flows
+        .map((f) => PrototypeLinkSpec(from: f.from, to: f.to))
+        .toList();
     if (artboards.isEmpty) {
       _toastWarn('画布上还没有原型', '先生成原型，再由原型生成热应用。');
       return;
@@ -3117,7 +3394,10 @@ class AppStore extends ChangeNotifier {
     }
     _hotappFromPrototypeBusy = true;
     notifyListeners();
-    _toast('正在由原型生成「原型验证 demo」…', '${artboards.length} 屏 / ${links.length} 条跳转');
+    _toast(
+      '正在由原型生成「原型验证 demo」…',
+      '${artboards.length} 屏 / ${links.length} 条跳转',
+    );
     try {
       final service = HotAppService(library: await NonAppLibrary.open());
       // 一个项目只对应一个「由原型生成」的热应用：同名应用已存在就原地更新，
@@ -3155,8 +3435,10 @@ class AppStore extends ChangeNotifier {
       setView('plugin:hotapp');
       final verb = replaceCurrent ? '更新' : '生成';
       if (result.verified) {
-        _toastSuccess('热应用已$verb并通过验证',
-            '${artboards.length} 屏 / ${links.length} 条跳转全部覆盖，页面在本机直接运行。');
+        _toastSuccess(
+          '热应用已$verb并通过验证',
+          '${artboards.length} 屏 / ${links.length} 条跳转全部覆盖，页面在本机直接运行。',
+        );
       } else {
         _toastWarn('热应用已$verb，但原型覆盖不完全', result.failureSummary);
       }
@@ -3170,9 +3452,527 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  bool _designPrototypeBusy = false;
+
+  /// 「验证原型」在飞：设计工具条据此显示进度并禁止重复点击。
+  bool get designPrototypeBusy => _designPrototypeBusy;
+
+  /// 双面组件的数据面（设计验证原型流程）：阶段条 + 最近一次结果卡。
+  List<WorkspaceStage> designPrototypeStages = const <WorkspaceStage>[];
+  DesignPrototypeDocument? designPrototypeResult;
+  String? designPrototypeError;
+
+  /// 3D 工作台双面数据面（由 v2 工具结果回调推进；工作台只读渲染）。
+  List<WorkspaceStage> threePipelineStages = const <WorkspaceStage>[];
+  String? threeGateVerdict;
+  List<String> threeGateFixHints = const <String>[];
+  String? threeGateError;
+  int threeGateGateCount = 0;
+
+  void dismissThreeGateResult() {
+    threePipelineStages = const <WorkspaceStage>[];
+    threeGateVerdict = null;
+    threeGateFixHints = const <String>[];
+    threeGateError = null;
+    threeGateGateCount = 0;
+    notifyListeners();
+  }
+
+  /// v2 工具结果 → 阶段线（migrate/plan_validate/measure/check）。
+  void applyThreeWorkspaceEvent(String kind, Map<String, dynamic> result) {
+    final bool ok = result['ok'] == true;
+    final String id = switch (kind) {
+      'migrate' => 'migrate',
+      'plan_validate' => 'plan',
+      'measure' => 'measure',
+      'build' => 'build',
+      'check' => 'check',
+      'placement' => 'placement',
+      _ => kind,
+    };
+    final String label = switch (kind) {
+      'migrate' => '迁移旧工作区',
+      'plan_validate' => '校验计划',
+      'measure' => '读取测量',
+      'build' => '构建场景',
+      'check' => '确定性门',
+      'placement' => '摆放门',
+      _ => kind,
+    };
+    String detail = '';
+    if (kind == 'migrate' && result['already_migrated'] == true) detail = '已迁移';
+    if (kind == 'plan_validate' && ok) detail = '通过';
+    if (kind == 'measure' && ok) detail = '${result['part_count'] ?? 0} 件';
+    if (kind == 'build' && ok) {
+      detail = result['mode'] == 'scene' ? 'scene.json → src' : 'src 就绪';
+    }
+    if (kind == 'check' && ok) detail = '${result['verdict'] ?? ''}';
+    if (kind == 'placement' && ok) detail = '${result['verdict'] ?? ''}';
+    final List<WorkspaceStage> next = <WorkspaceStage>[
+      for (final WorkspaceStage stage in threePipelineStages)
+        if (stage.id != id) stage,
+      WorkspaceStage(
+        id: id,
+        label: label,
+        detail: detail,
+        state: ok ? WorkspaceStageState.done : WorkspaceStageState.failed,
+      ),
+    ];
+    threePipelineStages = next;
+    if (kind == 'check' || kind == 'placement') {
+      threeGateVerdict = result['verdict']?.toString();
+      threeGateGateCount = result['gates'] is List ? (result['gates'] as List).length : 0;
+      threeGateFixHints = result['fix_hints'] is List
+          ? (result['fix_hints'] as List).map((item) => item.toString()).toList(growable: false)
+          : const <String>[];
+      threeGateError = ok ? null : (result['message']?.toString() ?? '3D 确定性门没有跑完');
+    }
+    if (!ok) {
+      threeGateError = result['message']?.toString() ?? '3D 工作区操作没有完成';
+    }
+    notifyListeners();
+  }
+
+  /// 收起结果卡（不清项目里的 prototype 元数据）。
+  void dismissDesignPrototypeResult() {
+    designPrototypeResult = null;
+    designPrototypeStages = const <WorkspaceStage>[];
+    designPrototypeError = null;
+    notifyListeners();
+  }
+
+  /// 设计模块：把当前画布原型派生为项目内验证原型（不调模型），并落进
+  /// `.ddp` 的 docs 元数据（随项目走、不另开 sidecar）。
+  Future<void> verifyDesignPrototype() async {
+    if (_designPrototypeBusy) return;
+    if (!hasProject) {
+      _toastWarn('先打开一个设计项目', '验证原型会写进当前项目的 .ddp。');
+      return;
+    }
+    if (agentBusy) {
+      _toastWarn('NaN 正在工作，等这一轮结束再验证原型。');
+      return;
+    }
+    final boards = render.artboards.where((a) => a.id != '__seed').toList();
+    if (boards.isEmpty) {
+      _toastWarn('画布上还没有原型', '先生成原型，再验证覆盖。');
+      return;
+    }
+    designPrototypeResult = null;
+    designPrototypeError = null;
+    designPrototypeStages = const <WorkspaceStage>[
+      WorkspaceStage(
+        id: 'build',
+        label: '构建自包含原型',
+        state: WorkspaceStageState.running,
+      ),
+    ];
+    _designPrototypeBusy = true;
+    notifyListeners();
+    try {
+      final doc = DesignPrototypeBuilder.build(
+        projectName: projectName,
+        entry: _prototypeEntry(render, boards.first.id),
+        screens: <DesignPrototypeScreen>[
+          for (final board in boards)
+            DesignPrototypeScreen(
+              id: board.id,
+              title: board.name,
+              width: board.width,
+              height: board.height,
+              svg: board.svg,
+            ),
+        ],
+        flows: <DesignPrototypeFlow>[
+          for (final flow in render.flows)
+            DesignPrototypeFlow(
+              from: flow.from,
+              to: flow.to,
+              trigger: flow.trigger,
+            ),
+        ],
+        palette: docs.design.palette,
+        builtAt: DateTime.now().toUtc().toIso8601String(),
+      );
+      designPrototypeStages = <WorkspaceStage>[
+        WorkspaceStage(
+          id: 'build',
+          label: '构建自包含原型',
+          detail: '${boards.length} 屏',
+          state: WorkspaceStageState.done,
+        ),
+        WorkspaceStage(
+          id: 'verify',
+          label: '覆盖验证',
+          detail: doc.verified ? '全部覆盖' : '有未覆盖项',
+          state: doc.verified ? WorkspaceStageState.done : WorkspaceStageState.failed,
+        ),
+      ];
+      notifyListeners();
+      final saved = await _persistDesignPrototype(doc);
+      designPrototypeStages = <WorkspaceStage>[
+        ...designPrototypeStages,
+        WorkspaceStage(
+          id: 'persist',
+          label: '写入项目',
+          detail: saved ? '已保存' : '项目未保存',
+          state: saved ? WorkspaceStageState.done : WorkspaceStageState.failed,
+        ),
+      ];
+      designPrototypeResult = doc;
+      notifyListeners();
+      appendChat(
+        ChatMessage.artifact(
+          kind: artifactPrototype,
+          title: projectName,
+          detail: doc.verified
+              ? '验证原型已生成：全部画板与跳转覆盖'
+              : '验证原型已生成，但有未覆盖项（${_prototypeFailureSummary(doc)}）',
+        ),
+      );
+      unawaited(_persistChat());
+      if (doc.verified) {
+        _toastSuccess(
+          '原型验证通过',
+          '${boards.length} 屏 / ${render.flows.length} 条跳转全部覆盖${saved ? '，已存入项目' : '（项目还未保存）'}。',
+        );
+      } else {
+        _toastWarn('原型还不完整', _prototypeFailureSummary(doc));
+      }
+    } catch (error) {
+      designPrototypeError = '验证原型没有完成，请稍后重试';
+      designPrototypeStages = const <WorkspaceStage>[
+        WorkspaceStage(
+          id: 'build',
+          label: '构建自包含原型',
+          detail: '失败',
+          state: WorkspaceStageState.failed,
+        ),
+      ];
+      _toastError('验证原型没有完成', '$error');
+    } finally {
+      _designPrototypeBusy = false;
+      notifyListeners();
+    }
+  }
+
+  /// 设计 agent run 的 `design_verify_prototype` 回调：用 run 的 mbt 渲染
+  /// （工具里读到的屏/跳转是同一份 canonical 的投影），构建、验证并落盘。
+  Future<Map<String, dynamic>> _agentVerifyDesignPrototype({
+    required String mbt,
+    required List<PrototypeScreenSpec> screens,
+    required List<PrototypeLinkSpec> flows,
+  }) async {
+    designPrototypeResult = null;
+    designPrototypeError = null;
+    designPrototypeStages = const <WorkspaceStage>[
+      WorkspaceStage(
+        id: 'build',
+        label: '构建自包含原型',
+        state: WorkspaceStageState.running,
+      ),
+    ];
+    notifyListeners();
+    RenderEnvelope envelope = render;
+    if (api != null) {
+      try {
+        final raw = await api!.render(mbt);
+        envelope = RenderEnvelope.fromJson(raw);
+      } catch (error) {
+        return <String, dynamic>{
+          'ok': false,
+          'error': 'engine_unavailable',
+          'message': failureMessage('engine_unavailable'),
+          'detail': '$error',
+        };
+      }
+      if (!envelope.ok) {
+        return <String, dynamic>{
+          'ok': false,
+          'error': 'engine_unavailable',
+          'message': failureMessage('engine_unavailable'),
+          if (envelope.error != null) 'detail': envelope.error,
+        };
+      }
+    }
+    final boards = envelope.artboards.where((a) => a.id != '__seed').toList();
+    if (screens.isEmpty || boards.isEmpty) {
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'prototype_empty',
+        'message': failureMessage('prototype_empty'),
+      };
+    }
+    final doc = DesignPrototypeBuilder.build(
+      projectName: projectName,
+      entry: _prototypeEntry(envelope, screens.first.id),
+      screens: <DesignPrototypeScreen>[
+        for (final spec in screens)
+          () {
+            final board = envelope.artboards
+                .where((a) => a.id == spec.id)
+                .toList(growable: false);
+            final match = board.isEmpty ? null : board.first;
+            return DesignPrototypeScreen(
+              id: spec.id,
+              title: spec.title.isNotEmpty
+                  ? spec.title
+                  : (match?.name ?? spec.id),
+              width: match?.width ?? 390,
+              height: match?.height ?? 844,
+              svg: match?.svg ?? '',
+            );
+          }(),
+      ],
+      flows: <DesignPrototypeFlow>[
+        for (final flow in flows)
+          DesignPrototypeFlow(from: flow.from, to: flow.to),
+      ],
+      palette: docs.design.palette,
+      builtAt: DateTime.now().toUtc().toIso8601String(),
+    );
+    designPrototypeStages = <WorkspaceStage>[
+      WorkspaceStage(
+        id: 'build',
+        label: '构建自包含原型',
+        detail: '${screens.length} 屏',
+        state: WorkspaceStageState.done,
+      ),
+      WorkspaceStage(
+        id: 'verify',
+        label: '覆盖验证',
+        detail: doc.verified ? '全部覆盖' : '有未覆盖项',
+        state: doc.verified ? WorkspaceStageState.done : WorkspaceStageState.failed,
+      ),
+    ];
+    notifyListeners();
+    final saved = await _persistDesignPrototype(doc);
+    designPrototypeStages = <WorkspaceStage>[
+      ...designPrototypeStages,
+      WorkspaceStage(
+        id: 'persist',
+        label: '写入项目',
+        detail: saved ? '已保存' : '项目未保存',
+        state: saved ? WorkspaceStageState.done : WorkspaceStageState.failed,
+      ),
+    ];
+    designPrototypeResult = doc;
+    notifyListeners();
+    appendChat(
+      ChatMessage.artifact(
+        kind: artifactPrototype,
+        title: projectName,
+        detail: doc.verified
+            ? '验证原型已生成：全部画板与跳转覆盖'
+            : '验证原型已生成，但有未覆盖项（${_prototypeFailureSummary(doc)}）',
+      ),
+    );
+    unawaited(_persistChat());
+    final failures = doc.checks
+        .where((check) => !check.ok)
+        .map((check) => check.detail)
+        .toList(growable: false);
+    return <String, dynamic>{
+      'ok': true,
+      'verified': doc.verified,
+      'saved': saved,
+      'screens': screens.length,
+      'flows': flows.length,
+      if (failures.isNotEmpty) 'failures': failures.join('；'),
+      'checks': doc.checks
+          .map((check) => check.toJson())
+          .toList(growable: false),
+    };
+  }
+
+  String _prototypeEntry(RenderEnvelope envelope, String fallback) {
+    final entry = envelope.entry.trim();
+    if (entry.isNotEmpty &&
+        envelope.artboards.any((a) => a.id == entry && a.id != '__seed')) {
+      return entry;
+    }
+    return fallback;
+  }
+
+  String _prototypeFailureSummary(DesignPrototypeDocument doc) => doc.checks
+      .where((check) => !check.ok)
+      .map((check) => check.detail)
+      .join('；');
+
+  /// 把验证原型元数据写进当前 `.ddp` 的 docs 注释；项目未保存时留在内存
+  /// （dirty=true），下一次正常保存会带上。
+  Future<bool> _persistDesignPrototype(DesignPrototypeDocument doc) async {
+    docs = Docs(
+      prd: docs.prd,
+      ui: docs.ui,
+      design: docs.design,
+      prototype: doc.toProjectMetadata(),
+    );
+    dirty = true;
+    final target = projectPath;
+    if (target == null) return false;
+    try {
+      final res = api != null
+          ? await api!.saveProject(
+              mbt: mbtWithInk,
+              path: target,
+              password: password,
+              docs: docs.toJson(),
+            )
+          : await _savePrototypeLocally(target);
+      if (res['ok'] == true) {
+        dirty = false;
+        lastSavedAt = DateTime.now().millisecondsSinceEpoch;
+        await _remember(target, projectName);
+        return true;
+      }
+      debugPrint('[prototype] save failed: ${res['error']}');
+    } catch (error) {
+      debugPrint('[prototype] save failed: $error');
+    }
+    return false;
+  }
+
+  /// 盲评 runner（生产接线）：校验图路径/大小 → CreativeJudgeService（fresh context）。
+  /// 图片必须是应用项目根内的 PNG/JPEG/WebP；降级结果原样返回（不静默冒充分数）。
+  Future<Map<String, dynamic>> _agentCreativeJudge({
+    required String brief,
+    required String kind,
+    required String track,
+    required List<String> imagePaths,
+    String planDigest = '',
+    List<String> acceptance = const <String>[],
+    List<String> measuredFacts = const <String>[],
+    Map<String, dynamic>? gates,
+  }) async {
+    final kindValue = CreativeKind.values
+        .where((value) => value.wire == kind)
+        .cast<CreativeKind?>()
+        .firstWhere((value) => value != null, orElse: () => null);
+    final trackValue = CreativeTrack.values
+        .where((value) => value.wire == track)
+        .cast<CreativeTrack?>()
+        .firstWhere((value) => value != null, orElse: () => null);
+    if (kindValue == null || trackValue == null) {
+      return <String, dynamic>{
+        'ok': false,
+        'degraded': true,
+        'reason': 'judge_bad_target',
+        'detail': 'kind/track 不在 creative 契约枚举内',
+      };
+    }
+    final root = await AppPaths.projectsRoot();
+    final rootPath = root.absolute.path.replaceAll('\\', '/');
+    final images = <CreativeJudgeImage>[];
+    for (final rawPath in imagePaths.take(8)) {
+      final file = File(rawPath.trim()).absolute;
+      final normalized = file.path.replaceAll('\\', '/');
+      if (!normalized.startsWith(rootPath)) {
+        return <String, dynamic>{
+          'ok': false,
+          'degraded': true,
+          'reason': 'judge_image_invalid',
+          'detail': '评审图必须位于本机项目目录内：$rawPath',
+        };
+      }
+      if (!await file.exists()) {
+        return <String, dynamic>{
+          'ok': false,
+          'degraded': true,
+          'reason': 'judge_image_invalid',
+          'detail': '评审图不存在：$rawPath',
+        };
+      }
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty || bytes.length > 8 * 1024 * 1024) {
+        return <String, dynamic>{
+          'ok': false,
+          'degraded': true,
+          'reason': 'judge_image_invalid',
+          'detail': '评审图为空或超过 8MB：$rawPath',
+        };
+      }
+      final lower = normalized.toLowerCase();
+      final mime = lower.endsWith('.png')
+          ? 'image/png'
+          : lower.endsWith('.webp')
+              ? 'image/webp'
+              : lower.endsWith('.jpg') || lower.endsWith('.jpeg')
+                  ? 'image/jpeg'
+                  : null;
+      if (mime == null) {
+        return <String, dynamic>{
+          'ok': false,
+          'degraded': true,
+          'reason': 'judge_image_invalid',
+          'detail': '评审图必须是 PNG/JPEG/WebP：$rawPath',
+        };
+      }
+      images.add(CreativeJudgeImage(
+        label: '${images.length + 1}:${file.uri.pathSegments.last}',
+        bytes: bytes,
+        mimeType: mime,
+      ));
+    }
+    CreativeGatesReport? report;
+    if (gates != null) {
+      final parsed = CreativeGatesReport.parse(gates);
+      report = parsed.value;
+      if (report == null) {
+        return <String, dynamic>{
+          'ok': false,
+          'degraded': true,
+          'reason': 'judge_bad_gates',
+          'detail': parsed.validation.issues.join('；'),
+        };
+      }
+    }
+    final settingsValue = settings;
+    final base = settingsValue.baseUrl.trim().isNotEmpty
+        ? settingsValue.baseUrl.trim()
+        : (model?.baseUrl.trim() ?? '');
+    final outcome = await const CreativeJudgeService().judge(
+      request: CreativeJudgeRequest(
+        kind: kindValue,
+        track: trackValue,
+        brief: brief,
+        planDigest: planDigest,
+        acceptance: acceptance,
+        measuredFacts: measuredFacts,
+        gates: report,
+        images: images,
+        weights: CreativeRubrics.forKind(kindValue),
+      ),
+      model: settingsValue.modelId,
+      baseUrl: base,
+      apiKey: settingsValue.apiKey,
+      thinkingLevel: settingsValue.thinkingLevel,
+    );
+    final json = outcome.toJson();
+    if (outcome.degraded) json['ok'] = false;
+    return json;
+  }
+
+  Future<Map<String, dynamic>> _savePrototypeLocally(String target) async {
+    final result = await projects.save(
+      path: target,
+      mbt: mbtWithInk,
+      password: password,
+      docs: docs.toJson(),
+    );
+    return <String, dynamic>{
+      'ok': result.ok,
+      'path': result.path,
+      'error': result.error,
+    };
+  }
+
   /// 项目名 → 合法热应用名（小写字母/数字/短横线/下划线）。
   String _prototypeAppName() {
-    final lowered = projectName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]+'), '-');
+    final lowered = projectName.toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9_-]+'),
+      '-',
+    );
     var cleaned = lowered.replaceAll(RegExp(r'-{2,}'), '-');
     while (cleaned.startsWith('-')) {
       cleaned = cleaned.substring(1);
@@ -3282,7 +4082,9 @@ class AppStore extends ChangeNotifier {
     chatMessages = [];
     _chatCard = null;
     try {
-      final del = _chatWriteQueue.then((_) => File('$recoveryDir/chat.json').delete());
+      final del = _chatWriteQueue.then(
+        (_) => File('$recoveryDir/chat.json').delete(),
+      );
       _chatWriteQueue = del.then<void>((_) {}, onError: (Object _) {});
       await del;
     } catch (_) {}
@@ -3311,7 +4113,10 @@ class AppStore extends ChangeNotifier {
     }
     var base = settings.baseUrl.trim();
     if (base.isEmpty) base = selected?.baseUrl.trim() ?? '';
-    if (base.isEmpty) base = _builtInBaseUrls[settings.providerId] ?? _builtInBaseUrls['openai']!;
+    if (base.isEmpty) {
+      base =
+          _builtInBaseUrls[settings.providerId] ?? _builtInBaseUrls['openai']!;
+    }
     if (settings.baseUrl.trim().isEmpty) {
       settings.baseUrl = base; // 空端点曾让 OpenAIProvider 发到空 baseUrl 静默失败
       unawaited(saveSettings());
@@ -3325,7 +4130,11 @@ class AppStore extends ChangeNotifier {
     runId = DateTime.now().microsecondsSinceEpoch % 0x7fffffff;
     agentBusy = true;
     _agentBusySince = DateTime.now();
-    agentPhase = mode == 'plan' ? 'planning' : mode == 'refine' ? 'refining' : 'building';
+    agentPhase = mode == 'plan'
+        ? 'planning'
+        : mode == 'refine'
+        ? 'refining'
+        : 'building';
     _runInstruction = instruction;
     _runStartedAt = DateTime.now().toIso8601String();
     _liveCanonical = null;
@@ -3347,10 +4156,10 @@ class AppStore extends ChangeNotifier {
         text: mode == 'plan'
             ? '理解需求，撰写产品文档'
             : mode == 'refine'
-                ? '定位改动，保持设计系统'
-                : mode == 'workspace'
-                    ? '在${workspaceModeLabel(settings.chatWorkspaceMode)}工作台执行'
-                    : '规划页面并落画布',
+            ? '定位改动，保持设计系统'
+            : mode == 'workspace'
+            ? '在${workspaceModeLabel(settings.chatWorkspaceMode)}工作台执行'
+            : '规划页面并落画布',
       ),
     ];
     // 聊天流驱动的 run 与嵌入宿主内发起的 run 不跳视图（聊天流是主面；
@@ -3371,7 +4180,7 @@ class AppStore extends ChangeNotifier {
         view = 'design';
       }
     }
-    _dartAgentCancel = CancellationToken();
+    _dartAgentCancel = CancellationController();
     notifyListeners();
 
     var success = false;
@@ -3408,10 +4217,41 @@ class AppStore extends ChangeNotifier {
                 baseUrl: base,
                 apiKey: settings.apiKey,
                 thinkingLevel: settings.thinkingLevel,
+                designPrototypeVerify:
+                    ({
+                      required String mbt,
+                      required List<PrototypeScreenSpec> screens,
+                      required List<PrototypeLinkSpec> flows,
+                    }) => _agentVerifyDesignPrototype(
+                      mbt: mbt,
+                      screens: screens,
+                      flows: flows,
+                    ),
+                threeWorkspaceEvent: applyThreeWorkspaceEvent,
+                creativeJudgeRunner:
+                    ({
+                      required String brief,
+                      required String kind,
+                      required String track,
+                      required List<String> imagePaths,
+                      String planDigest = '',
+                      List<String> acceptance = const <String>[],
+                      List<String> measuredFacts = const <String>[],
+                      Map<String, dynamic>? gates,
+                    }) => _agentCreativeJudge(
+                      brief: brief,
+                      kind: kind,
+                      track: track,
+                      imagePaths: imagePaths,
+                      planDigest: planDigest,
+                      acceptance: acceptance,
+                      measuredFacts: measuredFacts,
+                      gates: gates,
+                    ),
               ),
-        // 测试注入 scripted mock；生产恒 null（OpenAIProvider 直连）。
+        // 测试注入 scripted mock（genkit defineModel）；生产恒 null（插件直连）。
         modelOverride: debugAgentModelOverride,
-        abortSignal: _dartAgentCancel,
+        abortSignal: _dartAgentCancel?.token,
         // streamText 的 TimeoutConfiguration.total 是整轮 run（含全部工具
         // 循环）的硬死线，不是单请求超时。推理模型（如 step-5-preview）单轮
         // 流式推理就要 1-5 分钟，一轮 run 常含 3-5 轮工具循环，10 分钟会烧穿
@@ -3457,7 +4297,9 @@ class AppStore extends ChangeNotifier {
         final cleaned = instruction
             .replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), '')
             .trim();
-        projectName = cleaned.length > 18 ? cleaned.substring(0, 18) : (cleaned.isEmpty ? 'untitled' : cleaned);
+        projectName = cleaned.length > 18
+            ? cleaned.substring(0, 18)
+            : (cleaned.isEmpty ? 'untitled' : cleaned);
         render = RenderEnvelope.empty();
         previewRender = null;
         activeBoard = null;
@@ -3474,8 +4316,10 @@ class AppStore extends ChangeNotifier {
     } finally {
       // 诊断：run 终态行（模式/成功/停止原因/错误码）——排查「跑完但失败」
       // 时不用再猜是哪一段断的。
-      debugPrint('[agent] run end mode=$mode ok=$success '
-          'stop=${stopReason ?? '-'} error=${agentError ?? '-'}');
+      debugPrint(
+        '[agent] run end mode=$mode ok=$success '
+        'stop=${stopReason ?? '-'} error=${agentError ?? '-'}',
+      );
       _dartAgentCancel = null;
       _flushStreamAsAssistant();
       _flushThinking();
@@ -3553,7 +4397,11 @@ class AppStore extends ChangeNotifier {
     runId = DateTime.now().microsecondsSinceEpoch % 0x7fffffff;
     agentBusy = true;
     _agentBusySince = DateTime.now();
-    agentPhase = mode == 'plan' ? 'planning' : mode == 'refine' ? 'refining' : 'building';
+    agentPhase = mode == 'plan'
+        ? 'planning'
+        : mode == 'refine'
+        ? 'refining'
+        : 'building';
     _runInstruction = instruction;
     _runStartedAt = DateTime.now().toIso8601String();
     _liveCanonical = null;
@@ -3577,10 +4425,10 @@ class AppStore extends ChangeNotifier {
         text: mode == 'plan'
             ? '理解 brief，撰写产品文档'
             : mode == 'refine'
-                ? '定位改动，保持设计系统'
-                : mode == 'workspace'
-                    ? '在${workspaceModeLabel(settings.chatWorkspaceMode)}工作台执行'
-                    : '规划页面并生成原型',
+            ? '定位改动，保持设计系统'
+            : mode == 'workspace'
+            ? '在${workspaceModeLabel(settings.chatWorkspaceMode)}工作台执行'
+            : '规划页面并生成原型',
       ),
     ];
     // 同 _runDartLoop：聊天流驱动/嵌入宿主内的 run 不跳视图。
@@ -3609,7 +4457,9 @@ class AppStore extends ChangeNotifier {
       'docs': docs.toJson(),
       'design_spec': docs.design.toJson(),
       'model': selected.id,
-      'base_url': settings.baseUrl.isNotEmpty ? settings.baseUrl : selected.baseUrl,
+      'base_url': settings.baseUrl.isNotEmpty
+          ? settings.baseUrl
+          : selected.baseUrl,
       'api_key': settings.apiKey,
       'protocol': selected.protocol,
       'thinking_level': settings.thinkingLevel,
@@ -3623,7 +4473,9 @@ class AppStore extends ChangeNotifier {
     var orphaned = false;
     final myRun = runId!;
     try {
-      await for (final event in (api ?? NoNDesignApi.runtime()).agentRun(body)) {
+      await for (final event in (api ?? NoNDesignApi.runtime()).agentRun(
+        body,
+      )) {
         // run 归属校验（core-1 兜底）：SSE 事件不携带 run id，以 stream
         // 启动时捕获的 runId 为归属令牌——store.runId 被换（项目切换等
         // 路径）即本 run 已废弃，剩余事件（含 done/failed 的 canonical
@@ -3649,7 +4501,9 @@ class AppStore extends ChangeNotifier {
             item.error = agentError;
           }
         }
-        timeline.add(TimelineEntry.finish(false, 'NaN 异常结束', failureMessage(agentError)));
+        timeline.add(
+          TimelineEntry.finish(false, 'NaN 异常结束', failureMessage(agentError)),
+        );
         _toastError('NaN 异常结束，已提交的部分已保留', agentError);
       }
     } catch (e) {
@@ -3683,7 +4537,12 @@ class AppStore extends ChangeNotifier {
     switch (type) {
       case 'note':
         _flushStreamAsAssistant();
-        timeline.add(TimelineEntry.note((event['label'] ?? '').toString(), (event['detail'] ?? '').toString()));
+        timeline.add(
+          TimelineEntry.note(
+            (event['label'] ?? '').toString(),
+            (event['detail'] ?? '').toString(),
+          ),
+        );
         break;
       case 'tool_start':
         _flushStreamAsAssistant();
@@ -3691,12 +4550,16 @@ class AppStore extends ChangeNotifier {
         // 设计画布（桌面壳；演示不拽走，手机聊天优先壳不切）。
         followAgentWorkspace((event['tool'] ?? '').toString());
         _rememberWorkspaceArtifact(event);
-        timeline.add(TimelineEntry(
-          kind: 'tool',
-          tool: (event['tool'] ?? '').toString(),
-          args: event['args'] is Map ? Map<String, dynamic>.from(event['args'] as Map) : null,
-          running: true,
-        ));
+        timeline.add(
+          TimelineEntry(
+            kind: 'tool',
+            tool: (event['tool'] ?? '').toString(),
+            args: event['args'] is Map
+                ? Map<String, dynamic>.from(event['args'] as Map)
+                : null,
+            running: true,
+          ),
+        );
         break;
       case 'tool_end':
         final tool = (event['tool'] ?? '').toString();
@@ -3705,7 +4568,9 @@ class AppStore extends ChangeNotifier {
           if (item.kind == 'tool' && item.running && item.tool == tool) {
             item.running = false;
             item.ok = event['ok'] != false;
-            item.ms = (event['ms'] is num) ? (event['ms'] as num).toInt() : null;
+            item.ms = (event['ms'] is num)
+                ? (event['ms'] as num).toInt()
+                : null;
             item.preview = event['preview']?.toString();
             item.error = event['error']?.toString();
             item.message = event['message']?.toString();
@@ -3720,29 +4585,35 @@ class AppStore extends ChangeNotifier {
         // handleChatAction → a new turn (no test-only construction).
         final messages = event['messages'];
         if (messages is List && messages.isNotEmpty) {
-          appendChat(ChatMessage.a2ui(
-            List<Object?>.from(messages),
-            text: (event['text'] ?? '').toString(),
-          ));
+          appendChat(
+            ChatMessage.a2ui(
+              List<Object?>.from(messages),
+              text: (event['text'] ?? '').toString(),
+            ),
+          );
           unawaited(_persistChat());
         }
         break;
       case 'page_generated':
-        timeline.add(TimelineEntry.note(
-          '生成画板 ${event['artboard'] ?? ''}',
-          [
-            if (event['template'] != null) '模板 ${event['template']}',
-            if (event['score'] != null) '评分 ${event['score']}',
-            if (event['summary'] != null) event['summary'].toString(),
-          ].join(' · '),
-        ));
+        timeline.add(
+          TimelineEntry.note(
+            '生成画板 ${event['artboard'] ?? ''}',
+            [
+              if (event['template'] != null) '模板 ${event['template']}',
+              if (event['score'] != null) '评分 ${event['score']}',
+              if (event['summary'] != null) event['summary'].toString(),
+            ].join(' · '),
+          ),
+        );
         break;
       case 'review_round':
         _flushStreamAsAssistant();
-        timeline.add(TimelineEntry.note(
-          '质量审查 · 第${event['round']}轮',
-          (event['detail'] ?? '').toString(),
-        ));
+        timeline.add(
+          TimelineEntry.note(
+            '质量审查 · 第${event['round']}轮',
+            (event['detail'] ?? '').toString(),
+          ),
+        );
         break;
       case 'assistant_delta':
         _deltaBuffer += (event['text'] ?? '').toString();
@@ -3758,9 +4629,12 @@ class AppStore extends ChangeNotifier {
       case 'assistant_text':
         if (event['final'] == true) {
           _flushDelta();
-          final text =
-              streamText.trim().isNotEmpty ? streamText : (event['text'] ?? '').toString();
-          if (text.trim().isNotEmpty) timeline.add(TimelineEntry.assistant(text));
+          final text = streamText.trim().isNotEmpty
+              ? streamText
+              : (event['text'] ?? '').toString();
+          if (text.trim().isNotEmpty) {
+            timeline.add(TimelineEntry.assistant(text));
+          }
           streamText = '';
         }
         break;
@@ -3792,7 +4666,11 @@ class AppStore extends ChangeNotifier {
         notifyListeners();
         break;
       case 'design_spec_written':
-        docs = Docs(prd: docs.prd, ui: docs.ui, design: DesignSpec.fromJson(event['spec']));
+        docs = Docs(
+          prd: docs.prd,
+          ui: docs.ui,
+          design: DesignSpec.fromJson(event['spec']),
+        );
         notifyListeners();
         break;
       case 'preview':
@@ -3827,15 +4705,21 @@ class AppStore extends ChangeNotifier {
       case 'cleanup':
         final removed = event['removed'];
         if (removed is List && removed.isNotEmpty) {
-          timeline.add(TimelineEntry.note('清理空画板', '已移除 ${removed.length} 块空画板'));
+          timeline.add(
+            TimelineEntry.note('清理空画板', '已移除 ${removed.length} 块空画板'),
+          );
         }
         break;
       case 'failed':
         agentError = (event['error'] ?? 'failed').toString();
         // 诊断日志：原始异常只进控制台（用户可见面仍走文案映射）。
-        debugPrint('[agent] failed raw=${event['error']} detail=${event['detail']}');
+        debugPrint(
+          '[agent] failed raw=${event['error']} detail=${event['detail']}',
+        );
         final userMessage = event['message'];
-        if (userMessage is String && userMessage.isNotEmpty) agentUserMessage = userMessage;
+        if (userMessage is String && userMessage.isNotEmpty) {
+          agentUserMessage = userMessage;
+        }
         final partial = event['mbt_b64']?.toString();
         if (partial != null && partial.isNotEmpty && engineReady) {
           final partialMbt = utf8.decode(base64Decode(partial));
@@ -3860,7 +4744,9 @@ class AppStore extends ChangeNotifier {
             item.message ??= agentUserMessage;
           }
         }
-        timeline.add(TimelineEntry.finish(false, 'NaN 异常结束', failureMessage(agentError)));
+        timeline.add(
+          TimelineEntry.finish(false, 'NaN 异常结束', failureMessage(agentError)),
+        );
         break;
       case 'done':
         final finalMbt = event['mbt_b64']?.toString();
@@ -3917,7 +4803,9 @@ class AppStore extends ChangeNotifier {
   void _flushThinking() {
     if (_thinkingBuffer.isEmpty) return;
     thinkingText += _thinkingBuffer;
-    if (thinkingText.length > 6000) thinkingText = thinkingText.substring(thinkingText.length - 6000);
+    if (thinkingText.length > 6000) {
+      thinkingText = thinkingText.substring(thinkingText.length - 6000);
+    }
     _thinkingBuffer = '';
     notifyListeners();
   }
@@ -3951,8 +4839,7 @@ class AppStore extends ChangeNotifier {
         // 撕裂/半截/形状不对：保留 .bad 副本并让用户知道，不静默丢快照
         // （审查 sec-recovery-chat-writes-not-atomic）。
         await _quarantineBroken(file);
-        _notifyBrokenStateOnce(
-            '上次的进度记录损坏，已保留一份副本，当前项目不受影响');
+        _notifyBrokenStateOnce('上次的进度记录损坏，已保留一份副本，当前项目不受影响');
         return;
       }
       recovery = parsed;
@@ -4065,7 +4952,9 @@ class AppStore extends ChangeNotifier {
         await Directory(recoveryDir).create(recursive: true);
         final payload = await _recoveryPayload();
         await _writeStringAtomic(
-            File('$recoveryDir/recovery.json'), jsonEncode(payload));
+          File('$recoveryDir/recovery.json'),
+          jsonEncode(payload),
+        );
       });
       _recoveryWriteQueue = write.then<void>((_) {}, onError: (Object _) {});
       await write;
@@ -4080,7 +4969,8 @@ class AppStore extends ChangeNotifier {
 
   /// 测试锚点：直驱一份快照 + 等写链排空（应用代码走内部各调用点）。
   @visibleForTesting
-  Future<void> debugPersistRecovery({bool force = false}) => _persistRecovery(force: force);
+  Future<void> debugPersistRecovery({bool force = false}) =>
+      _persistRecovery(force: force);
 
   /// 测试锚点：冷启动加载快照（应用代码在 boot 内调用）。
   @visibleForTesting
@@ -4121,7 +5011,10 @@ class AppStore extends ChangeNotifier {
       final entered = await ask(rec['path']?.toString());
       if (entered == null || entered.isEmpty) return; // 用户取消
       try {
-        final plain = await DdpCodec.decrypt(base64Decode(sealed), password: entered);
+        final plain = await DdpCodec.decrypt(
+          base64Decode(sealed),
+          password: entered,
+        );
         final decoded = jsonDecode(plain);
         if (decoded is! Map) throw const FormatException('snapshot');
         rec = Map<String, dynamic>.from(decoded);
@@ -4166,9 +5059,7 @@ class AppStore extends ChangeNotifier {
         recovery = null;
         await _clearRecovery();
         notifyListeners();
-        _toastSuccess(hasProject
-            ? '已恢复未保存的工作，连接桌面后可继续预览画布'
-            : '已恢复未保存的文档');
+        _toastSuccess(hasProject ? '已恢复未保存的工作，连接桌面后可继续预览画布' : '已恢复未保存的文档');
         // 续跑（纯文档阶段不依赖引擎）：planning 中断重走文档管线补齐。
         if (runInstruction.isNotEmpty && runPhase == 'planning') {
           unawaited(_runChatTurn(runInstruction, forcePlan: true));
@@ -4200,7 +5091,12 @@ class AppStore extends ChangeNotifier {
       recovery = null;
       await _clearRecovery();
       if (runPhase.isNotEmpty) {
-        final label = switch (runPhase) { 'planning' => '撰写文档', 'building' => '构建原型', 'refining' => '调整原型', _ => runPhase };
+        final label = switch (runPhase) {
+          'planning' => '撰写文档',
+          'building' => '构建原型',
+          'refining' => '调整原型',
+          _ => runPhase,
+        };
         _toastSuccess('已恢复中断的$label进度，文档与画布都已保留');
       } else {
         _toastSuccess('已恢复未保存的工作');
@@ -4211,8 +5107,12 @@ class AppStore extends ChangeNotifier {
       if (runInstruction.isNotEmpty) {
         final docsIncomplete =
             docs.prd.trim().isEmpty || docs.ui.trim().isEmpty;
-        unawaited(_runChatTurn(runInstruction,
-            forcePlan: runPhase == 'planning' || docsIncomplete));
+        unawaited(
+          _runChatTurn(
+            runInstruction,
+            forcePlan: runPhase == 'planning' || docsIncomplete,
+          ),
+        );
       }
     } catch (e) {
       _toastError('恢复失败，请重试', e);
@@ -4228,8 +5128,9 @@ class AppStore extends ChangeNotifier {
   Future<void> _clearRecovery() async {
     // 删除同样入写链：与在飞快照写交错会出现「删后又复活旧内容」。
     try {
-      final del = _recoveryWriteQueue
-          .then((_) => File('$recoveryDir/recovery.json').delete());
+      final del = _recoveryWriteQueue.then(
+        (_) => File('$recoveryDir/recovery.json').delete(),
+      );
       _recoveryWriteQueue = del.then<void>((_) {}, onError: (Object _) {});
       await del;
     } catch (_) {}
@@ -4263,7 +5164,8 @@ class AppStore extends ChangeNotifier {
       _toast('没有可清理的对话记忆');
       return;
     }
-    final res = await api?.clearSession(projectPath ?? projectName) ??
+    final res =
+        await api?.clearSession(projectPath ?? projectName) ??
         {'ok': false, 'error': 'remote_unavailable'};
     _toast(res['removed'] == true ? '对话记忆已清空' : '没有可清理的对话记忆');
   }
@@ -4309,29 +5211,44 @@ class _StoreEngineGate implements EngineGateBridge, EngineWriteBridge {
   _StoreEngineGate(this.store);
 
   @override
-  Future<Map<String, dynamic>> applyAgent(String mbt, String op) => store.applyAgentOp(op);
+  Future<Map<String, dynamic>> applyAgent(String mbt, String op) =>
+      store.applyAgentOp(op);
 
-  static Map<String, dynamic> get _engineMissing => {'ok': false, 'error': 'engine_unavailable'};
+  static Map<String, dynamic> get _engineMissing => {
+    'ok': false,
+    'error': 'engine_unavailable',
+  };
 
   @override
-  Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) =>
-      store.api?.session(mbt, name, arg) ?? Future.value(_engineMissing);
+  Future<Map<String, dynamic>> session(
+    String mbt,
+    String name, [
+    String? arg,
+  ]) => store.api?.session(mbt, name, arg) ?? Future.value(_engineMissing);
 
   /// 整屏生成：入参 mbt 刻意不用（同 [applyAgent]）——链内读 store.mbt 才是
   /// 新鲜的；render + commit 由 store 侧完成。
   @override
   Future<Map<String, dynamic>> generate(
-          String mbt, String intent, String name, Map<String, dynamic> spec) =>
-      store.applyGeneratePage(intent, name, spec);
+    String mbt,
+    String intent,
+    String name,
+    Map<String, dynamic> spec,
+  ) => store.applyGeneratePage(intent, name, spec);
 
   /// RSI auto_fix / 空板清扫：session 变更同链采纳 canonical。
   @override
-  Future<Map<String, dynamic>> mutateSession(String mbt, String name, [String? arg]) =>
-      store.applySessionMutation(name, arg);
+  Future<Map<String, dynamic>> mutateSession(
+    String mbt,
+    String name, [
+    String? arg,
+  ]) => store.applySessionMutation(name, arg);
 
   @override
-  Future<List<dynamic>> templates() async => await store.api?.templates() ?? const <dynamic>[];
+  Future<List<dynamic>> templates() async =>
+      await store.api?.templates() ?? const <dynamic>[];
 
   @override
-  Future<List<dynamic>> components() async => await store.api?.components() ?? const <dynamic>[];
+  Future<List<dynamic>> components() async =>
+      await store.api?.components() ?? const <dynamic>[];
 }

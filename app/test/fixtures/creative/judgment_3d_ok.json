@@ -1,0 +1,25 @@
+{
+  "criteria": {
+    "idea": {"score": 0.8, "why": "单一焦点明确：椅子是唯一主体"},
+    "composition": {"score": 0.75, "why": "三分之四视角构图平衡，留白充足"},
+    "craft": {"score": 0.8, "why": "木纹与接缝细节在 m1/m3 tile 可见"},
+    "motion": {"score": 0.7, "why": "静态对象无运动，按中位给分"},
+    "legibility": {"score": 0.85, "why": "1x 缩放下四条腿清晰可辨"},
+    "constraint_fit": {"score": 0.9, "why": "座高与四腿落地均命中 acceptance"}
+  },
+  "summary": "总体成立的中世纪餐椅；腿部接触有一处可测量偏差。",
+  "strengths": ["材质统一", "轮廓可读"],
+  "issues": [
+    {"criterion": "craft", "tile": "m2", "evidence": "右后腿与座面接缝 12mm", "fix": "沿 z 轴收 12mm"}
+  ],
+  "improvement_plan": [
+    {"priority": 1, "target": "leg_fr", "action": "沿 (0, 0, -0.012) m 平移", "evidence": "connectivity gate"}
+  ],
+  "acceptance": [
+    {"item": "座高 0.45m", "pass": true, "evidence": "measurement.json seat_height_m=0.45"},
+    {"item": "四条腿落地误差 ≤2mm", "pass": false, "evidence": "leg_fr 悬浮 12mm"}
+  ],
+  "defects": [
+    {"id": "floating_part", "present": true, "evidence": "leg_fr 悬浮 12mm"}
+  ]
+}

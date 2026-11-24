@@ -723,6 +723,8 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       return;
     }
     if (!mounted) return;
+    // 原型验证 demo 已迁到设计模块（旧文件保留在本地库，只是不在这里展示）。
+    final usable = apps.where((a) => !a.isPrototypeDemo).toList();
     final picked = await showNonDialog<String>(
       context: context,
       builder: (ctx) => SimpleDialog(
@@ -738,15 +740,14 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
               const Text('新建热应用…'),
             ]),
           ),
-          if (apps.isEmpty)
+          if (usable.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: Text('还没有热应用：可以直接描述一个可用应用，或由当前原型生成一个验证式 demo。',
+              child: Text('还没有热应用：可以直接描述一个可用应用。原型验证已移到设计工作台「验证原型」。',
                   style: TextStyle(fontSize: 12, height: 1.5, color: ctx.palette.ink4)),
             ),
           for (final group in [
-            ('可用应用', apps.where((a) => !a.isPrototypeDemo).toList(), nonAppOriginApp),
-            ('原型验证 demo', apps.where((a) => a.isPrototypeDemo).toList(), nonAppOriginPrototype),
+            ('可用应用', usable, nonAppOriginApp),
           ])
             if (group.$2.isNotEmpty) ...[
               Padding(

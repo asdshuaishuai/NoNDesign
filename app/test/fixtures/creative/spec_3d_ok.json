@@ -1,0 +1,19 @@
+{
+  "schema": "nan.creative.spec/1",
+  "kind": "3d",
+  "track": "static_object",
+  "prompt": "一把中世纪橡木餐椅",
+  "must_have": ["座高 0.45m", "四条腿落地"],
+  "must_not": ["灰色默认材质"],
+  "dims": {"height_m": 0.9, "seat_height_m": 0.45},
+  "references": [
+    {"path": "refs/chair-silhouette.png", "role": "silhouette"}
+  ],
+  "style": {
+    "pack": "default",
+    "palette": ["#1c1c1c", "#fdfcf8"],
+    "type": ["Inter", "600"]
+  },
+  "output": {"preview": true, "source": true, "export": "glb"},
+  "experimental": {"keep": true}
+}

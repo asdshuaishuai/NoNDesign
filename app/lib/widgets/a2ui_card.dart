@@ -3,7 +3,7 @@
 // 本文件是 a2ui 系列包的唯一封装边界：a2ui_flutter / a2ui_agent / a2ui_core
 // 的 import 只允许出现在这里，后续升级（0.3.x → 新版）只改本文件。
 // 不绑 Firebase：传输层是可注入的 [A2uiTransport]，默认实现
-// [aiSdkStreamTextTransport] 接 ai_sdk_dart 的 streamText textStream。
+// [genkitStreamTextTransport] 接 genkit 的 generateStream 文本增量。
 //
 // 两条路径共用同一块 surface 宿主（MessageProcessor + A2uiSurface）：
 // - `A2uiCard`（流式）：用户指令 → a2ui_agent 的 A2uiGenerator 出系统提示
@@ -36,9 +36,8 @@ import 'package:a2ui_agent/a2ui_agent.dart';
 import 'package:a2ui_core/a2ui_core.dart';
 import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:a2ui_flutter/basic_catalog.dart';
-import 'package:ai_sdk_dart/ai_sdk_dart.dart'
-    show CancellationToken, TimeoutConfiguration, streamText;
-import 'package:ai_sdk_openai/ai_sdk_openai.dart';
+import 'package:genkit/genkit.dart' hide TextPart;
+import 'package:genkit_openai/genkit_openai.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
@@ -65,52 +64,72 @@ class A2uiRunRequest {
   final String prompt;
 
   /// 取消令牌（卡片 dispose / 取消时置位）。可忽略，但尊重它是礼貌。
-  final CancellationToken? abortSignal;
+  final CancellationToken? abortSignal; // genkit
 }
 
 /// 流式传输抽象：返回 LLM 的文本增量流。
 ///
-/// 默认实现见 [aiSdkStreamTextTransport]；换后端（Anthropic 兼容网关、桌面
+/// 默认实现见 [genkitStreamTextTransport]；换后端（Anthropic 兼容网关、桌面
 /// ACP agent）即换这个参数，卡片本体不感知传输细节。
 typedef A2uiTransport =
     Future<Stream<String>> Function(A2uiRunRequest request);
 
-/// 默认传输：ai_sdk_dart `streamText` 的 textStream。
+/// genkit openai 插件实例名（A2UI 卡的传输与 core/dart_agent 各自独立）。
+const String _a2uiLlmPluginName = 'nondesign-a2ui';
+
+/// 默认传输：genkit `generateStream` 的文本增量。
 ///
-/// OpenAI 兼容协议（ai_sdk_openai 的 OpenAIProvider），与 core/dart_agent
-/// 的内置循环同链路；provider 在流结束/出错/被取消时释放。
-A2uiTransport aiSdkStreamTextTransport({
+/// OpenAI 兼容协议（genkit_openai 的 openAI 插件），与 core/dart_agent
+/// 的内置循环同链路；取消令牌透传到 generate 的 cooperative cancel。
+A2uiTransport genkitStreamTextTransport({
   required String apiKey,
   required String baseUrl,
   required String model,
   Duration? timeout,
 }) {
   return (request) async {
-    final provider = OpenAIProvider(apiKey: apiKey, baseUrl: baseUrl);
-    try {
-      final result = await streamText(
-        model: provider.call(model),
-        system: request.system,
-        prompt: request.prompt,
-        abortSignal: request.abortSignal,
-        timeout: timeout == null ? null : TimeoutConfiguration(total: timeout),
-      );
-      // async* 包一层：消费侧停止监听/流出错/自然结束时都释放 provider。
-      Stream<String> relay() async* {
-        try {
-          await for (final chunk in result.textStream) {
-            yield chunk;
-          }
-        } finally {
-          provider.dispose();
-        }
-      }
-
-      return relay();
-    } on Object {
-      provider.dispose();
-      rethrow;
+    final ai = Genkit(
+      plugins: [
+        openAI(
+          name: _a2uiLlmPluginName,
+          apiKey: apiKey,
+          baseUrl: baseUrl,
+        ),
+      ],
+    );
+    final controller = CancellationController();
+    final cancelSub = request.abortSignal
+        ?.onCancel(() => controller.cancel('a2ui card disposed'));
+    Timer? timer;
+    if (timeout != null) {
+      timer = Timer(timeout, () => controller.cancel('transport timeout'));
     }
+    final stream = ai.generateStream(
+      model: openAI.model(model, namespace: _a2uiLlmPluginName),
+      system: request.system,
+      prompt: request.prompt,
+      cancel: controller.token,
+    );
+    Stream<String> relay() async* {
+      try {
+        await for (final chunk in stream) {
+          if (chunk.text.isNotEmpty) yield chunk.text;
+        }
+        final result = await stream.onResult;
+        if (result.finishReason.value == 'failed') {
+          throw (result.cause ??
+              GenkitException(
+                result.finishMessage ?? 'a2ui generation failed',
+                status: StatusCode.internal,
+              ));
+        }
+      } finally {
+        timer?.cancel();
+        cancelSub?.call();
+      }
+    }
+
+    return relay();
   };
 }
 
@@ -211,7 +230,7 @@ class _A2uiCardState extends State<A2uiCard> {
   final List<Subscription> _surfaceSubscriptions = [];
   final Set<String> _reportedErrors = {};
   RendererState? _agentState;
-  CancellationToken? _token;
+  CancellationController? _cancelCtrl;
   String _text = '';
   String? _error;
   bool _running = false;
@@ -286,7 +305,8 @@ class _A2uiCardState extends State<A2uiCard> {
     if (!mounted || widget.instruction == null || widget.transport == null) {
       return;
     }
-    final token = _token = CancellationToken();
+    final controller = _cancelCtrl = CancellationController();
+    final token = controller.token;
     setState(() {
       _running = true;
       _error = null;
@@ -362,7 +382,7 @@ class _A2uiCardState extends State<A2uiCard> {
 
   @override
   void dispose() {
-    _token?.cancel();
+    _cancelCtrl?.cancel();
     for (final subscription in _surfaceSubscriptions) {
       subscription.unsubscribe();
     }

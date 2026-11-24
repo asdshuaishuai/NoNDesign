@@ -1,0 +1,15 @@
+{
+  "schema": "nan.creative.plan/1",
+  "kind": "3d",
+  "track": "scene",
+  "language": "threejs",
+  "summary": "坏计划：语言不匹配、重复 id、parent 缺失、尺寸非法、验收为空",
+  "acceptance": [],
+  "parts": [
+    {"id": "seat", "dims_m": [0.45, 0.0, 0.42], "material": "oak"},
+    {"id": "seat", "dims_m": [1, 2], "material": ""},
+    {"id": "leg", "dims_m": [0.04, 0.45, 0.04], "material": "oak", "parent": "ghost"}
+  ],
+  "zones": [{"id": "room", "bounds_m": [10, 3]}],
+  "placements": [{"id": "chair_01", "zone": "missing", "at_m": [1, 0, 2]}]
+}

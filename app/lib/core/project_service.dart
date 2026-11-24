@@ -47,17 +47,19 @@ const Map<String, dynamic> defaultProjectDesign = {
   'notes': '',
 };
 
-final RegExp _designComment = RegExp(r'<!--\s*nondesign:design\s+([\s\S]*?)\s*-->');
+final RegExp _designComment = RegExp(
+  r'<!--\s*nondesign:design\s+([\s\S]*?)\s*-->',
+);
 final RegExp _docsComment = RegExp(r'<!--\s*nondesign:docs\s+([\s\S]*?)\s*-->');
 final RegExp _blankRuns = RegExp(r'\n{3,}');
 final RegExp _trailingSpace = RegExp(r'\s+$');
 
 /// Fresh, mutable copy of [defaultProjectDesign].
 Map<String, dynamic> defaultProjectDocs() => {
-      'prd': '',
-      'ui': '',
-      'design': _deepCopy(defaultProjectDesign),
-    };
+  'prd': '',
+  'ui': '',
+  'design': _deepCopy(defaultProjectDesign),
+};
 
 /// Merges [value] over the defaults, dropping values of the wrong type.
 ///
@@ -104,7 +106,8 @@ String stripProjectMetadata(String mbt) {
 
 /// Appends the project comments to [mbt].
 ///
-/// [docs] is the `{prd, ui, design}` shape produced by `Docs.toJson()`.
+/// [docs] is the `{prd, ui, design, prototype?}` shape produced by
+/// `Docs.toJson()`（`prototype` 是设计模块的项目内验证原型元数据）。
 /// Comments are always appended last, separated by one blank line, and
 /// terminated with a newline — the exact shape the previous writer produced.
 String withProjectMetadata(String mbt, Map<String, dynamic> docs) {
@@ -113,9 +116,11 @@ String withProjectMetadata(String mbt, Map<String, dynamic> docs) {
   final designJson = _encodeMetadata(
     (design is Map && design.isNotEmpty) ? design : defaultProjectDesign,
   );
+  final prototype = docs['prototype'];
   final payload = _encodeMetadata({
     'prd': docs['prd'] ?? '',
     'ui': docs['ui'] ?? '',
+    if (prototype is Map && prototype.isNotEmpty) 'prototype': prototype,
   });
   return '$base\n\n<!-- nondesign:design $designJson -->\n'
       '<!-- nondesign:docs $payload -->\n';
@@ -145,6 +150,10 @@ Map<String, dynamic> parseProjectMetadata(String mbt) {
         final ui = value['ui'];
         docs['prd'] = prd is String ? prd : '';
         docs['ui'] = ui is String ? ui : '';
+        final prototype = value['prototype'];
+        if (prototype is Map && prototype.isNotEmpty) {
+          docs['prototype'] = Map<String, dynamic>.from(prototype);
+        }
       }
     } catch (_) {
       // Keep defaults.
@@ -171,11 +180,11 @@ class ProjectEntry {
   });
 
   Map<String, dynamic> toJson() => {
-        'path': path,
-        'name': name,
-        'bytes': bytes,
-        'modified': modified,
-      };
+    'path': path,
+    'name': name,
+    'bytes': bytes,
+    'modified': modified,
+  };
 
   @override
   String toString() => 'ProjectEntry($name, $bytes bytes)';
@@ -246,7 +255,7 @@ class ProjectListResult {
 /// libraries inject a root instead of changing global state.
 class ProjectService {
   ProjectService({Future<Directory> Function()? root})
-      : _root = root ?? AppPaths.projectsRoot;
+    : _root = root ?? AppPaths.projectsRoot;
 
   final Future<Directory> Function() _root;
 
@@ -269,7 +278,11 @@ class ProjectService {
       final document = docs.isEmpty ? mbt : withProjectMetadata(mbt, docs);
       final payload = await DdpCodec.encrypt(document, password: password);
       await _writeAtomic(target, payload);
-      return ProjectSaveResult(ok: true, path: target.path, bytes: payload.length);
+      return ProjectSaveResult(
+        ok: true,
+        path: target.path,
+        bytes: payload.length,
+      );
     } on DdpException catch (e) {
       return ProjectSaveResult(ok: false, path: target.path, error: e.code);
     } catch (e) {
@@ -289,13 +302,21 @@ class ProjectService {
   Future<ProjectOpenResult> open(String path, {String password = ''}) async {
     final target = File(expandProjectPath(path));
     if (!await target.exists()) {
-      return ProjectOpenResult(ok: false, path: target.path, error: 'file_not_found');
+      return ProjectOpenResult(
+        ok: false,
+        path: target.path,
+        error: 'file_not_found',
+      );
     }
     final Uint8List bytes;
     try {
       bytes = await target.readAsBytes();
     } catch (_) {
-      return ProjectOpenResult(ok: false, path: target.path, error: 'ddp_read_failed');
+      return ProjectOpenResult(
+        ok: false,
+        path: target.path,
+        error: 'ddp_read_failed',
+      );
     }
     try {
       final mbt = await DdpCodec.decrypt(bytes, password: password);
@@ -307,7 +328,8 @@ class ProjectService {
         bytes: bytes.length,
       );
     } on DdpException catch (e) {
-      final needsPassword = e.code == 'ddp_password_required' ||
+      final needsPassword =
+          e.code == 'ddp_password_required' ||
           e.code == 'ddp_authentication_failed';
       return ProjectOpenResult(
         ok: false,
@@ -316,7 +338,11 @@ class ProjectService {
         error: e.code,
       );
     } catch (_) {
-      return ProjectOpenResult(ok: false, path: target.path, error: 'ddp_read_failed');
+      return ProjectOpenResult(
+        ok: false,
+        path: target.path,
+        error: 'ddp_read_failed',
+      );
     }
   }
 
@@ -333,7 +359,11 @@ class ProjectService {
       if (explicit) {
         target = Directory(expandProjectPath(dir));
         if (!await target.exists()) {
-          return ProjectListResult(ok: false, dir: target.path, error: 'dir_not_found');
+          return ProjectListResult(
+            ok: false,
+            dir: target.path,
+            error: 'dir_not_found',
+          );
         }
       } else {
         target = await _root();
@@ -342,11 +372,7 @@ class ProjectService {
         }
       }
     } catch (_) {
-      return ProjectListResult(
-        ok: false,
-        dir: dir,
-        error: 'dir_not_found',
-      );
+      return ProjectListResult(ok: false, dir: dir, error: 'dir_not_found');
     }
 
     final entries = <ProjectEntry>[];
@@ -357,18 +383,24 @@ class ProjectService {
         if (!name.toLowerCase().endsWith('.ddp')) continue;
         try {
           final stat = await entity.stat();
-          entries.add(ProjectEntry(
-            path: entity.path,
-            name: name.substring(0, name.length - 4),
-            bytes: stat.size,
-            modified: stat.modified.millisecondsSinceEpoch / 1000.0,
-          ));
+          entries.add(
+            ProjectEntry(
+              path: entity.path,
+              name: name.substring(0, name.length - 4),
+              bytes: stat.size,
+              modified: stat.modified.millisecondsSinceEpoch / 1000.0,
+            ),
+          );
         } catch (_) {
           // File vanished between listing and stat — skip it.
         }
       }
     } catch (_) {
-      return ProjectListResult(ok: false, dir: target.path, error: 'dir_list_failed');
+      return ProjectListResult(
+        ok: false,
+        dir: target.path,
+        error: 'dir_list_failed',
+      );
     }
     entries.sort((a, b) => b.modified.compareTo(a.modified));
     return ProjectListResult(ok: true, dir: target.path, projects: entries);

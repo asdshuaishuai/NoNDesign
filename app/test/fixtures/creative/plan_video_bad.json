@@ -1,0 +1,23 @@
+{
+  "schema": "nan.creative.plan/1",
+  "kind": "video",
+  "track": "ink_line",
+  "fps": 24,
+  "durationFrames": 300,
+  "summary": "坏计划：帧率、重叠、越界事件、未知事件类型、cast 缺坐标",
+  "acceptance": ["无"],
+  "shots": [
+    {
+      "id": "s01",
+      "start": 0,
+      "duration": 90,
+      "cast": [{"id": "hero", "x": 540}],
+      "events": [
+        {"f": 200, "type": "vfx", "x": 1, "y": 2},
+        {"f": 3, "type": "explosion", "cue": "boom"}
+      ]
+    },
+    {"id": "s02", "start": 80, "duration": 60},
+    {"id": "s02", "start": 140, "duration": 60}
+  ]
+}

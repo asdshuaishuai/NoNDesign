@@ -1,0 +1,14 @@
+{
+  "schema": "nan.creative.spec/1",
+  "kind": "video",
+  "track": "silly_skit",
+  "prompt": "15 秒按钮状态循环，120 BPM",
+  "must_have": ["最后一帧等于第一帧", "一个连续的形状"],
+  "must_not": ["彩虹渐变", "每拍粒子爆发"],
+  "duration": {"seconds": 15, "fps": 30, "aspect": "16:9"},
+  "style": {
+    "pack": "silly_skit",
+    "palette": ["#111111", "#f4f1ea", "#e25822"]
+  },
+  "output": {"preview": true, "source": true, "export": "none"}
+}

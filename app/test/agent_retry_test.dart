@@ -5,88 +5,60 @@
 // agent 按退避等待自动重试（交付水位前移则不重试，避免重复执行已生效的
 // 工具）；错误码分类后映射成人话文案，原始异常只进折叠的技术详情。
 //
-// ai_sdk_provider 是 ai_sdk_dart 的传递依赖（pubspec 未声明）；流片段类型
-// 与 test/dart_agent_test.dart 同一处理方式。
 import 'dart:async';
 
-import 'package:ai_sdk_dart/test.dart';
-// ignore: depend_on_referenced_packages
-import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:genkit/genkit.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'helpers/genkit_test_model.dart';
 
 import 'package:nondesign/core/dart_agent.dart';
 
-/// 逐步骤脚本模型：步骤是内容部件列表（正常放流）或异常对象（抛出）。
-class _FlakyScriptedModel extends LanguageModelV4 {
-  _FlakyScriptedModel(this.steps) : stepsTaken = 0;
+/// 逐步骤脚本模型：步骤是内容部件列表（正常放流）或异常对象（抛出——
+/// genkit 把 fn 抛出的异常收敛为 finishReason: failed + cause）。
+class _FlakyScriptedModel {
+  _FlakyScriptedModel(this.steps) {
+    model = Model<dynamic>(
+      name: 'flaky/flaky-scripted-model',
+      fn: (ModelRequest req,
+              ActionFnArg<ModelResponseChunk, ModelRequest, void> ctx) async {
+        // 每次调用实际收到的用户消息（校验重试轮提示词用）。
+        calls.add(req);
+        prompts.add(req.messages
+            .where((m) => m.role == Role.user)
+            .expand((m) => m.content.where((p) => p.isText))
+            .map((p) => p.text ?? '')
+            .join('\n'));
+        final i = stepsTaken;
+        stepsTaken++;
+        final step = i < steps.length
+              ? steps[i]
+              : <Part>[scriptText('done')];
+        if (step is! List<Part>) {
+          throw step;
+        }
+        for (final part in step) {
+          if (part is ToolRequestPart) continue;
+          ctx.sendChunk(ModelResponseChunk(content: [part], role: Role.model));
+        }
+        return ModelResponse(
+          message: Message(role: Role.model, content: step),
+          finishReason: FinishReason.stop,
+        );
+      },
+    );
+  }
 
   final List<Object> steps;
-  int stepsTaken;
+  int stepsTaken = 0;
 
   /// 每次模型调用实际收到的用户 prompt（校验重试轮提示词用）。
   final List<String> prompts = <String>[];
 
   /// 每次调用的完整参数（校验工具面用）。
-  final List<LanguageModelV4CallOptions> calls = <LanguageModelV4CallOptions>[];
+  final List<ModelRequest> calls = <ModelRequest>[];
 
-  @override
-  String get provider => 'flaky-scripted';
-
-  @override
-  String get modelId => 'flaky-scripted-model';
-
-  @override
-  String get specificationVersion => 'v4';
-
-  @override
-  Future<LanguageModelV4GenerateResult> doGenerate(
-    LanguageModelV4CallOptions options,
-  ) async {
-    throw UnimplementedError('generate not exercised here');
-  }
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(
-    LanguageModelV4CallOptions options,
-  ) async {
-    // 本次调用只带一条用户消息（streamText 单轮 prompt 语义）；工具回喂的
-    // 历史不进这里，够用来断言「重试轮 prompt 追加了什么」。
-    calls.add(options);
-    prompts.add(options.prompt.messages
-        .where((m) => m.role == LanguageModelV4Role.user)
-        .expand((m) => m.content.whereType<LanguageModelV4TextPart>())
-        .map((p) => p.text)
-        .join('\n'));
-    final i = stepsTaken;
-    stepsTaken++;
-    final step = i < steps.length ? steps[i] : <LanguageModelV4ContentPart>[mockText('done')];
-    if (step is! List<LanguageModelV4ContentPart>) {
-      throw step;
-    }
-    var seq = 0;
-    String nextId() => 'id-${seq++}';
-    final parts = <LanguageModelV4StreamPart>[
-      const StreamPartStreamStart(warnings: []),
-    ];
-    for (final part in step) {
-      if (part is LanguageModelV4TextPart) {
-        final id = nextId();
-        parts.add(StreamPartTextStart(id: id));
-        parts.add(StreamPartTextDelta(id: id, delta: part.text));
-        parts.add(StreamPartTextEnd(id: id));
-      } else if (part is LanguageModelV4ToolCallPart) {
-        parts.add(StreamPartToolInputStart(id: part.toolCallId, toolName: part.toolName));
-        parts.add(StreamPartToolInputDelta(id: part.toolCallId, delta: part.toolName));
-        parts.add(StreamPartToolInputEnd(id: part.toolCallId));
-        parts.add(StreamPartToolCall(toolCall: part));
-      }
-    }
-    parts.add(const StreamPartFinish(
-      finishReason: LanguageModelV4FinishReason.stop,
-      rawFinishReason: 'stop',
-    ));
-    return LanguageModelV4StreamResult(stream: Stream.fromIterable(parts));
-  }
+  late final Model<dynamic> model;
 }
 
 DartAgentRequest _req({String mode = 'workspace', String hint = 'auto'}) =>
@@ -106,12 +78,16 @@ void main() {
 
   group('classifyLlmError / isRetryableLlmError', () {
     test('带 statusCode 的 API 错误 → llm_http_<status>', () {
+      // genkit：HTTP 等价码经 GenkitException.status.httpStatus 提供
+      // （resourceExhausted→429、unauthenticated→401）。
       expect(
-        classifyLlmError(const AiApiCallError('rate limited', statusCode: 429)),
+        classifyLlmError(
+            GenkitException('rate limited', status: StatusCode.resourceExhausted)),
         'llm_http_429',
       );
       expect(
-        classifyLlmError(const AiApiCallError('no key', statusCode: 401)),
+        classifyLlmError(
+            GenkitException('no key', status: StatusCode.unauthenticated)),
         'llm_http_401',
       );
     });
@@ -155,13 +131,13 @@ void main() {
     test('瞬时 503：等待后重试成功，事件里出现「NaN 等待重试」', () async {
       final events = <Map<String, dynamic>>[];
       final model = _FlakyScriptedModel([
-        const AiApiCallError('gateway boom', statusCode: 503),
-        [mockText('done')],
-        [mockText('done')], // nudge 轮
+        GenkitException('gateway boom', status: StatusCode.unavailable), // → 503
+        [scriptText('done')],
+        [scriptText('done')], // nudge 轮
       ]);
       final result = await runDartAgent(
         request: _req(),
-        modelOverride: model,
+        modelOverride: model.model,
         onEvent: events.add,
       );
       expect(result.ok, isTrue, reason: '重试后正常完成');
@@ -172,14 +148,14 @@ void main() {
     test('交付水位前移后断线：带进度续跑而不是判死（已完成内容保留）', () async {
       final events = <Map<String, dynamic>>[];
       final model = _FlakyScriptedModel([
-        [mockToolCall(toolName: 'write_doc', input: {'kind': 'prd', 'content': '# PRD'})],
-        const AiApiCallError('gateway boom', statusCode: 503),
-        [mockText('done')],
-        [mockText('done')],
+        [scriptToolCall(toolName: 'write_doc', input: {'kind': 'prd', 'content': '# PRD'})],
+        GenkitException('gateway boom', status: StatusCode.unavailable), // → 503
+        [scriptText('done')],
+        [scriptText('done')],
       ]);
       final result = await runDartAgent(
         request: _req(mode: 'plan'),
-        modelOverride: model,
+        modelOverride: model.model,
         onEvent: events.add,
       );
       // 已交付后不改判死：断线续跑，带着已写文档继续。
@@ -195,7 +171,7 @@ void main() {
       ]);
       final result = await runDartAgent(
         request: _req(),
-        modelOverride: model,
+        modelOverride: model.model,
         onEvent: events.add,
       );
       expect(result.ok, isFalse);
@@ -211,23 +187,23 @@ void main() {
       final events = <Map<String, dynamic>>[];
       final model = _FlakyScriptedModel(<Object>[
         // 模型捏造了不存在的工具名 → SDK 抛 AiNoSuchToolError（线上曾把整轮打死）。
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'write_docx', input: <String, dynamic>{'kind': 'prd'}),
+        <Part>[
+          scriptToolCall(toolName: 'write_docx', input: <String, dynamic>{'kind': 'prd'}),
         ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(
+        <Part>[
+          scriptToolCall(
             toolName: 'write_doc',
             input: <String, dynamic>{'kind': 'prd', 'content': '# PRD'},
           ),
         ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(
+        <Part>[
+          scriptToolCall(
             toolName: 'write_doc',
             input: <String, dynamic>{'kind': 'ui', 'content': '# UI'},
           ),
         ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(
+        <Part>[
+          scriptToolCall(
             toolName: 'write_design_spec',
             input: <String, dynamic>{
               'palette': <String, dynamic>{'primary': '#3366FF'},
@@ -237,13 +213,13 @@ void main() {
             },
           ),
         ],
-        <LanguageModelV4ContentPart>[
-          mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '完成'}),
+        <Part>[
+          scriptToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '完成'}),
         ],
       ]);
       final result = await runDartAgent(
         request: _req(mode: 'build'),
-        modelOverride: model,
+        modelOverride: model.model,
         onEvent: events.add,
       );
       expect(result.ok, isTrue);
@@ -261,8 +237,8 @@ group('ask_user 与常规 agent 循环一致（用户裁决变更 2026-11-20）'
   test('workspace + 明确 hint：ask_user 仍可用，答题卡照常产出（不再拒答）', () async {
     final events = <Map<String, dynamic>>[];
     final model = _FlakyScriptedModel(<Object>[
-      <LanguageModelV4ContentPart>[
-        mockToolCall(
+      <Part>[
+        scriptToolCall(
           toolName: 'ask_user',
           input: <String, dynamic>{
             'question': '这一段用什么风格？',
@@ -270,18 +246,17 @@ group('ask_user 与常规 agent 循环一致（用户裁决变更 2026-11-20）'
           },
         ),
       ],
-      <LanguageModelV4ContentPart>[
-        mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '等你选'}),
+      <Part>[
+        scriptToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '等你选'}),
       ],
     ]);
     final result = await runDartAgent(
       request: _req(mode: 'workspace', hint: 'video'),
-      modelOverride: model,
+      modelOverride: model.model,
       onEvent: events.add,
     );
     expect(result.ok, isTrue);
-    final toolNames = model.calls.first.tools
-        .whereType<LanguageModelV4FunctionTool>()
+    final toolNames = (model.calls.first.tools ?? const <ToolDefinition>[])
         .map((t) => t.name)
         .toSet();
     expect(toolNames, contains('ask_user'), reason: '钉死工作台也暴露 ask_user');
@@ -302,8 +277,8 @@ group('ask_user 与常规 agent 循环一致（用户裁决变更 2026-11-20）'
   test('workspace + 明确 hint：真要换工作台时 switch_to 随答题卡透传', () async {
     final events = <Map<String, dynamic>>[];
     final model = _FlakyScriptedModel(<Object>[
-      <LanguageModelV4ContentPart>[
-        mockToolCall(
+      <Part>[
+        scriptToolCall(
           toolName: 'ask_user',
           input: <String, dynamic>{
             'question': '这个需求更像交互应用，要去热应用工作台吗？',
@@ -312,13 +287,13 @@ group('ask_user 与常规 agent 循环一致（用户裁决变更 2026-11-20）'
           },
         ),
       ],
-      <LanguageModelV4ContentPart>[
-        mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '等你选'}),
+      <Part>[
+        scriptToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '等你选'}),
       ],
     ]);
     final result = await runDartAgent(
       request: _req(mode: 'workspace', hint: 'video'),
-      modelOverride: model,
+      modelOverride: model.model,
       onEvent: events.add,
     );
     expect(result.ok, isTrue);
@@ -335,16 +310,16 @@ group('ask_user 与常规 agent 循环一致（用户裁决变更 2026-11-20）'
   test('workspace + auto：ask_user 保留（内容决策仍有价值）', () async {
     final events = <Map<String, dynamic>>[];
     final model = _FlakyScriptedModel(<Object>[
-      <LanguageModelV4ContentPart>[
-        mockToolCall(toolName: 'ask_user', input: <String, dynamic>{'question': '布局？', 'options': ['左右', '上下']}),
+      <Part>[
+        scriptToolCall(toolName: 'ask_user', input: <String, dynamic>{'question': '布局？', 'options': ['左右', '上下']}),
       ],
-      <LanguageModelV4ContentPart>[
-        mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '等你选'}),
+      <Part>[
+        scriptToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '等你选'}),
       ],
     ]);
     final result = await runDartAgent(
       request: _req(mode: 'workspace', hint: 'auto'),
-      modelOverride: model,
+      modelOverride: model.model,
       onEvent: events.add,
     );
     expect(result.ok, isTrue);

@@ -110,7 +110,7 @@ void main() {
 
     // A configured desktop that cannot be reached is a visible boot error.
     expect(
-      RegExp(r'if \(!status\.connected\)[\s\S]{0,400}bootError = mobileDegradedBootError\(')
+      RegExp(r'if \(!status\.connected\)[\s\S]{0,600}bootError\s*=\s*mobileDegradedBootError\(')
           .hasMatch(store),
       isTrue,
       reason: '连不上必须显性报错，不能静默回落本地',
@@ -123,15 +123,15 @@ void main() {
     final store = _read('lib/core/store.dart');
     // 2026-11-17 chat-stream 改造：取消令牌从 _mobileCancel 泛化为内置
     // Dart 循环通用的 _dartAgentCancel（桌面 agentRuntime=dart 同路径）；
-    // 取消即本地中断（token 透传 streamText abortSignal + cancelAgent 读
-    // 令牌调用 cancel）。行为契约不变：可取消 / docs-only recovery /
-    // PLAN 成功建最小项目态。
-    expect(store.contains('CancellationToken()'), isTrue);
-    expect(store.contains('abortSignal: _dartAgentCancel'), isTrue);
+    // genkit 迁移后令牌经 CancellationController 创建（cooperative cancel
+    // 透传 generate），cancelAgent 读控制器调用 cancel。行为契约不变：
+    // 可取消 / docs-only recovery / PLAN 成功建最小项目态。
+    expect(store.contains('CancellationController()'), isTrue);
+    expect(store.contains('abortSignal: _dartAgentCancel?.token'), isTrue);
     expect(
-      RegExp(r'final token = _dartAgentCancel;[\s\S]{0,200}token\.cancel\(\)').hasMatch(store),
+      RegExp(r'final controller = _dartAgentCancel;[\s\S]{0,200}controller\.cancel\(\)').hasMatch(store),
       isTrue,
-      reason: 'cancelAgent 必须读到令牌并真实调用 cancel（本地中断）',
+      reason: 'cancelAgent 必须读到控制器并真实调用 cancel（本地中断）',
     );
     expect(store.contains('docsOnly'), isTrue, reason: '移动端 docs-only recovery');
     expect(

@@ -1,0 +1,33 @@
+{
+  "schema": "nan.creative.plan/1",
+  "kind": "3d",
+  "track": "static_object",
+  "language": "threejs",
+  "summary": "中世纪橡木餐椅，四条腿，弧形靠背。",
+  "acceptance": ["座高 0.45m", "四条腿落地误差 ≤2mm", "无大于 2mm 的漂浮/穿插"],
+  "parts": [
+    {
+      "id": "seat",
+      "dims_m": [0.45, 0.04, 0.42],
+      "material": "oak",
+      "parent": "frame",
+      "bbox_center_m": [0, 0.45, 0]
+    },
+    {
+      "id": "frame",
+      "dims_m": [0.4, 0.04, 0.4],
+      "material": "oak",
+      "bbox_center_m": [0, 0.42, 0]
+    },
+    {
+      "id": "leg_fl",
+      "dims_m": [0.04, 0.45, 0.04],
+      "material": "oak",
+      "parent": "frame",
+      "bbox_center_m": [-0.18, 0.225, -0.17]
+    }
+  ],
+  "cameras": [
+    {"id": "hero", "at_m": [4, 2, 4], "look_at_m": [0, 1, 0]}
+  ]
+}

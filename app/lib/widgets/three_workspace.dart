@@ -41,6 +41,8 @@ import '../core/three_lint.dart';
 import '../core/three_service.dart';
 import '../core/toast_service.dart';
 import 'common.dart';
+import 'workspace_artifact_card.dart';
+import 'workspace_progress.dart';
 
 /// 移动端内嵌 3D 预览的启用门。
 ///
@@ -168,7 +170,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   /// 测试用 [debugThreeWebViewSupported] 覆盖。
   bool get _webViewSupported =>
       debugThreeWebViewSupported ??
-      (_host.supportsInAppWebView && ThreeWebViewGate.allowsLocalPreview(_host));
+      (_host.supportsInAppWebView &&
+          ThreeWebViewGate.allowsLocalPreview(_host));
 
   /// 3D 场景预览的内嵌执行面。
   bool get _scenePreviewSupported => _webViewSupported;
@@ -179,7 +182,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     // 移动端由插件注册自动完成；macOS 无 endorsed 实现才需要幂等注册。
     // 桌面 Windows/Linux 注册 WebKit 无意义；`instance == null` 守卫另兼测试
     // 卫生：fake 平台注入后不得被覆盖。
-    if ((Platform.isMacOS || Platform.isIOS) && !_wkRegistered && WebViewPlatform.instance == null) {
+    if ((Platform.isMacOS || Platform.isIOS) &&
+        !_wkRegistered &&
+        WebViewPlatform.instance == null) {
       WebKitWebViewPlatform.registerWith();
       _wkRegistered = true;
     }
@@ -196,7 +201,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     store.addListener(_onStoreNotify);
     if (_lastAgentBusy) _ensureRunPoll();
     // 首帧后再落 store（initState 里 notifyListeners 会在构建期触发祖先重建）。
-    WidgetsBinding.instance.addPostFrameCallback((_) => _boot(pending: pending, saved: saved));
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _boot(pending: pending, saved: saved),
+    );
   }
 
   @override
@@ -221,7 +228,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   /// （构建期 setState 会抛「during build」）。
   void _onStoreNotify() {
     if (!mounted) return;
-    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _applyStoreChange();
       });
@@ -308,7 +316,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   /// 当前项目按磁盘态刷新（节流）：run 中的通知很密（流式正文每 80ms 就
   /// 通知），每次都读盘会让界面抖动；500ms 合并窗口内只真正刷一次，定时
   /// 轮询负责兜底。run 结束用 [force] 立刻刷（最后一层不能被节流吞掉）。
-  Future<void> _reloadCurrent({bool reloadPreview = false, bool force = false}) async {
+  Future<void> _reloadCurrent({
+    bool reloadPreview = false,
+    bool force = false,
+  }) async {
     if (!mounted) return;
     if (!force) {
       _autoRefreshDebounce ??= Timer(const Duration(milliseconds: 500), () {
@@ -359,7 +370,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         for (var i = 0; i < items.length; i++) {
           final a = items[i];
           final b = _projects[i];
-          if (a.name != b.name || a.current != b.current || a.blocked != b.blocked) {
+          if (a.name != b.name ||
+              a.current != b.current ||
+              a.blocked != b.blocked) {
             same = false;
             break;
           }
@@ -397,7 +410,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     // 根目录允许尚不存在（首次运行/只有空项目），真正写入时自己建；
     // 只有「路径被一个文件占住」才是硬错误。
     if (File(service.root.path).existsSync()) {
-      setState(() => _serviceError = 'root is not a directory: ${service.root.path}');
+      setState(
+        () => _serviceError = 'root is not a directory: ${service.root.path}',
+      );
       return;
     }
     _service = service;
@@ -410,7 +425,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         ? _pendingStoreProject
         : store.settings.threeProjectName.trim();
     _pendingStoreProject = '';
-    final wanted = pending != null ? saved : (external.isNotEmpty ? external : saved);
+    final wanted = pending != null
+        ? saved
+        : (external.isNotEmpty ? external : saved);
     if (pending != null && store.settings.threeProjectName.trim() != pending) {
       _setStoreProject(pending);
     }
@@ -437,7 +454,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     if (project == null || !_specDirty || _specCtl.text.trim().isEmpty) return;
     final text = _specCtl.text;
     if (defer) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _store.setThreeSpecDraft(project, text));
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _store.setThreeSpecDraft(project, text),
+      );
     } else {
       _store.setThreeSpecDraft(project, text);
     }
@@ -462,16 +481,27 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         }
         _snapshot = snapshot;
         if (!_specDirty) {
-          _specCtl.text = const JsonEncoder.withIndent('  ').convert(snapshot.spec);
+          _specCtl.text = const JsonEncoder.withIndent('  ')
+              .convert(snapshot.spec);
           _specDirty = false; // 文本赋值时 listener 已置位，恢复未脏
         }
       });
     } on ThreeFailure catch (failure) {
-      _showError(threeFailureMessage(failure), failure.detail,
-          key: '${failure.code}|${failure.detail}', source: 'refresh', notify: false);
+      _showError(
+        threeFailureMessage(failure),
+        failure.detail,
+        key: '${failure.code}|${failure.detail}',
+        source: 'refresh',
+        notify: false,
+      );
     } catch (error) {
-      _showError(threeFailureMessage(null), '$error',
-          key: '$error', source: 'refresh', notify: false);
+      _showError(
+        threeFailureMessage(null),
+        '$error',
+        key: '$error',
+        source: 'refresh',
+        notify: false,
+      );
     }
   }
 
@@ -479,8 +509,13 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   /// 不重置同一条错误、不叠同文提示）。
   /// [notify] 为 false 时只更新常驻横幅、不发通知——状态类失败（刷新读不到
   /// 项目）用横幅表达就够，再叠一条通知是同一件事说两遍。
-  void _showError(String text, String detail,
-      {String? key, String source = 'action', bool notify = true}) {
+  void _showError(
+    String text,
+    String detail, {
+    String? key,
+    String source = 'action',
+    bool notify = true,
+  }) {
     final resolvedKey = key ?? '$text|$detail';
     if (resolvedKey == _errorKey) return;
     if (!mounted) return;
@@ -568,9 +603,14 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       context: context,
       builder: (ctx) => SimpleDialog(
         backgroundColor: ctx.palette.panel,
-        title: Text('ThreeUI 组件',
-            style: TextStyle(
-                fontSize: 15, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+        title: Text(
+          'ThreeUI 组件',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: ctx.palette.ink,
+          ),
+        ),
         children: [
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 620, maxHeight: 460),
@@ -615,29 +655,40 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       builder: (ctx) => AlertDialog(
         backgroundColor: p.panel,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Row(children: [
-          Icon(Icons.rule_outlined, size: 18, color: p.accent),
-          const SizedBox(width: 8),
-          Text('场景质检',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: p.ink)),
-          const Spacer(),
-          Text(
-            lint.clean
-                ? '通过'
-                : '${lint.errors} 必修 · ${lint.warns} 建议',
-            style: TextStyle(
+        title: Row(
+          children: [
+            Icon(Icons.rule_outlined, size: 18, color: p.accent),
+            const SizedBox(width: 8),
+            Text(
+              '场景质检',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: p.ink,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              lint.clean ? '通过' : '${lint.errors} 必修 · ${lint.warns} 建议',
+              style: TextStyle(
                 fontSize: 11,
-                color: lint.errors > 0 ? p.danger : (lint.warns > 0 ? p.warn : p.success)),
-          ),
-        ]),
+                color: lint.errors > 0
+                    ? p.danger
+                    : (lint.warns > 0 ? p.warn : p.success),
+              ),
+            ),
+          ],
+        ),
         content: SizedBox(
           width: 520,
           child: SingleChildScrollView(
             child: lint.clean
                 ? Padding(
                     padding: const EdgeInsets.symmetric(vertical: 18),
-                    child: Text('场景没有可判定的问题：相机、灯光、材质与六层进度都成立。',
-                        style: TextStyle(fontSize: 12, color: p.ink3)),
+                    child: Text(
+                      '场景没有可判定的问题：相机、灯光、材质与六层进度都成立。',
+                      style: TextStyle(fontSize: 12, color: p.ink3),
+                    ),
                   )
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -654,39 +705,55 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(children: [
-                                Icon(
-                                  issue.level == ThreeLintLevel.error
-                                      ? Icons.error_outline
-                                      : issue.level == ThreeLintLevel.warn
-                                          ? Icons.warning_amber_outlined
-                                          : Icons.info_outline,
-                                  size: 14,
-                                  color: issue.level == ThreeLintLevel.error
-                                      ? p.danger
-                                      : issue.level == ThreeLintLevel.warn
-                                          ? p.warn
-                                          : p.ink4,
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(issue.title,
+                              Row(
+                                children: [
+                                  Icon(
+                                    issue.level == ThreeLintLevel.error
+                                        ? Icons.error_outline
+                                        : issue.level == ThreeLintLevel.warn
+                                        ? Icons.warning_amber_outlined
+                                        : Icons.info_outline,
+                                    size: 14,
+                                    color: issue.level == ThreeLintLevel.error
+                                        ? p.danger
+                                        : issue.level == ThreeLintLevel.warn
+                                        ? p.warn
+                                        : p.ink4,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      issue.title,
                                       style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: p.ink)),
-                                ),
-                              ]),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: p.ink,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                               if (issue.detail.isNotEmpty)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 4),
-                                  child: Text(issue.detail,
-                                      style: TextStyle(fontSize: 11, height: 1.5, color: p.ink3)),
+                                  child: Text(
+                                    issue.detail,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      height: 1.5,
+                                      color: p.ink3,
+                                    ),
+                                  ),
                                 ),
                               Padding(
                                 padding: const EdgeInsets.only(top: 4),
-                                child: Text('怎么修：${issue.fix}',
-                                    style: TextStyle(fontSize: 11, color: p.accent)),
+                                child: Text(
+                                  '怎么修：${issue.fix}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: p.accent,
+                                  ),
+                                ),
                               ),
                             ],
                           ),
@@ -696,7 +763,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('知道了')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
         ],
       ),
     );
@@ -712,31 +782,50 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       builder: (ctx) => AlertDialog(
         backgroundColor: ctx.palette.panel,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('新建 3D 项目', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+        title: Text(
+          '新建 3D 项目',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            color: ctx.palette.ink,
+          ),
+        ),
         content: SizedBox(
           width: 420,
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(
-              controller: nameCtl,
-              decoration: const InputDecoration(labelText: '项目名（字母、数字、短横线）', hintText: 'saturn-demo'),
-              style: const TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: briefCtl,
-              maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: '一句话目标',
-                hintText: '做一个带环行星自转的演示场景',
-                alignLabelWithHint: true,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtl,
+                decoration: const InputDecoration(
+                  labelText: '项目名（字母、数字、短横线）',
+                  hintText: 'saturn-demo',
+                ),
+                style: const TextStyle(fontSize: 13),
               ),
-              style: const TextStyle(fontSize: 13),
-            ),
-          ]),
+              const SizedBox(height: 10),
+              TextField(
+                controller: briefCtl,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: '一句话目标',
+                  hintText: '做一个带环行星自转的演示场景',
+                  alignLabelWithHint: true,
+                ),
+                style: const TextStyle(fontSize: 13),
+              ),
+            ],
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('生成规范')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('生成规范'),
+          ),
         ],
       ),
     );
@@ -762,7 +851,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     }
     setState(() => _busy = true);
     try {
-      final snapshot = await service.newProject(name: name, brief: brief, config: config);
+      final snapshot = await service.newProject(
+        name: name,
+        brief: brief,
+        config: config,
+      );
       if (!mounted) return;
       _stashDraft(); // 旧项目未保存的规范编辑先存草稿
       setState(() {
@@ -782,7 +875,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       final components = (snapshot.spec['components'] as List?)?.length ?? 0;
       _toasts.success('规范已生成（$components 组件）', '点「生成当前层」开始第一层。');
     } on ThreeFailure catch (failure) {
-      _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
+      _showError(
+        threeFailureMessage(failure),
+        failure.detail,
+        key: '${failure.code}|${failure.detail}',
+      );
     } catch (error) {
       _showError(threeFailureMessage(null), '$error');
     } finally {
@@ -811,7 +908,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       for (var i = 0; i < 3 && snapshot == null; i++) {
         final name = i == 0 ? kit.id : '${kit.id}-${i + 1}';
         try {
-          snapshot = await service.newProject(name: name, brief: kit.brief, config: config);
+          snapshot = await service.newProject(
+            name: name,
+            brief: kit.brief,
+            config: config,
+          );
           _setStoreProject(name);
         } on ThreeFailure catch (failure) {
           if (failure.code != 'project_exists') rethrow;
@@ -838,7 +939,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       final components = (snapshot.spec['components'] as List?)?.length ?? 0;
       _toasts.success('${kit.name}：规范已生成（$components 组件）', '点「生成当前层」开始第一层。');
     } on ThreeFailure catch (failure) {
-      _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
+      _showError(
+        threeFailureMessage(failure),
+        failure.detail,
+        key: '${failure.code}|${failure.detail}',
+      );
     } catch (error) {
       _showError(threeFailureMessage(null), '$error');
     } finally {
@@ -886,10 +991,12 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel('NON3D', onMessageReceived: _onBridgeMessage)
-      ..setNavigationDelegate(NavigationDelegate(
-        onWebResourceError: _onPreviewResourceError,
-        onPageStarted: _onPreviewPageStarted,
-      ))
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onWebResourceError: _onPreviewResourceError,
+          onPageStarted: _onPreviewPageStarted,
+        ),
+      )
       ..loadFile(bundle.htmlPath);
     setState(() {
       _controller = controller;
@@ -985,7 +1092,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       }
       await _refresh();
     } on ThreeFailure catch (failure) {
-      _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
+      _showError(
+        threeFailureMessage(failure),
+        failure.detail,
+        key: '${failure.code}|${failure.detail}',
+      );
     } catch (_) {
       // 桥是尽力而为的旁路：单条消息处理失败不打断预览。
     }
@@ -1008,12 +1119,19 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       if (result.stale) {
         _toasts.warn('这一层已生成，但进度已经推进', '代码已更新；如需重做请切回该层再生成。');
       } else {
-        _toasts.success('已生成「${threePassLabel(result.pass)}」层', '预览已刷新；出错会自动记修复轮。');
+        _toasts.success(
+          '已生成「${threePassLabel(result.pass)}」层',
+          '预览已刷新；出错会自动记修复轮。',
+        );
       }
       await _mountPreview(); // reload 即迭代（宿主页时间戳换新）
       await _refresh();
     } on ThreeFailure catch (failure) {
-      _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
+      _showError(
+        threeFailureMessage(failure),
+        failure.detail,
+        key: '${failure.code}|${failure.detail}',
+      );
       await _refresh();
     } catch (error) {
       _showError(threeFailureMessage(null), '$error');
@@ -1037,7 +1155,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _toasts.info('进入「${threePassLabel(result.current)}」层', '点「生成当前层」继续。');
       }
     } on ThreeFailure catch (failure) {
-      _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
+      _showError(
+        threeFailureMessage(failure),
+        failure.detail,
+        key: '${failure.code}|${failure.detail}',
+      );
     } catch (error) {
       _showError(threeFailureMessage(null), '$error');
     }
@@ -1055,7 +1177,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       // 读盘失败（权限/占用）时用最近一次重扫的缓存兜底：NaN 新建/删除后
       // 列表已经刷过，不能让「项目」入口变成静默死路；没有缓存才显性报错。
       if (_projects.isEmpty) {
-        _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
+        _showError(
+          threeFailureMessage(failure),
+          failure.detail,
+          key: '${failure.code}|${failure.detail}',
+        );
         return;
       }
       items = _projects;
@@ -1074,51 +1200,76 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       context: context,
       builder: (ctx) => SimpleDialog(
         backgroundColor: ctx.palette.panel,
-        title: Text('3D 项目', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+        title: Text(
+          '3D 项目',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: ctx.palette.ink,
+          ),
+        ),
         children: [
           SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, '__new__'),
-            child: Row(children: [
-              Icon(Icons.add, size: 16, color: ctx.palette.accent),
-              const SizedBox(width: 8),
-              const Text('新建项目…'),
-            ]),
+            child: Row(
+              children: [
+                Icon(Icons.add, size: 16, color: ctx.palette.accent),
+                const SizedBox(width: 8),
+                const Text('新建项目…'),
+              ],
+            ),
           ),
           for (final item in items)
-            Row(children: [
-              Expanded(
-                child: SimpleDialogOption(
-                  onPressed: () => Navigator.pop(ctx, item.name),
-                  child: Row(children: [
-                    Icon(
-                      item.name == _project
-                          ? Icons.check
-                          : (item.blocked ? Icons.block : Icons.view_in_ar_outlined),
-                      size: 15,
-                      color: item.name == _project
-                          ? ctx.palette.accent
-                          : (item.blocked ? ctx.palette.warn : ctx.palette.ink3),
+            Row(
+              children: [
+                Expanded(
+                  child: SimpleDialogOption(
+                    onPressed: () => Navigator.pop(ctx, item.name),
+                    child: Row(
+                      children: [
+                        Icon(
+                          item.name == _project
+                              ? Icons.check
+                              : (item.blocked
+                                    ? Icons.block
+                                    : Icons.view_in_ar_outlined),
+                          size: 15,
+                          color: item.name == _project
+                              ? ctx.palette.accent
+                              : (item.blocked
+                                    ? ctx.palette.warn
+                                    : ctx.palette.ink3),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${item.name}（${item.current == 'corrupt' ? '进度需要修复' : threePassLabel(item.current)}）',
+                            style: const TextStyle(fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '${item.name}（${item.current == 'corrupt' ? '进度需要修复' : threePassLabel(item.current)}）',
-                        style: const TextStyle(fontSize: 13),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ]),
+                  ),
                 ),
-              ),
-              IconButton(
-                tooltip: '删除项目',
-                icon: Icon(Icons.delete_outline, size: 16, color: ctx.palette.ink4),
-                visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                onPressed: () => Navigator.pop(ctx, '__delete__:${item.name}'),
-              ),
-              const SizedBox(width: 8),
-            ]),
+                IconButton(
+                  tooltip: '删除项目',
+                  icon: Icon(
+                    Icons.delete_outline,
+                    size: 16,
+                    color: ctx.palette.ink4,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                  onPressed: () =>
+                      Navigator.pop(ctx, '__delete__:${item.name}'),
+                ),
+                const SizedBox(width: 8),
+              ],
+            ),
         ],
       ),
     );
@@ -1164,14 +1315,23 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       builder: (ctx) => AlertDialog(
         backgroundColor: ctx.palette.panel,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('删除 3D 项目？',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+        title: Text(
+          '删除 3D 项目？',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            color: ctx.palette.ink,
+          ),
+        ),
         content: Text(
           '将删除整个项目：规范、代码与全部截图证据，不可恢复。',
           style: TextStyle(fontSize: 13, height: 1.5, color: ctx.palette.ink2),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: ctx.palette.danger),
             onPressed: () => Navigator.pop(ctx, true),
@@ -1207,7 +1367,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       await _reloadProjects();
       _toasts.success('已删除 3D 项目', name);
     } on ThreeFailure catch (failure) {
-      _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
+      _showError(
+        threeFailureMessage(failure),
+        failure.detail,
+        key: '${failure.code}|${failure.detail}',
+      );
     } catch (error) {
       _showError(threeFailureMessage(null), '$error');
     }
@@ -1236,7 +1400,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       );
       await _refresh();
     } on ThreeFailure catch (failure) {
-      _showError(threeFailureMessage(failure), failure.detail, key: '${failure.code}|${failure.detail}');
+      _showError(
+        threeFailureMessage(failure),
+        failure.detail,
+        key: '${failure.code}|${failure.detail}',
+      );
     } catch (error) {
       _showError(threeFailureMessage(null), '$error');
     }
@@ -1263,19 +1431,29 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
 
   // -- 构建 ----------------------------------------------------------------
 
-  PopupMenuItem<String> _menuItem(BuildContext context, String value, IconData icon, String label,
-      {bool enabled = true}) {
+  PopupMenuItem<String> _menuItem(
+    BuildContext context,
+    String value,
+    IconData icon,
+    String label, {
+    bool enabled = true,
+  }) {
     final p = context.palette;
     final color = enabled ? p.ink3 : p.ink4;
     return PopupMenuItem<String>(
       value: value,
       height: 36,
       enabled: enabled,
-      child: Row(children: [
-        Icon(icon, size: 16, color: color),
-        const SizedBox(width: 8),
-        Text(label, style: TextStyle(fontSize: 13, color: enabled ? null : color)),
-      ]),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(fontSize: 13, color: enabled ? null : color),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1288,74 +1466,192 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     final current = _state?['current'] as String? ?? '';
     final passes = (_state?['passes'] as List?)?.cast<Map>() ?? const [];
     final size = MediaQuery.sizeOf(context);
-    return LayoutBuilder(builder: (context, constraints) {
-      final width = constraints.maxWidth;
-      final phone = width < 700;
-      // 平板/窄高窗口走双行工具栏：状态一行、动作一行；横屏/桌面单行。
-      final padPortrait = !phone && width < 1100 && size.height >= size.width;
-      return Column(children: [
-        _header(context, p, current, passes, width: width, phone: phone, padPortrait: padPortrait),
-        if (_errorText.isNotEmpty) _ErrorBar(
-          text: _errorText,
-          detail: _errorDetail,
-          palette: p,
-          onDismiss: _clearError,
-        ),
-        Expanded(child: _body(context, p, width: width)),
-      ]);
-    });
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final phone = width < 700;
+        // 平板/窄高窗口走双行工具栏：状态一行、动作一行；横屏/桌面单行。
+        final padPortrait = !phone && width < 1100 && size.height >= size.width;
+        return Column(
+          children: [
+            _header(
+              context,
+              p,
+              current,
+              passes,
+              width: width,
+              phone: phone,
+              padPortrait: padPortrait,
+            ),
+            // 执行过程面 / 结果面（v2 工具：迁移 → 计划校验 → 测量 → 确定性门）。
+            if (store.threePipelineStages.isNotEmpty)
+              WorkspaceProgress(
+                stages: store.threePipelineStages,
+                errorMessage: store.threeGateError,
+              ),
+            if (store.threeGateVerdict != null)
+              WorkspaceArtifactCard(
+                title: '确定性门 · ${_project ?? ''}',
+                ok: store.threeGateVerdict != 'ERROR',
+                summary: store.threeGateVerdict == 'ERROR'
+                    ? '有 ERROR：先按修复提示改几何，再重跑 three_check。'
+                    : store.threeGateVerdict == 'WARN'
+                    ? '有 WARN：可以先交付，但便宜的修复建议先做。'
+                    : '全部确定性门通过；视觉判断不能翻案已测事实。',
+                metrics: <String>[
+                  '${store.threeGateVerdict}',
+                  '${store.threeGateGateCount} 项门',
+                  if (store.threeGateFixHints.isNotEmpty)
+                    '${store.threeGateFixHints.length} 条修复提示',
+                ],
+                primaryLabel: store.threeGateFixHints.isEmpty ? null : '查看修复提示',
+                onPrimary: store.threeGateFixHints.isEmpty
+                    ? null
+                    : _showThreeGateHints,
+                onDismiss: store.dismissThreeGateResult,
+              ),
+            if (_errorText.isNotEmpty)
+              _ErrorBar(
+                text: _errorText,
+                detail: _errorDetail,
+                palette: p,
+                onDismiss: _clearError,
+              ),
+            Expanded(child: _body(context, p, width: width)),
+          ],
+        );
+      },
+    );
   }
 
-  Widget _header(BuildContext context, NonPalette p, String current, List<Map> passes,
-      {required double width, required bool phone, required bool padPortrait}) {
-    final decoration =
-        BoxDecoration(color: p.bgElevated, border: Border(bottom: BorderSide(color: p.line)));
+  Future<void> _showThreeGateHints() async {
+    final p = context.palette;
+    final hints = store.threeGateFixHints;
+    await showNonDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: p.panel,
+        title: Text(
+          '3D 确定性门 · ${store.threeGateVerdict ?? ''}',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: p.ink,
+          ),
+        ),
+        content: SizedBox(
+          width: 520,
+          child: ListView(
+            shrinkWrap: true,
+            children: <Widget>[
+              for (final hint in hints)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Icon(Icons.build_outlined, size: 15, color: p.warn),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          hint,
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.4,
+                            color: p.ink2,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _header(
+    BuildContext context,
+    NonPalette p,
+    String current,
+    List<Map> passes, {
+    required double width,
+    required bool phone,
+    required bool padPortrait,
+  }) {
+    final decoration = BoxDecoration(
+      color: p.bgElevated,
+      border: Border(bottom: BorderSide(color: p.line)),
+    );
     if (phone) {
       return Container(
         key: const ValueKey('three-header-phone'),
         height: 46,
         decoration: decoration,
         padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Row(children: [
-          _backButton(p),
-          ..._titleBits(p, 110),
-          const Spacer(),
-          if (_busy) ..._busyBits(p),
-          _menuButton(context, p, landscape: false),
-        ]),
+        child: Row(
+          children: [
+            _backButton(p),
+            ..._titleBits(p, 110),
+            const Spacer(),
+            if (_busy) ..._busyBits(p),
+            _menuButton(context, p, landscape: false),
+          ],
+        ),
       );
     }
     if (padPortrait) {
       return Container(
         key: const ValueKey('three-header-portrait'),
         decoration: decoration,
-        child: Column(children: [
-          SizedBox(
-            height: 44,
-            child: Row(children: [
-              Padding(padding: const EdgeInsets.only(left: 8), child: _backButton(p)),
-              ..._titleBits(p, 230),
-              const SizedBox(width: 10),
-              Expanded(
-                child: passes.isEmpty ? const SizedBox.shrink() : _passScroll(p, current, passes),
+        child: Column(
+          children: [
+            SizedBox(
+              height: 44,
+              child: Row(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: _backButton(p),
+                  ),
+                  ..._titleBits(p, 230),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: passes.isEmpty
+                        ? const SizedBox.shrink()
+                        : _passScroll(p, current, passes),
+                  ),
+                  if (_busy) ..._busyBits(p),
+                  const SizedBox(width: 8),
+                ],
               ),
-              if (_busy) ..._busyBits(p),
-              const SizedBox(width: 8),
-            ]),
-          ),
-          Container(
-            height: 44,
-            decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Row(children: [
-                ..._primaryActions(p, includeAll: true),
-                ..._faceActions(p),
-              ]),
             ),
-          ),
-        ]),
+            Container(
+              height: 44,
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: p.line)),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Row(
+                  children: [
+                    ..._primaryActions(p, includeAll: true),
+                    ..._faceActions(p),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       );
     }
     final all = width >= 1100;
@@ -1364,68 +1660,83 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       height: 46,
       decoration: decoration,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(children: [
-        _backButton(p),
-        ..._titleBits(p, all ? 260 : 220),
-        const SizedBox(width: 12),
-        Expanded(
-          child: passes.isEmpty ? const SizedBox.shrink() : _passScroll(p, current, passes),
-        ),
-        if (_busy) ..._busyBits(p),
-        if (all) ...[
-          ..._primaryActions(p, includeAll: true),
-          ..._faceActions(p),
-        ] else ...[
-          ..._primaryActions(p, includeAll: false),
-          _menuButton(context, p, landscape: true),
+      child: Row(
+        children: [
+          _backButton(p),
+          ..._titleBits(p, all ? 260 : 220),
+          const SizedBox(width: 12),
+          Expanded(
+            child: passes.isEmpty
+                ? const SizedBox.shrink()
+                : _passScroll(p, current, passes),
+          ),
+          if (_busy) ..._busyBits(p),
+          if (all) ...[
+            ..._primaryActions(p, includeAll: true),
+            ..._faceActions(p),
+          ] else ...[
+            ..._primaryActions(p, includeAll: false),
+            _menuButton(context, p, landscape: true),
+          ],
         ],
-      ]),
+      ),
     );
   }
 
   Widget _backButton(NonPalette p) => IconButton(
-        icon: const Icon(Icons.arrow_back, size: 18),
-        tooltip: '返回主页',
-        color: p.ink2,
-        visualDensity: VisualDensity.compact,
-        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-        onPressed: () => store.setView('home'),
-      );
+    icon: const Icon(Icons.arrow_back, size: 18),
+    tooltip: '返回主页',
+    color: p.ink2,
+    visualDensity: VisualDensity.compact,
+    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+    onPressed: () => store.setView('home'),
+  );
 
   List<Widget> _titleBits(NonPalette p, double maxWidth) => [
-        const SizedBox(width: 4),
-        Icon(Icons.view_in_ar_outlined, size: 17, color: p.accent),
-        const SizedBox(width: 8),
-        ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: maxWidth),
-          child: Text(
-            _project ?? '3D 工作台',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink),
-          ),
+    const SizedBox(width: 4),
+    Icon(Icons.view_in_ar_outlined, size: 17, color: p.accent),
+    const SizedBox(width: 8),
+    ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: Text(
+        _project ?? '3D 工作台',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: p.ink,
         ),
-      ];
+      ),
+    ),
+  ];
 
   List<Widget> _busyBits(NonPalette p) => [
-        SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 1.8, color: p.accent)),
-        const SizedBox(width: 8),
-      ];
+    SizedBox(
+      width: 14,
+      height: 14,
+      child: CircularProgressIndicator(strokeWidth: 1.8, color: p.accent),
+    ),
+    const SizedBox(width: 8),
+  ];
 
-  Widget _passScroll(NonPalette p, String current, List<Map> passes) => SingleChildScrollView(
+  Widget _passScroll(NonPalette p, String current, List<Map> passes) =>
+      SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: Row(children: [
-          for (final pass in passes)
-            Padding(
-              padding: const EdgeInsets.only(right: 5),
-              child: _PassChip(
-                label: threePassLabel(pass['id']),
-                status: '${pass['status']}',
-                active: pass['id'] == current,
-                palette: p,
+        child: Row(
+          children: [
+            for (final pass in passes)
+              Padding(
+                padding: const EdgeInsets.only(right: 5),
+                child: _PassChip(
+                  label: threePassLabel(pass['id']),
+                  status: '${pass['status']}',
+                  active: pass['id'] == current,
+                  palette: p,
+                ),
               ),
-            ),
-        ]),
+          ],
+        ),
       );
 
   /// 截图 / 四方位取证的启用判据（唯一一处）：预览页已就绪（metrics 桥到达）
@@ -1434,91 +1745,130 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   bool get _captureReady => _previewReady && !_busy && _project != null;
 
   List<Widget> _primaryActions(NonPalette p, {required bool includeAll}) => [
-        _TopBtn(icon: Icons.folder_open_outlined, label: '项目', onTap: _busy ? null : _pickProject),
-        _TopBtn(
-          icon: Icons.auto_awesome_outlined,
-          label: '生成当前层',
-          onTap: _busy || _project == null ? null : _runPass,
-        ),
-        if (includeAll) ...[
-          _TopBtn(
-            icon: Icons.camera_alt_outlined,
-            label: '截图',
-            onTap: _captureReady
-                ? () => _runPreviewScript(
-                    'window.__non3d_screenshot && window.__non3d_screenshot()')
-                : null,
-          ),
-          _TopBtn(
-            icon: Icons.rotate_90_degrees_ccw_outlined,
-            label: '四方位取证',
-            onTap: _captureReady
-                ? () => _runPreviewScript(
-                    'window.__non3d_turntable && window.__non3d_turntable()')
-                : null,
-          ),
-        ],
-        _TopBtn(
-          icon: Icons.widgets_outlined,
-          label: '组件画廊',
-          onTap: _openGalleryPicker,
-        ),
-        KeyedSubtree(
-          key: const ValueKey('three-lint'),
-          child: _TopBtn(
-            icon: Icons.rule_outlined,
-            label: _lintLabel(),
-            onTap: _snapshot == null ? null : _showLint,
-          ),
-        ),
-        _TopBtn(
-          icon: Icons.check_rounded,
-          label: '通过并继续',
-          onTap: _busy || _project == null ? null : _continue,
-        ),
-        if (includeAll)
-          _TopBtn(
-            icon: Icons.refresh,
-            label: '刷新预览',
-            onTap: _busy || _project == null ? null : _mountPreview,
-          ),
-      ];
+    _TopBtn(
+      icon: Icons.folder_open_outlined,
+      label: '项目',
+      onTap: _busy ? null : _pickProject,
+    ),
+    _TopBtn(
+      icon: Icons.auto_awesome_outlined,
+      label: '生成当前层',
+      onTap: _busy || _project == null ? null : _runPass,
+    ),
+    if (includeAll) ...[
+      _TopBtn(
+        icon: Icons.camera_alt_outlined,
+        label: '截图',
+        onTap: _captureReady
+            ? () => _runPreviewScript(
+                'window.__non3d_screenshot && window.__non3d_screenshot()',
+              )
+            : null,
+      ),
+      _TopBtn(
+        icon: Icons.rotate_90_degrees_ccw_outlined,
+        label: '四方位取证',
+        onTap: _captureReady
+            ? () => _runPreviewScript(
+                'window.__non3d_turntable && window.__non3d_turntable()',
+              )
+            : null,
+      ),
+    ],
+    _TopBtn(
+      icon: Icons.widgets_outlined,
+      label: '组件画廊',
+      onTap: _openGalleryPicker,
+    ),
+    KeyedSubtree(
+      key: const ValueKey('three-lint'),
+      child: _TopBtn(
+        icon: Icons.rule_outlined,
+        label: _lintLabel(),
+        onTap: _snapshot == null ? null : _showLint,
+      ),
+    ),
+    _TopBtn(
+      icon: Icons.check_rounded,
+      label: '通过并继续',
+      onTap: _busy || _project == null ? null : _continue,
+    ),
+    if (includeAll)
+      _TopBtn(
+        icon: Icons.refresh,
+        label: '刷新预览',
+        onTap: _busy || _project == null ? null : _mountPreview,
+      ),
+  ];
 
   List<Widget> _faceActions(NonPalette p) => [
-        for (final face in const [
-          ('preview', '预览', Icons.visibility_outlined),
-          ('source', '源码', Icons.code_outlined),
-          ('spec', '规范', Icons.rule_outlined),
-        ])
-          _TopBtn(
-            icon: face.$3,
-            label: face.$2,
-            active: _face == face.$1,
-            onTap: _project == null ? null : () => setState(() => _face = face.$1),
-          ),
-      ];
+    for (final face in const [
+      ('preview', '预览', Icons.visibility_outlined),
+      ('source', '源码', Icons.code_outlined),
+      ('spec', '规范', Icons.rule_outlined),
+    ])
+      _TopBtn(
+        icon: face.$3,
+        label: face.$2,
+        active: _face == face.$1,
+        onTap: _project == null ? null : () => setState(() => _face = face.$1),
+      ),
+  ];
 
-  Widget _menuButton(BuildContext context, NonPalette p, {required bool landscape}) {
+  Widget _menuButton(
+    BuildContext context,
+    NonPalette p, {
+    required bool landscape,
+  }) {
     // 弹出菜单路径与 _TopBtn 路径共用同一 ready 判据（两条入口都要禁用）。
     final captureReady = _captureReady;
     return PopupMenuButton<String>(
       tooltip: '3D 操作',
       color: p.panel,
       shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10), side: BorderSide(color: p.lineStrong)),
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: p.lineStrong),
+      ),
       onSelected: _handleAction,
       itemBuilder: (ctx) => [
         _menuItem(ctx, 'project', Icons.folder_open_outlined, '项目'),
         _menuItem(ctx, 'pass', Icons.auto_awesome_outlined, '生成当前层'),
-        _menuItem(ctx, 'shot', Icons.camera_alt_outlined, '截图', enabled: captureReady),
-        _menuItem(ctx, 'turntable', Icons.rotate_90_degrees_ccw_outlined, '四方位取证', enabled: captureReady),
+        _menuItem(
+          ctx,
+          'shot',
+          Icons.camera_alt_outlined,
+          '截图',
+          enabled: captureReady,
+        ),
+        _menuItem(
+          ctx,
+          'turntable',
+          Icons.rotate_90_degrees_ccw_outlined,
+          '四方位取证',
+          enabled: captureReady,
+        ),
         _menuItem(ctx, 'continue', Icons.check_rounded, '通过并继续'),
         _menuItem(ctx, 'reload', Icons.refresh, '刷新预览'),
         _menuItem(ctx, 'gallery', Icons.widgets_outlined, '组件画廊'),
         const PopupMenuDivider(),
-        _menuItem(ctx, 'face:preview', Icons.visibility_outlined, landscape ? '预览（全屏）' : '预览'),
-        _menuItem(ctx, 'face:source', Icons.code_outlined, landscape ? '源码（侧栏）' : '源码'),
-        _menuItem(ctx, 'face:spec', Icons.rule_outlined, landscape ? '规范（侧栏）' : '规范'),
+        _menuItem(
+          ctx,
+          'face:preview',
+          Icons.visibility_outlined,
+          landscape ? '预览（全屏）' : '预览',
+        ),
+        _menuItem(
+          ctx,
+          'face:source',
+          Icons.code_outlined,
+          landscape ? '源码（侧栏）' : '源码',
+        ),
+        _menuItem(
+          ctx,
+          'face:spec',
+          Icons.rule_outlined,
+          landscape ? '规范（侧栏）' : '规范',
+        ),
       ],
     );
   }
@@ -1533,10 +1883,14 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         // 菜单项已 disabled，这里再挡一道：任何杂散调用都不得在未就绪页面上
         // 跑截图（按钮亮但无操作 = 静默失败）。
         if (!_captureReady) return;
-        _runPreviewScript('window.__non3d_screenshot && window.__non3d_screenshot()');
+        _runPreviewScript(
+          'window.__non3d_screenshot && window.__non3d_screenshot()',
+        );
       case 'turntable':
         if (!_captureReady) return;
-        _runPreviewScript('window.__non3d_turntable && window.__non3d_turntable()');
+        _runPreviewScript(
+          'window.__non3d_turntable && window.__non3d_turntable()',
+        );
       case 'continue':
         _continue();
       case 'reload':
@@ -1546,7 +1900,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       case 'face:preview':
       case 'face:source':
       case 'face:spec':
-        if (_project != null) setState(() => _face = value.substring('face:'.length));
+        if (_project != null) {
+          setState(() => _face = value.substring('face:'.length));
+        }
     }
   }
 
@@ -1581,34 +1937,41 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         onRetry: _retryPreview,
       );
     } else if (_controller == null) {
-      preview = Center(child: Text('准备预览…', style: TextStyle(fontSize: 12, color: p.ink3)));
+      preview = Center(
+        child: Text('准备预览…', style: TextStyle(fontSize: 12, color: p.ink3)),
+      );
     } else {
       preview = WebViewWidget(controller: _controller!);
     }
     final side = switch (_face) {
       'source' => SingleChildScrollView(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 场景代码长度随 run 转发刷新可见（NaN 每完成一层都会改写
-              // 这份代码，用户能直接看到「有没有新东西进来」）。
-              if (_sceneJs.isNotEmpty)
-                Padding(
-                  key: const ValueKey('three-scene-meta'),
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    '场景代码 · ${_sceneJs.length} 字符',
-                    style: TextStyle(fontSize: 11, color: p.ink3),
-                  ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 场景代码长度随 run 转发刷新可见（NaN 每完成一层都会改写
+            // 这份代码，用户能直接看到「有没有新东西进来」）。
+            if (_sceneJs.isNotEmpty)
+              Padding(
+                key: const ValueKey('three-scene-meta'),
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '场景代码 · ${_sceneJs.length} 字符',
+                  style: TextStyle(fontSize: 11, color: p.ink3),
                 ),
-              SelectableText(
-                _sceneJs.isEmpty ? '还没有场景代码——点「生成当前层」开始' : _sceneJs,
-                style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: p.ink2, height: 1.5),
               ),
-            ],
-          ),
+            SelectableText(
+              _sceneJs.isEmpty ? '还没有场景代码——点「生成当前层」开始' : _sceneJs,
+              style: TextStyle(
+                fontSize: 12,
+                fontFamily: 'monospace',
+                color: p.ink2,
+                height: 1.5,
+              ),
+            ),
+          ],
         ),
+      ),
       'spec' => _SpecPane(controller: _specCtl, onSave: _saveSpec),
       _ => null,
     };
@@ -1651,34 +2014,39 @@ class _ErrorBar extends StatelessWidget {
       width: double.infinity,
       color: p.danger.withValues(alpha: 0.10),
       padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Icon(Icons.error_outline, size: 14, color: p.danger),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              text,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: p.danger),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.error_outline, size: 14, color: p.danger),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  text,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11, color: p.danger),
+                ),
+              ),
+              IconButton(
+                tooltip: '关闭提示',
+                icon: Icon(Icons.close, size: 14, color: p.danger),
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                onPressed: onDismiss,
+              ),
+            ],
+          ),
+          if (detail.trim().isNotEmpty)
+            _TechDetails(
+              detail: detail,
+              palette: p,
+              dense: true,
+              bodyKey: const ValueKey('three-tech-details-body'),
             ),
-          ),
-          IconButton(
-            tooltip: '关闭提示',
-            icon: Icon(Icons.close, size: 14, color: p.danger),
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-            onPressed: onDismiss,
-          ),
-        ]),
-        if (detail.trim().isNotEmpty)
-          _TechDetails(
-            detail: detail,
-            palette: p,
-            dense: true,
-            bodyKey: const ValueKey('three-tech-details-body'),
-          ),
-      ]),
+        ],
+      ),
     );
   }
 }
@@ -1704,7 +2072,9 @@ class _TechDetails extends StatelessWidget {
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          tilePadding: dense ? const EdgeInsets.symmetric(horizontal: 2) : EdgeInsets.zero,
+          tilePadding: dense
+              ? const EdgeInsets.symmetric(horizontal: 2)
+              : EdgeInsets.zero,
           childrenPadding: EdgeInsets.only(bottom: dense ? 6 : 4),
           dense: true,
           visualDensity: VisualDensity.compact,
@@ -1765,110 +2135,154 @@ class _EmptyNew extends StatelessWidget {
       // 不靠裁掉套件来适配小屏。
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(vertical: 20),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.view_in_ar_outlined, size: 44, color: p.ink4),
-        const SizedBox(height: 14),
-        Text('直接制作 3D', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.ink)),
-        const SizedBox(height: 6),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 380),
-            child: Text(
-              '一句话目标 → 先出项目规范（组件 / 材质 / 相机 / 验收标准）→ 分层生成\n'
-              '占位 → 结构 → 造型 → 材质 → 灯光 → 交互，应用内实时预览，\n'
-              '执行错误 / 测量 / 截图三类反馈自动驱动修复轮。',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: p.ink3, height: 1.7),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.view_in_ar_outlined, size: 44, color: p.ink4),
+            const SizedBox(height: 14),
+            Text(
+              '直接制作 3D',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: p.ink,
+              ),
             ),
-          ),
-        ),
-        const SizedBox(height: 18),
-        FilledButton.icon(
-          onPressed: busy ? null : onCreate,
-          icon: const Icon(Icons.add, size: 16),
-          label: const Text('新建 3D 项目'),
-        ),
-        if (onCreateKit != null) ...[
-          const SizedBox(height: 26),
-          Text('或从一个场景套件开始',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink3)),
-          const SizedBox(height: 4),
-          Text('套件已经想好构图与材质方向，可直接进入分层细化',
-              style: TextStyle(fontSize: 11, color: p.ink4)),
-          const SizedBox(height: 12),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 620),
-            child: Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                for (final kit in threeKits)
-                  InkWell(
-                    key: ValueKey('three-kit-${kit.id}'),
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: busy ? null : () => onCreateKit!(kit),
-                    child: Container(
-                      width: 186,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: p.panel.withValues(alpha: 0.6),
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 380),
+                child: Text(
+                  '一句话目标 → 先出项目规范（组件 / 材质 / 相机 / 验收标准）→ 分层生成\n'
+                  '占位 → 结构 → 造型 → 材质 → 灯光 → 交互，应用内实时预览，\n'
+                  '执行错误 / 测量 / 截图三类反馈自动驱动修复轮。',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: p.ink3, height: 1.7),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: busy ? null : onCreate,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('新建 3D 项目'),
+            ),
+            if (onCreateKit != null) ...[
+              const SizedBox(height: 26),
+              Text(
+                '或从一个场景套件开始',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: p.ink3,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '套件已经想好构图与材质方向，可直接进入分层细化',
+                style: TextStyle(fontSize: 11, color: p.ink4),
+              ),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 620),
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (final kit in threeKits)
+                      InkWell(
+                        key: ValueKey('three-kit-${kit.id}'),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: p.line),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(children: [
-                            Icon(Icons.view_in_ar_outlined, size: 14, color: p.accent),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(kit.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
-                            ),
-                          ]),
-                          const SizedBox(height: 6),
-                          Text(kit.hint,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 10.5, height: 1.45, color: p.ink4)),
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 4,
+                        onTap: busy ? null : () => onCreateKit!(kit),
+                        child: Container(
+                          width: 186,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: p.panel.withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: p.line),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              for (final tag in kit.tags.take(2))
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                  decoration: BoxDecoration(
-                                    color: p.accent.withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(4),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.view_in_ar_outlined,
+                                    size: 14,
+                                    color: p.accent,
                                   ),
-                                  child: Text(tag, style: TextStyle(fontSize: 9, color: p.accent)),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      kit.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: p.ink,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                kit.hint,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  height: 1.45,
+                                  color: p.ink4,
                                 ),
+                              ),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 4,
+                                children: [
+                                  for (final tag in kit.tags.take(2))
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 5,
+                                        vertical: 1,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: p.accent.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        tag,
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          color: p.accent,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-              ],
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 30),
+            _ThreeUiGallery(
+              catalog: catalog,
+              error: catalogError,
+              onReload: onReloadCatalog,
+              onOpen: onOpenUi,
+              padHorizontal: 24,
+              maxWidth: 620,
             ),
-          ),
-        ],
-        const SizedBox(height: 30),
-        _ThreeUiGallery(
-          catalog: catalog,
-          error: catalogError,
-          onReload: onReloadCatalog,
-          onOpen: onOpenUi,
-          padHorizontal: 24,
-          maxWidth: 620,
+          ],
         ),
-        ]),
       ),
     );
   }
@@ -1906,15 +2320,26 @@ class _ThreeUiGallery extends StatelessWidget {
         child: Column(
           key: const ValueKey('threeui-gallery'),
           children: [
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.widgets_outlined, size: 14, color: p.accent),
-              const SizedBox(width: 6),
-              Text('ThreeUI 组件',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink3)),
-            ]),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.widgets_outlined, size: 14, color: p.accent),
+                const SizedBox(width: 6),
+                Text(
+                  'ThreeUI 组件',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: p.ink3,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 4),
-            Text('组件库里选一个真实页面，在应用内打开看效果',
-                style: TextStyle(fontSize: 11, color: p.ink4)),
+            Text(
+              '组件库里选一个真实页面，在应用内打开看效果',
+              style: TextStyle(fontSize: 11, color: p.ink4),
+            ),
             const SizedBox(height: 12),
             if (items == null)
               if (error.isEmpty)
@@ -1923,7 +2348,10 @@ class _ThreeUiGallery extends StatelessWidget {
                   child: SizedBox(
                     width: 14,
                     height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 1.8, color: p.accent),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.8,
+                      color: p.accent,
+                    ),
                   ),
                 )
               else
@@ -1954,29 +2382,46 @@ class _ThreeUiGallery extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(children: [
-                              Icon(Icons.auto_awesome_mosaic_outlined, size: 14, color: p.accent),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(component.name,
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.auto_awesome_mosaic_outlined,
+                                  size: 14,
+                                  color: p.accent,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    component.name,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: p.ink)),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: p.ink,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              component.description,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                height: 1.45,
+                                color: p.ink3,
                               ),
-                            ]),
+                            ),
                             const SizedBox(height: 6),
-                            Text(component.description,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 10.5, height: 1.45, color: p.ink3)),
-                            const SizedBox(height: 6),
-                            Text(component.hint,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 9.5, color: p.ink4)),
+                            Text(
+                              component.hint,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 9.5, color: p.ink4),
+                            ),
                           ],
                         ),
                       ),
@@ -2007,19 +2452,21 @@ class _ThreeUiCatalogError extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: p.line),
       ),
-      child: Row(children: [
-        Icon(Icons.info_outline, size: 14, color: p.warn),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(message, style: TextStyle(fontSize: 11, color: p.ink3)),
-        ),
-        if (onReload != null)
-          TextButton(
-            key: const ValueKey('threeui-catalog-retry'),
-            onPressed: () => onReload!(),
-            child: const Text('重试'),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, size: 14, color: p.warn),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(message, style: TextStyle(fontSize: 11, color: p.ink3)),
           ),
-      ]),
+          if (onReload != null)
+            TextButton(
+              key: const ValueKey('threeui-catalog-retry'),
+              onPressed: () => onReload!(),
+              child: const Text('重试'),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -2056,9 +2503,9 @@ class _ThreeUiViewerDialogState extends State<_ThreeUiViewerDialog> {
     if (!widget.webViewSupported) return;
     final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(NavigationDelegate(
-        onWebResourceError: _onResourceError,
-      ));
+      ..setNavigationDelegate(
+        NavigationDelegate(onWebResourceError: _onResourceError),
+      );
     try {
       await controller.loadFlutterAsset(widget.component.assetKey);
     } catch (error) {
@@ -2109,69 +2556,88 @@ class _ThreeUiViewerDialogState extends State<_ThreeUiViewerDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 1040, maxHeight: 760),
-        child: Column(children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
-            child: Row(children: [
-              Icon(Icons.auto_awesome_mosaic_outlined, size: 16, color: p.accent),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(component.name,
-                        style: TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w700, color: p.ink)),
-                    const SizedBox(height: 2),
-                    Text(component.description,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11, color: p.ink3)),
-                  ],
-                ),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.auto_awesome_mosaic_outlined,
+                    size: 16,
+                    color: p.accent,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          component.name,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: p.ink,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          component.description,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11, color: p.ink3),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '重试',
+                    icon: const Icon(Icons.refresh, size: 17),
+                    color: p.ink3,
+                    onPressed: _retry,
+                  ),
+                  IconButton(
+                    tooltip: '关闭',
+                    icon: const Icon(Icons.close, size: 17),
+                    color: p.ink3,
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
               ),
-              IconButton(
-                tooltip: '重试',
-                icon: const Icon(Icons.refresh, size: 17),
-                color: p.ink3,
-                onPressed: _retry,
-              ),
-              IconButton(
-                tooltip: '关闭',
-                icon: const Icon(Icons.close, size: 17),
-                color: p.ink3,
-                onPressed: () => Navigator.pop(context),
-              ),
-            ]),
-          ),
-          Container(height: 1, color: p.line),
-          Expanded(
-            child: Container(
-              color: p.bg,
-              child: !widget.webViewSupported
-                  ? Center(
-                      child: Text('这台设备不能内嵌显示组件预览',
-                          style: TextStyle(fontSize: 12, color: p.ink3)),
-                    )
-                  : _error.isNotEmpty
-                      ? _ThreeUiViewError(
-                          message: _error,
-                          detail: _detail,
-                          onRetry: _retry,
-                        )
-                      : _controller == null
-                          ? Center(
-                              child: SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: p.accent),
-                              ),
-                            )
-                          : WebViewWidget(controller: _controller!),
             ),
-          ),
-        ]),
+            Container(height: 1, color: p.line),
+            Expanded(
+              child: Container(
+                color: p.bg,
+                child: !widget.webViewSupported
+                    ? Center(
+                        child: Text(
+                          '这台设备不能内嵌显示组件预览',
+                          style: TextStyle(fontSize: 12, color: p.ink3),
+                        ),
+                      )
+                    : _error.isNotEmpty
+                    ? _ThreeUiViewError(
+                        message: _error,
+                        detail: _detail,
+                        onRetry: _retry,
+                      )
+                    : _controller == null
+                    ? Center(
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: p.accent,
+                          ),
+                        ),
+                      )
+                    : WebViewWidget(controller: _controller!),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2195,25 +2661,35 @@ class _ThreeUiViewError extends StatelessWidget {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.broken_image_outlined, size: 30, color: p.warn),
-          const SizedBox(height: 10),
-          Text(message,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.broken_image_outlined, size: 30, color: p.warn),
+            const SizedBox(height: 10),
+            Text(
+              message,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
-          const SizedBox(height: 4),
-          Text('可以重试；如果一直打不开，换一个组件看看。',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: p.ink,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '可以重试；如果一直打不开，换一个组件看看。',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: p.ink3)),
-          if (detail.isNotEmpty)
-            _TechDetails(detail: detail, palette: p),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: () => onRetry(),
-            icon: const Icon(Icons.refresh, size: 16),
-            label: const Text('重试'),
-          ),
-        ]),
+              style: TextStyle(fontSize: 11, color: p.ink3),
+            ),
+            if (detail.isNotEmpty) _TechDetails(detail: detail, palette: p),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () => onRetry(),
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('重试'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2249,52 +2725,72 @@ class _PreviewUnsupportedPane extends StatelessWidget {
       alignment: Alignment.center,
       padding: const EdgeInsets.all(24),
       child: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.view_in_ar_outlined, size: 36, color: p.ink4),
-          const SizedBox(height: 10),
-          Text(title,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink2)),
-          const SizedBox(height: 6),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: Text(
-              '$preferred\n项目与预览文件都在本机，复制路径就能在文件管理器里找到；'
-              '桌面版还能直接在文件夹中定位。',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: p.ink4, height: 1.6),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
-            OutlinedButton.icon(
-              key: const ValueKey('three-preview-copy-path'),
-              onPressed: projectDir.isEmpty ? null : () => onCopy(projectDir, '已复制项目路径'),
-              icon: const Icon(Icons.copy, size: 14),
-              label: const Text('复制项目路径'),
-            ),
-            OutlinedButton.icon(
-              key: const ValueKey('three-preview-copy-url'),
-              onPressed: previewPath.isEmpty ? null : () => onCopy(previewPath, '已复制预览文件路径'),
-              icon: const Icon(Icons.link, size: 14),
-              label: const Text('复制预览文件路径'),
-            ),
-            if (onReveal != null)
-              OutlinedButton.icon(
-                key: const ValueKey('three-preview-reveal'),
-                onPressed: () => onReveal!(),
-                icon: const Icon(Icons.folder_open_outlined, size: 14),
-                label: const Text('在文件夹中显示'),
-              ),
-          ]),
-          if (projectDir.isNotEmpty) ...[
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.view_in_ar_outlined, size: 36, color: p.ink4),
             const SizedBox(height: 10),
-            SelectableText('项目目录：$projectDir',
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: p.ink2,
+              ),
+            ),
+            const SizedBox(height: 6),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Text(
+                '$preferred\n项目与预览文件都在本机，复制路径就能在文件管理器里找到；'
+                '桌面版还能直接在文件夹中定位。',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 11, color: p.ink4, height: 1.6),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: [
+                OutlinedButton.icon(
+                  key: const ValueKey('three-preview-copy-path'),
+                  onPressed: projectDir.isEmpty
+                      ? null
+                      : () => onCopy(projectDir, '已复制项目路径'),
+                  icon: const Icon(Icons.copy, size: 14),
+                  label: const Text('复制项目路径'),
+                ),
+                OutlinedButton.icon(
+                  key: const ValueKey('three-preview-copy-url'),
+                  onPressed: previewPath.isEmpty
+                      ? null
+                      : () => onCopy(previewPath, '已复制预览文件路径'),
+                  icon: const Icon(Icons.link, size: 14),
+                  label: const Text('复制预览文件路径'),
+                ),
+                if (onReveal != null)
+                  OutlinedButton.icon(
+                    key: const ValueKey('three-preview-reveal'),
+                    onPressed: () => onReveal!(),
+                    icon: const Icon(Icons.folder_open_outlined, size: 14),
+                    label: const Text('在文件夹中显示'),
+                  ),
+              ],
+            ),
+            if (projectDir.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              SelectableText(
+                '项目目录：$projectDir',
                 key: const ValueKey('three-preview-path'),
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5)),
+                style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5),
+              ),
+            ],
           ],
-        ]),
+        ),
       ),
     );
   }
@@ -2302,7 +2798,11 @@ class _PreviewUnsupportedPane extends StatelessWidget {
 
 /// 预览加载失败占位：整块替换 WebView 区域，重试按钮重新准备并加载。
 class _PreviewErrorPane extends StatelessWidget {
-  const _PreviewErrorPane({required this.message, required this.detail, required this.onRetry});
+  const _PreviewErrorPane({
+    required this.message,
+    required this.detail,
+    required this.onRetry,
+  });
   final String message;
   final String detail;
   final Future<void> Function() onRetry;
@@ -2311,37 +2811,42 @@ class _PreviewErrorPane extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.error_outline, size: 36, color: p.danger),
-        const SizedBox(height: 10),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Text(message,
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: p.ink3, height: 1.6)),
-          ),
-        ),
-        if (detail.trim().isNotEmpty)
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline, size: 36, color: p.danger),
+          const SizedBox(height: 10),
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 6, 24, 0),
+            padding: const EdgeInsets.symmetric(horizontal: 24),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
-              child: _TechDetails(
-                detail: detail,
-                palette: p,
-                bodyKey: const ValueKey('three-preview-tech-details-body'),
+              child: Text(
+                message,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: p.ink3, height: 1.6),
               ),
             ),
           ),
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: () => onRetry(),
-          icon: const Icon(Icons.refresh, size: 14),
-          label: const Text('重试加载'),
-        ),
-      ]),
+          if (detail.trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 6, 24, 0),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: _TechDetails(
+                  detail: detail,
+                  palette: p,
+                  bodyKey: const ValueKey('three-preview-tech-details-body'),
+                ),
+              ),
+            ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: () => onRetry(),
+            icon: const Icon(Icons.refresh, size: 14),
+            label: const Text('重试加载'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2359,27 +2864,44 @@ class _ServiceErrorPane extends StatelessWidget {
       color: p.bg,
       alignment: Alignment.center,
       padding: const EdgeInsets.all(24),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.folder_off_outlined, size: 36, color: p.warn),
-        const SizedBox(height: 10),
-        Text('3D 项目的存储目录打不开',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink2)),
-        const SizedBox(height: 6),
-        Text('检查一下应用的数据目录权限，然后重新进入这个工作台。',
-            textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: p.ink4, height: 1.6)),
-        const SizedBox(height: 10),
-        _TechDetails(
-          detail: detail,
-          palette: p,
-          bodyKey: const ValueKey('three-service-tech-details-body'),
-        ),
-      ]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.folder_off_outlined, size: 36, color: p.warn),
+          const SizedBox(height: 10),
+          Text(
+            '3D 项目的存储目录打不开',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: p.ink2,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '检查一下应用的数据目录权限，然后重新进入这个工作台。',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11, color: p.ink4, height: 1.6),
+          ),
+          const SizedBox(height: 10),
+          _TechDetails(
+            detail: detail,
+            palette: p,
+            bodyKey: const ValueKey('three-service-tech-details-body'),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _PassChip extends StatelessWidget {
-  const _PassChip({required this.label, required this.status, required this.active, required this.palette});
+  const _PassChip({
+    required this.label,
+    required this.status,
+    required this.active,
+    required this.palette,
+  });
   final String label;
   final String status;
   final bool active;
@@ -2389,7 +2911,8 @@ class _PassChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final (color, background) = switch (status) {
       'verified' => (palette.success, palette.success.withValues(alpha: 0.15)),
-      'failed' || 'blocked' => (palette.warn, palette.warn.withValues(alpha: 0.15)),
+      'failed' ||
+      'blocked' => (palette.warn, palette.warn.withValues(alpha: 0.15)),
       'generated' => (palette.accent, palette.accentSoft),
       _ => (palette.ink4, palette.panel2),
     };
@@ -2413,7 +2936,12 @@ class _PassChip extends StatelessWidget {
 }
 
 class _TopBtn extends StatelessWidget {
-  const _TopBtn({required this.icon, required this.label, this.onTap, this.active = false});
+  const _TopBtn({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.active = false,
+  });
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
@@ -2431,13 +2959,19 @@ class _TopBtn extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
           decoration: active
-              ? BoxDecoration(color: p.accentSoft, borderRadius: BorderRadius.circular(7))
+              ? BoxDecoration(
+                  color: p.accentSoft,
+                  borderRadius: BorderRadius.circular(7),
+                )
               : null,
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 4),
-            Text(label, style: TextStyle(fontSize: 12, color: color)),
-          ]),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 4),
+              Text(label, style: TextStyle(fontSize: 12, color: color)),
+            ],
+          ),
         ),
       ),
     );
@@ -2453,37 +2987,54 @@ class _SpecPane extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return Column(children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-        child: Row(children: [
-          Text('项目规范',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.ink2)),
-          const Spacer(),
-          OutlinedButton.icon(
-            onPressed: () => onSave(),
-            icon: const Icon(Icons.save_outlined, size: 14),
-            label: const Text('保存规范', style: TextStyle(fontSize: 12)),
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+          child: Row(
+            children: [
+              Text(
+                '项目规范',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: p.ink2,
+                ),
+              ),
+              const Spacer(),
+              OutlinedButton.icon(
+                onPressed: () => onSave(),
+                icon: const Icon(Icons.save_outlined, size: 14),
+                label: const Text('保存规范', style: TextStyle(fontSize: 12)),
+              ),
+            ],
           ),
-        ]),
-      ),
-      Expanded(
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: TextField(
-            controller: controller,
-            maxLines: null,
-            expands: true,
-            style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: p.ink2, height: 1.5),
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: p.panel2,
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: p.line)),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: TextField(
+              controller: controller,
+              maxLines: null,
+              expands: true,
+              style: TextStyle(
+                fontSize: 12,
+                fontFamily: 'monospace',
+                color: p.ink2,
+                height: 1.5,
+              ),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: p.panel2,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: p.line),
+                ),
+              ),
             ),
           ),
         ),
-      ),
-    ]);
+      ],
+    );
   }
 }

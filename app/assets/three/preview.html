@@ -242,21 +242,40 @@ window.__non3d_legacy_boot = function () {
   // 测量反馈：场景几何自检，随帧回传。
   function __measure() {
     let meshes = 0, tris = 0;
+    const parts = [];
     scene.traverse((o) => {
-      if (o.isMesh) {
-        meshes++;
-        tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
+      if (!o.isMesh) return;
+      meshes++;
+      const meshTris = Math.round(
+        (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3);
+      tris += meshTris;
+      // v2 测量：每个 part 的 mesh 用 plan part id 作 name，门的 bbox/接触
+      // 才有逐件事实。没有 name 的 mesh 用 mesh_<n> 兜底（诚实标记，不猜 id）。
+      const box = new THREE.Box3().setFromObject(o);
+      if (!box.isEmpty()) {
+        const min = box.min, max = box.max;
+        parts.push({
+          id: (o.name && String(o.name)) || ('mesh_' + parts.length),
+          bbox: {
+            min: [+min.x.toFixed(4), +min.y.toFixed(4), +min.z.toFixed(4)],
+            max: [+max.x.toFixed(4), +max.y.toFixed(4), +max.z.toFixed(4)],
+          },
+          triangles: meshTris,
+          material: (o.material && o.material.name) ? String(o.material.name) : '',
+        });
       }
     });
     const box = new THREE.Box3().setFromObject(scene);
     const size = box.isEmpty() ? { x: 0, y: 0, z: 0 } : box.getSize(new THREE.Vector3());
-    return {
+    const out = {
       path: 'legacy',
       meshes,
       triangles: Math.round(tris),
       bounds: { x: +size.x.toFixed(2), y: +size.y.toFixed(2), z: +size.z.toFixed(2) },
       user: metrics,
     };
+    if (parts.length) out.parts = parts;
+    return out;
   }
 
   function __firstFrame() {

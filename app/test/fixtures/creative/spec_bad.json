@@ -1,0 +1,13 @@
+{
+  "schema": "nan.creative.spec/2",
+  "kind": "video",
+  "track": "static_object",
+  "prompt": "  ",
+  "duration": {"seconds": 15, "fps": 24, "aspect": "21:9"},
+  "references": [
+    {"path": "../escape.png", "role": "palette"},
+    {"path": "/abs/path.png", "role": "video"}
+  ],
+  "style": {"pack": "mystery_pack", "palette": ["red"]},
+  "output": {"preview": true, "source": true, "export": "mp4"}
+}

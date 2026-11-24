@@ -1,6 +1,6 @@
 /// 热应用的本地面（批次 07）：生成 / 精修 / 列表 / 删除全部在客户端完成。
 ///
-/// 过去这三件事都由外部服务代劳；现在只有一条模型调用（`ai_sdk` 直连当前
+/// 过去这三件事都由外部服务代劳；现在只有一条模型调用（genkit 直连当前
 /// 选择的服务商），其余步骤都是本机文件与 SQLite：
 ///
 ///   一句话 → 模型产出**单个自包含 HTML**（零外链、无网络请求）→
@@ -17,11 +17,12 @@
 library;
 
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:ai_sdk_dart/ai_sdk_dart.dart' show TimeoutConfiguration, generateText;
-import 'package:ai_sdk_openai/ai_sdk_openai.dart' show OpenAIProvider;
+import 'package:genkit/genkit.dart';
+import 'package:genkit_openai/genkit_openai.dart';
 
 import 'hotapp_db.dart';
 import 'nonapp_library.dart';
@@ -335,23 +336,47 @@ class HotAppService {
   }
 }
 
-/// 默认模型调用：`ai_sdk` 单轮补全，OpenAI 兼容协议。
+/// genkit openai 插件实例名（热应用链路独立于主循环）。
+const String _hotAppLlmPluginName = 'nondesign-hotapp';
+
+/// 默认模型调用：genkit 单轮补全，OpenAI 兼容协议。
 Future<String> defaultHotAppLlmCall(HotAppLlmRequest request) async {
-  final provider = OpenAIProvider(apiKey: request.apiKey, baseUrl: request.baseUrl);
+  final ai = Genkit(plugins: [
+    openAI(
+      name: _hotAppLlmPluginName,
+      apiKey: request.apiKey,
+      baseUrl: request.baseUrl,
+    ),
+  ]);
+  final controller = CancellationController();
+  final timer = Timer(hotAppLlmTimeout, () => controller.cancel('hotapp llm timeout'));
   try {
-    final result = await generateText<Object?>(
-      model: provider.call(request.model.isEmpty ? 'gpt-5.1' : request.model),
+    final effort = hotAppReasoningEffort(request.thinkingLevel);
+    final result = await ai.generate<Map<String, dynamic>, dynamic>(
+      model: openAI.model(
+        request.model.isEmpty ? 'gpt-5.1' : request.model,
+        namespace: _hotAppLlmPluginName,
+      ),
       system: request.system,
       prompt: request.prompt,
-      temperature: request.temperature,
-      providerOptions: hotAppProviderOptions(request.thinkingLevel),
-      timeout: const TimeoutConfiguration(total: hotAppLlmTimeout),
+      config: effort == null
+          ? OpenAIChatOptions(temperature: request.temperature)
+          : OpenAIChatOptions(temperature: request.temperature, reasoningEffort: effort),
+      cancel: controller.token,
     );
+    if (result.finishReason.value == 'failed' ||
+        result.finishReason.value == 'aborted') {
+      throw (result.cause ??
+          GenkitException(
+            result.finishMessage ?? 'llm failed',
+            status: StatusCode.internal,
+          ));
+    }
     return result.text;
   } catch (error) {
     throw HotAppFailure('llm_error', '$error');
   } finally {
-    provider.dispose();
+    timer.cancel();
   }
 }
 
@@ -361,14 +386,7 @@ String? hotAppReasoningEffort(String level) {
   return null;
 }
 
-/// `ai_sdk` 的 providerOptions 形状（null = 不注入）。
-Map<String, Map<String, dynamic>>? hotAppProviderOptions(String level) {
-  final effort = hotAppReasoningEffort(level);
-  if (effort == null) return null;
-  return <String, Map<String, dynamic>>{
-    'openai': <String, dynamic>{'reasoning_effort': effort},
-  };
-}
+
 
 /// 模型回包 → 可落盘的 HTML 字节。
 ///

@@ -17,7 +17,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:ai_sdk_dart/ai_sdk_dart.dart' show CancellationToken;
+import 'package:genkit/genkit.dart' show CancellationToken;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nondesign/core/api.dart';
 import 'package:nondesign/core/capability.dart';
@@ -270,7 +270,7 @@ void main() {
     final runner = _Runner((run, abort) async* {
       yield <String, dynamic>{'type': 'note', 'label': '开始'};
       seen.complete(abort);
-      await abort.onCancelled;
+      await abort.whenCancelled;
       yield <String, dynamic>{'type': 'failed', 'error': 'cancelled', 'stopReason': 'cancelled'};
     });
     final host = DesktopRpcHost(services: _services(agent: runner));

@@ -27,7 +27,9 @@ void main() {
     temp = Directory.systemTemp.createTempSync('workspace-adopt-');
     AppPaths.projectsRootOverride = temp;
     store = AppStore(
-      projects: ProjectService(root: () async => Directory('${temp.path}/projects')),
+      projects: ProjectService(
+        root: () async => Directory('${temp.path}/projects'),
+      ),
       toasts: ToastService(autoDismiss: false),
     );
     store.recoveryDir = '${temp.path}/recovery';
@@ -59,20 +61,29 @@ void main() {
 
   group('工作区工具产物 → 工作台当前项目', () {
     test('three_create 成功 → threeProjectName 认领 + notify', () async {
-      await start('three_create', <String, dynamic>{'name': 'island', 'brief': '浮岛'});
+      await start('three_create', <String, dynamic>{
+        'name': 'island',
+        'brief': '浮岛',
+      });
       await end('three_create');
       expect(store.settings.threeProjectName, 'island');
       expect(notifies, greaterThan(0), reason: '工作台靠 notifyListeners 才能刷新');
     });
 
     test('three_create 失败 → 不认领（失败的项目不存在）', () async {
-      await start('three_create', <String, dynamic>{'name': 'ghost', 'brief': 'x'});
+      await start('three_create', <String, dynamic>{
+        'name': 'ghost',
+        'brief': 'x',
+      });
       await end('three_create', ok: false);
       expect(store.settings.threeProjectName, isEmpty);
     });
 
     test('three_pass 成功 → 仍是该项目的当前项目（层级推进不丢选中）', () async {
-      await start('three_create', <String, dynamic>{'name': 'island', 'brief': 'x'});
+      await start('three_create', <String, dynamic>{
+        'name': 'island',
+        'brief': 'x',
+      });
       await end('three_create');
       await start('three_pass', <String, dynamic>{'name': 'island'});
       await end('three_pass');
@@ -80,15 +91,19 @@ void main() {
     });
 
     test('hotapp_generate 成功 → hotappApp 认领', () async {
-      await start('hotapp_generate', <String, dynamic>{'name': 'counter', 'brief': '计数器'});
+      await start('hotapp_generate', <String, dynamic>{
+        'name': 'counter',
+        'brief': '计数器',
+      });
       await end('hotapp_generate');
       expect(store.settings.hotappApp, 'counter');
     });
 
-    test('hotapp_from_prototype 成功 → hotappApp 认领', () async {
-      await start('hotapp_from_prototype', <String, dynamic>{'name': 'todo-app'});
-      await end('hotapp_from_prototype');
-      expect(store.settings.hotappApp, 'todo-app');
+    test('设计验证原型不是热应用产物 → 不认领 hotappApp', () async {
+      store.settings.hotappApp = 'keep-me';
+      await start('design_verify_prototype', <String, dynamic>{});
+      await end('design_verify_prototype');
+      expect(store.settings.hotappApp, 'keep-me');
     });
 
     test('video_create 成功 → videoProjectName 认领（工作台切到新片）', () async {
@@ -99,7 +114,9 @@ void main() {
 
     test('video_review 不是产出工具 → 不动当前视频项目', () async {
       store.settings.videoProjectName = 'keep-me';
-      await start('video_review', <String, dynamic>{'timeline': <String, dynamic>{}});
+      await start('video_review', <String, dynamic>{
+        'timeline': <String, dynamic>{},
+      });
       await end('video_review');
       expect(store.settings.videoProjectName, 'keep-me');
     });

@@ -20,11 +20,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:ai_sdk_dart/test.dart';
-// ai_sdk_provider is a transitive dependency of ai_sdk_dart (not declared in
-// pubspec); the scripted mock needs its stream part types.
-// ignore: depend_on_referenced_packages
-import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+// genkit scripted 模型（test/helpers/genkit_test_model.dart）驱动 agent 循环；
+// 测试不再依赖 SDK 内部流片段类型。
 import 'package:flutter/foundation.dart' show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nondesign/core/api.dart';
@@ -35,6 +32,8 @@ import 'package:nondesign/core/models.dart';
 import 'package:nondesign/core/project_service.dart';
 import 'package:nondesign/core/remote_desktop_client.dart';
 import 'package:nondesign/core/store.dart';
+
+import 'helpers/genkit_test_model.dart';
 import 'package:nondesign/core/toast_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -187,32 +186,7 @@ class _FakeEngine implements LocalEngine {
 // Scripted model for the built-in Build loop
 // ---------------------------------------------------------------------------
 
-class _ScriptedBuildModel extends MockLanguageModelV4 {
-  final List<List<LanguageModelV4ContentPart>> script;
-  int _i = 0;
-  _ScriptedBuildModel(this.script) : super(provider: 'scripted', modelId: 'm');
 
-  @override
-  Future<LanguageModelV4StreamResult> doStream(LanguageModelV4CallOptions options) async {
-    final step = _i < script.length ? script[_i++] : <LanguageModelV4ContentPart>[mockText('done')];
-    var seq = 0;
-    final parts = <LanguageModelV4StreamPart>[const StreamPartStreamStart(warnings: [])];
-    for (final part in step) {
-      if (part is LanguageModelV4ToolCallPart) {
-        parts.add(StreamPartToolInputStart(id: 't$seq', toolName: part.toolName));
-        parts.add(StreamPartToolInputDelta(id: 't$seq', delta: jsonEncode(part.input)));
-        parts.add(StreamPartToolInputEnd(id: 't$seq'));
-        parts.add(StreamPartToolCall(toolCall: part));
-      }
-      seq++;
-    }
-    parts.add(const StreamPartFinish(
-      finishReason: LanguageModelV4FinishReason.stop,
-      rawFinishReason: 'stop',
-    ));
-    return LanguageModelV4StreamResult(stream: Stream.fromIterable(parts));
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -833,11 +807,11 @@ void main() {
       h.store.mbt = 'MBT_V1';
       h.store.history = ['MBT_V1'];
       h.store.historyIndex = 0;
-      h.store.debugAgentModelOverride = _ScriptedBuildModel([
-        [mockToolCall(toolName: 'design_op', input: {'op': 'create home 390 844'})],
-        [mockToolCall(toolName: 'design_op', input: {'op': 'place home text t1 10 10 100 30'})],
-        [mockToolCall(toolName: 'finish', input: {'summary': '建好首页'})],
-      ]);
+      h.store.debugAgentModelOverride = ScriptedAgentModel([
+        [scriptToolCall(toolName: 'design_op', input: {'op': 'create home 390 844'})],
+        [scriptToolCall(toolName: 'design_op', input: {'op': 'place home text t1 10 10 100 30'})],
+        [scriptToolCall(toolName: 'finish', input: {'summary': '建好首页'})],
+      ]).model;
 
       final ok = await h.store.runBuild('搭一个首页');
 
@@ -863,10 +837,10 @@ void main() {
       h.store.history = ['MBT_V1'];
       h.store.historyIndex = 0;
       h.engine.applyGate = Completer<void>();
-      h.store.debugAgentModelOverride = _ScriptedBuildModel([
-        [mockToolCall(toolName: 'design_op', input: {'op': 'create home 390 844'})],
-        [mockToolCall(toolName: 'finish', input: {'summary': 'ok'})],
-      ]);
+      h.store.debugAgentModelOverride = ScriptedAgentModel([
+        [scriptToolCall(toolName: 'design_op', input: {'op': 'create home 390 844'})],
+        [scriptToolCall(toolName: 'finish', input: {'summary': 'ok'})],
+      ]).model;
 
       final human = h.store.applyOp('move home n1 1 2'); // human door, gated
       final run = h.store.runBuild('搭一个首页');

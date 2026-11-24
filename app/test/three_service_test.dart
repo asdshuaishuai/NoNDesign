@@ -670,11 +670,10 @@ void main() {
       expect(threeReasoningEffort('high'), 'high');
       for (final other in <String>['', 'auto', 'off', 'on', 'max', 'HIGH', 'none']) {
         expect(threeReasoningEffort(other), isNull, reason: other);
-        expect(threeProviderOptions(other), isNull, reason: other);
       }
-      expect(threeProviderOptions('high'), <String, Map<String, dynamic>>{
-        'openai': <String, dynamic>{'reasoning_effort': 'high'},
-      });
+      // genkit 迁移后：落线形状由 OpenAIChatOptions(reasoningEffort:) 承担，
+      // 这里只锚档位白名单语义。
+      expect(threeReasoningEffort('high'), 'high');
     });
 
     test('JSON 提取：围栏 / 裸 JSON / 花括号夹在散文里都能取到', () async {

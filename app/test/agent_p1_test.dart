@@ -12,51 +12,20 @@
 //
 // 桥替身自建（不引用 dart_agent_test 的私有 fake）：_RecordingBridge 同时
 // 实现门与写接口，按调用序记录实参——RSI 的参数错位是本次最大的静默失效面。
-import 'dart:convert';
 
-import 'package:ai_sdk_dart/test.dart';
-// ai_sdk_provider 是 ai_sdk_dart 的传递依赖（pubspec 未声明）；工具清单
-// 断言需要其类型来读出 options.tools 的名字。
-// ignore: depend_on_referenced_packages
-import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+// 工具清单断言从 genkit 的 ModelRequest.tools（scripted 模型记录）读取，
+// 不再依赖 SDK 内部类型。
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nondesign/core/dart_agent.dart';
 
+import 'package:genkit/genkit.dart';
+
+import 'helpers/genkit_test_model.dart';
+
 /// 多轮脚本化模型：每次 doStream 依序取下一步响应；脚本耗尽回纯文本
 /// 'done'（防死循环）。
-class _ScriptedModel extends MockLanguageModelV4 {
-  final List<List<LanguageModelV4ContentPart>> script;
-  int _i = 0;
-  _ScriptedModel(this.script) : super(provider: 'scripted', modelId: 'scripted-model');
 
-  @override
-  Future<LanguageModelV4StreamResult> doStream(LanguageModelV4CallOptions options) async {
-    streamCalls.add(options);
-    final step = _i < script.length ? script[_i++] : <LanguageModelV4ContentPart>[mockText('done')];
-    var seq = 0;
-    String nextId() => 'id-${seq++}';
-    final parts = <LanguageModelV4StreamPart>[const StreamPartStreamStart(warnings: [])];
-    for (final part in step) {
-      if (part is LanguageModelV4TextPart) {
-        final id = nextId();
-        parts.add(StreamPartTextStart(id: id));
-        parts.add(StreamPartTextDelta(id: id, delta: part.text));
-        parts.add(StreamPartTextEnd(id: id));
-      } else if (part is LanguageModelV4ToolCallPart) {
-        parts.add(StreamPartToolInputStart(id: part.toolCallId, toolName: part.toolName));
-        parts.add(StreamPartToolInputDelta(id: part.toolCallId, delta: jsonEncode(part.input)));
-        parts.add(StreamPartToolInputEnd(id: part.toolCallId));
-        parts.add(StreamPartToolCall(toolCall: part));
-      }
-    }
-    parts.add(const StreamPartFinish(
-      finishReason: LanguageModelV4FinishReason.stop,
-      rawFinishReason: 'stop',
-    ));
-    return LanguageModelV4StreamResult(stream: Stream.fromIterable(parts));
-  }
-}
 
 /// 门 + 写接口的录制替身：session 调用按实参成对记录（name/arg/mbt），
 /// 变更走 mutateSession（该接口就是 auto_fix 与 delete-artboard 的去路）。
@@ -259,20 +228,18 @@ DartAgentRequest _planReq() => const DartAgentRequest(
       apiKey: 'k',
     );
 
-Set<String> _toolNames(MockLanguageModelV4 model) => model.streamCalls.first.tools
-    .whereType<LanguageModelV4FunctionTool>()
-    .map((t) => t.name)
-    .toSet();
+Set<String> _toolNames(ScriptedAgentModel model) =>
+    (model.calls.first.tools ?? const <ToolDefinition>[]).map((t) => t.name).toSet();
 
 void main() {
   group('generate_page（server agent.py:272-312）', () {
     test('非 plan 注册、plan 不注册', () async {
-      final build = _ScriptedModel([
-        [mockToolCall(toolName: 'finish', input: {'summary': 'ok'})],
+      final build = ScriptedAgentModel([
+        [scriptToolCall(toolName: 'finish', input: {'summary': 'ok'})],
       ]);
       await runDartAgent(
         request: _buildReq(),
-        modelOverride: build,
+        modelOverride: build.model,
         bridge: _RecordingBridge(canonical: _mbt0),
         onEvent: (_) {},
       );
@@ -280,22 +247,22 @@ void main() {
       expect(buildTools, contains('generate_page'));
       expect(buildTools, contains('design_op'));
 
-      final plan = _ScriptedModel([
+      final plan = ScriptedAgentModel([
         [
-          mockToolCall(toolName: 'write_doc', input: {'kind': 'prd', 'content': '# PRD'}),
-          mockToolCall(toolName: 'write_doc', input: {'kind': 'ui', 'content': '## UI'}),
-          mockToolCall(toolName: 'write_design_spec', input: {
+          scriptToolCall(toolName: 'write_doc', input: {'kind': 'prd', 'content': '# PRD'}),
+          scriptToolCall(toolName: 'write_doc', input: {'kind': 'ui', 'content': '## UI'}),
+          scriptToolCall(toolName: 'write_design_spec', input: {
             'palette': {'primary': '#3366FF'},
             'typography': {'h1': 30, 'h2': 22, 'body': 15},
             'spacing': [4, 8, 16],
             'radius': {'sm': 6, 'md': 10, 'lg': 14},
           }),
         ],
-        [mockToolCall(toolName: 'finish', input: {'summary': '完成'})],
+        [scriptToolCall(toolName: 'finish', input: {'summary': '完成'})],
       ]);
       final planned = await runDartAgent(
         request: _planReq(),
-        modelOverride: plan,
+        modelOverride: plan.model,
         bridge: _RecordingBridge(canonical: _mbt0),
         onEvent: (_) {},
       );
@@ -308,18 +275,18 @@ void main() {
     test('spec 缺省取 ctx.designSpec；canonical 前进 + page_generated 事件', () async {
       final bridge = _RecordingBridge(canonical: _mbt0);
       final events = <Map<String, dynamic>>[];
-      final model = _ScriptedModel([
+      final model = ScriptedAgentModel([
         [
-          mockToolCall(toolName: 'generate_page', input: {
+          scriptToolCall(toolName: 'generate_page', input: {
             'intent': '记账首页',
             'name': 'home',
           }),
         ],
-        [mockToolCall(toolName: 'finish', input: {'summary': '首页生成'})],
+        [scriptToolCall(toolName: 'finish', input: {'summary': '首页生成'})],
       ]);
       final result = await runDartAgent(
         request: _buildReq(),
-        modelOverride: model,
+        modelOverride: model.model,
         bridge: bridge,
         onEvent: events.add,
       );
@@ -354,15 +321,15 @@ void main() {
       };
       await runDartAgent(
         request: _buildReq(),
-        modelOverride: _ScriptedModel([
+        modelOverride: ScriptedAgentModel([
           [
-            mockToolCall(toolName: 'generate_page', input: {
+            scriptToolCall(toolName: 'generate_page', input: {
               'intent': '设置页',
               'spec': explicit,
             }),
           ],
-          [mockToolCall(toolName: 'finish', input: {'summary': 'ok'})],
-        ]),
+          [scriptToolCall(toolName: 'finish', input: {'summary': 'ok'})],
+        ]).model,
         bridge: bridge,
         onEvent: (_) {},
       );
@@ -375,12 +342,12 @@ void main() {
       final events = <Map<String, dynamic>>[];
       final result = await runDartAgent(
         request: _buildReq(),
-        modelOverride: _ScriptedModel([
+        modelOverride: ScriptedAgentModel([
           [
-            mockToolCall(toolName: 'generate_page', input: {'intent': 'x'}),
+            scriptToolCall(toolName: 'generate_page', input: {'intent': 'x'}),
           ],
-          [mockToolCall(toolName: 'finish', input: {'summary': 'done'})],
-        ]),
+          [scriptToolCall(toolName: 'finish', input: {'summary': 'done'})],
+        ]).model,
         bridge: gate,
         onEvent: events.add,
       );
@@ -405,12 +372,12 @@ void main() {
       final events = <Map<String, dynamic>>[];
       final result = await runDartAgent(
         request: _buildReq(),
-        modelOverride: _ScriptedModel([
+        modelOverride: ScriptedAgentModel([
           [
-            mockToolCall(toolName: 'design_op', input: {'op': 'create home 390 844'}),
+            scriptToolCall(toolName: 'design_op', input: {'op': 'create home 390 844'}),
           ],
-          [mockToolCall(toolName: 'finish', input: {'summary': '首页'})],
-        ]),
+          [scriptToolCall(toolName: 'finish', input: {'summary': '首页'})],
+        ]).model,
         bridge: bridge,
         onEvent: events.add,
       );
@@ -456,12 +423,12 @@ void main() {
       final events = <Map<String, dynamic>>[];
       final result = await runDartAgent(
         request: _buildReq(),
-        modelOverride: _ScriptedModel([
+        modelOverride: ScriptedAgentModel([
           [
-            mockToolCall(toolName: 'design_op', input: {'op': 'create home 390 844'}),
+            scriptToolCall(toolName: 'design_op', input: {'op': 'create home 390 844'}),
           ],
-          [mockToolCall(toolName: 'finish', input: {'summary': '首页'})],
-        ]),
+          [scriptToolCall(toolName: 'finish', input: {'summary': '首页'})],
+        ]).model,
         bridge: bridge,
         onEvent: events.add,
       );
@@ -484,9 +451,9 @@ void main() {
       final events = <Map<String, dynamic>>[];
       await runDartAgent(
         request: _buildReq(),
-        modelOverride: _ScriptedModel([
-          [mockToolCall(toolName: 'finish', input: {'summary': 'ok'})],
-        ]),
+        modelOverride: ScriptedAgentModel([
+          [scriptToolCall(toolName: 'finish', input: {'summary': 'ok'})],
+        ]).model,
         bridge: bridge,
         onEvent: events.add,
       );
@@ -509,9 +476,9 @@ void main() {
       final events = <Map<String, dynamic>>[];
       await runDartAgent(
         request: _buildReq(),
-        modelOverride: _ScriptedModel([
-          [mockToolCall(toolName: 'finish', input: {'summary': 'ok'})],
-        ]),
+        modelOverride: ScriptedAgentModel([
+          [scriptToolCall(toolName: 'finish', input: {'summary': 'ok'})],
+        ]).model,
         bridge: bridge,
         onEvent: events.add,
       );
@@ -535,9 +502,9 @@ void main() {
       final events = <Map<String, dynamic>>[];
       final result = await runDartAgent(
         request: _buildReq(),
-        modelOverride: _ScriptedModel([
-          [mockToolCall(toolName: 'finish', input: {'summary': 'ok'})],
-        ]),
+        modelOverride: ScriptedAgentModel([
+          [scriptToolCall(toolName: 'finish', input: {'summary': 'ok'})],
+        ]).model,
         bridge: bridge,
         onEvent: events.add,
       );
@@ -573,9 +540,9 @@ void main() {
       final events = <Map<String, dynamic>>[];
       await runDartAgent(
         request: _buildReq(mbt: '---\nrevision: 1\n---\n# doc'),
-        modelOverride: _ScriptedModel([
-          [mockToolCall(toolName: 'finish', input: {'summary': 'ok'})],
-        ]),
+        modelOverride: ScriptedAgentModel([
+          [scriptToolCall(toolName: 'finish', input: {'summary': 'ok'})],
+        ]).model,
         bridge: bridge,
         onEvent: events.add,
       );
@@ -602,19 +569,19 @@ void main() {
       );
       final result = await runDartAgent(
         request: _planReq(),
-        modelOverride: _ScriptedModel([
+        modelOverride: ScriptedAgentModel([
           [
-            mockToolCall(toolName: 'write_doc', input: {'kind': 'prd', 'content': '# PRD'}),
-            mockToolCall(toolName: 'write_doc', input: {'kind': 'ui', 'content': '## UI'}),
-            mockToolCall(toolName: 'write_design_spec', input: {
+            scriptToolCall(toolName: 'write_doc', input: {'kind': 'prd', 'content': '# PRD'}),
+            scriptToolCall(toolName: 'write_doc', input: {'kind': 'ui', 'content': '## UI'}),
+            scriptToolCall(toolName: 'write_design_spec', input: {
               'palette': {'primary': '#3366FF'},
               'typography': {'h1': 30, 'h2': 22, 'body': 15},
               'spacing': [4, 8, 16],
               'radius': {'sm': 6, 'md': 10, 'lg': 14},
             }),
           ],
-          [mockToolCall(toolName: 'finish', input: {'summary': '完成'})],
-        ]),
+          [scriptToolCall(toolName: 'finish', input: {'summary': '完成'})],
+        ]).model,
         bridge: bridge,
         onEvent: (_) {},
       );

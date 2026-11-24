@@ -38,8 +38,10 @@ List<File> _dartFiles(Directory dir) => dir
 
 List<String> _imports(File file) {
   final text = file.readAsStringSync();
-  final matches = RegExp(r'''^\s*(?:import|export)\s+['"]([^'"]+)['"]''', multiLine: true)
-      .allMatches(text);
+  final matches = RegExp(
+    r'''^\s*(?:import|export)\s+['"]([^'"]+)['"]''',
+    multiLine: true,
+  ).allMatches(text);
   return matches.map((m) => m.group(1)!).toList(growable: false);
 }
 
@@ -70,7 +72,12 @@ void main() {
   final coreDir = Directory('${libDir.path}/core');
 
   group('capability/layout contract is platform-pure', () {
-    for (final name in ['capability.dart', 'capability_hub.dart', 'layout.dart', 'platform_capabilities.dart']) {
+    for (final name in [
+      'capability.dart',
+      'capability_hub.dart',
+      'layout.dart',
+      'platform_capabilities.dart',
+    ]) {
       test('lib/core/$name avoids io/ffi/http and widget imports', () {
         final file = File('${coreDir.path}/$name');
         expect(file.existsSync(), isTrue);
@@ -91,7 +98,8 @@ void main() {
         }
         // platform_capabilities is the adapter: foundation only.
         if (name == 'platform_capabilities.dart') {
-          final flutterImports = _imports(file).where((i) => i.startsWith('package:flutter/'));
+          final flutterImports = _imports(file)
+              .where((i) => i.startsWith('package:flutter/'));
           expect(flutterImports, ['package:flutter/foundation.dart']);
         }
       });
@@ -101,10 +109,16 @@ void main() {
   group('engine boundary', () {
     test('package:wasm_run is confined to lib/core/engine/', () {
       for (final file in _dartFiles(libDir)) {
-        final rel = file.path.substring(libDir.path.length + 1).replaceAll('\\', '/');
+        final rel = file.path
+            .substring(libDir.path.length + 1)
+            .replaceAll('\\', '/');
         if (_imports(file).any((i) => i.startsWith('package:wasm_run'))) {
-          expect(rel.startsWith('core/engine/'), isTrue,
-              reason: 'wasm_run must only be imported by the Dart engine host, not $rel');
+          expect(
+            rel.startsWith('core/engine/'),
+            isTrue,
+            reason:
+                'wasm_run must only be imported by the Dart engine host, not $rel',
+          );
         }
       }
     });
@@ -114,23 +128,26 @@ void main() {
           .listSync(recursive: true)
           .whereType<File>()
           .map((f) => f.path.replaceAll('\\', '/'))
-          .where((path) =>
-              path.endsWith('.wasm') &&
-              !path.contains('/build/') &&
-              !path.contains('/.dart_tool/') &&
-              !path.contains('/macos/') &&
-              !path.contains('/ios/') &&
-              !path.contains('/android/') &&
-              !path.contains('/linux/') &&
-              !path.contains('/windows/'))
+          .where(
+            (path) =>
+                path.endsWith('.wasm') &&
+                !path.contains('/build/') &&
+                !path.contains('/.dart_tool/') &&
+                !path.contains('/macos/') &&
+                !path.contains('/ios/') &&
+                !path.contains('/android/') &&
+                !path.contains('/linux/') &&
+                !path.contains('/windows/'),
+          )
           .map((path) => path.substring(appDir.path.length + 1))
           .toList();
       expect(wasm, ['assets/engine/moonviz.wasm']);
     });
 
     test('engine manifest is the 0.2-dev build line', () {
-      final manifest = jsonDecode(File('${appDir.path}/assets/engine/manifest.json').readAsStringSync())
-          as Map<String, dynamic>;
+      final manifest = jsonDecode(
+        File('${appDir.path}/assets/engine/manifest.json').readAsStringSync(),
+      ) as Map<String, dynamic>;
       expect(manifest['build_line'], '0.2-dev');
       expect(manifest['bytes'], 805952);
       expect(manifest['templates'], 17);
@@ -149,8 +166,18 @@ void main() {
 
     test('required capabilities are direct dependencies', () {
       final deps = sections['dependencies'] ?? const <String>[];
-      for (final name in ['cryptography', 'sqlite3', 'sqlite3_flutter_libs', 'wasm_run_flutter', 'path_provider']) {
-        expect(deps, contains(name), reason: '$name must be a direct main dependency');
+      for (final name in [
+        'cryptography',
+        'sqlite3',
+        'sqlite3_flutter_libs',
+        'wasm_run_flutter',
+        'path_provider',
+      ]) {
+        expect(
+          deps,
+          contains(name),
+          reason: '$name must be a direct main dependency',
+        );
       }
     });
 
@@ -160,7 +187,10 @@ void main() {
         RegExp(r'wasm_run:\s*\n\s*path:\s*(\S+)').firstMatch(pubspec)?.group(1),
         '../third_party/wasm_run',
       );
-      expect(Directory('${repoRoot.path}/third_party/wasm_run').existsSync(), isTrue);
+      expect(
+        Directory('${repoRoot.path}/third_party/wasm_run').existsSync(),
+        isTrue,
+      );
     });
 
     test('the engine asset directory is bundled', () {
@@ -186,7 +216,11 @@ void main() {
         'https://',
         'Uri.parse',
       ]) {
-        expect(hook.contains(banned), isFalse, reason: 'hook must stay offline: found "$banned"');
+        expect(
+          hook.contains(banned),
+          isFalse,
+          reason: 'hook must stay offline: found "$banned"',
+        );
       }
       final pubspec = File('${vendor.path}/pubspec.yaml')
           .readAsLinesSync()
@@ -198,11 +232,17 @@ void main() {
 
     test('all 15 target libraries are vendored', () {
       final libs = Directory('${vendor.path}/libs');
-      expect(libs.existsSync(), isTrue, reason: 'run scripts/fetch_wasm_run_libs.sh');
+      expect(
+        libs.existsSync(),
+        isTrue,
+        reason: 'run scripts/fetch_wasm_run_libs.sh',
+      );
       // Windows 的 LoadLibrary 会给无扩展名路径补 `.dll`：本机额外放了一个
       // 指向同一字节的 `.dll` 硬链接垫片（开发机加载/真实宿主用），它不是
       // 第 16 个 vendored 目标库；备份 DLL 同理不计。
-      final canonical = RegExp(r'^wasm_run_dart-dynamic-[a-z0-9_]+(-[a-z0-9_]+)*$');
+      final canonical = RegExp(
+        r'^wasm_run_dart-dynamic-[a-z0-9_]+(-[a-z0-9_]+)*$',
+      );
       final names = libs
           .listSync()
           .whereType<File>()
@@ -226,19 +266,67 @@ void main() {
     });
 
     test('the fetch script pins the same version as the vendored package', () {
-      final script = File('${repoRoot.path}/scripts/fetch_wasm_run_libs.sh').readAsStringSync();
+      final script = File('${repoRoot.path}/scripts/fetch_wasm_run_libs.sh')
+          .readAsStringSync();
       expect(script.contains('PKG_VERSION="0.2.0+2"'), isTrue);
       expect(script.contains('--check'), isTrue);
-      expect(script.contains('wasm_run_dart-dynamic-aarch64-apple-ios'), isTrue);
+      expect(
+        script.contains('wasm_run_dart-dynamic-aarch64-apple-ios'),
+        isTrue,
+      );
     });
   });
 
   group('engine sync script', () {
     test('mirrors into app/assets/engine and supports --check', () {
-      final script = File('${repoRoot.path}/scripts/sync_engine.py').readAsStringSync();
+      final script = File('${repoRoot.path}/scripts/sync_engine.py')
+          .readAsStringSync();
       expect(script.contains('APP_ENGINE_DIR'), isTrue);
       expect(script.contains('mirror_to_app()'), isTrue);
       expect(script.contains('--check'), isTrue);
+    });
+  });
+
+  group('LLM layer stays on genkit (2026-11-23 user decision)', () {
+    test('ai_sdk dependency and imports are gone', () {
+      final pubspec = File('${appDir.path}/pubspec.yaml').readAsStringSync();
+      // 注释里允许记录「不要再引入 ai_sdk」；只检查真正的依赖行。
+      final dependencyLines = pubspec
+          .split('\n')
+          .where((String line) => !line.trimLeft().startsWith('#'))
+          .join('\n');
+      expect(
+        dependencyLines.contains('ai_sdk'),
+        isFalse,
+        reason: 'ai_sdk 已退场：不要再把 ai_sdk_dart / ai_sdk_openai 加回依赖',
+      );
+      expect(pubspec.contains('genkit:'), isTrue);
+      expect(pubspec.contains('genkit_openai:'), isTrue);
+      expect(pubspec.contains('schemantic:'), isTrue);
+      for (final file in _dartFiles(libDir)) {
+        for (final import in _imports(file)) {
+          expect(
+            import.startsWith('package:ai_sdk_'),
+            isFalse,
+            reason: '${file.path} 仍 import $import；LLM 层只允许 genkit',
+          );
+        }
+      }
+    });
+
+    test('retired ai_sdk middleware cannot come back', () {
+      expect(
+        File('${libDir.path}/core/agent_model_middleware.dart').existsSync(),
+        isFalse,
+        reason: 'ai_sdk 方言守护已随迁移删除；需要新守护先改 AGENTS/测试并走裁决',
+      );
+      for (final file in _dartFiles(libDir)) {
+        expect(
+          file.readAsStringSync().contains('StreamToolNameGuard'),
+          isFalse,
+          reason: '${file.path} 仍引用已退场的 StreamToolNameGuard',
+        );
+      }
     });
   });
 }

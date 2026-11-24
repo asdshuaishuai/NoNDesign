@@ -13,11 +13,8 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:ai_sdk_dart/test.dart';
-// ai_sdk_provider 是 ai_sdk_dart 的传递依赖（pubspec 未声明）；scripted mock
-// 需要其流片段/结果类型来覆写 doStream（store_test 同款模式的本文件副本）。
-// ignore: depend_on_referenced_packages
-import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+// genkit scripted 模型（test/helpers/genkit_test_model.dart）驱动 agent 循环；
+// store_test / chat_stream_test 同款模式。
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -29,6 +26,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nondesign/core/api.dart';
 import 'package:nondesign/core/models.dart';
 import 'package:nondesign/core/store.dart';
+
+import 'helpers/genkit_test_model.dart';
 import 'package:nondesign/main.dart';
 import 'package:nondesign/widgets/chat_pip_shell.dart';
 import 'package:nondesign/widgets/desktop_shell.dart';
@@ -109,29 +108,7 @@ NoNDesignApi _engineApi() => NoNDesignApi('http://mock.local', MockClient((reque
     }));
 
 /// 脚本化模型（store_test 同款副本）：每次 doStream 依序取脚本步。
-class _ScriptedModel extends MockLanguageModelV4 {
-  final List<List<LanguageModelV4ContentPart>> script;
-  int _i = 0;
-  _ScriptedModel(this.script) : super(provider: 'scripted', modelId: 'm');
 
-  @override
-  Future<LanguageModelV4StreamResult> doStream(LanguageModelV4CallOptions options) async {
-    final step = _i < script.length ? script[_i++] : <LanguageModelV4ContentPart>[mockText('done')];
-    var seq = 0;
-    final parts = <LanguageModelV4StreamPart>[const StreamPartStreamStart(warnings: [])];
-    for (final part in step) {
-      if (part is LanguageModelV4ToolCallPart) {
-        parts.add(StreamPartToolInputStart(id: 't$seq', toolName: part.toolName));
-        parts.add(StreamPartToolInputDelta(id: 't$seq', delta: jsonEncode(part.input)));
-        parts.add(StreamPartToolInputEnd(id: 't$seq'));
-        parts.add(StreamPartToolCall(toolCall: part));
-      }
-      seq++;
-    }
-    parts.add(const StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop, rawFinishReason: 'stop'));
-    return LanguageModelV4StreamResult(stream: Stream.fromIterable(parts));
-  }
-}
 
 /// Dart 运行时 store：MockClient 过能力门，模型走 scripted 注入，recovery 落
 /// 临时目录（不污染 ~/.nondesign）。
@@ -282,10 +259,10 @@ void main() {
 
     testWidgets('嵌入宿主期间 runBuild / runRefine 不拆聊天主面', (tester) async {
       final store = _dartStore();
-      store.debugAgentModelOverride = _ScriptedModel([
-        [mockText('完成')],
-        [mockText('完成')],
-      ]);
+      store.debugAgentModelOverride = ScriptedAgentModel([
+        [scriptText('完成')],
+        [scriptText('完成')],
+      ]).model;
       await _pumpAt(tester, _rootApp(store), const Size(390, 844));
       await tester.tap(find.byKey(const ValueKey('pip-edge-capsule')));
       await tester.pump(const Duration(milliseconds: 100));

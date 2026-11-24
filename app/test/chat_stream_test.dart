@@ -10,15 +10,11 @@
 // - NaN 窄栏：聊天里的 A2UI 卡（ask_user 选项）在桌面右栏可见；外部智能体
 //   只显示产品名；
 // - 会话持久化：chat.json 落盘 → 重启恢复（running 进度卡诚实降级）。
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:ai_sdk_dart/test.dart';
-// ai_sdk_provider 是 ai_sdk_dart 的传递依赖（pubspec 未声明）；scripted mock
-// 需要其流片段/结果类型来覆写 doStream（store_test 同款注释与本文件副本）。
-// ignore: depend_on_referenced_packages
-import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+// genkit scripted 模型（test/helpers/genkit_test_model.dart）：工具循环与流式
+// 事件的断言都经它驱动，不再有 SDK 内部流片段类型。
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -29,6 +25,9 @@ import 'package:nondesign/core/capability.dart';
 import 'package:nondesign/core/models.dart';
 import 'package:nondesign/core/project_service.dart';
 import 'package:nondesign/core/store.dart';
+
+import 'helpers/genkit_test_model.dart';
+
 import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/core/toast_service.dart';
 import 'package:nondesign/main.dart';
@@ -41,29 +40,6 @@ import 'package:nondesign/widgets/workspace.dart';
 
 /// Build 循环的脚本化模型（store_test 同款副本）：每次 doStream 依序取脚本
 /// 步；耗尽回纯文本。
-class _ScriptedBuildModel extends MockLanguageModelV4 {
-  final List<List<LanguageModelV4ContentPart>> script;
-  int _i = 0;
-  _ScriptedBuildModel(this.script) : super(provider: 'scripted', modelId: 'm');
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(LanguageModelV4CallOptions options) async {
-    final step = _i < script.length ? script[_i++] : <LanguageModelV4ContentPart>[mockText('done')];
-    var seq = 0;
-    final parts = <LanguageModelV4StreamPart>[const StreamPartStreamStart(warnings: [])];
-    for (final part in step) {
-      if (part is LanguageModelV4ToolCallPart) {
-        parts.add(StreamPartToolInputStart(id: 't$seq', toolName: part.toolName));
-        parts.add(StreamPartToolInputDelta(id: 't$seq', delta: jsonEncode(part.input)));
-        parts.add(StreamPartToolInputEnd(id: 't$seq'));
-        parts.add(StreamPartToolCall(toolCall: part));
-      }
-      seq++;
-    }
-    parts.add(const StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop, rawFinishReason: 'stop'));
-    return LanguageModelV4StreamResult(stream: Stream.fromIterable(parts));
-  }
-}
 
 /// 脚本化引擎（store_test `_FakeEngine` 的精简副本）：进程内宿主替身，
 /// 记录 AgentGate 的 gate/op 并回 canonical。批次 05 起 store 的写路径是
@@ -75,15 +51,21 @@ class _ChatEngine implements LocalEngine {
   String canonical = 'MBT_0';
 
   Map<String, dynamic> _envelope(String mbt) => {
-        'ok': true,
-        'mbt': mbt,
-        'entry': 'home',
-        'revision': 1,
-        'artboards': [
-          {'id': 'home', 'name': 'home', 'width': 390, 'height': 844, 'nodes': <dynamic>[]},
-        ],
-        'flows': <dynamic>[],
-      };
+    'ok': true,
+    'mbt': mbt,
+    'entry': 'home',
+    'revision': 1,
+    'artboards': [
+      {
+        'id': 'home',
+        'name': 'home',
+        'width': 390,
+        'height': 844,
+        'nodes': <dynamic>[],
+      },
+    ],
+    'flows': <dynamic>[],
+  };
 
   @override
   bool get isReady => true;
@@ -102,10 +84,17 @@ class _ChatEngine implements LocalEngine {
   }
 
   @override
-  Future<Map<String, dynamic>> validate(String mbt) async => {'ok': true, 'mbt': mbt};
+  Future<Map<String, dynamic>> validate(String mbt) async => {
+    'ok': true,
+    'mbt': mbt,
+  };
 
   @override
-  Future<Map<String, dynamic>> apply(String mbt, String op, {String gate = 'human'}) async {
+  Future<Map<String, dynamic>> apply(
+    String mbt,
+    String op, {
+    String gate = 'human',
+  }) async {
     gates.add(gate);
     appliedOps.add(op);
     canonical = 'MBT_${appliedOps.length}';
@@ -113,7 +102,11 @@ class _ChatEngine implements LocalEngine {
   }
 
   @override
-  Future<Map<String, dynamic>> session(String mbt, String name, [String? arg]) async {
+  Future<Map<String, dynamic>> session(
+    String mbt,
+    String name, [
+    String? arg,
+  ]) async {
     if (name == 'session_list_artboards') {
       return {
         'ok': true,
@@ -127,39 +120,65 @@ class _ChatEngine implements LocalEngine {
 
   @override
   Future<Map<String, dynamic>> generate(
-      String mbt, String intent, String name, Map<String, dynamic> spec) async {
+    String mbt,
+    String intent,
+    String name,
+    Map<String, dynamic> spec,
+  ) async {
     canonical = '$mbt<!-- generated: $intent -->';
     return {'ok': true, 'mbt': canonical, 'artboard': name};
   }
 
   @override
-  Future<Map<String, dynamic>> tap(String mbt, String artboard, double x, double y) async =>
-      {'ok': true, 'current': artboard};
+  Future<Map<String, dynamic>> tap(
+    String mbt,
+    String artboard,
+    double x,
+    double y,
+  ) async => {'ok': true, 'current': artboard};
 
   @override
-  Future<Map<String, dynamic>> constrainIntent(String mbt, String artboard, String intent) async =>
-      {'ok': true, 'mbt': mbt};
+  Future<Map<String, dynamic>> constrainIntent(
+    String mbt,
+    String artboard,
+    String intent,
+  ) async => {'ok': true, 'mbt': mbt};
 
   @override
-  Future<Map<String, dynamic>> event(String mbt, String artboard, String spec) async =>
-      {'ok': true, 'current': artboard};
+  Future<Map<String, dynamic>> event(
+    String mbt,
+    String artboard,
+    String spec,
+  ) async => {'ok': true, 'current': artboard};
 
   @override
-  Future<Map<String, dynamic>> history(String mbt, String command) async => {'ok': true, 'mbt': mbt};
+  Future<Map<String, dynamic>> history(String mbt, String command) async => {
+    'ok': true,
+    'mbt': mbt,
+  };
 
   @override
-  Future<Map<String, dynamic>> exportHtml(String mbt) async => {'ok': true, 'html': '<html></html>'};
+  Future<Map<String, dynamic>> exportHtml(String mbt) async => {
+    'ok': true,
+    'html': '<html></html>',
+  };
 
   @override
-  Future<Map<String, dynamic>> tokens() async => {'ok': true, 'data': const <dynamic>[]};
+  Future<Map<String, dynamic>> tokens() async => {
+    'ok': true,
+    'data': const <dynamic>[],
+  };
 
   @override
-  Future<Map<String, dynamic>> versionInfo() async => {'ok': true, 'version': 'fixture'};
+  Future<Map<String, dynamic>> versionInfo() async => {
+    'ok': true,
+    'version': 'fixture',
+  };
 
   @override
   Future<List<dynamic>> templates() async => [
-        {'id': 'pc_app', 'name': 'PC App', 'device': 'pc'},
-      ];
+    {'id': 'pc_app', 'name': 'PC App', 'device': 'pc'},
+  ];
 
   @override
   Future<List<dynamic>> components() async => ['button', 'text'];
@@ -209,7 +228,11 @@ Future<(AppStore, _ChatEngine, Future<void> Function())> _chatHarness() async {
         'api': 'http://mock.local',
         'protocol': 'openai',
         'models': {
-          'm1': {'name': 'M1', 'tool_call': true, 'limit': {'context': 128000}},
+          'm1': {
+            'name': 'M1',
+            'tool_call': true,
+            'limit': {'context': 128000},
+          },
         },
       },
     },
@@ -225,11 +248,15 @@ Future<(AppStore, _ChatEngine, Future<void> Function())> _chatHarness() async {
   store.projectName = '仪表盘';
   store.view = 'chat';
   store.docs.prd = '已有的 PRD';
-  return (store, engine, () async {
-    try {
-      dir.deleteSync(recursive: true);
-    } catch (_) {}
-  });
+  return (
+    store,
+    engine,
+    () async {
+      try {
+        dir.deleteSync(recursive: true);
+      } catch (_) {}
+    },
+  );
 }
 
 /// 静态 A2UI surface 消息（a2ui_card_test 同款夹具形状，纯 map 无 a2ui import）。
@@ -238,16 +265,24 @@ final List<Object?> _surfaceMessages = [
     'version': '1.0',
     'createSurface': {
       'surfaceId': 'demo',
-      'catalogId': 'https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json',
+      'catalogId':
+          'https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json',
       'components': [
-        {'id': 'root', 'component': 'Column', 'children': ['title', 'btn']},
+        {
+          'id': 'root',
+          'component': 'Column',
+          'children': ['title', 'btn'],
+        },
         {'id': 'title', 'component': 'Text', 'text': '旅行偏好'},
         {
           'id': 'btn',
           'component': 'Button',
           'child': 'btnLabel',
           'action': {
-            'event': {'name': 'submit', 'context': {'place': 'Tokyo'}},
+            'event': {
+              'name': 'submit',
+              'context': {'place': 'Tokyo'},
+            },
           },
         },
         {'id': 'btnLabel', 'component': 'Text', 'text': '生成行程'},
@@ -266,10 +301,17 @@ void main() {
   group('sendChat 全链（store 级，dart 运行时 × 引擎门）', () {
     test('发消息→进度卡→产物卡：事件镜像步骤、原型卡追加、视图不被拽走', () async {
       final (store, engine, close) = await _chatHarness();
-      store.debugAgentModelOverride = _ScriptedBuildModel([
-        [mockToolCall(toolName: 'design_op', input: {'op': 'create home 390 844'})],
-        [mockToolCall(toolName: 'finish', input: {'summary': '建好首页'})],
-      ]);
+      store.debugAgentModelOverride = ScriptedAgentModel([
+        [
+          scriptToolCall(
+            toolName: 'design_op',
+            input: {'op': 'create home 390 844'},
+          ),
+        ],
+        [
+          scriptToolCall(toolName: 'finish', input: {'summary': '建好首页'}),
+        ],
+      ]).model;
 
       final ok = await store.sendChat('搭一个仪表盘');
 
@@ -287,8 +329,11 @@ void main() {
       expect(progress.running, false, reason: '终态收尾后进度卡不再在跑');
       expect(progress.ok, true);
       expect(progress.text, '原型已生成');
-      expect(progress.steps.map((s) => s.label), contains('design_op'),
-          reason: 'design_op 工具调用镜像为进度卡步骤');
+      expect(
+        progress.steps.map((s) => s.label),
+        contains('design_op'),
+        reason: 'design_op 工具调用镜像为进度卡步骤',
+      );
       // 阶段代号（build/plan/refine）不上屏：起始行是人话阶段 + 模型名。
       final startStep = progress.steps.firstWhere((s) => s.label == 'NaN 开始');
       expect(startStep.detail, contains('生成原型'));
@@ -307,20 +352,30 @@ void main() {
 
     test('ask_user 工具 → 聊天流出现真实 A2UI 交互卡（不是测试专用构造）', () async {
       final (store, _, close) = await _chatHarness();
-      store.debugAgentModelOverride = _ScriptedBuildModel([
+      store.debugAgentModelOverride = ScriptedAgentModel([
         [
-          mockToolCall(toolName: 'ask_user', input: <String, dynamic>{
-            'question': '导航放哪里？',
-            'options': <String>['底部标签栏', '侧边抽屉'],
-          }),
+          scriptToolCall(
+            toolName: 'ask_user',
+            input: <String, dynamic>{
+              'question': '导航放哪里？',
+              'options': <String>['底部标签栏', '侧边抽屉'],
+            },
+          ),
         ],
-        [mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '等你选择'})],
-      ]);
+        [
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '等你选择'},
+          ),
+        ],
+      ]).model;
 
       final ok = await store.sendChat('做一个记账应用');
       expect(ok, true);
 
-      final cards = store.chatMessages.where((m) => m.kind == chatKindA2ui).toList();
+      final cards = store.chatMessages
+          .where((m) => m.kind == chatKindA2ui)
+          .toList();
       expect(cards, hasLength(1), reason: 'ask_user 的工具事件应生产一张 A2UI 卡');
       final payload = jsonEncode(cards.single.a2uiMessages);
       expect(payload, contains('ask-'));
@@ -331,20 +386,27 @@ void main() {
 
     test('tool_end.message → 聊天步骤与时间线都显示人话失败原因', () async {
       final (store, _, close) = await _chatHarness();
-      store.debugAgentModelOverride = _ScriptedBuildModel([
+      store.debugAgentModelOverride = ScriptedAgentModel([
         [
-          mockToolCall(toolName: 'write_doc', input: <String, dynamic>{
-            'kind': 'nope',
-            'content': 'x',
-          }),
+          scriptToolCall(
+            toolName: 'write_doc',
+            input: <String, dynamic>{'kind': 'nope', 'content': 'x'},
+          ),
         ],
-        [mockToolCall(toolName: 'finish', input: <String, dynamic>{'summary': '完成'})],
-      ]);
+        [
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '完成'},
+          ),
+        ],
+      ]).model;
 
       final ok = await store.sendChat('改一下文档');
       expect(ok, true);
 
-      final card = store.chatMessages.firstWhere((m) => m.kind == chatKindProgress);
+      final card = store.chatMessages.firstWhere(
+        (m) => m.kind == chatKindProgress,
+      );
       final step = card.steps.firstWhere((s) => s.label == 'write_doc');
       expect(step.ok, false);
       expect(step.detail, '文档类型不对，请重试');
@@ -388,23 +450,32 @@ void main() {
         ChatStep(label: 'inspect', ms: 7),
       ]);
       store.appendChat(progress);
-      store.appendChat(ChatMessage.artifact(
-          kind: artifactPrototype, title: '记账', detail: '可交互原型已生成，点开进入工作区'));
-      store.appendChat(ChatMessage.artifact(kind: artifactVideo, title: '开场动画'));
+      store.appendChat(
+        ChatMessage.artifact(
+          kind: artifactPrototype,
+          title: '记账',
+          detail: '可交互原型已生成，点开进入工作区',
+        ),
+      );
+      store.appendChat(
+        ChatMessage.artifact(kind: artifactVideo, title: '开场动画'),
+      );
       store.appendChat(ChatMessage.artifact(kind: artifactThree, title: '小场景'));
-      store.appendChat(ChatMessage.artifact(kind: artifactHotapp, title: '发票计算器'));
+      store.appendChat(
+        ChatMessage.artifact(kind: artifactHotapp, title: '发票计算器'),
+      );
       store.appendChat(ChatMessage.a2ui(_surfaceMessages));
       return store;
     }
 
     Widget host(AppStore store) => ChangeNotifierProvider<AppStore>.value(
-          value: store,
-          child: MaterialApp(
-            theme: AppTheme.build(dark: true),
-            scaffoldMessengerKey: rootMessengerKey,
-            home: const ChatStreamView(),
-          ),
-        );
+      value: store,
+      child: MaterialApp(
+        theme: AppTheme.build(dark: true),
+        scaffoldMessengerKey: rootMessengerKey,
+        home: const ChatStreamView(),
+      ),
+    );
 
     testWidgets('四类卡渲染：用户气泡 / 进度步骤 / 产物卡 / A2UI surface', (tester) async {
       await tester.binding.setSurfaceSize(const Size(1200, 900));
@@ -421,7 +492,11 @@ void main() {
       expect(find.text('设计变更'), findsNWidgets(2));
       expect(find.text('design_op'), findsNothing);
       expect(find.text('42ms'), findsOneWidget);
-      expect(find.text('检查'), findsOneWidget, reason: 'inspect → 检查（不按是否含下划线判断）');
+      expect(
+        find.text('检查'),
+        findsOneWidget,
+        reason: 'inspect → 检查（不按是否含下划线判断）',
+      );
       expect(find.text('inspect'), findsNothing);
       // 产物卡：标签与标题。
       expect(find.text('原型'), findsOneWidget);
@@ -469,19 +544,25 @@ void main() {
 
       expect(store.chatMessages.length, greaterThan(before));
       expect(
-        store.chatMessages.any((m) => m.kind == chatKindUser && m.text.contains('submit')),
+        store.chatMessages.any(
+          (m) => m.kind == chatKindUser && m.text.contains('submit'),
+        ),
         isTrue,
         reason: '动作摘要作为用户消息入列（回流续跑）',
       );
-      expect(store.chatMessages.last.kind, chatKindProgress,
-          reason: '无 apiKey 的续跑诚实收尾为失败进度卡');
+      expect(
+        store.chatMessages.last.kind,
+        chatKindProgress,
+        reason: '无 apiKey 的续跑诚实收尾为失败进度卡',
+      );
       expect(store.chatMessages.last.running, false);
       await tester.binding.setSurfaceSize(null);
     });
 
     testWidgets('输入框发送：用户消息 + 进度卡入列（无 Key 诚实失败收尾）', (tester) async {
       await tester.binding.setSurfaceSize(const Size(1200, 900));
-      final store = AppStore(toasts: ToastService(autoDismiss: false))..ready = true;
+      final store = AppStore(toasts: ToastService(autoDismiss: false))
+        ..ready = true;
       await tester.pumpWidget(host(store));
       await tester.pump(const Duration(milliseconds: 50));
 
@@ -493,7 +574,11 @@ void main() {
       expect(store.chatMessages.first.kind, chatKindUser);
       expect(store.chatMessages.first.text, '做个小工具');
       expect(store.chatMessages.last.kind, chatKindProgress);
-      expect(store.chatMessages.last.running, false, reason: '无 apiKey 的 run 立即失败收尾');
+      expect(
+        store.chatMessages.last.running,
+        false,
+        reason: '无 apiKey 的 run 立即失败收尾',
+      );
       expect(store.chatMessages.last.ok, false);
       await tester.binding.setSurfaceSize(null);
     });
@@ -504,25 +589,31 @@ void main() {
       final store = AppStore(toasts: ToastService(autoDismiss: false));
       store.ready = true;
       store.hasProject = true;
-      store.settings = AppSettings(providerId: 'deepseek', modelId: 'deepseek-v4.1-flash');
+      store.settings = AppSettings(
+        providerId: 'deepseek',
+        modelId: 'deepseek-v4.1-flash',
+      );
       return store;
     }
 
     /// 桌面主题：AgentPanel 用 Theme.platform 判移动端；测试默认平台是
     /// Android，显式钉 macOS 才走到「外部智能体」分支（与真机一致）。
-    Widget host(AppStore store, {TargetPlatform platform = TargetPlatform.macOS}) =>
-        ChangeNotifierProvider<AppStore>.value(
-          value: store,
-          child: MaterialApp(
-            theme: AppTheme.build(dark: true).copyWith(platform: platform),
-            home: const Scaffold(body: AgentPanel()),
-          ),
-        );
+    Widget host(
+      AppStore store, {
+      TargetPlatform platform = TargetPlatform.macOS,
+    }) => ChangeNotifierProvider<AppStore>.value(
+      value: store,
+      child: MaterialApp(
+        theme: AppTheme.build(dark: true).copyWith(platform: platform),
+        home: const Scaffold(body: AgentPanel()),
+      ),
+    );
 
     testWidgets('聊天里的 A2UI 卡（ask_user 选项）在 NaN 面板可见', (tester) async {
       await tester.binding.setSurfaceSize(const Size(420, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      final store = panelStore()..appendChat(ChatMessage.a2ui(_surfaceMessages));
+      final store = panelStore()
+        ..appendChat(ChatMessage.a2ui(_surfaceMessages));
       await tester.pumpWidget(host(store));
       await tester.pump(const Duration(milliseconds: 120));
 
@@ -546,7 +637,9 @@ void main() {
       expect(find.text('Claude Code'), findsOneWidget);
       expect(find.textContaining('· ACP'), findsNothing);
       expect(
-        find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').contains('ACP')),
+        find.byWidgetPredicate(
+          (w) => w is Tooltip && (w.message ?? '').contains('ACP'),
+        ),
         findsNothing,
         reason: 'tooltip 也不得暴露协议名（docs/copy-glossary.md §2）',
       );
@@ -560,7 +653,10 @@ void main() {
     _RecordingSaveStore touchStore() {
       final store = _RecordingSaveStore();
       store.ready = true;
-      store.settings = AppSettings(providerId: 'deepseek', modelId: 'deepseek-v4.1-flash');
+      store.settings = AppSettings(
+        providerId: 'deepseek',
+        modelId: 'deepseek-v4.1-flash',
+      );
       store.hasProject = true;
       store.projectName = '手机项目';
       store.projectPath = '/tmp/手机项目.ddp';
@@ -570,13 +666,13 @@ void main() {
     }
 
     Widget host(AppStore store) => ChangeNotifierProvider<AppStore>.value(
-          value: store,
-          child: MaterialApp(
-            theme: AppTheme.build(dark: true),
-            scaffoldMessengerKey: rootMessengerKey,
-            home: const ChatStreamView(),
-          ),
-        );
+      value: store,
+      child: MaterialApp(
+        theme: AppTheme.build(dark: true),
+        scaffoldMessengerKey: rootMessengerKey,
+        home: const ChatStreamView(),
+      ),
+    );
 
     testWidgets('聊天主面顶栏：项目名 + 未保存点 + 保存/另存/打开/新建', (tester) async {
       await tester.binding.setSurfaceSize(const Size(390, 844));
@@ -587,8 +683,11 @@ void main() {
 
       expect(find.byKey(const ValueKey('chat-project-menu')), findsOneWidget);
       expect(find.text('手机项目'), findsOneWidget, reason: '手机上必须看得到项目名');
-      expect(find.byKey(const ValueKey('chat-project-dirty')), findsOneWidget,
-          reason: '未保存点常驻可见');
+      expect(
+        find.byKey(const ValueKey('chat-project-dirty')),
+        findsOneWidget,
+        reason: '未保存点常驻可见',
+      );
 
       await tester.tap(find.byKey(const ValueKey('chat-project-menu')));
       await tester.pumpAndSettle();
@@ -611,8 +710,11 @@ void main() {
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();
 
-      expect(store.saveCalls, 1,
-          reason: '手机没有系统保存对话框：触屏入口必须直接接上 store 的保存（应用内默认项目路径）');
+      expect(
+        store.saveCalls,
+        1,
+        reason: '手机没有系统保存对话框：触屏入口必须直接接上 store 的保存（应用内默认项目路径）',
+      );
       expect(store.dirty, false);
       expect(tester.takeException(), isNull);
     });
@@ -629,9 +731,15 @@ void main() {
       await tester.tap(find.text('另存为…'));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('chat-save-as-name')), findsOneWidget,
-          reason: '无系统保存框时用应用内命名对话框');
-      await tester.enterText(find.byKey(const ValueKey('chat-save-as-name')), '副本项目');
+      expect(
+        find.byKey(const ValueKey('chat-save-as-name')),
+        findsOneWidget,
+        reason: '无系统保存框时用应用内命名对话框',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('chat-save-as-name')),
+        '副本项目',
+      );
       await tester.tap(find.widgetWithText(FilledButton, '保存'));
       await tester.pumpAndSettle();
 
@@ -647,14 +755,17 @@ void main() {
       store.ready = true;
       store.hasProject = false;
       store.view = 'design';
-      store.settings = AppSettings(providerId: 'deepseek', modelId: 'deepseek-v4.1-flash');
+      store.settings = AppSettings(
+        providerId: 'deepseek',
+        modelId: 'deepseek-v4.1-flash',
+      );
       return store;
     }
 
     Widget rootApp(AppStore store) => ChangeNotifierProvider<AppStore>.value(
-          value: store,
-          child: const NonApp(),
-        );
+      value: store,
+      child: const NonApp(),
+    );
 
     Future<void> pumpAt(WidgetTester tester, AppStore store, Size size) async {
       tester.view.physicalSize = size;
@@ -677,8 +788,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('手机：关掉 chatStreamHome → 经典 Welcome；常驻聊天胶囊可切回',
-        (tester) async {
+    testWidgets('手机：关掉 chatStreamHome → 经典 Welcome；常驻聊天胶囊可切回', (tester) async {
       final store = rootStore();
       await pumpAt(tester, store, const Size(390, 844));
 
@@ -686,10 +796,17 @@ void main() {
       store.notifyListeners();
       await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.textContaining('把想法变成'), findsOneWidget, reason: '经典 Welcome 回归');
+      expect(
+        find.textContaining('把想法变成'),
+        findsOneWidget,
+        reason: '经典 Welcome 回归',
+      );
       expect(find.byKey(const ValueKey('chat-input')), findsNothing);
-      expect(find.byKey(const ValueKey('chat-first-fab')), findsOneWidget,
-          reason: '关掉聊天主面不能把用户锁在没有聊天的界面');
+      expect(
+        find.byKey(const ValueKey('chat-first-fab')),
+        findsOneWidget,
+        reason: '关掉聊天主面不能把用户锁在没有聊天的界面',
+      );
 
       await tester.tap(find.byKey(const ValueKey('chat-first-fab')));
       await tester.pump(const Duration(milliseconds: 100));
@@ -698,8 +815,9 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('桌面：chatStreamHome 不再决定主面——无项目是经典 Welcome，且主页无右栏',
-        (tester) async {
+    testWidgets('桌面：chatStreamHome 不再决定主面——无项目是经典 Welcome，且主页无右栏', (
+      tester,
+    ) async {
       final store = rootStore();
       store.settings.chatStreamHome = true;
       await pumpAt(tester, store, const Size(1440, 900));
@@ -707,12 +825,21 @@ void main() {
       expect(find.byType(DesktopShell), findsOneWidget);
       expect(find.byType(Welcome), findsOneWidget, reason: '桌面无项目主面 = Welcome');
       expect(find.byKey(const ValueKey('welcome-wide')), findsOneWidget);
-      expect(find.byKey(const ValueKey('desktop-chat-rail')), findsNothing,
-          reason: '主页默认不显示右侧栏');
-      expect(find.byKey(const ValueKey('desktop-chat-rail-strip')), findsNothing,
-          reason: '折叠覆盖条也不应出现在主页');
-      expect(find.byKey(const ValueKey('welcome-open-chat')), findsNothing,
-          reason: '右栏不存在时聊天入口隐藏');
+      expect(
+        find.byKey(const ValueKey('desktop-chat-rail')),
+        findsNothing,
+        reason: '主页默认不显示右侧栏',
+      );
+      expect(
+        find.byKey(const ValueKey('desktop-chat-rail-strip')),
+        findsNothing,
+        reason: '折叠覆盖条也不应出现在主页',
+      );
+      expect(
+        find.byKey(const ValueKey('welcome-open-chat')),
+        findsNothing,
+        reason: '右栏不存在时聊天入口隐藏',
+      );
 
       // 关掉手机主面偏好对桌面没有影响。
       store.settings.chatStreamHome = false;
@@ -723,8 +850,9 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('桌面：有项目 → Workspace 主面；view==chat 不再整块路由；Esc 不抢工作区',
-        (tester) async {
+    testWidgets('桌面：有项目 → Workspace 主面；view==chat 不再整块路由；Esc 不抢工作区', (
+      tester,
+    ) async {
       final store = rootStore();
       store.hasProject = true;
       store.projectName = 'proj';
@@ -734,15 +862,26 @@ void main() {
         entry: 'home',
         revision: 1,
         mbt: store.mbt,
-        artboards: [Artboard(id: 'home', name: 'home', width: 390, height: 844, nodes: const [])],
+        artboards: [
+          Artboard(
+            id: 'home',
+            name: 'home',
+            width: 390,
+            height: 844,
+            nodes: const [],
+          ),
+        ],
       );
       store.view = 'chat';
       await pumpAt(tester, store, const Size(1440, 900));
 
       expect(find.byType(Workspace), findsOneWidget, reason: '有项目 → 工作区主面');
       expect(find.byKey(const ValueKey('desktop-chat-rail')), findsOneWidget);
-      expect(find.byKey(const ValueKey('agent-input')), findsOneWidget,
-          reason: '右侧栏默认落在 NaN（聊天 + 任务指令）');
+      expect(
+        find.byKey(const ValueKey('agent-input')),
+        findsOneWidget,
+        reason: '右侧栏默认落在 NaN（聊天 + 任务指令）',
+      );
 
       store.setView('design');
       await tester.pump(const Duration(milliseconds: 80));
@@ -785,8 +924,11 @@ void main() {
       // 不能停留在经典工作区而与隐藏状态不一致。
       expect(store.view, 'chat');
       expect(find.byKey(const ValueKey('chat-input')), findsOneWidget);
-      expect(store.settings.chatStreamHome, isFalse,
-          reason: 'Esc 不静默改写用户选择的启动主面');
+      expect(
+        store.settings.chatStreamHome,
+        isFalse,
+        reason: 'Esc 不静默改写用户选择的启动主面',
+      );
       expect(tester.takeException(), isNull);
     });
 
@@ -797,9 +939,15 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('chat-open-workspace')));
       await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.byKey(const ValueKey('pip-project-menu')), findsOneWidget,
-          reason: '嵌入工作区隐藏了标题栏/状态栏，项目入口必须常驻浮窗');
-      expect(find.byKey(const ValueKey('chat-shell-create-board')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('pip-project-menu')),
+        findsOneWidget,
+        reason: '嵌入工作区隐藏了标题栏/状态栏，项目入口必须常驻浮窗',
+      );
+      expect(
+        find.byKey(const ValueKey('chat-shell-create-board')),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     });
   });
@@ -824,18 +972,28 @@ void main() {
       final b = AppStore()..recoveryDir = dir.path;
       await b.debugLoadChat();
 
-      expect(b.chatMessages.map((m) => m.kind).toList(),
-          [chatKindUser, chatKindAssistant, chatKindA2ui, chatKindArtifact]);
+      expect(b.chatMessages.map((m) => m.kind).toList(), [
+        chatKindUser,
+        chatKindAssistant,
+        chatKindA2ui,
+        chatKindArtifact,
+      ]);
       expect(b.chatMessages[0].text, '第一句话');
       expect(b.chatMessages[1].text, '好的，开始规划。');
       expect(b.chatMessages[2].a2uiMessages, isNotNull);
-      expect((b.chatMessages[2].a2uiMessages!.first as Map)['createSurface']['surfaceId'], 'demo');
+      expect(
+        (b.chatMessages[2].a2uiMessages!.first
+            as Map)['createSurface']['surfaceId'],
+        'demo',
+      );
       expect(b.chatMessages[3].artifactKind, artifactPrototype);
       expect(b.chatMessages[3].artifactName, '原型A');
     });
 
     test('重启后 running 进度卡诚实降级为失败卡（不伪装成仍在运行）', () async {
-      final dir = Directory.systemTemp.createTempSync('nondesign-chat-persist2');
+      final dir = Directory.systemTemp.createTempSync(
+        'nondesign-chat-persist2',
+      );
       addTearDown(() {
         try {
           dir.deleteSync(recursive: true);
@@ -843,7 +1001,10 @@ void main() {
       });
 
       final a = AppStore()..recoveryDir = dir.path;
-      a.appendChat(ChatMessage.progress('理解 brief，撰写产品文档')..steps.add(ChatStep(label: '写入文档', running: true)));
+      a.appendChat(
+        ChatMessage.progress('理解 brief，撰写产品文档')
+          ..steps.add(ChatStep(label: '写入文档', running: true)),
+      );
       await a.debugPersistChat();
       await a.chatWritesIdle;
 
@@ -858,7 +1019,9 @@ void main() {
     });
 
     test('clearChat 清内存并删落盘文件', () async {
-      final dir = Directory.systemTemp.createTempSync('nondesign-chat-persist3');
+      final dir = Directory.systemTemp.createTempSync(
+        'nondesign-chat-persist3',
+      );
       addTearDown(() {
         try {
           dir.deleteSync(recursive: true);
@@ -873,11 +1036,17 @@ void main() {
 
       await store.clearChat();
       expect(store.chatMessages, isEmpty);
-      expect(File('${dir.path}/chat.json').existsSync(), isFalse, reason: '落盘记录一并删除');
+      expect(
+        File('${dir.path}/chat.json').existsSync(),
+        isFalse,
+        reason: '落盘记录一并删除',
+      );
     });
 
     test('boot 前置外：坏形状文件不毒化（catch-all 尽力而为）', () async {
-      final dir = Directory.systemTemp.createTempSync('nondesign-chat-persist4');
+      final dir = Directory.systemTemp.createTempSync(
+        'nondesign-chat-persist4',
+      );
       addTearDown(() {
         try {
           dir.deleteSync(recursive: true);

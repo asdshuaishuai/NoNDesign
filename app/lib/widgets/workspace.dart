@@ -12,6 +12,7 @@ import '../core/toast_service.dart';
 import 'canvas_view.dart';
 import 'command_palette.dart';
 import 'common.dart';
+import 'design_prototype_banner.dart';
 import 'docs_view.dart';
 import 'left_panel.dart';
 import 'play_view.dart';
@@ -297,6 +298,7 @@ class _WorkspaceState extends State<Workspace> {
               _ => Column(
                   children: [
                     _BoardTabs(embedded: widget.embedded),
+                    const DesignPrototypeBanner(),
                     Expanded(
                       // 嵌入宿主且无画板时不吃 CanvasView 的空态卡：那张卡带
                       // 「先写文档」= setView('docs')（canvas_view.dart:1590），
@@ -661,6 +663,16 @@ class _BoardTabs extends StatelessWidget {
               tooltip: '自动修复当前画板 ${modCombo('⇧⌘F')}',
               size: 26,
               onTap: () => store.autoFix(),
+            ),
+            // 设计模块的项目内验证原型（不调模型；写进当前 .ddp）。
+            IconAction(
+              key: const ValueKey('design-verify-prototype'),
+              icon: Icons.fact_check_outlined,
+              tooltip: '验证原型',
+              size: 26,
+              onTap: store.designPrototypeBusy
+                  ? null
+                  : () => store.verifyDesignPrototype(),
             ),
             IconAction(icon: Icons.play_arrow_outlined, tooltip: '演示模式 ${modCombo('⌘4')}', size: 26, onTap: () => store.setView('play')),
             IconAction(icon: Icons.collections_bookmark_outlined, tooltip: '作品集', size: 26, onTap: () => store.setView('portfolio')),

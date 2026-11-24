@@ -1,0 +1,24 @@
+{
+  "schema": "nan.creative.gates/1",
+  "round": 0,
+  "verdict": "ERROR",
+  "gates": [
+    {
+      "id": "contract",
+      "verdict": "PASS",
+      "metrics": {"max_bbox_delta_m": 0.004, "ground_gap_m": 0.001}
+    },
+    {
+      "id": "connectivity",
+      "verdict": "ERROR",
+      "metrics": {"max_penetration_m": 0.012, "floating_parts": 1},
+      "fix_hint": "沿 (0, 0, -0.012) m 平移 leg_fr，使四条腿接触地面"
+    },
+    {
+      "id": "detail_budget",
+      "verdict": "WARN",
+      "metrics": {"triangles": 2400}
+    }
+  ],
+  "caps": {"floating": 0.6, "penetration": 0.7}
+}
