@@ -36,12 +36,14 @@ import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 import '../core/platform_capabilities.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import '../core/workbench_layout.dart';
 import '../core/three_kits.dart';
 import '../core/three_lint.dart';
 import '../core/three_service.dart';
 import '../core/toast_service.dart';
 import 'common.dart';
 import 'workspace_artifact_card.dart';
+import 'three_workbench_panels.dart';
 import 'workspace_progress.dart';
 
 /// 移动端内嵌 3D 预览的启用门。
@@ -94,6 +96,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   ThreeProjectSnapshot? _snapshot;
   // 面板三态：预览 / 源码 / 规范（规范手编 = 先改规范再要代码）。
   String _face = 'preview';
+  // UI-2 首批：3D 大纲选中项（只读检查器用；不写事实源）。
+  String? _selectedOutlinerId;
   final _specCtl = TextEditingController();
   // 规范编辑守卫：每条预览桥消息与每次生成都会刷新快照——用户在规范页
   // 未保存的编辑不能被静默覆盖；保存成功后重置守卫恢复正常同步。
@@ -1518,10 +1522,27 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
                 onDismiss: _clearError,
               ),
             Expanded(child: _body(context, p, width: width)),
+            if (_project != null)
+              ThreeWorkbenchStatusBar(
+                currentPass: current,
+                blocked: _snapshot?.blocked ?? false,
+                attempts: _attemptsOf(passes, current),
+                gateVerdict: store.threeGateVerdict,
+              ),
           ],
         );
       },
     );
+  }
+
+  int _attemptsOf(List<Map> passes, String current) {
+    for (final Map pass in passes) {
+      if ('${pass['id'] ?? ''}' == current) {
+        final Object? attempts = pass['attempts'];
+        if (attempts is num) return attempts.toInt();
+      }
+    }
+    return 0;
   }
 
   Future<void> _showThreeGateHints() async {
@@ -1975,6 +1996,49 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       'spec' => _SpecPane(controller: _specCtl, onSave: _saveSpec),
       _ => null,
     };
+    // 3D 独立内容布局（UI-2 首批）：预览面在宽屏下是大纲 | 视口 | 检查器
+    // 三栏，不再是设计画布的「预览 + 源码/规范侧栏」换皮。
+    if (_face == 'preview') {
+      final threeLayout = resolveWorkbenchLayout(
+        kind: WorkbenchKind.three,
+        width: width,
+        height: MediaQuery.sizeOf(context).height,
+      );
+      final outlinerItems = threeOutlinerItemsFromSpec(_snapshot?.spec);
+      ThreeOutlinerItem? selected;
+      for (final item in outlinerItems) {
+        if (item.id == _selectedOutlinerId) selected = item;
+      }
+      final Widget outliner = ThreeOutlinerPanel(
+        items: outlinerItems,
+        selectedId: selected?.id,
+        onSelect: (item) => setState(() => _selectedOutlinerId = item.id),
+      );
+      final Widget inspector = ThreeNodeInspector(
+        item: selected,
+        sceneChars: _sceneJs.length,
+        currentPass: '${_state?['current'] ?? ''}',
+      );
+      if (threeLayout.left == PanelPolicy.docked ||
+          threeLayout.right == PanelPolicy.docked) {
+        return Row(
+          key: const ValueKey('three-body-three-pane'),
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            if (threeLayout.left == PanelPolicy.docked)
+              SizedBox(width: threeLayout.leftWidth, child: outliner),
+            if (threeLayout.left == PanelPolicy.docked)
+              Container(width: 1, color: p.line),
+            Expanded(child: preview),
+            if (threeLayout.right == PanelPolicy.docked)
+              Container(width: 1, color: p.line),
+            if (threeLayout.right == PanelPolicy.docked)
+              SizedBox(width: threeLayout.rightWidth, child: inspector),
+          ],
+        );
+      }
+      return preview;
+    }
     // 横屏/桌面：源码/规范是预览的侧栏，不把预览整块替换掉；
     // 竖屏/手机：保持单面切换（宽度不足，并排会两张都不可读）。
     if (width >= 900 && side != null) {
