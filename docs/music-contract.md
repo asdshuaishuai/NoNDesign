@@ -1,6 +1,8 @@
 # 音乐模块契约（编曲工作台 · score.json 唯一事实源）
 
-> 状态：**草案（R0 契约冻结，2026-11-23）· 未施工**。本文只写音乐模块的契约增量：
+> 状态：**R1 契约核心已落地（2026-11-24）· 谱面 UI/播放页/工具族未施工**。已落地：
+> score.json v1 解析/未知字段保留、`verifyMusicScore` 硬门、整数 tick 编译器（ppq=3840）、
+> `MusicProjectStore` 存储；本文契约增量：
 > score.json v1、整数 tick 编译、`verifyScore`（拟实现）硬门、五线谱、播放页、存储、工具族、配乐联动与验收。
 >
 > 相关：[plan-music-module.md](plan-music-module.md)（方案事实源）·
@@ -96,12 +98,16 @@ AudioContext.currentTime
 
 | 契约面 | 拟写测试 | 锚定 |
 | --- | --- | --- |
-| schema / 契约 | `music_contract_test.dart` | roundtrip、未知字段保留、轨道/小节上限、七连音拒绝 |
+| schema / 契约 | `music_score_test.dart`（已落地） | roundtrip、未知字段保留、轨道/小节上限、七连音拒绝 |
 | 版本迁移 | `music_score_migration_test.dart` | 读 N-1 写 N、固定 fixture、不支持版本报错 |
-| tick 编译 | `music_tick_compile_test.dart` | ppq=3840、三/五连音、tempoMap、字节确定性、无浮点拍点 |
-| 校验器 | `music_verify_score_test.dart` | 小节时值/关系配对/乐器/范围/鼓件正反例 |
+| tick 编译 | `music_compile_test.dart`（已落地） | ppq=3840、三/五连音、tempoMap、字节确定性、无浮点拍点 |
+| 校验器 | `music_score_test.dart`（已落地） | 小节时值/关系配对/乐器/范围/鼓件正反例 |
 | 播放页 | `music_player_page_test.dart` | CSP 自检、零外联、lookahead 参数、无 Tone.js/采样 |
 | 编辑器/工作台 | `music_editor_test.dart` + `music_workspace_test.dart` + 拟扩 `dart_agent_tools_test.dart` | 放音/拖移/删除/小节操作；谱面重绘确定性；项目跟随落 `plugin:music`；workspace 只见 `music_*` + 通用只读 |
+
+**存储锚点**：`music_project_test.dart`（已落地）：save→list/read、坏名/坏文件显性失败、delete。
+
+**落地文件**：`app/lib/core/music/music_score.dart` / `music_compile.dart` / `music_project.dart`。
 
 ## 10. 不做（v1 边界）
 
