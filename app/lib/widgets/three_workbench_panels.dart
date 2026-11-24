@@ -10,7 +10,7 @@ import 'package:material_ui/material_ui.dart';
 import '../core/theme.dart';
 
 /// 大纲条目种类（只做 layout/检查器分区，不是场景事实源）。
-enum ThreeOutlinerKind { component, material, camera }
+enum ThreeOutlinerKind { component, material, camera, node }
 
 /// 一条大纲条目（从 legacy spec / v2 scene 投影出来的只读视图）。
 final class ThreeOutlinerItem {
@@ -34,6 +34,7 @@ final class ThreeOutlinerItem {
     ThreeOutlinerKind.component => Icons.category_outlined,
     ThreeOutlinerKind.material => Icons.palette_outlined,
     ThreeOutlinerKind.camera => Icons.videocam_outlined,
+    ThreeOutlinerKind.node => Icons.widgets_outlined,
   };
 }
 
@@ -88,6 +89,35 @@ List<ThreeOutlinerItem> threeOutlinerItemsFromSpec(Map<String, dynamic>? spec) {
         label: (camera['view'] ?? '作者相机').toString(),
         detail: '相机',
         data: Map<String, Object?>.from(camera),
+      ),
+    );
+  }
+  return items;
+}
+
+/// 从 v2 `scene.json` 的 nodes 投影大纲条目（scene 模式事实源）。
+///
+/// code 模式的 scene.json 是派生投影，也按同一视图展示；节点 id 是场景事实源
+/// 的 key，坏了/缺 id 的节点跳过而不是让整份大纲消失。
+List<ThreeOutlinerItem> threeOutlinerItemsFromScene(
+  Map<String, Object?>? scene,
+) {
+  if (scene == null) return const <ThreeOutlinerItem>[];
+  final Object? rawNodes = scene['nodes'];
+  if (rawNodes is! List) return const <ThreeOutlinerItem>[];
+  final List<ThreeOutlinerItem> items = <ThreeOutlinerItem>[];
+  for (final Object? raw in rawNodes) {
+    if (raw is! Map) continue;
+    final String id = (raw['id'] ?? '').toString().trim();
+    if (id.isEmpty) continue;
+    final String type = (raw['type'] ?? 'node').toString();
+    items.add(
+      ThreeOutlinerItem(
+        id: 'node:$id',
+        kind: ThreeOutlinerKind.node,
+        label: id,
+        detail: type,
+        data: Map<String, Object?>.from(raw),
       ),
     );
   }
@@ -286,6 +316,7 @@ class ThreeNodeInspector extends StatelessWidget {
                       ThreeOutlinerKind.component => '组件',
                       ThreeOutlinerKind.material => '材质',
                       ThreeOutlinerKind.camera => '相机',
+                      ThreeOutlinerKind.node => '节点',
                     }, style: TextStyle(fontSize: 10, color: p.ink4)),
                     const SizedBox(height: 10),
                     for (final entry in item.data.entries)

@@ -41,6 +41,27 @@ void main() {
       expect(bad, isEmpty);
     });
 
+    test('v2 scene.json → 大纲节点投影：坏节点跳过、无 nodes 返回空', () {
+      final items = threeOutlinerItemsFromScene(<String, Object?>{
+        'v': 1,
+        'nodes': <Object?>[
+          <String, Object?>{'id': 'floor', 'type': 'box'},
+          <String, Object?>{'id': 'table', 'type': 'box'},
+          <String, Object?>{'id': '', 'type': 'box'},
+          'bad',
+        ],
+      });
+      expect(items, hasLength(2));
+      expect(items.first.kind, ThreeOutlinerKind.node);
+      expect(items.first.label, 'floor');
+      expect(items.first.detail, 'box');
+      expect(threeOutlinerItemsFromScene(null), isEmpty);
+      expect(
+        threeOutlinerItemsFromScene(<String, Object?>{'nodes': 'bad'}),
+        isEmpty,
+      );
+    });
+
     testWidgets('大纲列表：标题/条目/选中回调', (tester) async {
       ThreeOutlinerItem? selected;
       final items = threeOutlinerItemsFromSpec(_spec());

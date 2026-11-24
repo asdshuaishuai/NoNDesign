@@ -39,6 +39,7 @@ import '../core/theme.dart';
 import '../core/workbench_layout.dart';
 import '../core/three_kits.dart';
 import '../core/three_lint.dart';
+import '../core/three/three_workspace.dart';
 import '../core/three_service.dart';
 import '../core/toast_service.dart';
 import 'common.dart';
@@ -94,6 +95,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   String? _project;
   ThreeService? _service;
   ThreeProjectSnapshot? _snapshot;
+  ThreeWorkspaceProject? _v2Project;
+  // UI-2：3D 内容区姿态开关（大纲/检查器）；local-only，不写事实源。
+  bool _showOutliner = true;
+  bool _showInspector = true;
   // 面板三态：预览 / 源码 / 规范（规范手编 = 先改规范再要代码）。
   String _face = 'preview';
   // UI-2 首批：3D 大纲选中项（只读检查器用；不写事实源）。
@@ -484,6 +489,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _errorSource = '';
         }
         _snapshot = snapshot;
+        unawaited(_loadWorkspaceProject());
         if (!_specDirty) {
           _specCtl.text = const JsonEncoder.withIndent('  ')
               .convert(snapshot.spec);
@@ -865,6 +871,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       setState(() {
         _project = name;
         _snapshot = snapshot;
+        unawaited(_loadWorkspaceProject());
         _lastError = '';
         _specDirty = false;
         _loadError = '';
@@ -930,6 +937,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       setState(() {
         _project = snapshot!.name;
         _snapshot = snapshot;
+        unawaited(_loadWorkspaceProject());
         _lastError = '';
         _specDirty = false;
         _loadError = '';
@@ -1357,6 +1365,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         setState(() {
           _project = null;
           _snapshot = null;
+          _v2Project = null;
           _controller = null;
           _previewReady = false;
           _loadError = '';
@@ -1461,6 +1470,77 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     );
   }
 
+  /// 3D 专属建模工具条（UI-2 骨架）：视口姿态 + 大纲/检查器开关。
+  ///
+  /// gizmo（移动/旋转/缩放/网格/吸附）等视口交互在 3D 视口批次接入；这里先给
+  /// 真实可用的布局姿态开关，不做假的禁用按钮。
+  Widget _modelingToolstrip(NonPalette p, {required double width}) {
+    if (_project == null) return const SizedBox.shrink();
+    final layout = resolveWorkbenchLayout(
+      kind: WorkbenchKind.three,
+      width: width,
+      height: MediaQuery.sizeOf(context).height,
+    );
+    final showToggles =
+        layout.left == PanelPolicy.docked || layout.right == PanelPolicy.docked;
+    if (!showToggles) return const SizedBox.shrink();
+    return Container(
+      key: const ValueKey('three-workbench-toolstrip'),
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: p.bgElevated.withValues(alpha: 0.6),
+        border: Border(bottom: BorderSide(color: p.line)),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(Icons.view_in_ar_outlined, size: 13, color: p.ink4),
+          const SizedBox(width: 6),
+          Text('视口', style: TextStyle(fontSize: 11, color: p.ink3)),
+          const Spacer(),
+          if (layout.left == PanelPolicy.docked)
+            _paneToggle(
+              key: const ValueKey('three-toggle-outliner'),
+              icon: Icons.account_tree_outlined,
+              label: '大纲',
+              active: _showOutliner,
+              onTap: () => setState(() => _showOutliner = !_showOutliner),
+            ),
+          if (layout.right == PanelPolicy.docked)
+            _paneToggle(
+              key: const ValueKey('three-toggle-inspector'),
+              icon: Icons.tune,
+              label: '检查器',
+              active: _showInspector,
+              onTap: () => setState(() => _showInspector = !_showInspector),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _paneToggle({
+    required Key key,
+    required IconData icon,
+    required String label,
+    required bool active,
+    required VoidCallback onTap,
+  }) {
+    final p = context.palette;
+    return TextButton.icon(
+      key: key,
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        foregroundColor: active ? p.ink : p.ink4,
+        textStyle: const TextStyle(fontSize: 11),
+      ),
+      icon: Icon(icon, size: 14, color: active ? p.accent : p.ink4),
+      label: Text(label),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -1487,6 +1567,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
               phone: phone,
               padPortrait: padPortrait,
             ),
+            _modelingToolstrip(p, width: width),
             // 执行过程面 / 结果面（v2 工具：迁移 → 计划校验 → 测量 → 确定性门）。
             if (store.threePipelineStages.isNotEmpty)
               WorkspaceProgress(
@@ -1927,6 +2008,22 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     }
   }
 
+  /// 读取 v2 工作区投影（失败不打扰用户：大纲退回 legacy spec，不报错）。
+  Future<void> _loadWorkspaceProject() async {
+    final service = _service;
+    final project = _project;
+    if (service == null || project == null) {
+      if (mounted) setState(() => _v2Project = null);
+      return;
+    }
+    try {
+      final v2 = await service.workspaceStore.read(project);
+      if (mounted) setState(() => _v2Project = v2);
+    } catch (_) {
+      if (mounted) setState(() => _v2Project = null);
+    }
+  }
+
   Widget _body(BuildContext context, NonPalette p, {required double width}) {
     if (_project == null) {
       return _EmptyNew(
@@ -2004,7 +2101,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         width: width,
         height: MediaQuery.sizeOf(context).height,
       );
-      final outlinerItems = threeOutlinerItemsFromSpec(_snapshot?.spec);
+      final sceneItems = threeOutlinerItemsFromScene(_v2Project?.sceneJson);
+      final outlinerItems = sceneItems.isNotEmpty
+          ? sceneItems
+          : threeOutlinerItemsFromSpec(_snapshot?.spec);
       ThreeOutlinerItem? selected;
       for (final item in outlinerItems) {
         if (item.id == _selectedOutlinerId) selected = item;
@@ -2025,14 +2125,14 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           key: const ValueKey('three-body-three-pane'),
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            if (threeLayout.left == PanelPolicy.docked)
+            if (threeLayout.left == PanelPolicy.docked && _showOutliner)
               SizedBox(width: threeLayout.leftWidth, child: outliner),
-            if (threeLayout.left == PanelPolicy.docked)
+            if (threeLayout.left == PanelPolicy.docked && _showOutliner)
               Container(width: 1, color: p.line),
             Expanded(child: preview),
-            if (threeLayout.right == PanelPolicy.docked)
+            if (threeLayout.right == PanelPolicy.docked && _showInspector)
               Container(width: 1, color: p.line),
-            if (threeLayout.right == PanelPolicy.docked)
+            if (threeLayout.right == PanelPolicy.docked && _showInspector)
               SizedBox(width: threeLayout.rightWidth, child: inspector),
           ],
         );
