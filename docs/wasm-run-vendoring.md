@@ -15,6 +15,7 @@
 |---|---|
 | 宿主（macOS arm64, wasmtime 14.0.4）加载 `moonviz.wasm` 并驱动 `_in` ABI | **已实测通过**（`test/wasm_run_spike_test.dart`） |
 | 15 个目标平台的预编译动态库入库（sha256 固定） | **已完成**（`bash scripts/fetch_wasm_run_libs.sh --check` 全绿） |
+| Linux x86_64 兜底执行器 | **已换为本地构建 wasmtime 14.0.4（含 SIMD，2026-11-23）**：上游 v0.2.0 该资产实际是 wasmi，Linux 上 engine 测试全部 `SIMD support is not enabled`；替换后 `engine_host_test + engine_contract_test` 42/42 绿。aarch64 Linux 仍是上游 wasmi（见 §7.2） |
 | 离线构建（不访问 GitHub / pub.dev） | **已实测**：macOS debug 与 iOS `--no-codesign` 均构建通过、日志零下载；wasm_run hook 只从 `third_party/wasm_run/libs/` 拷贝，sqlite3 改用系统库（见 §9/§5.4） |
 | iOS 本地引擎 | **wasm_run 不可行（已实测）**：wasmi 0.31 不支持 SIMD；但 2026-11-20 起主路径改为 WKWebView 里的 classic wasm（Safari 16.4+ 支持 SIMD），iOS 本地引擎改由 WebView 宿主承担 |
 | Android 本地引擎 | **运行未验证，打包已可见**：`MainActivity.kt` 的类型错误修复后，工作树已有 debug APK 产物（本轮未重跑构建）；APK 内 `lib/arm64-v8a/libwasm_run_dart.so` 与 `assets/engine/moonviz.wasm` 均在位。但当前无 Android 设备/AVD，**wasmtime arm64 加载与 `_in` ABI 未在设备上跑过** |
@@ -205,6 +206,24 @@ MoonViz 的 wasm 产物包含 SIMD 指令（MoonBit 默认代码生成），`Mod
    单次调用能否被 fuel 打断，未在 iOS 上验证（spike 的 `fuelSupported` 会如实报告）。
 5. **移动端预算结论**：见 §1，`WasmRuntimeGate.mobileLocalEngineEnabled` 保持 false。
 
+### 7.2 Linux x86_64：上游资产是 wasmi（2026-11-23 已本地构建替换）
+
+`third_party/wasm_run/libs/wasm_run_dart-dynamic-x86_64-unknown-linux-gnu` 原本是
+上游 release 的 **wasmi** 资产（与 Windows 同一问题，无 SIMD）：Linux 上
+`flutter test` 的 engine 用例全部报 `SIMD support is not enabled (at offset 0x261)`，
+影响 `session_signatures_test` / `engine_contract_test` / `engine_host_test` /
+`acceptance_local_core_test` / `wasm_run_spike_test`（44 个失败）。CI gate 只在
+macOS/Windows 跑，Linux 桌面没有真机门禁，所以此前未暴露。
+
+2026-11-23 按 Windows 同一纪律自建并替换：源 `wasm_run` main@23e36bdf，
+`bash scripts/config_api.sh wasmtime` + `cargo build --release -p wasm_run_dart`
+（wasmtime 14.0.4 + 原生 Cranelift；**Linux 不需要** Windows 的 pulley 补丁，
+engine_host_test 的 fuel/trap/watchdog 用例全过），sha256 `617738d6…`，已写入
+`LOCAL_OVERRIDES` 与 `upstream-assets.json`。替换后
+`engine_host_test + engine_contract_test` 42/42 全绿；A/B 换回 wasmi 即复现全部
+SIMD 失败。**aarch64 Linux 仍是上游 wasmi**，需在 ARM 机同法构建后回填。
+生产主路径（classic wasm 跑在 WebView）不受影响，本次只修兜底路径与纯 Dart 测试。
+
 ## 8. 升级 wasm_run 的步骤
 
 1. 改 `scripts/fetch_wasm_run_libs.sh` 的 `PKG_VERSION` / `RELEASE_TAG` / `ASSETS` 表
@@ -246,5 +265,6 @@ hooks:
 
 ## 10. 体积
 
-`third_party/wasm_run/libs` 共约 **73 MB**（15 个平台）。这是离线构建的代价；
-若后续采用 git-lfs 或按需下载，保持 `--check` 的 sha256 门不变即可。
+`third_party/wasm_run/libs` 共约 **93 MB**（15 个平台；其中 Windows x64 与
+Linux x86_64 是自建 wasmtime 产物，单个体积大于上游 wasmi 资产）。这是离线构建
+的代价；若后续采用 git-lfs 或按需下载，保持 `--check` 的 sha256 门不变即可。

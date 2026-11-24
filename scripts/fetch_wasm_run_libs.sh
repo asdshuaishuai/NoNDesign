@@ -40,17 +40,21 @@ RELEASE_BASE="https://github.com/juancastillo0/wasm_run/releases/download/${RELE
 # Keep this list identical to upstream's assetsSha256 map, EXCEPT for the
 # entries in LOCAL_OVERRIDES below.
 #
-# LOCAL_OVERRIDES（2026-11-19）：上游 release 的 Windows x64 资产是 wasmi
-# 后端——没有 SIMD，编译不了本应用的引擎 wasm（`SIMD support is not
-# enabled`，Windows 上引擎起不来的根因）。该条目改为**自建** wasmtime 后端
-# 的固定产物：源 wasm_run main@23e36bdf（FRB v2，与 vendored Dart 侧多包
-# 绑定配对），由 .github/workflows/desktop-release.yml 的 windows-engine-dll
-# job 构建（CI 已实证 43/43 引擎冒烟全过），字节与 sha256 固化在
-# third_party/wasm_run/libs/。更新它 = 换源码 commit 重跑该 job 再回填。
-# aarch64-pc-windows-msvc 仍是上游 wasmi 资产（ARM64 Windows 未覆盖，已知
-# 缺口；x64 是实际用户面）。
+# LOCAL_OVERRIDES（2026-11-19 / 2026-11-23）：上游 release 的 **Windows x64 与
+# Linux x86_64** 资产都是 wasmi 后端——没有 SIMD，编译不了本应用的引擎 wasm
+# （`SIMD support is not enabled`，是两边兜底引擎起不来的根因；macOS 资产才是
+# upstream wasmtime）。这两个条目改为**自建** wasmtime 后端的固定产物：源
+# wasm_run main@23e36bdf（FRB v2，与 vendored Dart 侧多包绑定配对）。Windows
+# 由 .github/workflows/desktop-release.yml 的 windows-engine-dll job 构建
+# （CI 已实证 43/43 引擎冒烟全过）；Linux x86_64 于 2026-11-23 按同一源码/命令
+# 本地构建（wasmtime 14.0.4 + 原生 Cranelift，engine_host_test +
+# engine_contract_test 42/42 全绿）。字节与 sha256 固化在
+# third_party/wasm_run/libs/。更新它 = 换源码 commit 重跑构建再回填。
+# aarch64-pc-windows-msvc / aarch64-unknown-linux-gnu 仍是上游 wasmi 资产
+# （ARM64 未覆盖，已知缺口；x64 是实际用户面）。
 LOCAL_OVERRIDES="\
 wasm_run_dart-dynamic-x86_64-pc-windows-msvc
+wasm_run_dart-dynamic-x86_64-unknown-linux-gnu
 "
 ASSETS="\
 wasm_run_dart-dynamic-aarch64-apple-ios:afb7ed40a7b19b496bf568d42121deddf6263cb1b0a52ec067c1aca6edb93145
@@ -65,7 +69,7 @@ wasm_run_dart-dynamic-x86_64-apple-darwin:aa7cfd700e79815c3f04485c8ebb723751c02f
 wasm_run_dart-dynamic-armv7-unknown-linux-gnueabihf:c5acb2bacb78a397b10d8f5b5afe8e30705395569a625683888c017a967210ce
 wasm_run_dart-dynamic-aarch64-unknown-linux-gnu:7b292f2e2ed7edae34de22c8813ac453830e63450b9d1bd2d277f389379964ee
 wasm_run_dart-dynamic-riscv64gc-unknown-linux-gnu:78255e9397080a62f8cfa55d685c26445845ec071943ffd6033205f7f9c02da9
-wasm_run_dart-dynamic-x86_64-unknown-linux-gnu:5a0df6b8992c112a66dca94efeacc87a05ac3c695e2ddf38fea8e32dc47ee05f
+wasm_run_dart-dynamic-x86_64-unknown-linux-gnu:617738d6a09c71c4ec707e093720610d8d98c4e1612633ae61a7a1b5410623e2
 wasm_run_dart-dynamic-x86_64-pc-windows-msvc:07d75e175eb2098457f9258f241b4001ff981fa74a7d966b4b952e468ac9678b
 wasm_run_dart-dynamic-aarch64-pc-windows-msvc:9998fd1553f672a5e81c3771290a65e8138e57e997133f8d3c88fbbb8f15ad61
 "
@@ -232,9 +236,12 @@ cmd_fetch() {
     # 不了哈希校验。明确指路 CI job。
     if printf '%s\n' "$LOCAL_OVERRIDES" | grep -qx "$name"; then
       echo "  ✗ $name 是自建条目（LOCAL_OVERRIDES），上游没有对应资产" >&2
-      echo "      请跑 .github/workflows/desktop-release.yml 的 windows-engine-dll" >&2
-      echo "      job（wasm_run main@23e36bdf + config_api.sh wasmtime），下载其" >&2
-      echo "      wasm_run_dart-windows-x64 artifact 回填 third_party/wasm_run/libs/" >&2
+      echo "      Windows：跑 .github/workflows/desktop-release.yml 的" >&2
+      echo "      windows-engine-dll job（wasm_run main@23e36bdf +" >&2
+      echo "      config_api.sh wasmtime），下载 artifact 回填；" >&2
+      echo "      Linux：同一 commit 跑 bash scripts/config_api.sh wasmtime &&" >&2
+      echo "      cargo build --release -p wasm_run_dart，产物回填" >&2
+      echo "      third_party/wasm_run/libs/$name 并更新本表 sha256。" >&2
       failed=1
       continue
     fi
