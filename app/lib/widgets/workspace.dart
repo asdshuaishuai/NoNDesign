@@ -170,6 +170,7 @@ class _WorkspaceState extends State<Workspace> {
                 // 插件视图不挂设计左栏（板/图层/文档/历史都是设计面的内容，
                 // 插件工作台有自己的内容和工具条）；左轨仍由共享外壳提供。
                 final showLeft =
+                    !store.designCanvasFocus &&
                     designLayout.left == PanelPolicy.docked &&
                     pluginView == null;
                 final wide = designLayout.isWide;
@@ -214,10 +215,14 @@ class _WorkspaceState extends State<Workspace> {
                       ? const LeftPanel()
                       : null,
                   main: _center(store, pluginView),
-                  rightPanel: wide && widget.showRightPanel
+                  rightPanel:
+                      wide && widget.showRightPanel && !store.designCanvasFocus
                       ? const WorkspaceRightPanel()
                       : null,
-                  narrowBar: !wide && (leftAsSheet || rightAsSheet)
+                  narrowBar:
+                      !store.designCanvasFocus &&
+                          !wide &&
+                          (leftAsSheet || rightAsSheet)
                       ? _narrowBar(
                           context,
                           leftAsSheet: leftAsSheet,
@@ -775,6 +780,15 @@ class _BoardTabs extends StatelessWidget {
             ),
           ),
           if (!embedded) ...[
+            IconAction(
+              key: const ValueKey('design-focus-toggle'),
+              icon: store.designCanvasFocus
+                  ? Icons.fullscreen_exit
+                  : Icons.fullscreen,
+              tooltip: store.designCanvasFocus ? '显示左右面板' : '专注画布',
+              size: 26,
+              onTap: store.toggleDesignCanvasFocus,
+            ),
             IconAction(
               icon: Icons.code,
               tooltip: '源码 ${modCombo('⌘3')}',

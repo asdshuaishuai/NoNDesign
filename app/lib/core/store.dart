@@ -3457,6 +3457,15 @@ class AppStore extends ChangeNotifier {
   /// 「验证原型」在飞：设计工具条据此显示进度并禁止重复点击。
   bool get designPrototypeBusy => _designPrototypeBusy;
 
+  /// 设计画布专注（设计工作台独立交互姿态）：隐藏左/右面板，只留共享外壳
+  /// 与画布；不改变项目数据，切走再回来仍是最后一次选择。
+  bool designCanvasFocus = false;
+
+  void toggleDesignCanvasFocus() {
+    designCanvasFocus = !designCanvasFocus;
+    notifyListeners();
+  }
+
   /// 双面组件的数据面（设计验证原型流程）：阶段条 + 最近一次结果卡。
   List<WorkspaceStage> designPrototypeStages = const <WorkspaceStage>[];
   DesignPrototypeDocument? designPrototypeResult;
@@ -3521,11 +3530,17 @@ class AppStore extends ChangeNotifier {
     threePipelineStages = next;
     if (kind == 'check' || kind == 'placement') {
       threeGateVerdict = result['verdict']?.toString();
-      threeGateGateCount = result['gates'] is List ? (result['gates'] as List).length : 0;
+      threeGateGateCount = result['gates'] is List
+          ? (result['gates'] as List).length
+          : 0;
       threeGateFixHints = result['fix_hints'] is List
-          ? (result['fix_hints'] as List).map((item) => item.toString()).toList(growable: false)
+          ? (result['fix_hints'] as List)
+                .map((item) => item.toString())
+                .toList(growable: false)
           : const <String>[];
-      threeGateError = ok ? null : (result['message']?.toString() ?? '3D 确定性门没有跑完');
+      threeGateError = ok
+          ? null
+          : (result['message']?.toString() ?? '3D 确定性门没有跑完');
     }
     if (!ok) {
       threeGateError = result['message']?.toString() ?? '3D 工作区操作没有完成';
@@ -3605,7 +3620,9 @@ class AppStore extends ChangeNotifier {
           id: 'verify',
           label: '覆盖验证',
           detail: doc.verified ? '全部覆盖' : '有未覆盖项',
-          state: doc.verified ? WorkspaceStageState.done : WorkspaceStageState.failed,
+          state: doc.verified
+              ? WorkspaceStageState.done
+              : WorkspaceStageState.failed,
         ),
       ];
       notifyListeners();
@@ -3742,7 +3759,9 @@ class AppStore extends ChangeNotifier {
         id: 'verify',
         label: '覆盖验证',
         detail: doc.verified ? '全部覆盖' : '有未覆盖项',
-        state: doc.verified ? WorkspaceStageState.done : WorkspaceStageState.failed,
+        state: doc.verified
+            ? WorkspaceStageState.done
+            : WorkspaceStageState.failed,
       ),
     ];
     notifyListeners();
@@ -3896,10 +3915,10 @@ class AppStore extends ChangeNotifier {
       final mime = lower.endsWith('.png')
           ? 'image/png'
           : lower.endsWith('.webp')
-              ? 'image/webp'
-              : lower.endsWith('.jpg') || lower.endsWith('.jpeg')
-                  ? 'image/jpeg'
-                  : null;
+          ? 'image/webp'
+          : lower.endsWith('.jpg') || lower.endsWith('.jpeg')
+          ? 'image/jpeg'
+          : null;
       if (mime == null) {
         return <String, dynamic>{
           'ok': false,
@@ -3908,11 +3927,13 @@ class AppStore extends ChangeNotifier {
           'detail': '评审图必须是 PNG/JPEG/WebP：$rawPath',
         };
       }
-      images.add(CreativeJudgeImage(
-        label: '${images.length + 1}:${file.uri.pathSegments.last}',
-        bytes: bytes,
-        mimeType: mime,
-      ));
+      images.add(
+        CreativeJudgeImage(
+          label: '${images.length + 1}:${file.uri.pathSegments.last}',
+          bytes: bytes,
+          mimeType: mime,
+        ),
+      );
     }
     CreativeGatesReport? report;
     if (gates != null) {
