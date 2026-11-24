@@ -30,6 +30,7 @@ class VideoAnimationSurface extends StatefulWidget {
     this.fps,
     this.autoplay = false,
     this.loop = true,
+    this.initialTime = 0,
     this.onFrame,
   });
 
@@ -44,6 +45,9 @@ class VideoAnimationSurface extends StatefulWidget {
 
   /// 循环播放的初始状态。
   final bool loop;
+
+  /// 首帧时间（秒）；导演台选中镜头时用来把预览跳到镜头起点。
+  final double initialTime;
 
   /// 每换一帧回调一次（时间、0 基帧号），供外部做读数/联动。
   final void Function(double seconds, int frameIndex)? onFrame;
@@ -95,7 +99,10 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
   void initState() {
     super.initState();
     _loop = widget.loop;
-    _applyFrame(0);
+    _t = widget.initialTime.isFinite
+        ? widget.initialTime.clamp(0.0, _duration)
+        : 0;
+    _applyFrame(_t);
     if (widget.autoplay) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _play();
@@ -258,36 +265,45 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
   Widget _framePane(BuildContext context) {
     if (_problem.isNotEmpty || _svg.isEmpty) return _problemPane(context);
     final document = widget.document;
-    final aspect = document.height <= 0 ? 16 / 9 : document.width / document.height;
-    return LayoutBuilder(builder: (context, constraints) {
-      final maxWidth = constraints.maxWidth.isFinite ? constraints.maxWidth : 640.0;
-      final maxHeight = constraints.maxHeight.isFinite ? constraints.maxHeight : 360.0;
-      if (maxWidth <= 0 || maxHeight <= 0) return const SizedBox.shrink();
-      var width = maxWidth;
-      var height = aspect <= 0 ? maxHeight : width / aspect;
-      if (height > maxHeight) {
-        height = maxHeight;
-        width = height * aspect;
-      }
-      if (width <= 0 || height <= 0) return const SizedBox.shrink();
-      return Center(
-        child: SizedBox(
-          width: width,
-          height: height,
-          child: ColoredBox(
-            color: Colors.black,
-            child: SvgPicture.string(
-              _svg,
-              fit: BoxFit.contain,
-              alignment: Alignment.center,
-              semanticsLabel: '动画画面',
-              // 解析/绘制失败不是崩，是一个可以说清楚的空画面。
-              errorBuilder: (context, error, stackTrace) => _problemPane(context),
+    final aspect = document.height <= 0
+        ? 16 / 9
+        : document.width / document.height;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : 640.0;
+        final maxHeight = constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : 360.0;
+        if (maxWidth <= 0 || maxHeight <= 0) return const SizedBox.shrink();
+        var width = maxWidth;
+        var height = aspect <= 0 ? maxHeight : width / aspect;
+        if (height > maxHeight) {
+          height = maxHeight;
+          width = height * aspect;
+        }
+        if (width <= 0 || height <= 0) return const SizedBox.shrink();
+        return Center(
+          child: SizedBox(
+            width: width,
+            height: height,
+            child: ColoredBox(
+              color: Colors.black,
+              child: SvgPicture.string(
+                _svg,
+                fit: BoxFit.contain,
+                alignment: Alignment.center,
+                semanticsLabel: '动画画面',
+                // 解析/绘制失败不是崩，是一个可以说清楚的空画面。
+                errorBuilder: (context, error, stackTrace) =>
+                    _problemPane(context),
+              ),
             ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
   }
 
   Widget _problemPane(BuildContext context) {
@@ -295,15 +311,18 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.image_not_supported_outlined, size: 22, color: p.ink4),
-          const SizedBox(height: 8),
-          Text(
-            frameProblemMessage,
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5),
-          ),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.image_not_supported_outlined, size: 22, color: p.ink4),
+            const SizedBox(height: 8),
+            Text(
+              frameProblemMessage,
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -312,70 +331,85 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
     final p = context.palette;
     return Container(
       padding: const EdgeInsets.fromLTRB(6, 2, 10, 4),
-      decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Row(children: [
-          _iconButton(
-            buttonKey: const ValueKey('video-animation-play'),
-            icon: _playing ? Icons.pause : Icons.play_arrow,
-            tooltip: _playing ? '暂停' : '播放',
-            onPressed: _togglePlay,
-            active: _playing,
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: p.line)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              _iconButton(
+                buttonKey: const ValueKey('video-animation-play'),
+                icon: _playing ? Icons.pause : Icons.play_arrow,
+                tooltip: _playing ? '暂停' : '播放',
+                onPressed: _togglePlay,
+                active: _playing,
+              ),
+              _iconButton(
+                buttonKey: const ValueKey('video-animation-restart'),
+                icon: Icons.replay,
+                tooltip: '回到片头',
+                onPressed: _restart,
+              ),
+              _iconButton(
+                buttonKey: const ValueKey('video-animation-loop'),
+                icon: _loop ? Icons.repeat_on_outlined : Icons.repeat_outlined,
+                tooltip: _loop ? '循环播放已开' : '循环播放已关',
+                onPressed: _toggleLoop,
+                active: _loop,
+              ),
+              const Spacer(),
+              Text(
+                'frame $_frameNumber/$_totalFrames',
+                key: const ValueKey('video-animation-frame'),
+                style: TextStyle(
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                  color: p.ink4,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    '${formatVideoTime(_t)} / ${formatVideoTime(_duration)}',
+                    key: const ValueKey('video-animation-time'),
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                      color: p.ink3,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-          _iconButton(
-            buttonKey: const ValueKey('video-animation-restart'),
-            icon: Icons.replay,
-            tooltip: '回到片头',
-            onPressed: _restart,
-          ),
-          _iconButton(
-            buttonKey: const ValueKey('video-animation-loop'),
-            icon: _loop ? Icons.repeat_on_outlined : Icons.repeat_outlined,
-            tooltip: _loop ? '循环播放已开' : '循环播放已关',
-            onPressed: _toggleLoop,
-            active: _loop,
-          ),
-          const Spacer(),
-          Text(
-            'frame $_frameNumber/$_totalFrames',
-            key: const ValueKey('video-animation-frame'),
-            style: TextStyle(fontSize: 10, fontFamily: 'monospace', color: p.ink4),
-          ),
-          const SizedBox(width: 10),
-          Flexible(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerRight,
-              child: Text(
-                '${formatVideoTime(_t)} / ${formatVideoTime(_duration)}',
-                key: const ValueKey('video-animation-time'),
-                style: TextStyle(fontSize: 10, fontFamily: 'monospace', color: p.ink3),
+          SizedBox(
+            height: 26,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 2,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+              ),
+              child: Slider(
+                key: const ValueKey('video-animation-slider'),
+                value: _t.clamp(0.0, _duration),
+                min: 0,
+                max: _duration,
+                activeColor: p.accent,
+                inactiveColor: p.line,
+                onChangeStart: _onScrubStart,
+                onChanged: _setTime,
+                onChangeEnd: _onScrubEnd,
               ),
             ),
           ),
-        ]),
-        SizedBox(
-          height: 26,
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 2,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-            ),
-            child: Slider(
-              key: const ValueKey('video-animation-slider'),
-              value: _t.clamp(0.0, _duration),
-              min: 0,
-              max: _duration,
-              activeColor: p.accent,
-              inactiveColor: p.line,
-              onChangeStart: _onScrubStart,
-              onChanged: _setTime,
-              onChangeEnd: _onScrubEnd,
-            ),
-          ),
-        ),
-      ]),
+        ],
+      ),
     );
   }
 

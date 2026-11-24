@@ -1703,11 +1703,20 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         ),
       );
     }
+    // 导演台：选中镜头时把预览切到该镜头起点（新实例 = 暂停在新位置，
+    // 旧计时器彻底停掉）；未选中镜头则从片头开始。
+    double selectedStart = 0;
+    final selectedIndex = _selectedShotIndex;
+    if (selectedIndex != null) {
+      for (final shot in videoShotsFromTimeline(doc.timeline)) {
+        if (shot.index == selectedIndex) selectedStart = shot.start;
+      }
+    }
     return VideoAnimationSurface(
-      // 换文档即换实例：时间回到片头、旧计时器彻底停掉。
-      key: ObjectKey(doc),
+      key: ValueKey('video-animation-${identityHashCode(doc)}-$selectedIndex'),
       document: doc,
       fps: _fps,
+      initialTime: selectedStart,
     );
   }
 }

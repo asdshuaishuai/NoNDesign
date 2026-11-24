@@ -40,6 +40,7 @@ import 'package:nondesign/widgets/right_panel.dart' show Inspector;
 import 'package:nondesign/widgets/video_animation_surface.dart';
 import 'package:nondesign/widgets/video_clip_surface.dart';
 import 'package:nondesign/widgets/video_player_surface.dart';
+import 'package:nondesign/widgets/video_workbench_panels.dart';
 import 'package:nondesign/widgets/video_workspace.dart';
 
 const _mp4 = '/Users/x/Documents/NoNDesign/videos/job-1/frames.mp4';
@@ -242,6 +243,24 @@ void main() {
     final root = _tmpRoot;
     _tmpRoot = null;
     if (root != null && root.existsSync()) await root.delete(recursive: true);
+  });
+
+  testWidgets('导演台：点镜头把预览跳到镜头起点（暂停）', (tester) async {
+    final doc = _sampleDoc();
+    final shots = videoShotsFromTimeline(doc.timeline);
+    expect(shots.length, greaterThan(1), reason: '示例需要至少两个镜头来验证联动');
+    final store = _store();
+    final service = _FakeVideoService(sample: doc);
+    await _pump(tester, store, service);
+
+    expect(_secondsOf(_timeText(tester).data!), 0.0, reason: '初始在片头');
+    await tester.tap(find.byKey(const ValueKey('video-timeline-shot-1')));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(
+      _secondsOf(_timeText(tester).data!),
+      closeTo(shots[1].start, 1e-6),
+      reason: '选中第二个镜头后，预览时间应跳到它的起点',
+    );
   });
 
   testWidgets('打开即满幅播放面：编辑动作收进工具条，不再常驻侧栏', (tester) async {
