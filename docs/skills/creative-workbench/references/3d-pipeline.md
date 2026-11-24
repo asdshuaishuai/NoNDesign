@@ -221,3 +221,43 @@ Budget: 60–120 words; one scene + one primary verb + 1–2 systems + 3–5 con
 
 Full data and caveats: [research/3dcodeverse.md](../../../research/3dcodeverse.md)
 Appendix A.
+
+## 12. Engine and material candidates (2026-11-24, reference-only)
+
+Two candidates were evaluated for the 3D/short-drama line. **Neither is a product
+dependency**; the execution surface stays three-live + 3dcodeverse.
+
+| Candidate | What it could cover | Decision | Why |
+| --- | --- | --- | --- |
+| `shinyobjectz/raea` | 3D (Bevy), composition/frame model, story model, short-drama `cut`/`check` P0–P3 | **Reference only** | FSL-1.1-ALv2 *Competing Use* blocks a commercial creative workbench; it is a 230-crate app, not an embeddable library; Rust/Bevy/React/JS stack conflicts with Dart + three-live |
+| `alla2001/material-painter` | PBR texture painting, bake maps, material node graph, WGSL nodes, engine export presets | **Reference only; optional external MCP station is a pending user decision** | GPL-3.0-or-later + GUI-only binary, no `[lib]`; embedding/linking would force copyleft. Separate-process MCP use does not vendor the code, but is an external-tool exception |
+
+### 12.1 What we borrow (ideas, not code)
+
+- **raea**: word-anchored timing (`words.json`), P0–P3 check inputs
+  (`manifest` + `words` + `taste`), speech-driven cut, typed story
+  (world/telling/beat, value turns, setup/payoff). Map to our existing
+  `screenplay.json` / `story-short.md`; do not add a React/Bevy runtime.
+- **Material Painter**: eight-channel material model, bake-map taxonomy
+  (AO/curvature/cavity/thickness/normal/height/position/world-normal/ID),
+  export channel packing (glTF ORM first), layer-stack UX, and MCP security
+  pattern (loopback, off by default, 503, origin allowlist).
+
+### 12.2 Material scope for v1
+
+`nan.material/1`: `baseColor`, `metallic`, `roughness`, `normal`, `emissive`,
+`occlusion`, `alpha`; texture slots; UV repeat/offset; HDRI/PMREM; glTF ORM
+export; deterministic material preview. **No painting, UV unwrap, or bake in
+v1.** Those are v2 candidates via an optional external station, or a later
+self-built painter — not a reason to embed GPL code.
+
+### 12.3 Guardrails
+
+- Do not vendor/copy raea code, skills, or assets; do not add Bevy/React/JS
+  runtime.
+- Do not copy Material Painter code or bundle its installer; do not treat its
+  GPL code or bundled assets as ours.
+- Do not add a hard dependency on an external app. If an optional station is
+  ever approved, absence must degrade honestly, never silently.
+- Full reasoning: [research/raea.md](../../../research/raea.md) ·
+  [research/material-painter.md](../../../research/material-painter.md).

@@ -135,6 +135,10 @@ For 55–70s vertical animated stories, use
 Evidence pack: contact sheet, frame strips around cuts, 3–5 representative frames,
 the final `judgment.json`/`score.json` if judged.
 
+Reference (not a dependency): raea's `check` adds P0–P3 items for platform UI safe
+zones, caption-word sync, and face occlusion. Borrow the check items only; see
+[research/raea.md](../../../research/raea.md).
+
 ## 8. Export
 
 - Current product: preview only; mp4 export is blocked.

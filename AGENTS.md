@@ -75,6 +75,14 @@ plugins/             独立插件资产（视频制作说明）
   词级时间、镜头表、look 数值与 QA；**不引入 Remotion / `@remotion/three` / React /
   Node / Chromium**，不复制其参考帧/角色/脚本/镜头/配音/音乐。`toon_3d`
   （2D 角色 + 3D 世界）是候选风格，待裁决与 spike。
+- **2026-11-24 追加两个「只参考」候选**：`shinyobjectz/raea`（FSL-1.1-ALv2）技术上
+  覆盖 3D/短剧，但它是 230 crate 的完整 Rust/Bevy + React/TS 应用、SDK 私有，且
+  *Competing Use* 限制商业替代品——**不 vendor、不捆绑、不引 Bevy/React/JS 运行时**，
+  只借 composition/词级时间/`check`/story 契约（未来重开需商业许可或满两年转
+  Apache-2.0 + 有边界 API + 产品裁决）。`alla2001/material-painter`（GPL-3.0-or-later）
+  能力面覆盖全领域 3D 材质，但仅 GUI 二进制、无 `[lib]`——**不嵌入、不链接、不随包
+  分发**；v1 自建 `nan.material/1` PBR 层，可选外部 MCP 工作站是**未裁决**的外部
+  工具例外。详见 `docs/research/raea.md` 与 `docs/research/material-painter.md`。
 - **创作线引入例外（2026-11-22 用户裁决）**：
   ① **3D 线直接引入** `threejs-live`（已在库）+ **3dcodeverse skill/harness 契约**
   （Apache-2.0：plan schema、确定性门阈值、blind judge rubric、spec/src/artifacts/judge

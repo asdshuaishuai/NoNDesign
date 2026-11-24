@@ -130,8 +130,12 @@ LLM 生成 three.js 场景代码，**应用内 WebView 即执行面**（不引�
 - **统一 skill**：3D 的 intake/plan/judge 也走
   [`docs/skills/creative-workbench/SKILL.md`](skills/creative-workbench/SKILL.md)，
   不再单独维护一套提示词。
+- **材质边界（2026-11-24 调研）**：v1 自建 `nan.material/1` PBR 材质层（七通道 +
+  贴图槽 + HDRI + glTF ORM），不嵌入 `alla2001/material-painter`（GPL-3.0 +
+  GUI-only 无 lib）；可选外部 MCP 材质工作站是未裁决候选。`shinyobjectz/raea`
+  （FSL-1.1-ALv2）同样只参考，不引 Bevy/React/JS 运行时。
 - **不做**：3DCodeVerse-2M 数据集（CC-BY-NC-SA）随包分发；示例资产复制；
-  articulated 轨在 Blender/URDF 运行时缺失下的假实现。
+  articulated 轨在 Blender/URDF 运行时缺失下的假实现；GPL/FSL 代码 vendor。
 
 详见 [research/3dcodeverse.md](research/3dcodeverse.md) 与
 [plan-creative-workbench.md](plan-creative-workbench.md) §4。

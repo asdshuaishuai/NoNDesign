@@ -1,4 +1,4 @@
-# 创意工作台交互升级与模块规范（2026-11-20 定稿，2026-11-22 增补 ink_line / 3dcodeverse / pixelfx，2026-11-24 增补 toon_3d 候选，未施工）
+# 创意工作台交互升级与模块规范（2026-11-20 定稿，2026-11-22 增补 ink_line / 3dcodeverse / pixelfx，2026-11-24 增补 toon_3d 候选与 Raea/Material Painter 候选评估，未施工）
 
 > 状态：**方案定稿，待施工**。本文覆盖全局交互升级与四个工作台的能力/联动裁决；
 > 音乐模块的技术面（谱面/合成/编译器）以 [plan-music-module.md](plan-music-module.md) 为准。
@@ -162,7 +162,33 @@ pixelfx 子集；Python/Blender/headless Chrome 只在开发期参考。
   材质 PBR 参数 → 布尔（three-bvh-csg vendored，拉伸）；3dcodeverse 的 plan/check/
   judge 从第一批就接入，不等几何能力全齐。
 
-详见 [research/3dcodeverse.md](research/3dcodeverse.md) 与
+### 4.1 候选引擎与材质边界（2026-11-24 调研，未施工）
+
+2026-11-24 评估了两个仓库，结论**均不直接引入**；3D 执行面仍是 three-live +
+3dcodeverse：
+
+| 候选 | 能补什么 | 裁决 | 原因 |
+| --- | --- | --- | --- |
+| `shinyobjectz/raea` | Bevy 3D、composition/帧模型、story model、短剧 `cut` / `check` P0–P3 | **只参考** | FSL-1.1-ALv2 的 *Competing Use* 限制商业替代品；230 crate 的完整应用而非可嵌入库；Rust/Bevy/React/JS 栈与 Flutter/Dart + three-live 冲突 |
+| `alla2001/material-painter` | PBR 纹理绘制、烘焙、材质节点图、WGSL 节点、引擎导出预设 | **只参考；可选外部 MCP 工作站待裁决** | GPL-3.0-or-later + 仅 GUI 二进制、无 `[lib]`；嵌入/链接会触发 copyleft。独立进程 MCP 不 vendor 代码，但属于外部工具例外 |
+
+* **raea 只借契约**：词级时间、`check` 的 manifest/words/taste 输入面、语音驱动
+  `cut`、typed story（world/telling/beat、value turns、setup/payoff）。不引
+  React/Bevy/JS 运行时，不复制 skills/代码/资产；未来若重开，需同时过「商业
+  许可或满两年转 Apache-2.0 + 有边界库/API + 产品允许外部引擎 + 只加适配层」
+  四道门（见 [research/raea.md](research/raea.md)）。
+* **Material Painter 只借需求**：八通道模型、bake map 分类、导出通道打包、
+  层栈/智能遮罩 UX、MCP 安全模式（loopback/默认关闭/503/Origin allowlist）。
+  v1 材质自建 `nan.material/1`（baseColor/metallic/roughness/normal/emissive/
+  occlusion/alpha + 贴图槽 + HDRI + glTF ORM），**不做绘制/UV 展开/烘焙**；
+  可选外部工作站必须用户自行安装、显式开启、失败诚实降级，不随包分发。
+* **政策**：外部创作工具仍「只参考、不引入」；3D 栈例外仅限 three.js /
+  three-live / 3dcodeverse。Material Painter 的外部 MCP 桥是**新增例外候选**，
+  未获用户裁决前不施工。
+
+详见 [research/3dcodeverse.md](research/3dcodeverse.md)、
+[research/raea.md](research/raea.md)、
+[research/material-painter.md](research/material-painter.md) 与
 [skills/creative-workbench/references/3d-pipeline.md](skills/creative-workbench/references/3d-pipeline.md)。
 
 ## 5. 视频：导演台 + 剧本标准 + 三风格 + TTS + 配乐联动
@@ -336,6 +362,12 @@ allowlist 由 vendoring 时扫描生成并写入 `manifest.json`，视频编译�
   React / Node / Chromium / ffmpeg 运行时；不复制参考帧/角色/脚本/镜头/配音/音乐。
   只借 8 段脚本、词级时间、镜头语法、look 数值与 QA 逻辑；`toon_3d` 为候选风格，
   待裁决与 spike（见 [research/claude-animated-shorts.md](research/claude-animated-shorts.md)）。
+* **raea 只参考**：不 vendor 代码/TS SDK/skills/资产，不引 Bevy/React/JS/Bun/CMake，
+  不把 `raea` CLI 作为产品依赖或捆绑进程；FSL-1.1-ALv2 的 *Competing Use* 与
+  230 crate 的完整应用形态都不适合嵌入（见 [research/raea.md](research/raea.md)）。
+* **Material Painter 不嵌入**：GPL-3.0-or-later + GUI-only 二进制、无库 API；不 vendor、
+  不随包分发、不复制源码。v1 材质自建 PBR 层；可选外部 MCP 工作站是**未裁决**的
+  例外候选（见 [research/material-painter.md](research/material-painter.md)）。
 * Godot / Unity / PixiJS / Flame 已裁决不采用（理由见 §5.0）；引擎短片 v1 **只走剧本解释器**，
   不允许 Agent 手写 Phaser 代码（保确定性与可校验性）。
 * `ink_line` 的参考源是 `JDhruv14/line-art-animation`（MIT），但**不复制其代码、不依赖

@@ -87,11 +87,15 @@
 | [research/3dcodeverse.md](research/3dcodeverse.md) | 调研结论（**3D 线直接引入**） | 3DCodeVerse 论文/harness：代码即真相、四轨七运行时、plan → check → blind judge → refine、contract/connectivity/placement/shader 门、cap 规则；附录 A 量化 threejs.cc 1,018 案例的 13 类分布/特征词/五槽 prompt 模型；Python/Blender 运行时不入产品 |
 | [research/pixelfx.md](research/pixelfx.md) | 调研结论（**特效子集直接引入**） | `patch-gg/pixelfx`（MIT，v0.3.1，244 effects）：color+light 双缓冲、seeded RNG、纯/模拟 effect、sprite sheet、质量 bar；只引入火焰/冰霜/风/爆炸等特效，**不引入人物/stock actor/moves** |
 | [research/claude-animated-shorts.md](research/claude-animated-shorts.md) | 调研结论（**只参考，不引入**） | `mromidev/claude-animated-shorts`（MIT，TypeScript）：55–70s 竖屏动画短剧；8 段脚本、词级时间、镜头表、2D billboard 角色 + three.js 手绘世界、墨线/景深/滑翔相机、合成声音、逐帧 QA；只借工艺/look 数值，不引入 Remotion/React/Node，`toon_3d` 候选风格 |
+| [research/raea.md](research/raea.md) | 调研结论（**FSL 许可阻塞，只参考**） | `shinyobjectz/raea`（FSL-1.1-ALv2，Rust + Bevy 0.20 + React/TS）：3D/视频/动效/游戏引擎与短剧工艺；230 crate 完整应用、私有 SDK、非可嵌入库；*Competing Use* 挡住商业创作工作台；只借 composition/词级时间/check/story 契约 |
+| [research/material-painter.md](research/material-painter.md) | 调研结论（**GPL 阻塞，参考 / 可选外部工作站**） | `alla2001/material-painter`（GPL-3.0-or-later，Rust + wgpu）：8 通道 PBR 绘制、烘焙、节点图、WGSL、UDIM、引擎导出预设；GUI-only 无 lib，不能嵌入；v1 自建 PBR 材质层，MCP 外部工作站为未裁决候选 |
 
 ## 2. 决策台账（按时间倒序）
 
 | 日期 | 裁决 | 状态 | 事实源 |
 | --- | --- | --- | --- |
+| 2026-11-24 | **raea 不直接引入（FSL 许可阻塞）**：技术上覆盖 3D/短剧，但 FSL-1.1-ALv2 的 *Competing Use* 限制商业替代品；230 crate 完整应用、私有 SDK、Rust/Bevy/React/JS 栈，不是可嵌入库。只借 composition/词级时间/check/story 契约；未来需商业许可或满两年转 Apache-2.0 + 有边界 API + 产品允许外部引擎 | 调研结论（许可阻塞） | research/raea.md |
+| 2026-11-24 | **Material Painter 不嵌入（GPL 阻塞）**：能力面覆盖全领域 3D 材质（绘制/烘焙/节点图/导出预设），但 GPL-3.0-or-later + 仅 GUI 二进制、无 `[lib]`；不 vendor、不随包分发。v1 自建 PBR 材质层；可选外部 MCP 工作站是**未裁决**的外部工具例外候选 | 调研结论（GPL 阻塞） | research/material-painter.md |
 | 2026-11-24 | **动画短剧候选风格 `toon_3d`（2D 角色 + 3D 世界）**：参考 `mromidev/claude-animated-shorts` 的 8 段脚本/词级时间/镜头表/look 数值/QA；**不引入 Remotion/React/Node/Chromium**，不复制参考帧/角色/脚本/镜头；执行面用 three-live。候选待裁决与 spike | 调研结论（候选，待裁决） | research/claude-animated-shorts.md · skills/creative-workbench/references/story-short.md |
 | 2026-11-22 | **3D 直接引入 threejs-live + 3dcodeverse**：采用 3dcodeverse 的 skill/harness 契约（Apache-2.0）与 three-live 执行面；双 authoring（`scene.json` / `src/*.js`）；Python/Blender/CadQuery/URDF 运行时不入产品，检查器用 Dart/JS 等价实现 | 方案定稿（未施工） | plan-creative-workbench §4 · research/3dcodeverse.md |
 | 2026-11-22 | **视频直接引入 pixelfx 特效子集**：只取火焰/冰霜/风/爆炸/闪电等**特效**，**不含人物/角色**；`actor`/`rig`/`poses`/`act`/`moves`/on-body 特效不引入；角色仍用我们自己的 rig | 方案定稿（未施工） | plan-creative-workbench §5.3/§5.6 · research/pixelfx.md |
@@ -164,5 +168,7 @@ plan-cross-platform-runtime §1（已落地：webview_all 全平台）
 macOS WKWebView 真实集成测试通过；Windows/Linux/移动真机复验与 wasm_run B4 退役
 仍是未清项；OHOS 离屏 WebView 缺口已登记；本轮新增 `creative-workbench` skill、
 3dcodeverse 3D harness、pixelfx VFX 子集、`ink_line` 风格与 `toon_3d` 动画短剧
-候选调研；`3dcodeverse.md` 附录 A 补 threejs.cc 1,018 案例的 3D prompt 量化——
-除 3D 线（three-live + 3dcodeverse）与 pixelfx 特效子集外，仍坚持「只参考、不引入」）。
+候选调研；`3dcodeverse.md` 附录 A 补 threejs.cc 1,018 案例的 3D prompt 量化；
+新增 `raea.md`（FSL 许可阻塞）与 `material-painter.md`（GPL 阻塞）两份候选评估——
+除 3D 线（three-live + 3dcodeverse）与 pixelfx 特效子集外，仍坚持「只参考、
+不引入」；Material Painter 的可选外部 MCP 工作站仍是未裁决候选）。
