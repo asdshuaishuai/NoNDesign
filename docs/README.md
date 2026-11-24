@@ -55,7 +55,7 @@
 | --- | --- | --- |
 | [plan-creative-workbench.md](plan-creative-workbench.md) | **方案定稿；批次 0/1/1b/2/3 已落地，批次 4 仅契约面（2026-11-24 工作树）** | 全局交互（右 chat + 执行/结果双面）、设计验证式原型绑定、3D 建模 + 3dcodeverse harness、视频导演台/剧本/三风格 + `toon_3d` 候选/TTS/配乐联动、强绑定强规范框架、施工批次 0–8 |
 | [plan-next-iterations.md](plan-next-iterations.md) | **方案 v3（2026-11-24，设计先行，未施工）** | 收窄到视频双轨：M0 收口 → D 设计阶段（双轨 ADR/3D 视频 three-live 引擎设计/数据契约/导演台最小面）→ P1 three-live 3D 视频 POC → P2 3D 视频最小纵切；P3 常规视频只回归；音乐/VFX/TTS/视口/GLB/judge 移入 backlog；raea 嵌入已关闭（只参考） |
-| [plan-workbench-ui.md](plan-workbench-ui.md) | **方案（2026-11-24，已开工：UI-0 完成 / UI-1 首批专注画布）** | 四工作台内容区交互姿态/布局独立适配：共享外层壳不变；按 设计 → 3D → 视频 → 音乐 分批（UI-0 规格 → UI-1 设计 → UI-2 3D → UI-3 视频导演台 → UI-4 音乐）；热应用暂不改动 |
+| [plan-workbench-ui.md](plan-workbench-ui.md) | **方案（2026-11-24，已开工：UI-0 完成 / UI-1 设计专注 / UI-2 3D 三栏首批）** | 四工作台内容区交互姿态/布局独立适配：共享外层壳不变；按 设计 → 3D → 视频 → 音乐 分批（UI-0 规格 → UI-1 设计 → UI-2 3D → UI-3 视频导演台 → UI-4 音乐）；热应用暂不改动 |
 | [skills/creative-workbench/SKILL.md](skills/creative-workbench/SKILL.md) | **方案定稿，未接线** | 统一创作 skill：intake → direction → structure → build → check → blind judge → refine → deliver；spec/plan/src/artifacts/judge 标准工作区；视频/3D/设计共用 |
 | [plan-music-module.md](plan-music-module.md) | **方案定稿，未施工** | 音乐（编曲）模块：score.json、五线谱编辑器、Web Audio 编译播放、music_* 工具面 |
 | [creative-refactor-decisions.md](creative-refactor-decisions.md) | **R0 契约核心已落地；设计 R1、3D R3 契约面已实施（2026-11-24 工作树），视频/音乐未施工** | R0 决策冻结：轮次版本化、blind judge 通道、Phaser 版本、`ink_line` 首版、TTS 随包策略、`scene.json` 双 authoring、评分默认参数；**Genkit 迁移冲突（2026-11-23 同日裁决：保留 genkit、移除 ai_sdk，见 §2 台账）** |
