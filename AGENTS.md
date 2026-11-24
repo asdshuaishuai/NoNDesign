@@ -71,6 +71,10 @@ plugins/             独立插件资产（视频制作说明）
   再单独改方案）。**代码/技能包同理**：`JDhruv14/line-art-animation`（MIT）只作为
   `ink_line` 墨线手绘风格的规则参考，不复制其代码、不依赖其 TypeScript/SVG 运行时；
   方案线的风格包渲染走自研 Canvas2D 矢量笔触（未施工，I0 spike 验证）。
+  `mromidev/claude-animated-shorts`（MIT 代码/文档）同样只参考：只借 8 段脚本、
+  词级时间、镜头表、look 数值与 QA；**不引入 Remotion / `@remotion/three` / React /
+  Node / Chromium**，不复制其参考帧/角色/脚本/镜头/配音/音乐。`toon_3d`
+  （2D 角色 + 3D 世界）是候选风格，待裁决与 spike。
 - **创作线引入例外（2026-11-22 用户裁决）**：
   ① **3D 线直接引入** `threejs-live`（已在库）+ **3dcodeverse skill/harness 契约**
   （Apache-2.0：plan schema、确定性门阈值、blind judge rubric、spec/src/artifacts/judge
@@ -256,6 +260,11 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   **pixelfx 特效子集**（只取火焰/冰霜/风/爆炸等，不取人物/stock actor/moves），
   以 `{f,type:"vfx",cue,...}` 事件接入 `screenplay.json`；cue 走 allowlist。
   统一创作流程见 `docs/skills/creative-workbench/SKILL.md`。
+  **候选风格 `toon_3d`（2D 角色 + 3D 世界，2026-11-24 调研，待裁决）**：参考
+  claude-animated-shorts 的 8 段脚本/词级时间/镜头表/look/QA，执行面用 three-live；
+  不引入 Remotion/React/Node/Chromium。见
+  `docs/research/claude-animated-shorts.md` 与
+  `docs/skills/creative-workbench/references/story-short.md`。
   详见 `docs/research/line-art-animation.md`、`docs/research/pixelfx.md`、
   `docs/research/awesome-opus5-5-videos.md`。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算

@@ -53,7 +53,7 @@
 
 | 文档 | 状态 | 覆盖 |
 | --- | --- | --- |
-| [plan-creative-workbench.md](plan-creative-workbench.md) | **方案定稿，未施工** | 全局交互（右 chat + 执行/结果双面）、设计验证式原型绑定、3D 建模 + 3dcodeverse harness、视频导演台/剧本/三风格/TTS/配乐联动、强绑定强规范框架、施工批次 0–8 |
+| [plan-creative-workbench.md](plan-creative-workbench.md) | **方案定稿，未施工** | 全局交互（右 chat + 执行/结果双面）、设计验证式原型绑定、3D 建模 + 3dcodeverse harness、视频导演台/剧本/三风格 + `toon_3d` 候选/TTS/配乐联动、强绑定强规范框架、施工批次 0–8 |
 | [skills/creative-workbench/SKILL.md](skills/creative-workbench/SKILL.md) | **方案定稿，未接线** | 统一创作 skill：intake → direction → structure → build → check → blind judge → refine → deliver；spec/plan/src/artifacts/judge 标准工作区；视频/3D/设计共用 |
 | [plan-music-module.md](plan-music-module.md) | **方案定稿，未施工** | 音乐（编曲）模块：score.json、五线谱编辑器、Web Audio 编译播放、music_* 工具面 |
 | [plan-flutter-3.50-adoption.md](plan-flutter-3.50-adoption.md) | backlog（待排期） | Flutter 3.50 采纳清单 |
@@ -84,13 +84,15 @@
 | [research/openmotion-hyperframes.md](research/openmotion-hyperframes.md) | 调研结论（**只参考，不引入**） | OpenMotion（nexu-io，Apache-2.0）与 HyperFrames（Apache-2.0）：HTML-as-video、Motion.md、Agent+Studio 同源工程、版本/导出/MCP 纪律；只借规范，不做依赖/内置/套壳/导出适配器；3D 栈例外 |
 | [research/line-art-animation.md](research/line-art-animation.md) | 调研结论（**只参考，不引入**） | `JDhruv14/line-art-animation`（MIT，TypeScript）：细抖墨线 + 暖纸 + 无脸小人 + 开放双笔触四肢 + 步态求解 + 昼夜反转 + 帧条验收；我们新增 `ink_line` 风格包，只借规则/参数/验收，不依赖其 TS/SVG 库 |
 | [research/awesome-opus5-5-videos.md](research/awesome-opus5-5-videos.md) | 调研结论（**只参考，不引入**） | 703 条 Opus 5.5 视频 prompt 的结构/分类/技术栈统计；六段 prompt（inputs/direction/structure/build/gotchas/start）、seek(t) 确定性、beat grid、帧证据；抽象进 `creative-workbench` skill，不复制作品/服务 |
-| [research/3dcodeverse.md](research/3dcodeverse.md) | 调研结论（**3D 线直接引入**） | 3DCodeVerse 论文/harness：代码即真相、四轨七运行时、plan → check → blind judge → refine、contract/connectivity/placement/shader 门、cap 规则；我们直接采用 skill/harness 契约，Python/Blender 运行时不入产品 |
+| [research/3dcodeverse.md](research/3dcodeverse.md) | 调研结论（**3D 线直接引入**） | 3DCodeVerse 论文/harness：代码即真相、四轨七运行时、plan → check → blind judge → refine、contract/connectivity/placement/shader 门、cap 规则；附录 A 量化 threejs.cc 1,018 案例的 13 类分布/特征词/五槽 prompt 模型；Python/Blender 运行时不入产品 |
 | [research/pixelfx.md](research/pixelfx.md) | 调研结论（**特效子集直接引入**） | `patch-gg/pixelfx`（MIT，v0.3.1，244 effects）：color+light 双缓冲、seeded RNG、纯/模拟 effect、sprite sheet、质量 bar；只引入火焰/冰霜/风/爆炸等特效，**不引入人物/stock actor/moves** |
+| [research/claude-animated-shorts.md](research/claude-animated-shorts.md) | 调研结论（**只参考，不引入**） | `mromidev/claude-animated-shorts`（MIT，TypeScript）：55–70s 竖屏动画短剧；8 段脚本、词级时间、镜头表、2D billboard 角色 + three.js 手绘世界、墨线/景深/滑翔相机、合成声音、逐帧 QA；只借工艺/look 数值，不引入 Remotion/React/Node，`toon_3d` 候选风格 |
 
 ## 2. 决策台账（按时间倒序）
 
 | 日期 | 裁决 | 状态 | 事实源 |
 | --- | --- | --- | --- |
+| 2026-11-24 | **动画短剧候选风格 `toon_3d`（2D 角色 + 3D 世界）**：参考 `mromidev/claude-animated-shorts` 的 8 段脚本/词级时间/镜头表/look 数值/QA；**不引入 Remotion/React/Node/Chromium**，不复制参考帧/角色/脚本/镜头；执行面用 three-live。候选待裁决与 spike | 调研结论（候选，待裁决） | research/claude-animated-shorts.md · skills/creative-workbench/references/story-short.md |
 | 2026-11-22 | **3D 直接引入 threejs-live + 3dcodeverse**：采用 3dcodeverse 的 skill/harness 契约（Apache-2.0）与 three-live 执行面；双 authoring（`scene.json` / `src/*.js`）；Python/Blender/CadQuery/URDF 运行时不入产品，检查器用 Dart/JS 等价实现 | 方案定稿（未施工） | plan-creative-workbench §4 · research/3dcodeverse.md |
 | 2026-11-22 | **视频直接引入 pixelfx 特效子集**：只取火焰/冰霜/风/爆炸/闪电等**特效**，**不含人物/角色**；`actor`/`rig`/`poses`/`act`/`moves`/on-body 特效不引入；角色仍用我们自己的 rig | 方案定稿（未施工） | plan-creative-workbench §5.3/§5.6 · research/pixelfx.md |
 | 2026-11-22 | **统一创作 skill `creative-workbench`**：intake/direction/structure/build/check/blind-judge/refine/deliver 标准化；`awesome-opus5-5-videos` 只借六段 prompt 结构与质量规则，不引入作品/服务 | 方案定稿（未接线） | skills/creative-workbench/SKILL.md · research/awesome-opus5-5-videos.md |
@@ -122,7 +124,8 @@ plan-cross-platform-runtime §1（已落地：webview_all 全平台）
         ├──> plan-creative-workbench §2（执行/结果双面；统一 creative-workbench skill）
         ├──> plan-creative-workbench §4（3D 建模视口 + 3dcodeverse plan/check/judge；three-live）
         ├──> plan-creative-workbench §5（视频导演台 / Phaser；`ink_line` 走 Canvas2D 笔触；pixelfx 特效子集）
-        │          └──> plan-music-module（§5.5 配乐联动依赖音乐模块）
+        │          ├──> plan-music-module（§5.5 配乐联动依赖音乐模块）
+        │          └──> story-short（`toon_3d` 候选；只参考 claude-animated-shorts）
         └──> wasm_run B4 退役（待 Windows/Linux/移动真机复验）
 ```
 
@@ -156,9 +159,10 @@ plan-cross-platform-runtime §1（已落地：webview_all 全平台）
 
 ---
 
-最后对账：2026-11-22（与 `AGENTS.md`、`vision.md`、四份方案、已实施契约头部交叉核对；
+最后对账：2026-11-24（与 `AGENTS.md`、`vision.md`、四份方案、已实施契约头部交叉核对；
 **批次 A（webview_all 全平台）+ B1（classic wasm WebView 宿主）已落地**；
 macOS WKWebView 真实集成测试通过；Windows/Linux/移动真机复验与 wasm_run B4 退役
 仍是未清项；OHOS 离屏 WebView 缺口已登记；本轮新增 `creative-workbench` skill、
-3dcodeverse 3D harness、pixelfx VFX 子集与 `ink_line` 风格调研——除 3D 线
-（three-live + 3dcodeverse）与 pixelfx 特效子集外，仍坚持「只参考、不引入」）。
+3dcodeverse 3D harness、pixelfx VFX 子集、`ink_line` 风格与 `toon_3d` 动画短剧
+候选调研；`3dcodeverse.md` 附录 A 补 threejs.cc 1,018 案例的 3D prompt 量化——
+除 3D 线（three-live + 3dcodeverse）与 pixelfx 特效子集外，仍坚持「只参考、不引入」）。

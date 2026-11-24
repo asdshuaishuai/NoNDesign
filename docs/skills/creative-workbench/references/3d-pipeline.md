@@ -166,3 +166,58 @@ Every ERROR caps the score; WARN never caps (fix once if cheap).
 - **Do not adopt**: Python CLI, Blender, CadQuery, URDF, moderngl runtimes in the
   product; 3DCodeVerse-2M dataset (CC-BY-NC-SA) in the product; example assets.
 - **Backlog**: articulated track; full multi-agent DAG; training/fine-tuning.
+
+## 11. Prompt taxonomy from threejs.cc (2026-11-24)
+
+Source: <https://threejs.cc/catalog/#experimental>. It is a **case library**, not a
+prompt library: 1,018 works, 13 categories; item pages publish title/description/
+author/tech/model but **no verbatim prompts**. Use the measured design space, not
+copied works.
+
+### 11.1 Five slots
+
+| Slot | Values |
+| --- | --- |
+| Genre/verb | explore, drive, fly, race, shoot, build, solve, observe, manage, decorate, edit |
+| Scene | city street (rain/night/neon), interior (room/studio/mall), nature (forest/mountain/snow), water (ocean/river/pond), space (orbit/planet/black hole), industrial/factory, abstract/art, UI/portfolio |
+| Subject | vehicle, character/creature, robot, anatomy/organ, product, architecture, data/atom, UI card |
+| System | physics, particles/fluid/cloth, procedural generation, shader/postfx, WebGPU/TSL, multiplayer/netcode, audio, interaction |
+| Constraints | desktop/touch, WebGPU dependency, performance, single file, no external assets, scope |
+
+### 11.2 Template
+
+```text
+Build a <genre> in <scene>: the user <verb> <subject>.
+Must have: <system 1>, <system 2>, <interaction loop>.
+Visual: <palette / light / ink / postfx>.
+Constraints: Three.js + WebGL2 (WebGPU only if necessary), <device>,
+             <performance budget>, <assets>, <scope>.
+Acceptance: <observable check 1>, <observable check 2>.
+```
+
+Budget: 60–120 words; one scene + one primary verb + 1–2 systems + 3–5 constraints.
+
+### 11.3 Measured distribution (use for scope, not for model claims)
+
+- Categories: art 34.3%, race 9.8%, simulation 8.6%, action 8.5%, science 6.4%,
+  site 6.2%, puzzle 5.5%, tools 4.5%, RPG 4.4%, showcase 4.3%, strategy 3.2%,
+  city 2.2%, multiplayer 2.0%.
+- Title features: game 7.6%, city 4.8%, vehicle 4.4%, nature 4.2%, water 3.8%,
+  space 3.8%, portfolio 3.2%, character 2.5%, procedural 2.5%, shader/postfx 1.8%,
+  WebGPU 1.7%, physics 1.1%, multiplayer 1.0%.
+- `#experimental` is the **multiplayer** category (20 items): Three.js+WebGL 7,
+  Three.js 5, WebGPU 2, Blender 1, unknown 4; only 2/20 name a model.
+  Interaction verbs: choose 8, explore 4, observe 4, control 3, fight 3.
+- Model provenance is unknowable for ~89% of works; do not use slugs as capability
+  labels.
+
+### 11.4 Intake checklist
+
+- [ ] One genre/verb, one scene, one subject.
+- [ ] 1–2 systems only; name the interaction loop.
+- [ ] 3–5 constraints: device, WebGL2/WebGPU, performance, assets, scope.
+- [ ] 2+ observable acceptance checks (e.g. "60fps", "grounded", "no console errors").
+- [ ] No copying a case's scene/character/brand; generic motifs only.
+
+Full data and caveats: [research/3dcodeverse.md](../../../research/3dcodeverse.md)
+Appendix A.

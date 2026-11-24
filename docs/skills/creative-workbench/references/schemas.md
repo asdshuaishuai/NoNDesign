@@ -181,7 +181,43 @@ Rules:
 - `caps[].applied` records which cap actually lowered the score.
 - `improvement_plan` preserves gate ERRORs first.
 
-## 6. Naming and rounds
+## 6. Story-short extension (`toon_3d` candidate)
+
+`words.json`:
+
+```jsonc
+[
+  { "w": "Seventy-four", "start": 0.00, "end": 0.42 },
+  { "w": "soldiers",     "start": 0.42, "end": 0.78 }
+]
+```
+
+Rules: start/end monotonic, non-overlapping, within the video duration; the time
+axis for every visual reaction (0–3 frames before the word).
+
+Shot extension (in `screenplay.json`):
+
+```jsonc
+{
+  "id": 1, "a": 0, "b": 130,
+  "light": "day | golden | night",
+  "crowd": "march | fall | water | bank | tourists | none",
+  "tau": "29.5+t",
+  "cam": [{ "f": 0, "pos": [7.5, 8.6, -13], "look": [0, 8.4, 5],
+            "fov": 44, "roll": 0, "cut": false, "dur": 24 }],
+  "dof": 15,
+  "foreground": ["hat"],
+  "kicks": [{ "f": 130, "amp": 2.2 }]
+}
+```
+
+Top-level: `xfade: {shotId: frames}`, `flashAt: frame`, `audio: {voice, music, sfx,
+loudnessLufs, musicDb, sfxDb}`.
+
+Validation: `a < b`; `cam[].f` inside the shot; `dof` 0–20; `tau` evaluates to a
+finite number; `xfade`/`flashAt` within duration; `words` sorted.
+
+## 7. Naming and rounds
 
 - `src/` files: kebab-case; one part/zone/layer/shot per file.
 - `judge/rNN/` with zero-padded `NN` (`r00`, `r01`…); each round is a git tag.

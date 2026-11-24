@@ -247,6 +247,21 @@ Cue 表 12–16 个：dun/ding/boing/whoosh/slap/gasp/scratch/awkward/laugh/impa
 - **验收**：站立脚漂移 <0.5px/帧、开放四肢、前腿在上、昼夜对比度、交互回 idle；
   先做一个 figure 给用户过，再铺整场。
 
+### 3.7 2D 角色 + 3D 世界（`toon_3d` 候选）
+
+`mromidev/claude-animated-shorts` 这条线是「55–70s 竖屏动画短剧」：2D 扁平
+billboard 角色站在 three.js 手绘 3D 世界里，墨线轮廓、景深、滑翔相机、合成
+音效/配乐。完整调研见 [claude-animated-shorts.md](claude-animated-shorts.md)，
+skill 参考 [story-short.md](../skills/creative-workbench/references/story-short.md)。
+
+- **只参考、不引入**：Remotion/React/Node/Chromium 运行时、1.3GB 参考资产、
+  参考片/角色/脚本/镜头都不进来；执行面仍是 three-live + 30fps 确定性帧。
+- **可借**：8 段脚本（hook/setting/escalation/mystery/pivot/analogy/consequence/
+  callback）、`words.json` 词级时间、镜头表 schema、相机语法、look 数值
+  （墨线 3px、日/黄金光、DOF、post 顺序、角色比例）、逐帧 QA、look-match loop。
+- **状态**：`toon_3d` 是候选风格，**不改变当前三风格定稿口径**；先做 three-live
+  的 billboard/后处理/1080×1920 30fps spike，再决定是否进入正式 style pack。
+
 ## 4. 确定性运行时
 
 ### 4.1 帧时钟

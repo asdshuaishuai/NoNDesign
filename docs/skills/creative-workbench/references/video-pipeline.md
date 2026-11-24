@@ -84,11 +84,29 @@ Rules:
 | `silly_skit` | big shapes, squash/stretch, snap zoom/shake/hit-stop, meme cards, SFX | Phaser/canvas + pixelfx VFX |
 | `line_toon` | hard single-line characters, speech bubbles, panel wipes, comic physics | Phaser/canvas |
 | `ink_line` | thin wobbly ink, warm paper, faceless figures, open double-stroke limbs, day/night inversion | Canvas2D vector strokes (no runtime SVG) |
+| `toon_3d` **(candidate)** | 2D flat billboard characters in a painted 3D world, ink outlines, lens blur, gliding camera, 55–70s vertical story | three-live + Canvas2D character textures + post chain |
 | `default` | neutral motion graphics | canvas/SVG |
 
 Style pack fields: `palette`, `type`, `pen`, `motion` preset family, `vfx` allowlist,
 `caption` presets, `transition` set. All are data; no style pack may add a network
 request or a new runtime.
+
+### 5.1 Story-short extension (`toon_3d` candidate)
+
+For 55–70s vertical animated stories, use
+[story-short.md](story-short.md):
+
+- 8-beat script (hook → setting → escalation → mystery → pivot/analogy →
+  consequence → callback), 3.7 words/s.
+- `words.json` word timings are the time axis; every visual reaction lands 0–3
+  frames before its word.
+- Shot plan fields: `light`, `crowd`, `tau`, `cam` keys, `dof`, `foreground`,
+  `kicks`, `xfade`, `flashAt`.
+- 2D characters are Canvas2D textures on billboards; the world is three-live;
+  post = ink → lens → bloom → neutral tone map → grade.
+- QA: black/white/frozen/pops, loudness, 2s contact sheets, per-shot stats.
+- **Reference-only**: no Remotion/React/Node runtime; no reference frames/scripts/
+  characters copied. `toon_3d` is not a shipped style until ruled + spiked.
 
 ## 6. Determinism checklist
 

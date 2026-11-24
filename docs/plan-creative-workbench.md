@@ -1,4 +1,4 @@
-# 创意工作台交互升级与模块规范（2026-11-20 定稿，2026-11-22 增补 ink_line / 3dcodeverse / pixelfx，未施工）
+# 创意工作台交互升级与模块规范（2026-11-20 定稿，2026-11-22 增补 ink_line / 3dcodeverse / pixelfx，2026-11-24 增补 toon_3d 候选，未施工）
 
 > 状态：**方案定稿，待施工**。本文覆盖全局交互升级与四个工作台的能力/联动裁决；
 > 音乐模块的技术面（谱面/合成/编译器）以 [plan-music-module.md](plan-music-module.md) 为准。
@@ -229,6 +229,8 @@ pixelfx 子集；Python/Blender/headless Chrome 只在开发期参考。
 `screenplay.json`（`v:1`）：幕 → 场 → 镜头（`id`、场景、镜头语言、时长、台词
 `[{role, text, tts}]`、动作、**VFX 事件** `[{f,type:"vfx",cue,...}]`、转场）。剧本是
 创作面**事实源**；既有 timeline/spec 由编译产生（保持播放器与机械对照兼容）。
+动画短剧候选线另带 `words.json`（词级 start/end）作为时间主轴，视觉反应对齐到词前
+0–3 帧（见 §5.3 `toon_3d` 候选）。
 
 ### 5.2 导演台（工作区形态）
 
@@ -261,6 +263,15 @@ on-body 特效一律不引入；角色仍由我们的 cutout/rig 负责。VFX �
 必须在 allowlist 内；固定 30fps、双缓冲（color+light）、最近邻放大。`line_toon`
 只在刻意的像素特效层用；`ink_line` 默认不用（1px 像素光与细墨线语法冲突）。
 详见 [research/pixelfx.md](research/pixelfx.md)。
+
+**候选风格 `toon_3d`（2D 角色 + 3D 世界，2026-11-24 调研，待裁决）**：参考
+`mromidev/claude-animated-shorts` 的 55–70s 竖屏动画短剧流水线——8 段脚本、
+词级时间、镜头表、2D billboard 角色 + three.js 手绘世界、墨线/景深/滑翔相机、
+合成声音与逐帧 QA。**只借工艺与 look 数值**；不引入 Remotion/React/Node/Chromium
+运行时，不复制参考帧/角色/脚本/镜头。执行面用 three-live；详见
+[research/claude-animated-shorts.md](research/claude-animated-shorts.md) 与
+[skills/creative-workbench/references/story-short.md](skills/creative-workbench/references/story-short.md)。
+本候选**不改变当前三风格定稿口径**，是否进入正式 style pack 待裁决。
 
 ### 5.4 TTS（离线，含许可红线）
 
@@ -321,6 +332,10 @@ allowlist 由 vendoring 时扫描生成并写入 `manifest.json`，视频编译�
   `poses` / `act` / `moves` / on-body 特效；角色由我们自己的 rig 负责。
 * **awesome-opus5-5-videos 只借结构**：不复制创作者作品、角色、品牌、成段 prompt，
   不接入 Skillry 服务；六段 prompt 结构进 `creative-workbench` skill。
+* **claude-animated-shorts / Remotion 只参考**：不引入 Remotion / `@remotion/three` /
+  React / Node / Chromium / ffmpeg 运行时；不复制参考帧/角色/脚本/镜头/配音/音乐。
+  只借 8 段脚本、词级时间、镜头语法、look 数值与 QA 逻辑；`toon_3d` 为候选风格，
+  待裁决与 spike（见 [research/claude-animated-shorts.md](research/claude-animated-shorts.md)）。
 * Godot / Unity / PixiJS / Flame 已裁决不采用（理由见 §5.0）；引擎短片 v1 **只走剧本解释器**，
   不允许 Agent 手写 Phaser 代码（保确定性与可校验性）。
 * `ink_line` 的参考源是 `JDhruv14/line-art-animation`（MIT），但**不复制其代码、不依赖

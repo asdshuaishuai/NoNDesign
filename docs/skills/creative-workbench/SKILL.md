@@ -5,7 +5,7 @@ metadata:
   version: 0.1-spec
   status: spec-only (not wired into the app yet)
   applies_to: [3d, video, design]
-  references: prompt-anatomy · 3d-pipeline · video-pipeline · vfx-pixelfx · judging · schemas
+  references: prompt-anatomy · 3d-pipeline · video-pipeline · story-short · vfx-pixelfx · judging · schemas
 ---
 
 # Creative Workbench Skill
@@ -140,7 +140,7 @@ judge/rNN/       brief.md + montages + judgment.json + score.json
 {
   "schema": "nan.creative.spec/1",
   "kind": "3d | video | interactive | design",
-  "track": "static_object | scene | graphics | silly_skit | line_toon | ink_line",
+  "track": "static_object | scene | graphics | silly_skit | line_toon | ink_line | toon_3d",
   "prompt": "one-line brief",
   "must_have": ["..."],
   "must_not": ["..."],
@@ -225,7 +225,9 @@ Contract: [references/video-pipeline.md](references/video-pipeline.md).
 - Render QA: one frame per beat / contact sheet first; then full render; motion
   blur only via subframes + blend.
 - Styles: `silly_skit` (pixel/combat), `line_toon` (hard-line comic), `ink_line`
-  (ink/paper, Canvas2D vector strokes).
+  (ink/paper, Canvas2D vector strokes); `toon_3d` (2D characters in a 3D world)
+  is a **candidate** until ruled and spiked — see
+  [references/story-short.md](references/story-short.md).
 - Export: current product blocks mp4; when enabled, use deterministic frame capture,
   never MediaRecorder as the source of truth.
 
@@ -344,6 +346,9 @@ No file-by-file list, no restating the plan, no self-congratulation.
   three-live, dual authoring mode.
 - [video-pipeline.md](references/video-pipeline.md) — `screenplay.json`, 30fps,
   seek, beat grid, style packs, render/export.
+- [story-short.md](references/story-short.md) — 55–70 s vertical story-short
+  pipeline: 8-beat script, word timings, shot plan, 2D/3D look values, QA,
+  look-match loop; `toon_3d` candidate, reference-only.
 - [vfx-pixelfx.md](references/vfx-pixelfx.md) — filtered pixelfx subset, allowlist,
   event schema, style matrix.
 - [judging.md](references/judging.md) — blind judge, brief, JSON, rubric, caps,

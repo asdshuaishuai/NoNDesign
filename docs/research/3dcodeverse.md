@@ -259,3 +259,129 @@ judge/rNN/    brief.md + montages + judgment.json + score.json
   `harness/skills/3dcodeverse/SKILL.md`、`harness/agents/3d-judge.md`
 - 数据集：<https://huggingface.co/datasets/3dcodeverse/3dcodeverse-2m>
 - GitHub metadata（2026-11-22 核验）
+
+## 附录 A：threejs.cc 案例库量化（2026-11-24）
+
+> 来源：<https://threejs.cc/catalog/#experimental>。只读抓取 catalog 与 `#experimental`
+> 的 20 个详情页；**未安装/运行任何作品**。
+>
+> **重要边界**：该站是**作品案例索引**，不是提示词库。详情页只有标题、中文描述、
+> 作者、技术栈、制作模型与官网/源码链接，**没有可摘录的 prompt 原文**。下面是
+> 对「可提示的设计空间」的量化与模板推导，不是 prompt 文本挖掘，也不复制任何作品。
+
+### A.1 全库结构
+
+- **1,018 个作品，13 类**；`#experimental` 实际是「多人」分类（20 个），不是
+  一个叫 experimental 的独立类型。
+- 分类分布：
+
+| 分类 | 数量 | 占比 |
+| --- | --- | --- |
+| 视觉艺术 | 349 | 34.3% |
+| 竞速体育 | 100 | 9.8% |
+| 物理模拟 | 88 | 8.6% |
+| 动作射击 | 87 | 8.5% |
+| 科普教育 | 65 | 6.4% |
+| 站点 | 63 | 6.2% |
+| 解谜策略 | 56 | 5.5% |
+| 开发工具 | 46 | 4.5% |
+| 角色冒险 | 45 | 4.4% |
+| 产品展示 | 44 | 4.3% |
+| 模拟经营 | 33 | 3.2% |
+| 地图 | 22 | 2.2% |
+| 多人 | 20 | 2.0% |
+
+- 标题形态：约 410 条「英文名 · 中文一句话」、517 条中文、91 条英文；标题普遍是
+  **一个名词性作品名 + 一个场景/玩法短语**，描述 1–3 句。
+- 模型来源（从 slug 后缀启发式归类，非权威字段）：X archive 471（46.3%）、
+  无模型标记 434（42.6%）、Fable 54（5.3%）、GPT 32（3.1%）、Gemini 4 Neon 10（1.0%）、
+  Claude 8（0.8%）、Astra 5（0.5%）、Three.js 官方示例 4（0.4%）。
+  **结论：约 89% 的作品无法可靠判断生成模型**，不能用它做模型能力对比。
+
+### A.2 `#experimental` / 多人 20 个
+
+技术栈（20 个详情页）：`Three.js + WebGL` 7、`Three.js` 5、`Three.js + WebGPU` 2、
+`Three.js + Blender` 1、未知/占位 4、带源码仓库 1。模型：Gemini 4 Neon 2、
+GPT-6.2 Astra 2、未知 16。**WebGPU 只占 2/20**，Three.js/WebGL 仍是主流。
+
+18/20 个详情页的描述可读（2 个超时），高频结构：
+
+- **互动动词**：选择 8、探索 4、观察 4、操控 3、对战 3；挑战/射击/合作/驾驶各 2；
+  拉簧/发球/击打/调整/漫游/点击/按/积累/释放/修改/切换/创建/加入/组房/添加/互动/
+  守护/抵御/撞碎/成长/竞速各 1。
+- **场景/对象名词**：房间 6、角色 3、竞技场 3、多人 3、机器人 2、广场 2；
+  弹珠台/街区/大海/货轮/工业场地/岩石/材质/衣物/针脚/纤维/射击游戏/联机大厅/
+  英雄/深渊/地形/战场/花园/坦克/炮弹/彩虹核心/城市/道路/敌人/南瓜/墓地/恐龙/
+  商场各 1。
+- **描述公式**：`在 <场景> 中/上，<动词> <对象>，<可调参数/反馈>。支持 <多人/设备/
+  模式>，需 <WebGPU/桌面>。`
+- **实验类的高频组合**：多人房间/竞技场（3+3）、载具/驾驶（2）、程序化材质/工具（2）、
+  场景漫游（4）。这说明「多人」并不等于完整联网游戏，很多是**共享房间 + 本地
+  互动玩具/原型**。
+
+### A.3 全库标题特征词
+
+在 1,018 条标题中做关键词命中（中英混合，含同义词）：
+
+| 特征 | 命中 | 占比 | 主要分布 |
+| --- | --- | --- | --- |
+| game/游戏/竞速/射击/解谜/战斗 | 77 | 7.6% | race 24、action 19、rpg 11、art 7 |
+| city/城市/街道/街区/都市 | 49 | 4.8% | art 13、city 11、race 7、action 5 |
+| vehicle/车辆/驾驶/飞机/坦克/船 | 45 | 4.4% | race 25、art 7、sim 4 |
+| nature/森林/山/雪/生态 | 43 | 4.2% | art 23、race 8、city 3 |
+| water/水面/海洋/河/流体 | 39 | 3.8% | art 23、sim 8 |
+| space/太空/星球/宇宙/轨道 | 39 | 3.8% | art 11、action 8、science 5 |
+| portfolio/作品集/展示/官网 | 33 | 3.2% | site 30 |
+| character/角色/人物/机器人/生物 | 25 | 2.5% | showcase 6、action 4、art 4 |
+| procedural/程序化/生成 | 25 | 2.5% | art 10、tools 6、sim 4 |
+| shader/postfx/描边/景深/粒子/光效 | 18 | 1.8% | art 15 |
+| tool/工具/编辑器/生成器/studio | 17 | 1.7% | tools 12 |
+| WebGPU | 17 | 1.7% | art 13、sim 4 |
+| physics/物理/碰撞/重力 | 11 | 1.1% | sim 6、race 2 |
+| multiplayer/多人/联机/合作/对战 | 10 | 1.0% | experimental 4、action 4 |
+
+**结论**：视觉艺术占三分之一；「游戏」是宽标签；**WebGPU、物理、多人这些技术词
+在标题里都只有 1–2%**——大多数案例是「一个场景 + 一个交互 + 少量系统」，不是
+全功能游戏。这正好支持我们「one scene + one verb + 1–2 systems」的 prompt 预算。
+
+### A.4 3D prompt 五槽模型（从以上数据推导）
+
+| 槽 | 取值 | 数据依据 |
+| --- | --- | --- |
+| **Genre/verb** | explore / drive / fly / race / shoot / build / solve / observe / manage / decorate / edit | 实验类动词分布；全库 game/vehicle/city 词频 |
+| **Scene** | 城市街道（雨/夜/霓虹）、室内（房间/工作室/商场）、自然（森林/山/雪）、水（海/河/池）、太空（轨道/星球/黑洞）、工业/工厂、抽象/视觉艺术、UI/作品集 | 全库 city 4.8%、nature 4.2%、water 3.8%、space 3.8%、site 3.2% |
+| **Subject** | 载具、角色/生物、机器人、解剖/器官、产品、建筑、数据/原子、UI 卡 | 全库 vehicle 4.4%、character 2.5%、anatomy 1.3% |
+| **System** | 物理、粒子/流体/布料、程序化生成、shader/后处理、WebGPU/TSL、多人/网络、音频、交互 | 全库 procedural 2.5%、shader/postfx 1.8%、physics 1.1%、multiplayer 1.0% |
+| **Constraints** | 桌面/触屏、WebGPU 依赖、性能预算、单文件、无外部资产、范围 | 实验页的「需兼容 WebGPU/建议桌面」；全库 WebGPU 1.7% |
+
+**模板**（60–120 词，1 个场景 + 1 个主动词 + 1–2 个系统）：
+
+```text
+Build a <genre> in <scene>: the user <verb> <subject>.
+Must have: <system 1>, <system 2>, <interaction loop>.
+Visual: <palette / light / ink / postfx>.
+Constraints: Three.js + WebGL2 (WebGPU only if necessary), <device>,
+             <performance budget>, <assets>, <scope>.
+Acceptance: <observable check 1>, <observable check 2>.
+```
+
+**反模式**：一句话堆 5 个形容词 + 3 个玩法 + 4 个技术栈；没有场景/动词/验收；
+把「多人」当默认（全库仅 1%）；默认 WebGPU（全库仅 1.7%）；把「视觉艺术」案例
+误当完整游戏。
+
+### A.5 只借什么 / 不借什么
+
+| 借 | 不借 |
+| --- | --- |
+| 13 类分布、特征词频、实验类动词/名词分布 | 任何作品、代码、素材、角色、品牌 |
+| 五槽 prompt 模型与 60–120 词预算 | 把 slug 的模型后缀当权威能力标签（89% 不可考） |
+| 「one scene + one verb + 1–2 systems」的范围纪律 | 复制具体场景/玩法/镜头 |
+| 用分类分布做测试集覆盖（art/race/sim/action 为主） | 把 1,018 条标题当 prompt 原文（站点没有 prompt） |
+
+### A.6 证据限制
+
+- 没有 prompt 原文；详情页只有标题/描述/作者/技术栈/模型。
+- 模型来源是从 slug 后缀启发式归类，非站点权威字段；约 89% 不可考。
+- 2/20 个 experimental 详情页读取超时；动词/名词统计基于 18 条可读描述。
+- 标题/描述是中文策展文案，不是创作者原始 prompt；不能反推原始措辞。
+- 未验证这些案例的实际性能、WebGPU 兼容性、许可与素材授权。
