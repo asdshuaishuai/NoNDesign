@@ -55,14 +55,14 @@
 | --- | --- | --- |
 | [plan-creative-workbench.md](plan-creative-workbench.md) | **方案定稿；批次 0/1/1b/2/3 已落地，批次 4 仅契约面（2026-11-24 工作树）** | 全局交互（右 chat + 执行/结果双面）、设计验证式原型绑定、3D 建模 + 3dcodeverse harness、视频导演台/剧本/三风格 + `toon_3d` 候选/TTS/配乐联动、强绑定强规范框架、施工批次 0–8 |
 | [plan-next-iterations.md](plan-next-iterations.md) | **方案 v3（2026-11-24，设计先行，未施工）** | 收窄到视频双轨：M0 收口 → D 设计阶段（双轨 ADR/3D 视频 three-live 引擎设计/数据契约/导演台最小面）→ P1 three-live 3D 视频 POC → P2 3D 视频最小纵切；P3 常规视频只回归；音乐/VFX/TTS/视口/GLB/judge 移入 backlog；raea 嵌入已关闭（只参考） |
-| [plan-workbench-ui.md](plan-workbench-ui.md) | **方案（2026-11-24，已开工：UI-0/UI-1/UI-2 完成，UI-3 导演台（镜头→预览 seek + 共享播放头 + 外部运输条））** | 四工作台内容区交互姿态/布局独立适配：共享外层壳不变；按 设计 → 3D → 视频 → 音乐 分批（UI-0 规格 → UI-1 设计 → UI-2 3D → UI-3 视频导演台 → UI-4 音乐）；热应用暂不改动 |
+| [plan-workbench-ui.md](plan-workbench-ui.md) | **方案（2026-11-24，已开工：UI-0–UI-4 首批全部落地）** | 四工作台内容区交互姿态/布局独立适配：共享外层壳不变；按 设计 → 3D → 视频 → 音乐 分批（UI-0 规格 → UI-1 设计 → UI-2 3D → UI-3 视频导演台 → UI-4 音乐只读工作台）；热应用暂不改动 |
 | [skills/creative-workbench/SKILL.md](skills/creative-workbench/SKILL.md) | **方案定稿，未接线** | 统一创作 skill：intake → direction → structure → build → check → blind judge → refine → deliver；spec/plan/src/artifacts/judge 标准工作区；视频/3D/设计共用 |
 | [plan-music-module.md](plan-music-module.md) | **方案定稿，未施工** | 音乐（编曲）模块：score.json、五线谱编辑器、Web Audio 编译播放、music_* 工具面 |
 | [creative-refactor-decisions.md](creative-refactor-decisions.md) | **R0 契约核心已落地；设计 R1、3D R3 契约面已实施（2026-11-24 工作树），视频/音乐未施工** | R0 决策冻结：轮次版本化、blind judge 通道、Phaser 版本、`ink_line` 首版、TTS 随包策略、`scene.json` 双 authoring、评分默认参数；**Genkit 迁移冲突（2026-11-23 同日裁决：保留 genkit、移除 ai_sdk，见 §2 台账）** |
 | [design-contract.md](design-contract.md) | **已实施（R1 设计模块，2026-11-24）** | 设计模块契约：验证原型绑定项目本身（`.ddp` 内 `prototype/`）、覆盖验证规则、`design_verify_prototype` 收口、热应用列表迁移过滤、只借 intake/judge |
 | [three-contract.md](three-contract.md) | **R3 契约面已落地（2026-11-24 工作树；视口/GLB/多视角/judge 待后续）** | 3D 模块契约：三轨 + 双 authoring、工作区、plan schema、确定性门阈值、盲评、10 个 `three_*` 工具（拟实现）、GLB/许可/迁移 |
 | [video-screenplay-contract.md](video-screenplay-contract.md) | **草案（R0，2026-11-23）· 未施工** | 视频模块契约：`screenplay.json` 唯一事实源、30fps 确定性、TimingCompiler、cutout rig/clip、Phaser 锁版本、三风格、pixelfx 子集、TTS、桥 v2、导出仍屏蔽、v1 兼容 |
-| [music-contract.md](music-contract.md) | **R1 契约核心已落地（2026-11-24；谱面 UI/播放/工具族未施工）** | 音乐模块契约：`score.json` v1、整数 tick（ppq 3840）、`verifyScore`、Web Audio 播放页、Bravura/SIL OFL、`music_*` 工具（拟实现）、存储与验收 |
+| [music-contract.md](music-contract.md) | **R1 契约核心 + 只读工作台布局已落地（2026-11-24；编辑器/播放/工具族未施工）** | 音乐模块契约：`score.json` v1、整数 tick（ppq 3840）、`verifyScore`、Web Audio 播放页、Bravura/SIL OFL、`music_*` 工具（拟实现）、存储与验收 |
 | [plan-flutter-3.50-adoption.md](plan-flutter-3.50-adoption.md) | backlog（待排期） | Flutter 3.50 采纳清单 |
 
 ### 1.5 历史快照 / 审查（只读，不作为待办）
@@ -101,7 +101,7 @@
 
 | 日期 | 裁决 | 状态 | 事实源 |
 | --- | --- | --- | --- |
-| 2026-11-24 | **音乐模块 R1 契约核心落地**：`score.json` v1 解析（未知字段保留）+ `verifyMusicScore` 硬门 + 整数 tick 编译器（ppq=3840，三/五连音、字节确定性）+ `MusicProjectStore`（portfolio/music 扫描/读写/原子落盘）；谱面 UI、Web Audio 播放页、`music_*` 工具与项目跟随**未施工** | **已实施（2026-11-24，工作树）** | [music-contract.md](music-contract.md) · `app/lib/core/music/` |
+| 2026-11-24 | **音乐模块 R1 契约核心 + 只读工作台落地**：`score.json` v1 解析（未知字段保留）+ `verifyMusicScore` 硬门 + 整数 tick 编译器（ppq=3840，三/五连音、字节确定性）+ `MusicProjectStore`（portfolio/music 扫描/读写/原子落盘）；`plugin:music` + `MusicWorkspace` 只读钢琴卷帘/检查器/运输条；编辑器、Web Audio 播放页、`music_*` 工具与项目跟随**未施工** | **已实施（2026-11-24，工作树）** | [music-contract.md](music-contract.md) · `app/lib/core/music/` |
 | 2026-11-24 | **raea 不引入（用户最终裁决）**：复核许可（FSL-1.1-ALv2 的 *Competing Use*）与形态（230 crate 完整应用、无公开库 ABI）后**撤回嵌入方向，只借鉴**；视频仍拆常规视频（保持 v1 表面）与 3D 视频（执行面用现有 three-live），raea 只提供 composition/词级时间/`check`/story 契约与工艺参考，**不 vendor、不嵌入、不引 React/Bevy/JS 运行时** | **已裁决（只参考，不引入）** | [research/raea.md](research/raea.md) · [plan-next-iterations.md](plan-next-iterations.md) |
 | 2026-11-24 | **Material Painter 不嵌入（GPL 阻塞）**：能力面覆盖全领域 3D 材质（绘制/烘焙/节点图/导出预设），但 GPL-3.0-or-later + 仅 GUI 二进制、无 `[lib]`；不 vendor、不随包分发。v1 自建 PBR 材质层；可选外部 MCP 工作站是**未裁决**的外部工具例外候选 | 调研结论（GPL 阻塞） | research/material-painter.md |
 | 2026-11-24 | **动画短剧候选风格 `toon_3d`（2D 角色 + 3D 世界）**：参考 `mromidev/claude-animated-shorts` 的 8 段脚本/词级时间/镜头表/look 数值/QA；**不引入 Remotion/React/Node/Chromium**，不复制参考帧/角色/脚本/镜头；执行面用 three-live。候选待裁决与 spike | 调研结论（候选，待裁决） | research/claude-animated-shorts.md · skills/creative-workbench/references/story-short.md |

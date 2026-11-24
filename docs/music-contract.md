@@ -1,8 +1,9 @@
 # 音乐模块契约（编曲工作台 · score.json 唯一事实源）
 
-> 状态：**R1 契约核心已落地（2026-11-24）· 谱面 UI/播放页/工具族未施工**。已落地：
+> 状态：**R1 契约核心 + 只读工作台布局已落地（2026-11-24）· 编辑器/播放页/工具族未施工**。已落地：
 > score.json v1 解析/未知字段保留、`verifyMusicScore` 硬门、整数 tick 编译器（ppq=3840）、
-> `MusicProjectStore` 存储；本文契约增量：
+> `MusicProjectStore` 存储；`plugin:music` + `MusicWorkspace` 只读钢琴卷帘/检查器/运输条；
+> 本文契约增量：
 > score.json v1、整数 tick 编译、`verifyScore`（拟实现）硬门、五线谱、播放页、存储、工具族、配乐联动与验收。
 >
 > 相关：[plan-music-module.md](plan-music-module.md)（方案事实源）·
