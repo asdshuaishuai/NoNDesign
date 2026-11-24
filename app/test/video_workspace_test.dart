@@ -64,7 +64,8 @@ class _FakeVideoService extends VideoService {
     required Map<String, dynamic>? spec,
     int samples = 6,
   }) =>
-      reviewResult ?? super.review(timeline: timeline, spec: spec, samples: samples);
+      reviewResult ??
+      super.review(timeline: timeline, spec: spec, samples: samples);
 }
 
 /// 没有任何内置示例的安装形态（资源缺失/裁剪构建）：工作台必须落到空态，
@@ -78,10 +79,7 @@ class _EmptySamplesVideoService extends VideoService {
 
 VideoDocument _sampleDoc() => VideoService(host: VideoHost.macos).loadSample(0);
 
-AppStore _store({
-  ToastService? toasts,
-  HostOs os = HostOs.macos,
-}) {
+AppStore _store({ToastService? toasts, HostOs os = HostOs.macos}) {
   final store = AppStore(
     toasts: toasts ?? ToastService(autoDismiss: false),
     capabilities: CapabilityHub(platform: PlatformCapabilities.forOs(os)),
@@ -92,7 +90,8 @@ AppStore _store({
   return store;
 }
 
-Widget _wrap(AppStore store, VideoService service) => ChangeNotifierProvider<AppStore>.value(
+Widget _wrap(AppStore store, VideoService service) =>
+    ChangeNotifierProvider<AppStore>.value(
       value: store,
       child: MaterialApp(
         theme: AppTheme.build(dark: true),
@@ -133,15 +132,17 @@ double _secondsOf(String readout) {
 
 /// 播放器帧号读数 → (当前 1 基帧号, 总帧数)。
 (int, int) _frameNumbers(WidgetTester tester) {
-  final text =
-      tester.widget<Text>(find.byKey(const ValueKey('video-animation-frame'))).data!;
+  final text = tester
+      .widget<Text>(find.byKey(const ValueKey('video-animation-frame')))
+      .data!;
   final match = RegExp(r'^frame (\d+)/(\d+)$').firstMatch(text)!;
   return (int.parse(match.group(1)!), int.parse(match.group(2)!));
 }
 
 /// 走真实路由（[pluginWorkspaceFor]）而不是直接 new 工作台：锁住「从
 /// `plugin:video` 视图名就能进播放面，与是否打开项目无关」。
-Widget _wrapRoute(AppStore store, Widget child) => ChangeNotifierProvider<AppStore>.value(
+Widget _wrapRoute(AppStore store, Widget child) =>
+    ChangeNotifierProvider<AppStore>.value(
       value: store,
       child: MaterialApp(
         theme: AppTheme.build(dark: true),
@@ -173,17 +174,18 @@ class _FakeVideoPlatform extends WebViewPlatform {
 
   @override
   PlatformWebViewController createPlatformWebViewController(
-      PlatformWebViewControllerCreationParams params) =>
-      lastController = _FakeVideoController(params);
+    PlatformWebViewControllerCreationParams params,
+  ) => lastController = _FakeVideoController(params);
 
   @override
   PlatformNavigationDelegate createPlatformNavigationDelegate(
-          PlatformNavigationDelegateCreationParams params) =>
-      _FakeVideoNavigationDelegate(params);
+    PlatformNavigationDelegateCreationParams params,
+  ) => _FakeVideoNavigationDelegate(params);
 
   @override
-  PlatformWebViewWidget createPlatformWebViewWidget(PlatformWebViewWidgetCreationParams params) =>
-      _FakeVideoWebViewWidget(params);
+  PlatformWebViewWidget createPlatformWebViewWidget(
+    PlatformWebViewWidgetCreationParams params,
+  ) => _FakeVideoWebViewWidget(params);
 }
 
 class _FakeVideoController extends PlatformWebViewController {
@@ -198,7 +200,8 @@ class _FakeVideoController extends PlatformWebViewController {
   Future<void> setPlatformNavigationDelegate(dynamic delegate) async {}
 
   @override
-  Future<void> loadFile(String absoluteFilePath) async => loadedFiles.add(absoluteFilePath);
+  Future<void> loadFile(String absoluteFilePath) async =>
+      loadedFiles.add(absoluteFilePath);
 }
 
 class _FakeVideoNavigationDelegate extends PlatformNavigationDelegate {
@@ -247,11 +250,32 @@ void main() {
     await _pump(tester, store, service);
 
     expect(find.text('视频工作台'), findsOneWidget);
-    // 主区就是一整块播放器：不再有 340 宽的常驻编辑栏。
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    // 2026-11-24 导演台布局：左剧本/镜头树 + 中预览 + 右镜头检查器 + 底部时间线；
+    // 播放器仍是主区最大的一块，但不再独占整幅宽度（编辑动作收进工具条）。
     expect(
-      tester.getSize(find.byKey(const ValueKey('video-animation-surface'))).width,
-      greaterThan(1200),
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('video-workbench-script-tree')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('video-workbench-inspector')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('video-workbench-timeline')),
+      findsOneWidget,
+    );
+    expect(find.text('剧本 / 镜头'), findsOneWidget);
+    expect(find.text('镜头检查器'), findsOneWidget);
+    expect(find.text('时间线'), findsOneWidget);
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('video-animation-surface')))
+          .width,
+      greaterThan(600),
     );
     expect(find.byKey(const ValueKey('video-animation-play')), findsOneWidget);
     expect(_timeText(tester).data, '00:00.000 / 00:08.000');
@@ -266,8 +290,8 @@ void main() {
     expect(find.byKey(const ValueKey('video-review-chip')), findsOneWidget);
     // 帧率是弹层：同一时刻只有播放器自己那根时间滑条。
     expect(find.byType(Slider), findsOneWidget);
-    // 播放器底部一行仍保留「不导出成片」的口径（不抢画面）。
-    expect(find.text('代码动画直接播放，暂不导出成片'), findsOneWidget);
+    // 导演台用底部时间线取代旧的「播放器底部提示行」；不导出成片的口径
+    // 仍在工作台顶部（导出入口按裁决隐藏），这里不再断言旧提示行。
 
     // 旧的渲染面彻底撤掉。
     expect(find.byType(VideoPlayerSurface), findsNothing);
@@ -302,7 +326,10 @@ void main() {
       _timeText(tester).data,
       '00:00.000 / ${formatVideoTime(second.totalSeconds)}',
     );
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('帧率是紧凑弹层：改完立即按新帧率播放', (tester) async {
@@ -315,14 +342,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('播放帧率'), findsOneWidget);
 
-    final slider = tester.widget<Slider>(find.byKey(const ValueKey('video-fps-slider')));
+    final slider = tester.widget<Slider>(
+      find.byKey(const ValueKey('video-fps-slider')),
+    );
     slider.onChanged!(20);
     await tester.pump();
     await tester.tap(find.text('完成'));
     await tester.pumpAndSettle();
 
     expect(find.text('帧率 20'), findsOneWidget);
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('规范对照是一枚状态 chip，点开是结果 sheet', (tester) async {
@@ -355,7 +387,10 @@ void main() {
 
     expect(find.text('未通过'), findsOneWidget);
     // 对照失败不等于不能看：代码动画照样在第一帧。
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byKey(const ValueKey('video-review-chip')));
     await tester.pumpAndSettle();
@@ -368,11 +403,17 @@ void main() {
 
   testWidgets('手机（iOS 390）与桌面同一套：没有「不能出片」的提示', (tester) async {
     final store = _store(os: HostOs.ios);
-    final service = _FakeVideoService(host: VideoHost.ios, sample: _sampleDoc());
+    final service = _FakeVideoService(
+      host: VideoHost.ios,
+      sample: _sampleDoc(),
+    );
     await _pump(tester, store, service, size: const Size(390, 844));
 
     expect(tester.takeException(), isNull);
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     // 窄屏也保留示例名与「加载示例」，其余动作收进 ⋯ 菜单。
     expect(find.text('标杆示例'), findsOneWidget);
     expect(find.text('加载示例'), findsOneWidget);
@@ -423,17 +464,20 @@ void main() {
     await tester.enterText(
       fields.at(0),
       '{"fps": 10, "width": 640, "height": 360, "scenes": [{"duration": 1.0, '
-          '"elements": [{"type": "text", "text": "hi", "x": "50%", "y": 100}]}]}',
+      '"elements": [{"type": "text", "text": "hi", "x": "50%", "y": 100}]}]}',
     );
     await tester.enterText(
       fields.at(1),
       '{"kind": "science", "subject": "小样", "laws": ["x"], '
-          '"assumptions": ["y"], "facts": ["z"]}',
+      '"assumptions": ["y"], "facts": ["z"]}',
     );
     await tester.tap(find.text('检查并载入'));
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     expect(_timeText(tester).data, '00:00.000 / 00:01.000');
     expect(find.text('未通过'), findsNothing);
 
@@ -453,12 +497,12 @@ void main() {
     await tester.enterText(
       fields.at(0),
       '{"fps": 1e999, "width": 640, "height": 360, "scenes": '
-          '[{"duration": 1.0, "elements": []}]}',
+      '[{"duration": 1.0, "elements": []}]}',
     );
     await tester.enterText(
       fields.at(1),
       '{"kind": "science", "subject": "小样", "laws": ["x"], '
-          '"assumptions": ["y"], "facts": ["z"]}',
+      '"assumptions": ["y"], "facts": ["z"]}',
     );
     await tester.tap(find.text('检查并载入'));
     await tester.pump(const Duration(milliseconds: 100));
@@ -486,7 +530,10 @@ void main() {
     // 回到创作面：动画面板重新出现。
     await tester.tap(find.text('返回创作台'));
     await tester.pump(const Duration(milliseconds: 80));
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('旧版本遗留的渲染任务号：静默清掉，不留任何轮询/恢复界面', (tester) async {
@@ -515,7 +562,10 @@ void main() {
     await _pumpRoute(tester, store, route!);
 
     // 播放面直接可用：文档来自视频服务内置示例，与是否有项目无关。
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     expect(_timeText(tester).data, '00:00.000 / 00:08.000');
     expect(store.hasProject, isFalse);
     expect(store.projectPath, isNull);
@@ -528,7 +578,9 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('video-animation-play')));
     await tester.pump(const Duration(milliseconds: 50));
 
-    tester.widget<Slider>(find.byKey(const ValueKey('video-animation-slider'))).onChanged!(3.0);
+    tester
+        .widget<Slider>(find.byKey(const ValueKey('video-animation-slider')))
+        .onChanged!(3.0);
     await tester.pump();
     expect(_secondsOf(_timeText(tester).data!), closeTo(3.0, 1e-6));
 
@@ -553,7 +605,10 @@ void main() {
     expect(store.view, 'plugin:video');
     expect(store.hasProject, isFalse);
     expect(store.projectPath, isNull);
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
 
     // 只有显式的「返回主页」按钮才离开：视频是独立工作区，回主页（模块入口），
@@ -576,7 +631,10 @@ void main() {
 
     await _pumpRoute(tester, store, pluginWorkspaceFor(store.view)!);
 
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     expect(_timeText(tester).data, '00:00.000 / 00:08.000');
     expect(find.byType(Inspector), findsNothing);
 
@@ -604,7 +662,9 @@ void main() {
     // 30 → 10 帧/秒：8 秒片的帧数从 240 变 80，片长不变。
     await tester.tap(find.byKey(const ValueKey('video-fps-control')));
     await tester.pumpAndSettle();
-    tester.widget<Slider>(find.byKey(const ValueKey('video-fps-slider'))).onChanged!(10);
+    tester
+        .widget<Slider>(find.byKey(const ValueKey('video-fps-slider')))
+        .onChanged!(10);
     await tester.pump();
     await tester.tap(find.text('完成'));
     await tester.pumpAndSettle();
@@ -625,13 +685,19 @@ void main() {
     // 播放中再改帧率：当前时间不回零，总帧数按新帧率重算。
     await tester.tap(find.byKey(const ValueKey('video-fps-control')));
     await tester.pump(const Duration(milliseconds: 250));
-    tester.widget<Slider>(find.byKey(const ValueKey('video-fps-slider'))).onChanged!(15);
+    tester
+        .widget<Slider>(find.byKey(const ValueKey('video-fps-slider')))
+        .onChanged!(15);
     await tester.pump();
     await tester.tap(find.text('完成'));
     await tester.pump(const Duration(milliseconds: 250));
     final (_, totalFrames15) = _frameNumbers(tester);
     expect(totalFrames15, 120, reason: '8 秒 × 15 帧/秒 = 120 帧');
-    expect(_secondsOf(_timeText(tester).data!), greaterThan(0.1), reason: '改帧率不回到片头');
+    expect(
+      _secondsOf(_timeText(tester).data!),
+      greaterThan(0.1),
+      reason: '改帧率不回到片头',
+    );
 
     // 收尾：暂停，别把计时器留到测试结束。
     await tester.tap(find.byKey(const ValueKey('video-animation-play')));
@@ -644,8 +710,9 @@ void main() {
     final service = VideoService(host: VideoHost.macos);
     await _pump(tester, store, service);
 
-    final firstDoc =
-        tester.widget<VideoAnimationSurface>(find.byType(VideoAnimationSurface)).document;
+    final firstDoc = tester
+        .widget<VideoAnimationSurface>(find.byType(VideoAnimationSurface))
+        .document;
 
     // 先播起来：旧实例持有周期计时器（约 33ms 一跳）。
     await tester.tap(find.byKey(const ValueKey('video-animation-play')));
@@ -661,15 +728,19 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 300));
 
-    final next = tester.widget<VideoAnimationSurface>(find.byType(VideoAnimationSurface));
+    final next = tester.widget<VideoAnimationSurface>(
+      find.byType(VideoAnimationSurface),
+    );
     expect(identical(next.document, firstDoc), isFalse, reason: '切示例必须换文档实例');
     expect(next.document.totalSeconds, 10.0, reason: '新文档来自新示例，不沿用旧帧缓存');
     expect(_timeText(tester).data, '00:00.000 / ${formatVideoTime(10)}');
     expect(_frameNumbers(tester), (1, 300));
-    final playIcon = tester.widget<Icon>(find.descendant(
-      of: find.byKey(const ValueKey('video-animation-play')),
-      matching: find.byType(Icon),
-    ));
+    final playIcon = tester.widget<Icon>(
+      find.descendant(
+        of: find.byKey(const ValueKey('video-animation-play')),
+        matching: find.byType(Icon),
+      ),
+    );
     expect(playIcon.icon, Icons.play_arrow, reason: '新片停在片头，不继承播放态');
 
     // 旧计时器若没被 cancel，这里会在已 dispose 的 State 上 setState 抛异常。
@@ -680,20 +751,31 @@ void main() {
 
   testWidgets('320 宽窄屏：工具条与播放器不溢出，更多菜单/对照 sheet 仍可达', (tester) async {
     final store = _store(os: HostOs.ios);
-    final service = _FakeVideoService(host: VideoHost.ios, sample: _sampleDoc());
+    final service = _FakeVideoService(
+      host: VideoHost.ios,
+      sample: _sampleDoc(),
+    );
     await _pump(tester, store, service, size: const Size(320, 640));
 
     expect(tester.takeException(), isNull);
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('video-sample-picker')), findsOneWidget);
     expect(find.byKey(const ValueKey('video-review-chip')), findsOneWidget);
     expect(find.byKey(const ValueKey('video-more-menu')), findsOneWidget);
     expect(find.byKey(const ValueKey('video-load-sample')), findsOneWidget);
     // 播放器控件都在，画面区没有被压成 0。
     expect(find.byKey(const ValueKey('video-animation-play')), findsOneWidget);
-    expect(find.byKey(const ValueKey('video-animation-slider')), findsOneWidget);
     expect(
-      tester.getSize(find.byKey(const ValueKey('video-animation-surface'))).width,
+      find.byKey(const ValueKey('video-animation-slider')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('video-animation-surface')))
+          .width,
       greaterThan(280),
     );
 
@@ -717,7 +799,6 @@ void main() {
   _clipModeTests();
   _projectModeTests();
 }
-
 
 // ---------------------------------------------------------------------------
 // 动效合成（HTML/CSS/JS 短片）接线
@@ -816,22 +897,21 @@ Widget _wrapClips(
   VideoService service, {
   required List<VideoClipInfo> clips,
   required VideoClipPlayback Function(VideoClipInfo clip) factory,
-}) =>
-    ChangeNotifierProvider<AppStore>.value(
-      value: store,
-      child: MaterialApp(
-        theme: AppTheme.build(dark: true),
-        builder: (context, child) =>
-            withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
-        home: Scaffold(
-          body: VideoWorkspace(
-            service: service,
-            clips: clips,
-            clipPlaybackFactory: factory,
-          ),
-        ),
+}) => ChangeNotifierProvider<AppStore>.value(
+  value: store,
+  child: MaterialApp(
+    theme: AppTheme.build(dark: true),
+    builder: (context, child) =>
+        withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
+    home: Scaffold(
+      body: VideoWorkspace(
+        service: service,
+        clips: clips,
+        clipPlaybackFactory: factory,
       ),
-    );
+    ),
+  ),
+);
 
 Future<void> _pumpClips(
   WidgetTester tester,
@@ -845,7 +925,9 @@ Future<void> _pumpClips(
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
-  await tester.pumpWidget(_wrapClips(store, service, clips: clips, factory: factory));
+  await tester.pumpWidget(
+    _wrapClips(store, service, clips: clips, factory: factory),
+  );
   await tester.pump(const Duration(milliseconds: 50));
   await tester.pump(const Duration(milliseconds: 80));
 }
@@ -877,7 +959,10 @@ void _clipModeTests() {
     });
 
     // 起点仍是矢量动画。
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('video-clip-surface')), findsNothing);
 
     // 选择器分两组：动效合成那 4 条按清单顺序就在菜单里。
@@ -903,7 +988,10 @@ void _clipModeTests() {
     expect(find.byKey(const ValueKey('video-animation-surface')), findsNothing);
 
     // 工具条：规格对照 + 加示例在；矢量稿的编辑脚本/帧率不在。
-    expect(find.byKey(const ValueKey('video-clip-review-chip')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-clip-review-chip')),
+      findsOneWidget,
+    );
     expect(find.text('规格对照'), findsOneWidget);
     expect(find.byKey(const ValueKey('video-clip-add-sample')), findsOneWidget);
     expect(find.byKey(const ValueKey('video-edit-script')), findsNothing);
@@ -912,10 +1000,7 @@ void _clipModeTests() {
     expect(find.byKey(const ValueKey('video-review-chip')), findsNothing);
 
     // 模式口径文案跟着换。
-    expect(
-      find.text('HTML/CSS/JS 动效合成，应用内实时播放，暂不导出成片'),
-      findsOneWidget,
-    );
+    expect(find.text('HTML/CSS/JS 动效合成，应用内实时播放，暂不导出成片'), findsOneWidget);
     expect(find.text('代码动画直接播放，暂不导出成片'), findsNothing);
 
     // 视频是独立工作区：切模式不换视图。
@@ -924,7 +1009,10 @@ void _clipModeTests() {
     // 规格对照是只读卡：subtitle 与 tags 都在，没有写入口。
     await tester.tap(find.byKey(const ValueKey('video-clip-review-chip')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('video-clip-review-sheet')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-clip-review-sheet')),
+      findsOneWidget,
+    );
     expect(find.text('手绘纸面 + 逐笔描线 + 数值滚动'), findsOneWidget);
     expect(find.text('#简笔'), findsOneWidget);
     expect(find.text('#物理'), findsOneWidget);
@@ -940,7 +1028,10 @@ void _clipModeTests() {
     await tester.tap(find.text('生物 · 细胞有丝分裂'));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('video-clip-surface')), findsNothing);
     expect(find.byKey(const ValueKey('video-clip-transport')), findsNothing);
     expect(created.single.disposed, isTrue, reason: '切模式必须释放旧播放器');
@@ -950,7 +1041,10 @@ void _clipModeTests() {
 
   testWidgets('动效合成窄屏（320）：工具条与运输条不溢出，仍可切回矢量', (tester) async {
     final store = _store(os: HostOs.ios);
-    final service = _FakeVideoService(host: VideoHost.ios, sample: _sampleDoc());
+    final service = _FakeVideoService(
+      host: VideoHost.ios,
+      sample: _sampleDoc(),
+    );
     final clips = <VideoClipInfo>[_clipInfo(0, title: '动效排版 · 标题落位')];
     await _pumpClips(
       tester,
@@ -968,7 +1062,10 @@ void _clipModeTests() {
 
     expect(find.byKey(const ValueKey('video-clip-surface')), findsOneWidget);
     expect(find.byKey(const ValueKey('video-clip-transport')), findsOneWidget);
-    expect(find.byKey(const ValueKey('video-clip-review-chip')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-clip-review-chip')),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('video-clip-add-sample')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -1106,24 +1203,23 @@ Widget _wrapProjects(
   AppStore store,
   VideoService service,
   VideoProjectStore projectStore,
-) =>
-    ChangeNotifierProvider<AppStore>.value(
-      value: store,
-      child: MaterialApp(
-        theme: AppTheme.build(dark: true),
-        builder: (context, child) =>
-            withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
-        home: Scaffold(
-          body: VideoWorkspace(
-            service: service,
-            projectStore: projectStore,
-            // 动效合成清单注入空表：生成项目用例只管「生成项目」组，不让
-            // 真实 assets 加载把等待时机搅浑。
-            clips: const <VideoClipInfo>[],
-          ),
-        ),
+) => ChangeNotifierProvider<AppStore>.value(
+  value: store,
+  child: MaterialApp(
+    theme: AppTheme.build(dark: true),
+    builder: (context, child) =>
+        withResponsiveTextScale(context, child ?? const SizedBox.shrink()),
+    home: Scaffold(
+      body: VideoWorkspace(
+        service: service,
+        projectStore: projectStore,
+        // 动效合成清单注入空表：生成项目用例只管「生成项目」组，不让
+        // 真实 assets 加载把等待时机搅浑。
+        clips: const <VideoClipInfo>[],
       ),
-    );
+    ),
+  ),
+);
 
 Future<void> _pumpProjects(
   WidgetTester tester,
@@ -1142,8 +1238,9 @@ Future<void> _pumpProjects(
 }
 
 /// 从播放面里取当前文档（生成项目用例判断「是否真的换成了这一片」）。
-VideoDocument _surfaceDoc(WidgetTester tester) =>
-    tester.widget<VideoAnimationSurface>(find.byType(VideoAnimationSurface)).document;
+VideoDocument _surfaceDoc(WidgetTester tester) => tester
+    .widget<VideoAnimationSurface>(find.byType(VideoAnimationSurface))
+    .document;
 
 void _projectModeTests() {
   testWidgets('生成项目出现在选择器（标题+片长），选中后铺到播放面并写回设置', (tester) async {
@@ -1176,10 +1273,16 @@ void _projectModeTests() {
     await tester.pump(const Duration(milliseconds: 200));
 
     // 播放面换成 read() 出来的文档（10 秒片），工具条标题跟着换。
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     expect(_surfaceDoc(tester).totalSeconds, seeded.document.totalSeconds);
-    expect(identical(_surfaceDoc(tester), seeded.document), isFalse,
-        reason: 'read 必须重新构建文档，不能复用 create 的内存对象');
+    expect(
+      identical(_surfaceDoc(tester), seeded.document),
+      isFalse,
+      reason: 'read 必须重新构建文档，不能复用 create 的内存对象',
+    );
     expect(find.text('NaN 生成片'), findsWidgets);
     expect(find.byKey(const ValueKey('video-project-delete')), findsOneWidget);
     expect(store.settings.videoProjectName, 'nan-demo');
@@ -1212,7 +1315,10 @@ void _projectModeTests() {
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(store.settings.videoProjectName, 'nan-run');
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     expect(_surfaceDoc(tester).totalSeconds, seeded.document.totalSeconds);
     expect(find.text('NaN 刚生成'), findsWidgets);
     expect(_lastToastTitle(store), contains('NaN 刚生成'));
@@ -1240,10 +1346,7 @@ void _projectModeTests() {
     // 生成中：列表不空（给可行动空态人话），不因在飞 run 抖动。
     await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
     await tester.pumpAndSettle();
-    expect(
-      find.text('还没有生成项目 · 在工作区里让 NaN 做一个视频，跑完后会出现在这里'),
-      findsOneWidget,
-    );
+    expect(find.text('还没有生成项目 · 在工作区里让 NaN 做一个视频，跑完后会出现在这里'), findsOneWidget);
     await tester.tapAt(const Offset(6, 6));
     await tester.pumpAndSettle();
 
@@ -1299,7 +1402,10 @@ void _projectModeTests() {
     // 回退到内置示例：设置里的项目名清掉，播放面恢复。
     await tester.tap(find.byKey(const ValueKey('video-project-use-sample')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     expect(store.settings.videoProjectName, isEmpty);
     expect(_surfaceDoc(tester).totalSeconds, 8.0);
     expect(tester.takeException(), isNull);
@@ -1317,7 +1423,10 @@ void _projectModeTests() {
     final service = VideoService(host: VideoHost.macos);
     await _pumpProjects(tester, store, service, projectStore);
 
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     expect(_surfaceDoc(tester).totalSeconds, seeded.document.totalSeconds);
 
     // 第一次点删除后取消：项目与播放都不受影响。
@@ -1332,13 +1441,18 @@ void _projectModeTests() {
     // 确认删除：磁盘目录没了、设置清空、播放面回退示例、列表刷新。
     await tester.tap(find.byKey(const ValueKey('video-project-delete')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('video-project-delete-confirm')));
+    await tester.tap(
+      find.byKey(const ValueKey('video-project-delete-confirm')),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(Directory(seeded.dir).existsSync(), isFalse);
     expect(store.settings.videoProjectName, isEmpty);
-    expect(find.byKey(const ValueKey('video-animation-surface')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-animation-surface')),
+      findsOneWidget,
+    );
     expect(_surfaceDoc(tester).totalSeconds, 8.0);
     expect(_lastToastTitle(store), '已删除生成项目「待删除项目」');
 
@@ -1356,7 +1470,8 @@ void _projectModeTests() {
     final root = await projectStore.resolveRoot();
     // 元数据坏掉的目录：list 标 corrupt，read 报 no_project。
     Directory('${root.path}/bad-one').createSync(recursive: true);
-    File('${root.path}/bad-one/video.json').writeAsStringSync('{"title": "坏项目"');
+    File('${root.path}/bad-one/video.json')
+        .writeAsStringSync('{"title": "坏项目"');
 
     final store = _store();
     final service = VideoService(host: VideoHost.macos);
@@ -1388,15 +1503,10 @@ void _projectModeTests() {
     await tester.tap(find.byKey(const ValueKey('video-sample-picker')));
     await tester.pumpAndSettle();
     expect(find.text('生成项目'), findsOneWidget);
-    expect(
-      find.text('还没有生成项目 · 在工作区里让 NaN 做一个视频，跑完后会出现在这里'),
-      findsOneWidget,
-    );
+    expect(find.text('还没有生成项目 · 在工作区里让 NaN 做一个视频，跑完后会出现在这里'), findsOneWidget);
     expect(find.textContaining('io_error'), findsNothing);
     await tester.tapAt(const Offset(6, 6));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 }
-
-
