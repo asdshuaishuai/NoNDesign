@@ -83,7 +83,7 @@ raea 只提供契约参考，不进入代码依赖。
    进我们的校验/QA，不引其运行时。
 6. 不引入边界：不引 React/Bevy/JS 运行时、不把 raea CLI 作为依赖、不做第二套 agent。
 
-**D3. 3D 视频数据契约**（`docs/design/video3d-contract.md`，**草案已落盘**）
+**D3. 3D 视频数据契约**（`docs/design/video3d-contract.md`，**草案已落盘 + 契约核心已实现**：`app/lib/core/video3d/video3d_contract.dart` / `video3d_compile.dart`，48 例测试）
 - `scene3d.json` / `screenplay3d.json` v1 字段、路径白名单、体积上限、缺资产显性失败；
   与 3D 建模 `scene.json` 的关系（只读兼容/不混写）。
 - 与 story-short 的 8 段脚本/词级时间/镜头表/look 参数映射；toon_3d 只作为 style 候选。

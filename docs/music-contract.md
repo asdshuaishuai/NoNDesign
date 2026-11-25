@@ -1,10 +1,13 @@
 # 音乐模块契约（编曲工作台 · score.json 唯一事实源）
 
-> 状态：**R1 契约核心 + 编辑闭环 + 播放页编译产物已落地（2026-11-24/25）· 播放 UI 接入/music_* 工具/五线谱编辑器未施工**。已落地：
+> 状态：**R1 契约核心 + 编辑闭环 + 播放页编译产物 + 播放面接入 + music_* 工具族已落地（2026-11-24/25）· 五线谱编辑器/music_patch/配乐联动未施工**。已落地：
 > score.json v1 解析/未知字段保留、`verifyMusicScore` 硬门、整数 tick 编译器（ppq=3840）、
 > `MusicProjectStore` 存储；`plugin:music` + `MusicWorkspace` 只读钢琴卷帘/检查器/运输条；
 > `music_edit.dart` 最小编辑闭环（纯函数 + 可保存检查器）；`music_player.dart` 自包含
-> Web Audio 播放页编译产物（CSP/确定性/六音色）；本文契约增量：
+> Web Audio 播放页编译产物（CSP/确定性/六音色）；`music_playback_surface.dart` 把播放页接进
+> 工作台（WebView + 运输条播放/暂停/停止/播放头，未校验/无计划时禁用并说明）；
+> `music_list/read/inspect/create` 工具族 + workspace 工具面收窄 + 成功产物认领；
+> 本文契约增量：
 > score.json v1、整数 tick 编译、`verifyScore`（拟实现）硬门、五线谱、播放页、存储、工具族、配乐联动与验收。
 >
 > 相关：[plan-music-module.md](plan-music-module.md)（方案事实源）·
@@ -79,15 +82,15 @@ AudioContext.currentTime
 * `~/Documents/NoNDesign/portfolio/music/<name>/score.json`（+ `NOTICE.md` 记来源）；与 3D 同模式扫描；最近项目列表收音乐项目。
 * `pluginRegistry` 注册 `plugin:music`；工作台跟随项目（打开音乐项目落音乐工作台）；主页作品集加「音乐」类；艺术架不在范围（音乐不经艺术架）。平台：桌面完整（编辑 + 播放），手机播放 + 查看，Web 不在范围。
 
-## 7. Agent 工具族（`music_*`，**拟实现**，链接 [plan-music-module.md](plan-music-module.md) §6）
+## 7. Agent 工具族（`music_*`，**create/read/inspect/list 已落地**，链接 [plan-music-module.md](plan-music-module.md) §6）
 
 | 工具（拟实现） | 语义 |
 | --- | --- |
-| `music_list` | 列本机音乐项目（名称/轨道数/小节数/时长） |
-| `music_create` | 由 brief 产 score.json，过校验器入库 |
-| `music_read` | 读整谱 JSON |
-| `music_patch` | RFC6902 风格确定性补丁；改后自动校验并如实回报 |
-| `music_inspect` | 摘要面（轨道/小节/时长/校验状态），不回全谱 |
+| `music_list` | ✅ 已实现：列本机音乐项目（名称/轨道数/小节数/时长） |
+| `music_create` | ✅ 已实现（v1 由调用方给完整 score JSON，先校验后原子保存；brief 作曲待后续） |
+| `music_read` | ✅ 已实现（4000 字截断并标注） |
+| `music_patch` | RFC6902 风格确定性补丁；改后自动校验并如实回报（**未实现**，待补丁批次） |
+| `music_inspect` | ✅ 已实现：摘要面（轨道/小节/时长/校验状态/≤5 条 issue hint），不回全谱 |
 
 * workspace 模式只暴露 `music_*` + 通用只读；跨模块动作只走裁决过的联动通道（§8）。`AgentWorkspaceServices` 扩方法、`LocalWorkspaceServices` 实现（工厂可注入，测试不落用户目录）；成功产物走 workspace 产物认领链；提示词教学加「写谱后先过校验器再交付」。
 
@@ -106,6 +109,9 @@ AudioContext.currentTime
 | 校验器 | `music_score_test.dart`（已落地） | 小节时值/关系配对/乐器/范围/鼓件正反例 |
 | 播放页 | `music_player_test.dart`（已落地） | CSP 自检、零外联、lookahead 参数、无 Tone.js/采样、字节确定性 |
 | 编辑器/工作台 | `music_edit_test.dart` + `music_workspace_test.dart`（已落地部分） | 标题/tempo/小节/音符/休止编辑→保存→重读；校验结果如实显示；放音/拖移与 `music_*` 工具待后续 |
+
+**播放面锚点**：`music_playback_surface_test.dart`（7 例，fake 控制器/桥/降级）；
+**工具锚点**：`music_tools_test.dart`（10 例 create→list→inspect）+ `dart_agent_tools_test` music 工具面。
 
 **编辑锚点**：`music_edit_test.dart`（已落地，16 例）；**播放页锚点**：`music_player_test.dart`（已落地，10 例）。
 
