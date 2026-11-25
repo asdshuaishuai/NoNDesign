@@ -9,6 +9,7 @@ library;
 import '../core/portfolio_entries.dart';
 import '../core/store.dart';
 import 'hotapp_workspace.dart';
+import 'music_workspace.dart';
 import 'three_workspace.dart';
 import 'video_workspace.dart';
 
@@ -47,8 +48,24 @@ void openVideoWorkspace(AppStore store) {
   store.setView('plugin:video');
 }
 
-/// 进音乐工作台：项目由工作台自己的项目库列表切换（顶栏菜单暂不列音乐项目）。
-void openMusicWorkspace(AppStore store) {
+/// 进音乐工作台。
+///
+/// 音乐项目由工作台自己的项目库列表切换；传了 [name] 时把项目名经
+/// `musicLoadOnOpen` 一次性通道交给工作台（initState 消费），并把 store 的
+/// 当前音乐项目名换成它，顶栏「音乐」分区才能标出「当前」。不传 [name] 则
+/// 保持原有「列表首项」逻辑；已在音乐工作台里时是无操作（不打断当前项目）。
+void openMusicWorkspace(AppStore store, [String? name]) {
+  final trimmed = (name ?? '').trim();
+  if (trimmed.isEmpty) {
+    if (store.view == 'plugin:music') return;
+    musicLoadOnOpen = null;
+    musicProjectSwitch.value = null;
+    store.setMusicProjectName('');
+  } else {
+    musicLoadOnOpen = trimmed; // 新挂载的工作台在 initState 消费
+    musicProjectSwitch.value = MusicProjectSwitch(trimmed); // 已挂载的工作台直接切
+    store.setMusicProjectName(trimmed);
+  }
   store.setView('plugin:music');
 }
 
@@ -62,5 +79,7 @@ void openPortfolioEntry(AppStore store, PortfolioEntry entry) {
     case 'video':
       videoLoadOnOpen = entry.path ?? entry.ref;
       store.setView('plugin:video');
+    case 'music':
+      openMusicWorkspace(store, entry.ref);
   }
 }

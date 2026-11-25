@@ -59,7 +59,13 @@ class TitleBar extends StatelessWidget {
       case 'plugin:video':
         return ('视频', '视频工作台', '', Icons.movie_outlined);
       case 'plugin:music':
-        return ('音乐', '音乐工作台', '', Icons.library_music_outlined);
+        final name = store.musicProjectName.trim();
+        return (
+          '音乐',
+          name.isEmpty ? '音乐工作台' : name,
+          name,
+          Icons.library_music_outlined,
+        );
       default:
         return ('设计', store.projectName, '', Icons.layers_outlined);
     }
@@ -119,6 +125,13 @@ class TitleBar extends StatelessWidget {
                     openHotApp(store, value.substring('switch:hotapp:'.length));
                     return;
                   }
+                  if (value.startsWith('switch:music:')) {
+                    openMusicWorkspace(
+                      store,
+                      value.substring('switch:music:'.length),
+                    );
+                    return;
+                  }
                   switch (value) {
                     case 'new':
                       onNewProject();
@@ -155,6 +168,10 @@ class TitleBar extends StatelessWidget {
                       .toList();
                   final hotEntries = store.portfolioEntries
                       .where((e) => e.kind == 'hotapp')
+                      .take(5)
+                      .toList();
+                  final musicEntries = store.portfolioEntries
+                      .where((e) => e.kind == 'music')
                       .take(5)
                       .toList();
                   final designFace = !store.view.startsWith('plugin:');
@@ -241,6 +258,18 @@ class TitleBar extends StatelessWidget {
                       '视频工作台',
                       '代码动画',
                     ),
+                    const PopupMenuDivider(),
+                    _sectionLabel(context, '音乐'),
+                    for (final e in musicEntries)
+                      _menu(
+                        context,
+                        'switch:music:${e.ref}',
+                        Icons.library_music_outlined,
+                        e.title,
+                        e.ref == current.$3 && store.view == 'plugin:music'
+                            ? '当前'
+                            : '',
+                      ),
                     _menu(
                       context,
                       'music',

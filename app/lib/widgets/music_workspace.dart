@@ -21,6 +21,27 @@ import '../core/workbench_layout.dart';
 import 'music_playback_surface.dart';
 import 'music_workbench_panels.dart';
 
+/// 跨实例打开通道（与 `threeLoadOnOpen` / `videoLoadOnOpen` 同模式）：
+/// [openMusicWorkspace] 写入项目名，音乐工作台在 initState 消费后清空。
+///
+/// 空 = 不指定项目：工作台保持原有「打开列表首项」逻辑。
+String? musicLoadOnOpen;
+
+/// 已挂载工作台的切换请求：工作台视图已存在时 initState 不会再跑，
+/// 顶栏「音乐」分区里再点另一个项目走这里直接切。
+///
+/// 每次请求都是新对象：同一个项目名重复点击也能触发监听（ValueNotifier
+/// 对相等值不 notify）。
+final ValueNotifier<MusicProjectSwitch?> musicProjectSwitch =
+    ValueNotifier<MusicProjectSwitch?>(null);
+
+/// [musicProjectSwitch] 的一次「切到某个音乐项目」请求。
+final class MusicProjectSwitch {
+  const MusicProjectSwitch(this.name);
+
+  final String name;
+}
+
 class MusicWorkspace extends StatefulWidget {
   const MusicWorkspace({super.key, this.store, this.playbackFactory});
 
@@ -52,10 +73,24 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   /// 当前播放面控制器；null = 没有可播放的编译产物（按钮禁用并说明原因）。
   MusicPlaybackController? _playback;
 
+  /// initState 从 [musicLoadOnOpen] 取到的开局项目名（只消费一次）。
+  String? _pendingOpen;
+
   @override
   void initState() {
     super.initState();
+    // 跨视图打开：项目名由 [openMusicWorkspace] 一次性写入，空 = 走原有首项逻辑。
+    _pendingOpen = musicLoadOnOpen;
+    musicLoadOnOpen = null;
+    musicProjectSwitch.addListener(_onSwitchRequest);
     _refresh();
+  }
+
+  /// 已挂载工作台的切项目请求（顶栏「音乐」分区 → 另一个项目）。
+  void _onSwitchRequest() {
+    final MusicProjectSwitch? request = musicProjectSwitch.value;
+    if (!mounted || request == null || request.name.isEmpty) return;
+    unawaited(_open(request.name));
   }
 
   Future<void> _refresh() async {
@@ -75,12 +110,21 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
       _listError = error;
     });
     if (error.isNotEmpty) return;
-    if (_name == null && entries.isNotEmpty) {
+    final String? pending = _pendingOpen;
+    _pendingOpen = null;
+    if (pending != null && pending.isNotEmpty) {
+      // 指定了开局项目：打开它（读不到时由 _open 如实报错）。
+      await _open(pending);
+    } else if (_name == null && entries.isNotEmpty) {
       await _open(entries.first.name);
     }
   }
 
   Future<void> _open(String name) async {
+    _pendingOpen = null; // 已经落到具体项目，开局通道到此消费完
+    // 已挂载实例里切项目时，别把开局名留给下一次挂载（跨视图续接走
+    // store.musicProjectName，不靠这个一次性通道）。
+    musicLoadOnOpen = null;
     // 切项目先卸播放面：旧页不能继续对着新项目响。
     final MusicPlaybackController? previous = _playback;
     _playback = null;
@@ -134,6 +178,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
 
   @override
   void dispose() {
+    musicProjectSwitch.removeListener(_onSwitchRequest);
     _playback?.dispose();
     _playback = null;
     super.dispose();
