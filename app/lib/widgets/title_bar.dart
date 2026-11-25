@@ -58,6 +58,9 @@ class TitleBar extends StatelessWidget {
         );
       case 'plugin:video':
         return ('视频', '视频工作台', '', Icons.movie_outlined);
+      case 'plugin:video3d':
+        // 3D 视频项目由工作台自己的项目库切换；顶栏只标识工作台类型。
+        return ('3D 视频', '3D 视频工作台', '', Icons.movie_creation_outlined);
       case 'plugin:music':
         final name = store.musicProjectName.trim();
         return (
@@ -151,6 +154,8 @@ class TitleBar extends StatelessWidget {
                       store.setView('home');
                     case 'video':
                       openVideoWorkspace(store);
+                    case 'video3d':
+                      openVideo3dWorkspace(store);
                     case 'music':
                       openMusicWorkspace(store);
                     case 'new-three':
@@ -257,6 +262,13 @@ class TitleBar extends StatelessWidget {
                       Icons.movie_outlined,
                       '视频工作台',
                       '代码动画',
+                    ),
+                    _menu(
+                      context,
+                      'video3d',
+                      Icons.movie_creation_outlined,
+                      '3D 视频工作台',
+                      '只读预览',
                     ),
                     const PopupMenuDivider(),
                     _sectionLabel(context, '音乐'),

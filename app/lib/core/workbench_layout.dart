@@ -61,6 +61,7 @@ final class WorkbenchLayout {
     required this.right,
     required this.rail,
     required this.bottomBar,
+    required this.bottomBarHeight,
     required this.leftWidth,
     required this.rightWidth,
     required this.isPhone,
@@ -72,6 +73,10 @@ final class WorkbenchLayout {
   final PanelPolicy right;
   final bool rail;
   final bool bottomBar;
+
+  /// 自带底栏时的固定高度（0 = 没有底栏；widget 不另写字面量高度）。
+  final double bottomBarHeight;
+
   final double leftWidth;
   final double rightWidth;
   final bool isPhone;
@@ -159,6 +164,7 @@ WorkbenchLayout resolveWorkbenchLayout({
     right: right,
     rail: rail,
     bottomBar: spec.bottomBar,
+    bottomBarHeight: spec.bottomBarHeight,
     leftWidth: spec.leftWidth,
     rightWidth: spec.rightWidth,
     isPhone: phone,
@@ -167,9 +173,13 @@ WorkbenchLayout resolveWorkbenchLayout({
 }
 
 /// 视图名（`plugin:three` 等）→ 工作台种类；设计面 `docs/source` 也归设计。
+///
+/// `plugin:video3d`（3D 视频工作台）沿用视频导演台的内容区规格（时间线底栏、
+/// 左项目/右检查器语义同族），不新增第五份规格、不改既有四工作台断点语义。
 WorkbenchKind? workbenchKindForView(String view) => switch (view) {
   'plugin:three' => WorkbenchKind.three,
   'plugin:video' => WorkbenchKind.video,
+  'plugin:video3d' => WorkbenchKind.video,
   'plugin:music' => WorkbenchKind.music,
   'plugin:hotapp' => null, // 热应用暂不改布局
   _ => WorkbenchKind.design,

@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../widgets/hotapp_workspace.dart';
 import '../widgets/music_workspace.dart';
 import '../widgets/three_workspace.dart';
+import '../widgets/video3d_workspace.dart';
 import '../widgets/video_workspace.dart';
 
 /// 插件工作台注册表——3D / 视频 / 未来插件各自的独立工作台界面，
@@ -47,6 +48,13 @@ final List<PluginDef> pluginRegistry = [
     tooltip: '视频工作台',
     icon: Icons.movie_outlined,
     builder: () => const VideoWorkspace(),
+  ),
+  PluginDef(
+    id: 'video3d',
+    title: '3D 视频工作台',
+    tooltip: '3D 视频工作台',
+    icon: Icons.movie_creation_outlined,
+    builder: () => const Video3dWorkspace(),
   ),
   PluginDef(
     id: 'music',

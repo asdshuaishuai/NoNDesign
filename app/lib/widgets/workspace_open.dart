@@ -11,6 +11,7 @@ import '../core/store.dart';
 import 'hotapp_workspace.dart';
 import 'music_workspace.dart';
 import 'three_workspace.dart';
+import 'video3d_workspace.dart';
 import 'video_workspace.dart';
 
 /// 打开一个已有 3D 场景：3D 工作台在 initState 消费 `threeLoadOnOpen`。
@@ -48,6 +49,17 @@ void openVideoWorkspace(AppStore store) {
   store.setView('plugin:video');
 }
 
+/// 进 3D 视频工作台。
+///
+/// 3D 视频项目由工作台自己的项目库列表切换；传了 [name] 时把项目名经
+/// `video3dLoadOnOpen` 一次性通道交给工作台（initState 消费）。不传 [name]
+/// 则保持「列表首项」逻辑。这一批只做只读预览，不写项目文件。
+void openVideo3dWorkspace(AppStore store, [String? name]) {
+  final String trimmed = (name ?? '').trim();
+  video3dLoadOnOpen = trimmed.isEmpty ? null : trimmed;
+  store.setView('plugin:video3d');
+}
+
 /// 进音乐工作台。
 ///
 /// 音乐项目由工作台自己的项目库列表切换；传了 [name] 时把项目名经
@@ -79,6 +91,10 @@ void openPortfolioEntry(AppStore store, PortfolioEntry entry) {
     case 'video':
       videoLoadOnOpen = entry.path ?? entry.ref;
       store.setView('plugin:video');
+    case 'video3d':
+      // 作品集后续接 3D 视频项目时直接按项目名打开（当前作品集还没有该来源，
+      // 先把这个类型接上，避免入口出现时另写一份路由）。
+      openVideo3dWorkspace(store, entry.ref);
     case 'music':
       openMusicWorkspace(store, entry.ref);
   }
