@@ -2,9 +2,11 @@ import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nondesign/core/music/music_compile.dart';
 import 'package:nondesign/core/music/music_project.dart';
 import 'package:nondesign/core/music/music_score.dart';
 import 'package:nondesign/core/theme.dart';
+import 'package:nondesign/widgets/music_playback_surface.dart';
 import 'package:nondesign/widgets/music_workspace.dart';
 
 MusicScore _score({String title = '练习曲', int tracks = 1}) => MusicScore(
@@ -70,6 +72,129 @@ class _UnverifiedSaveStore extends MusicProjectStore {
       issues: <MusicIssue>[MusicIssue('/tempo', 'score_invalid', '速度不在允许范围')],
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// 播放面：可注入 Fake（不构造真 WebView）+ 读盘桩（构造不符合播放条件的快照）
+// ---------------------------------------------------------------------------
+
+class _FakePlayback extends MusicPlaybackController {
+  _FakePlayback({this.duration = 2.5});
+
+  @override
+  final double duration;
+  bool _ready = false;
+  bool _playing = false;
+  double _position = 0;
+  int _beat = -1;
+  int _bar = 0;
+  final String _loadError = '';
+  final String _technicalDetail = '';
+
+  int playCalls = 0;
+  int pauseCalls = 0;
+  int stopCalls = 0;
+  final List<double> seekCalls = <double>[];
+
+  void advance(double position, {int beat = -1, int bar = 0}) {
+    _position = position;
+    _beat = beat;
+    _bar = bar;
+    notifyListeners();
+  }
+
+  @override
+  bool get ready => _ready;
+
+  @override
+  bool get playing => _playing;
+
+  @override
+  double get position => _position;
+
+  @override
+  @override
+  int get beat => _beat;
+
+  @override
+  int get bar => _bar;
+
+  @override
+  String get loadError => _loadError;
+
+  @override
+  String get technicalDetail => _technicalDetail;
+
+  @override
+  Future<void> start() async {
+    _ready = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> play() async {
+    playCalls += 1;
+    _playing = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> pause() async {
+    pauseCalls += 1;
+    _playing = false;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> stop() async {
+    stopCalls += 1;
+    _playing = false;
+    _position = 0;
+    _beat = -1;
+    _bar = 0;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> seek(double seconds) async {
+    seekCalls.add(seconds);
+    _position = seconds;
+    notifyListeners();
+  }
+}
+
+/// 读盘桩：让工作台拿到「校验未通过 / 没有播放计划」的真实 snapshot 形状。
+class _StaleSnapshotStore extends MusicProjectStore {
+  _StaleSnapshotStore({required Directory root, required this.snapshot})
+    : super(root: root);
+
+  final MusicProjectSnapshot snapshot;
+
+  @override
+  Future<MusicProjectSnapshot> read(String name) async => snapshot;
+}
+
+MusicProjectSnapshot _staleSnapshot({
+  required Directory dir,
+  bool verified = true,
+  bool withPlan = true,
+}) {
+  final MusicScore score = _score();
+  return MusicProjectSnapshot(
+    name: 'stale',
+    score: score,
+    raw: score.toJson(),
+    validation: verified
+        ? const MusicValidation(issues: <MusicIssue>[], verified: true)
+        : const MusicValidation(
+            issues: <MusicIssue>[
+              MusicIssue('/tempo', 'score_invalid', '速度不在允许范围'),
+            ],
+            verified: false,
+          ),
+    playPlan: withPlan ? compileMusicScore(score) : null,
+    dir: dir.path,
+  );
 }
 
 void main() {
@@ -274,6 +399,174 @@ void main() {
     final MusicProjectSnapshot reread = await store.read('study');
     expect(reread.score.tempo, 96);
     expect(reread.score.title, '练习曲');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('有播放计划且校验通过：运输条出现播放/暂停/停止与播放头，并驱动播放面', (tester) async {
+    await viewport(tester, const Size(1440, 900));
+    await store.save('study', _score());
+    _FakePlayback fake = _FakePlayback();
+    await tester.pumpWidget(
+      _app(
+        MusicWorkspace(
+          store: store,
+          playbackFactory: (MusicScore score, MusicPlayPlan plan) => fake =
+              _FakePlayback(duration: musicPlaybackDurationSeconds(plan)),
+        ),
+      ),
+    );
+    await _settle(tester);
+
+    // 演奏面与运输条播放控件都在（不是旧的「待批次」只读条）。
+    expect(
+      find.byKey(const ValueKey('music-playback-surface')),
+      findsOneWidget,
+    );
+    for (final String key in <String>[
+      'music-transport-play',
+      'music-transport-pause',
+      'music-transport-stop',
+      'music-transport-seek',
+      'music-transport-time',
+    ]) {
+      expect(find.byKey(ValueKey<String>(key)), findsOneWidget);
+    }
+    expect(find.textContaining('待批次'), findsNothing);
+
+    Future<void> settle() async {
+      await _settle(tester);
+    }
+
+    // 就绪后可播；播放中暂停可用、播放禁用。
+    await settle();
+    expect(
+      tester
+          .widget<IconButton>(
+            find.byKey(const ValueKey('music-transport-play')),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    expect(
+      tester
+          .widget<IconButton>(
+            find.byKey(const ValueKey('music-transport-pause')),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('music-transport-play')));
+    await settle();
+    expect(fake.playCalls, 1);
+    expect(fake.playing, isTrue);
+    expect(
+      tester
+          .widget<IconButton>(
+            find.byKey(const ValueKey('music-transport-pause')),
+          )
+          .onPressed,
+      isNotNull,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('music-transport-pause')));
+    await settle();
+    expect(fake.pauseCalls, 1);
+    expect(fake.playing, isFalse);
+
+    // seek 拖到 1.5s：运输条只发命令，播放头来自控制器回调。
+    tester
+        .widget<Slider>(find.byKey(const ValueKey('music-transport-seek')))
+        .onChanged!(1.5);
+    await settle();
+    expect(fake.seekCalls, <double>[1.5]);
+    expect(fake.position, closeTo(1.5, 1e-9));
+
+    await tester.tap(find.byKey(const ValueKey('music-transport-stop')));
+    await settle();
+    expect(fake.stopCalls, 1);
+    expect(fake.position, 0);
+
+    // 播放头/拍位回传 → 运输条读数联动。
+    fake.advance(1.25, beat: 5, bar: 2);
+    await settle();
+    expect(find.textContaining(' 第 2 小节'), findsOneWidget);
+    expect(find.textContaining('/ 0:03'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('没有播放计划：播放控件禁用并如实说明原因，不创建播放面', (tester) async {
+    await viewport(tester, const Size(1440, 900));
+    await store.save('stale', _score());
+    final _StaleSnapshotStore staleStore = _StaleSnapshotStore(
+      root: temp,
+      snapshot: _staleSnapshot(dir: temp, withPlan: false),
+    );
+    int factoryCalls = 0;
+    await tester.pumpWidget(
+      _app(
+        MusicWorkspace(
+          store: staleStore,
+          playbackFactory: (MusicScore score, MusicPlayPlan plan) {
+            factoryCalls += 1;
+            return _FakePlayback();
+          },
+        ),
+      ),
+    );
+    await _settle(tester);
+
+    for (final String key in <String>[
+      'music-transport-play',
+      'music-transport-pause',
+      'music-transport-stop',
+    ]) {
+      expect(
+        tester.widget<IconButton>(find.byKey(ValueKey<String>(key))).onPressed,
+        isNull,
+      );
+    }
+    expect(
+      find.byKey(const ValueKey('music-transport-reason')),
+      findsOneWidget,
+    );
+    expect(find.text('乐谱还没有编译出播放计划，先通过校验'), findsOneWidget);
+    expect(find.byKey(const ValueKey('music-playback-surface')), findsNothing);
+    expect(factoryCalls, 0, reason: '没有编译产物时不得构造播放面');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('校验未通过：播放控件禁用并说明「先修好」', (tester) async {
+    await viewport(tester, const Size(1440, 900));
+    await store.save('stale', _score());
+    final _StaleSnapshotStore staleStore = _StaleSnapshotStore(
+      root: temp,
+      snapshot: _staleSnapshot(dir: temp, verified: false),
+    );
+    int factoryCalls = 0;
+    await tester.pumpWidget(
+      _app(
+        MusicWorkspace(
+          store: staleStore,
+          playbackFactory: (MusicScore score, MusicPlayPlan plan) {
+            factoryCalls += 1;
+            return _FakePlayback();
+          },
+        ),
+      ),
+    );
+    await _settle(tester);
+
+    expect(
+      tester
+          .widget<IconButton>(
+            find.byKey(const ValueKey('music-transport-play')),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(find.textContaining('先修好再播放'), findsOneWidget);
+    expect(factoryCalls, 0, reason: '校验未通过时不得构造播放面');
     expect(tester.takeException(), isNull);
   });
 }

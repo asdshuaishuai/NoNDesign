@@ -3,7 +3,8 @@
 /// 2026-11-24 工作台独立适配（UI-4 首批）：音乐是**谱面优先**的工作台，左侧项目/
 /// 轨道、中部谱面、右侧检查器、底部运输条；共享外壳仍由外层提供。
 /// 本批：谱面只读；检查器提供最小编辑面（标题/速度、小节加删、四分音符/休止、
-/// 轨道音量/静音），编辑动作交给工作台保存。播放引擎尚未接线，不伪造播放按钮。
+/// 轨道音量/静音），编辑动作交给工作台保存；**播放能力已接线**（演奏页 + 底部
+/// 运输条播放/暂停/停止 + 播放头），但运输条只读播放控制器，不碰 `score.json`。
 library;
 
 import 'dart:math' as math;
@@ -15,6 +16,7 @@ import '../core/music/music_edit.dart';
 import '../core/music/music_project.dart';
 import '../core/music/music_score.dart';
 import '../core/theme.dart';
+import 'music_playback_surface.dart';
 
 /// 左侧项目列表（音乐项目库）。
 class MusicProjectList extends StatelessWidget {
@@ -880,53 +882,187 @@ class _VerificationBadge extends StatelessWidget {
   }
 }
 
-/// 底部运输条（只读：BPM/拍号/总拍数；播放引擎待批次，不放假按钮）。
+/// 底部运输条：播放/暂停/停止 + 播放头（进度、时间、拍位读数）。
+///
+/// 只读 [MusicPlaybackController]（生产是 WebView 演奏页，测试可注入 Fake），
+/// 因此不构造真 WebView 也能测完播放控制；运输条**不碰** `score.json`，播放
+/// 只是编译产物的执行面。
+///
+/// 不可播放时按钮禁用并给一句**如实**原因（没有播放计划 / 校验未通过 /
+/// 演奏页还没就绪 / 乐谱没有可播放的音符），不假装可点。
 class MusicTransportBar extends StatelessWidget {
-  const MusicTransportBar({super.key, required this.snapshot});
+  const MusicTransportBar({super.key, required this.snapshot, this.playback});
 
   final MusicProjectSnapshot? snapshot;
 
+  /// 播放控制器；null = 当前没有可用的播放面（按钮全部禁用）。
+  final MusicPlaybackController? playback;
+
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
+    final playback = this.playback;
+    if (playback == null) return _bar(context, null);
+    return ListenableBuilder(
+      listenable: playback,
+      builder: (BuildContext context, Widget? _) => _bar(context, playback),
+    );
+  }
+
+  /// 为什么现在不能播；null = 可以播。
+  String? _disabledReason(MusicPlaybackController? playback) {
+    final snapshot = this.snapshot;
+    if (snapshot == null) return '还没有打开的乐谱';
+    if (snapshot.playPlan == null) {
+      return '乐谱还没有编译出播放计划，先通过校验';
+    }
+    if (!snapshot.validation.verified) return '乐谱校验未通过，先修好再播放';
+    if (playback == null) return '演奏页还没有准备好';
+    final String error = playback.loadError;
+    if (!playback.ready) {
+      return error.isEmpty ? '演奏页准备中…' : error;
+    }
+    if (playback.duration <= 0) return '乐谱里还没有可播放的音符';
+    return null;
+  }
+
+  Widget _bar(BuildContext context, MusicPlaybackController? playback) {
+    final NonPalette p = context.palette;
     final MusicScore? score = snapshot?.score;
     final MusicPlayPlan? plan = snapshot?.playPlan;
-    final int totalTicks = plan?.totalTicks ?? 0;
-    final int ppq = plan?.ppq ?? 3840;
-    final int bpm = score?.tempo ?? 0;
-    final double seconds = bpm > 0 && ppq > 0
-        ? totalTicks * 60 / (bpm * ppq)
-        : 0;
+    final String? reason = _disabledReason(playback);
+    final bool enabled = reason == null;
+    final double duration =
+        playback?.duration ??
+        (plan == null ? 0 : musicPlaybackDurationSeconds(plan));
+    final double position = playback?.position ?? 0;
+    final bool playing = playback?.playing ?? false;
+    final double sliderMax = duration > 0 ? duration : 1;
+    final double sliderValue = position
+        .clamp(0.0, duration > 0 ? duration : 0.0)
+        .toDouble();
+    final int bar = playback?.bar ?? 0;
+    final String meta = score == null
+        ? '没有乐谱'
+        : '${score.tempo} BPM · ${score.timeSig.join('/')} · ${score.keySig}'
+              '${bar > 0 ? ' · 第 $bar 小节' : ''}';
     return Container(
       key: const ValueKey('music-transport'),
       height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         color: p.bgElevated,
         border: Border(top: BorderSide(color: p.line)),
       ),
       child: Row(
         children: <Widget>[
-          Icon(Icons.queue_music, size: 14, color: p.ink4),
+          IconButton(
+            key: const ValueKey('music-transport-play'),
+            tooltip: '播放',
+            onPressed: enabled && playback != null && !playing
+                ? playback.play
+                : null,
+            iconSize: 20,
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: Icon(Icons.play_arrow, color: p.ink3),
+          ),
+          IconButton(
+            key: const ValueKey('music-transport-pause'),
+            tooltip: '暂停',
+            onPressed: enabled && playback != null && playing
+                ? playback.pause
+                : null,
+            iconSize: 20,
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: Icon(Icons.pause, color: p.ink3),
+          ),
+          IconButton(
+            key: const ValueKey('music-transport-stop'),
+            tooltip: '停止',
+            onPressed: enabled && playback != null ? playback.stop : null,
+            iconSize: 20,
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: Icon(Icons.stop, color: p.ink3),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: enabled
+                ? SizedBox(
+                    height: 30,
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 2,
+                        thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 5,
+                        ),
+                        overlayShape: const RoundSliderOverlayShape(
+                          overlayRadius: 10,
+                        ),
+                      ),
+                      child: Slider(
+                        key: const ValueKey('music-transport-seek'),
+                        value: sliderValue,
+                        max: sliderMax,
+                        activeColor: p.accent,
+                        inactiveColor: p.line,
+                        onChanged: playback == null
+                            ? null
+                            : (double value) => playback.seek(value),
+                      ),
+                    ),
+                  )
+                : _reasonText(p, reason),
+          ),
           const SizedBox(width: 8),
           Text(
-            score == null
-                ? '没有乐谱'
-                : '${score.tempo} BPM · ${score.timeSig.join('/')} · ${score.keySig}',
-            style: TextStyle(fontSize: 11, color: p.ink3),
-          ),
-          const Spacer(),
-          Text(
-            plan == null
-                ? '—'
-                : '${seconds.toStringAsFixed(2)}s · $totalTicks tick · ppq $ppq',
+            enabled
+                ? '${formatMusicPlaybackTime(position)} / '
+                      '${formatMusicPlaybackTime(duration)}'
+                : '—',
             key: const ValueKey('music-transport-time'),
-            style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 10,
+              fontFamily: 'Menlo',
+              color: p.ink4,
+              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+            ),
           ),
-          const SizedBox(width: 12),
-          Text('播放引擎待批次', style: TextStyle(fontSize: 10, color: p.ink4)),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              meta,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: TextStyle(fontSize: 10, color: p.ink4),
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _reasonText(NonPalette p, String? reason) {
+    return Row(
+      key: const ValueKey('music-transport-reason'),
+      children: <Widget>[
+        Icon(Icons.info_outline, size: 13, color: p.warn),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            reason ?? '',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11, color: p.ink3),
+          ),
+        ),
+      ],
     );
   }
 }

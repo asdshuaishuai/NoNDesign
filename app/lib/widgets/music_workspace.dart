@@ -1,24 +1,37 @@
 /// 音乐工作台（编曲）：谱面优先的独立内容布局。
 ///
-/// 2026-11-24 工作台独立适配（UI-4）：左侧项目/轨道、中部只读谱面、右侧检查器、
-/// 底部运输条；共享外壳（TitleBar/Rail/右 chat/StatusBar）由外层提供。
-/// 当前批次只读——播放引擎/编辑器/Agent 工具族在后续批次，不伪造控制。
+/// 2026-11-24 工作台独立适配（UI-4）：左侧项目/轨道、中部谱面 + 演奏页、
+/// 右侧检查器、底部运输条；共享外壳（TitleBar/Rail/右 chat/StatusBar）由外层提供。
+/// 当前批次：谱面只读、检查器最小编辑；**播放面已接线**——有播放计划且校验
+/// 通过时把 [assembleMusicPlayer] 的页面接到 [MusicPlaybackSurface]，底部运输条
+/// 播放/暂停/停止 + 播放头；播放只读，绝不改 `score.json` 事实源。
 library;
+
+import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../core/music/music_compile.dart';
 import '../core/music/music_edit.dart';
+import '../core/music/music_player.dart';
 import '../core/music/music_project.dart';
 import '../core/music/music_score.dart';
 import '../core/theme.dart';
 import '../core/workbench_layout.dart';
+import 'music_playback_surface.dart';
 import 'music_workbench_panels.dart';
 
 class MusicWorkspace extends StatefulWidget {
-  const MusicWorkspace({super.key, this.store});
+  const MusicWorkspace({super.key, this.store, this.playbackFactory});
 
   /// 测试注入：指向临时目录的项目库；生产为 [MusicProjectStore.instance]。
   final MusicProjectStore? store;
+
+  /// 测试注入：把播放面换成 Fake 控制器，避免构造真 WebView。
+  ///
+  /// 生产为 null，走 [createDefaultMusicPlayback]（`webview_all` + 播放页）。
+  final MusicPlaybackController Function(MusicScore score, MusicPlayPlan plan)?
+  playbackFactory;
 
   @override
   State<MusicWorkspace> createState() => _MusicWorkspaceState();
@@ -35,6 +48,9 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   MusicProjectFailure? _failure;
   MusicInspectorStatus? _status;
   int _selectedTrack = 0;
+
+  /// 当前播放面控制器；null = 没有可播放的编译产物（按钮禁用并说明原因）。
+  MusicPlaybackController? _playback;
 
   @override
   void initState() {
@@ -65,6 +81,10 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   }
 
   Future<void> _open(String name) async {
+    // 切项目先卸播放面：旧页不能继续对着新项目响。
+    final MusicPlaybackController? previous = _playback;
+    _playback = null;
+    previous?.dispose();
     setState(() {
       _name = name;
       _failure = null;
@@ -74,7 +94,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     try {
       final snapshot = await _store.read(name);
       if (!mounted || _name != name) return;
-      setState(() => _snapshot = snapshot);
+      _bindSnapshot(snapshot);
     } on MusicProjectFailure catch (failure) {
       if (!mounted || _name != name) return;
       setState(() {
@@ -88,6 +108,35 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
         _failure = MusicProjectFailure('io_error', '$error');
       });
     }
+  }
+
+  /// 写入新 snapshot 并按它重建播放面。
+  ///
+  /// 有播放计划且校验通过才创建控制器；否则运输条禁用播放并如实说明原因。
+  /// 播放只读编译产物，不改 `score.json`。
+  void _bindSnapshot(MusicProjectSnapshot snapshot) {
+    final MusicPlaybackController? next = _createPlayback(snapshot);
+    final MusicPlaybackController? previous = _playback;
+    setState(() {
+      _snapshot = snapshot;
+      _playback = next;
+    });
+    previous?.dispose();
+    if (next != null) unawaited(next.start());
+  }
+
+  MusicPlaybackController? _createPlayback(MusicProjectSnapshot snapshot) {
+    final MusicPlayPlan? plan = snapshot.playPlan;
+    if (plan == null || !snapshot.validation.verified) return null;
+    final factory = widget.playbackFactory ?? createDefaultMusicPlayback;
+    return factory(snapshot.score, plan);
+  }
+
+  @override
+  void dispose() {
+    _playback?.dispose();
+    _playback = null;
+    super.dispose();
   }
 
   /// 执行一次编辑：先改模型，再经 [MusicProjectStore.save] 落盘，读完新 snapshot
@@ -149,10 +198,14 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
       entries = _entries;
     }
     if (!mounted || _name != name) return;
+    // 保存后按新编译产物重建播放面（旧页对应旧乐谱，必须换掉）。
+    final MusicPlaybackController? nextPlayback = _createPlayback(fresh);
+    final MusicPlaybackController? previousPlayback = _playback;
     setState(() {
       _entries = entries;
       _snapshot = fresh;
       _failure = null;
+      _playback = nextPlayback;
       _status = MusicInspectorStatus(
         message: validation.verified
             ? '$successMessage · 乐谱校验通过'
@@ -161,6 +214,8 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
         validation: validation,
       );
     });
+    previousPlayback?.dispose();
+    if (nextPlayback != null) unawaited(nextPlayback.start());
   }
 
   void _setStatus(MusicInspectorStatus status) {
@@ -233,7 +288,8 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
               return Column(
                 children: <Widget>[
                   Expanded(child: body),
-                  if (layout.bottomBar) MusicTransportBar(snapshot: _snapshot),
+                  if (layout.bottomBar)
+                    MusicTransportBar(snapshot: _snapshot, playback: _playback),
                 ],
               );
             },
@@ -354,13 +410,40 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
         ),
       );
     }
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: MusicPianoRoll(
-        score: snapshot.score,
-        playPlan: snapshot.playPlan,
-        selectedTrack: _selectedTrack,
-      ),
+    final MusicPlaybackController? playback = _playback;
+    if (playback == null) {
+      return Padding(
+        padding: const EdgeInsets.all(12),
+        child: MusicPianoRoll(
+          score: snapshot.score,
+          playPlan: snapshot.playPlan,
+          selectedTrack: _selectedTrack,
+        ),
+      );
+    }
+    // 谱面优先：谱面占大头，演奏页在下方给一块能看能点的画位；运输条在底部
+    // 驱动同一份播放控制器（播放头 / 错误都经它回调刷新）。
+    return Column(
+      children: <Widget>[
+        Expanded(
+          flex: 3,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+            child: MusicPianoRoll(
+              score: snapshot.score,
+              playPlan: snapshot.playPlan,
+              selectedTrack: _selectedTrack,
+            ),
+          ),
+        ),
+        Expanded(
+          flex: 2,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: MusicPlaybackSurface(playback: playback),
+          ),
+        ),
+      ],
     );
   }
 }
