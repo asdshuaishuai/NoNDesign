@@ -3527,6 +3527,23 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 设计面左/右栏临时折叠（双击面板与主区之间的分隔热区切换）。
+  ///
+  /// 只影响设计工作台外壳的面板显隐，不改变项目数据；与 [designCanvasFocus]
+  /// 正交（专注模式仍两侧全隐藏）。窄屏 sheet 形态不读这两个字段。
+  bool leftPanelCollapsed = false;
+  bool rightPanelCollapsed = false;
+
+  void toggleLeftPanel() {
+    leftPanelCollapsed = !leftPanelCollapsed;
+    notifyListeners();
+  }
+
+  void toggleRightPanel() {
+    rightPanelCollapsed = !rightPanelCollapsed;
+    notifyListeners();
+  }
+
   /// 双面组件的数据面（设计验证原型流程）：阶段条 + 最近一次结果卡。
   List<WorkspaceStage> designPrototypeStages = const <WorkspaceStage>[];
   DesignPrototypeDocument? designPrototypeResult;

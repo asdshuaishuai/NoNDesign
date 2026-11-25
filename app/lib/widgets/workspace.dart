@@ -171,6 +171,7 @@ class _WorkspaceState extends State<Workspace> {
                 // 插件工作台有自己的内容和工具条）；左轨仍由共享外壳提供。
                 final showLeft =
                     !store.designCanvasFocus &&
+                    !store.leftPanelCollapsed &&
                     designLayout.left == PanelPolicy.docked &&
                     pluginView == null;
                 final wide = designLayout.isWide;
@@ -189,6 +190,21 @@ class _WorkspaceState extends State<Workspace> {
                 final leftAsSheet =
                     !showLeft && leftPaneSafe && pluginView == null;
                 final rightAsSheet = widget.showRightPanel;
+                // 设计面左右面板与主区之间的 1px 分隔边界给约 8px 热区：双击
+                // 折叠该侧面板、再次双击恢复。只在「全屏壳 + 设计面 + 该侧本来
+                // 可停靠」时挂载——窄屏 sheet 形态与嵌入宿主保持原样（它们已有
+                // 自己的窄条/底部面板入口）。
+                final leftDockEdge =
+                    !widget.embedded &&
+                    pluginView == null &&
+                    designLayout.left == PanelPolicy.docked &&
+                    !store.designCanvasFocus;
+                final rightDockEdge =
+                    !widget.embedded &&
+                    pluginView == null &&
+                    designLayout.isWide &&
+                    widget.showRightPanel &&
+                    !store.designCanvasFocus;
                 return WorkspaceChrome(
                   titleBar: widget.embedded
                       ? null
@@ -203,22 +219,29 @@ class _WorkspaceState extends State<Workspace> {
                   rail: showRail
                       ? (widget.embedded
                             ? const _EmbeddedRail()
-                            : Rail(
-                                // 窄屏没有左栏：点「历史」用底部面板给出
-                                // 可见结果，而不是只把图标点亮（nav-4）。
-                                onHistory: showLeft
-                                    ? null
-                                    : () => _openLeftSheet(context),
+                            : _railWithRestore(
+                                store,
+                                Rail(
+                                  // 窄屏没有左栏：点「历史」用底部面板给出
+                                  // 可见结果，而不是只把图标点亮（nav-4）。
+                                  onHistory: showLeft
+                                      ? null
+                                      : () => _openLeftSheet(context),
+                                ),
                               ))
                       : null,
-                  leftPanel: showLeft && leftPaneSafe
-                      ? const LeftPanel()
-                      : null,
+                  leftPanel: leftDockEdge
+                      ? _leftPanelWithDivider(store)
+                      : (showLeft && leftPaneSafe ? const LeftPanel() : null),
                   main: _center(store, pluginView),
-                  rightPanel:
-                      wide && widget.showRightPanel && !store.designCanvasFocus
-                      ? const WorkspaceRightPanel()
-                      : null,
+                  rightPanel: rightDockEdge
+                      ? _rightPanelWithDivider(store)
+                      : (wide &&
+                                widget.showRightPanel &&
+                                !store.designCanvasFocus &&
+                                !store.rightPanelCollapsed
+                            ? const WorkspaceRightPanel()
+                            : null),
                   narrowBar:
                       !store.designCanvasFocus &&
                           !wide &&
@@ -313,6 +336,41 @@ class _WorkspaceState extends State<Workspace> {
     );
   }
 
+  /// 左栏折叠后仍可从左侧图标轨恢复（不要「面板收起了、入口也没了」的死路）：
+  /// 折叠态下按轨道任一图标即先展开左栏，原本的面板/视图切换照常继续。
+  Widget _railWithRestore(AppStore store, Widget rail) {
+    if (!store.leftPanelCollapsed) return rail;
+    return Listener(onPointerDown: (_) => store.toggleLeftPanel(), child: rail);
+  }
+
+  /// 设计面左栏 + 右缘 8px 分隔热区；折叠时只留热区（仍可双击恢复）。
+  Widget _leftPanelWithDivider(AppStore store) {
+    final divider = _PanelDivider(
+      dividerKey: const ValueKey('design-left-panel-divider'),
+      tooltip: store.leftPanelCollapsed ? '双击展开左侧面板' : '双击折叠左侧面板',
+      onDoubleTap: store.toggleLeftPanel,
+    );
+    if (store.leftPanelCollapsed) return divider;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [const LeftPanel(), divider],
+    );
+  }
+
+  /// 设计面右栏 + 左缘 8px 分隔热区；折叠时只留热区（仍可双击恢复）。
+  Widget _rightPanelWithDivider(AppStore store) {
+    final divider = _PanelDivider(
+      dividerKey: const ValueKey('design-right-panel-divider'),
+      tooltip: store.rightPanelCollapsed ? '双击展开右侧面板' : '双击折叠右侧面板',
+      onDoubleTap: store.toggleRightPanel,
+    );
+    if (store.rightPanelCollapsed) return divider;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [divider, const WorkspaceRightPanel()],
+    );
+  }
+
   Widget _center(AppStore store, Widget? pluginView) {
     // 视图切换过渡：fade + 8px 上滑（180ms）。KeyedSubtree 按 view 键控，
     // 同视图内 store 变化不会触发重播。
@@ -388,6 +446,42 @@ class _WorkspaceState extends State<Workspace> {
   Future<void> _openPath(String path) async {
     await openProjectFlow(context, path);
     if (mounted) _focus.requestFocus();
+  }
+}
+
+/// 设计面左右面板与主区之间的 8px 分隔热区（双击折叠/恢复该侧面板）。
+///
+/// 只占边界上一条窄带（不是铺满全屏的 GestureDetector）：画布其它区域的点击
+/// 照常落到 CanvasView；热区自身只认双击，单击不触发任何操作。悬停显示左右
+/// 分隔光标，提示这里可以双击收放面板。
+class _PanelDivider extends StatelessWidget {
+  const _PanelDivider({
+    required this.dividerKey,
+    required this.tooltip,
+    required this.onDoubleTap,
+  });
+
+  /// 热区宽度（约 8px：1px 分隔边界两侧都能点到）。
+  static const double hitWidth = 8;
+
+  final Key dividerKey;
+  final String tooltip;
+  final VoidCallback onDoubleTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: MouseRegion(
+        key: dividerKey,
+        cursor: SystemMouseCursors.resizeLeftRight,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onDoubleTap: onDoubleTap,
+          child: const SizedBox(width: hitWidth, height: double.infinity),
+        ),
+      ),
+    );
   }
 }
 
