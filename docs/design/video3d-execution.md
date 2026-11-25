@@ -1,6 +1,6 @@
 # 3D 视频执行面设计（three-live）
 
-> 状态：**设计草案（2026-11-25，D2）· 未施工**。目标是把 `scene3d.json` +
+> 状态：**设计草案（D2）已落项目层/预览页编译器/工作台（2026-11-25，v1 为确定性 Canvas2D 预览，真 three 渲染与真机 smoke 待后续）**。目标是把 `scene3d.json` +
 > `screenplay3d.json` 确定性渲染成可审阅的 3D 短片，**不引入新引擎**。
 >
 > 关联：[video-tracks-adr.md](video-tracks-adr.md) · [video3d-contract.md](video3d-contract.md) ·

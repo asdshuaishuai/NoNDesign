@@ -1,6 +1,6 @@
 # 3D 视频数据契约 v1（草案）
 
-> 状态：**设计草案（2026-11-25，D3）· 未施工**。`scene3d.json` / `screenplay3d.json`
+> 状态：**设计草案（D3）已实现契约核心 + 项目存储 + 预览页编译器 + 首个工作台（2026-11-25，只读预览）**。`scene3d.json` / `screenplay3d.json`
 > 是 3D 视频项目的事实源；产物（HTML/帧/证据）是派生。agent 只写 JSON，不写 JS/React。
 >
 > 关联：[video3d-execution.md](video3d-execution.md) · [video-tracks-adr.md](video-tracks-adr.md) ·
