@@ -1,15 +1,18 @@
-/// 音乐五线谱只读视图 + 确定性排版纯函数（task-11）。
+/// 音乐五线谱视图 + 确定性排版/命中测试纯函数（task-11 / task-14）。
 ///
-/// 本文件只有两层：
+/// 本文件三层：
 /// * [musicStaffLayout]：把 [MusicScore] 换算成可断言的几何模型（行 rows →
 ///   小节 columns → 音符 notes）。纯函数——不写事实源、不读时钟、不用随机源；
 ///   同一输入两次调用结果 `==`，`toJsonString()` 字节相同。
+/// * [staffHitTest]：把可视坐标（含缩放）换算回排版坐标，命中某行/小节/五线位置
+///   → [MusicStaffHit]（位置 + 换算音高/鼓件）。纯函数，越界/空白安全返回 null。
 /// * [MusicStaffView]：只消费上面布局的 `CustomPainter`（五线、谱号、符头/符干/
 ///   符尾、附点、小节线、拍号/调号文本、连音线占位），支持 50–150% 缩放与水平
-///   滚动。只读：**不伪造播放头**，也不接收播放控制器；播放语义仍归
-///   `MusicPianoRoll` + `MusicPlaybackSurface`。
+///   滚动。默认只读：**不伪造播放头**，也不接收播放控制器；播放语义仍归
+///   `MusicPianoRoll` + `MusicPlaybackSurface`。传入 [MusicStaffView.onNoteTap] 时
+///   点击谱面只回调命中结果，视图本身仍不写事实源（落盘/校验由工作台经编辑出口做）。
 ///
-/// 语义边界：布局只做「记谱坐标 → 画布几何」的确定性换算，不改音高/时值/关系。
+/// 语义边界：布局/命中只做「记谱坐标 ↔ 画布几何」的确定性换算，不改音高/时值/关系。
 /// 空轨道、空小节（整小节休止）、非法轨道索引、极端宽度都按空安全退化，不抛异常。
 library;
 
@@ -58,6 +61,9 @@ const double kMusicStaffStemLength = 28.0;
 const int kMusicStaffZoomMinPercent = 50;
 const int kMusicStaffZoomMaxPercent = 150;
 const int kMusicStaffZoomStepPercent = 10;
+
+/// 点击命中的五线垂直容差：底线/顶线外 ±2 个线间距（够到加线音符；再远算空白）。
+const double kMusicStaffHitLineTolerance = kMusicStaffLineSpacing * 2;
 
 // ---------------------------------------------------------------------------
 // 纯函数：MusicScore → 可断言几何
@@ -277,28 +283,59 @@ int musicStaffStepForEvent(MusicEvent event, String clef) {
     'A': 5,
     'B': 6,
   };
-  const Map<String, int> clefBottomDiatonic = <String, int>{
-    'treble': 30, // E4 = 4*7 + 2
-    'bass': 18, // G2 = 2*7 + 4
-  };
   final int step = stepIndex[event.step.toUpperCase()] ?? 0;
   final int diatonic = event.octave * 7 + step;
-  final int bottom = clefBottomDiatonic[clef] ?? clefBottomDiatonic['treble']!;
+  final int bottom =
+      _clefBottomDiatonic[clef] ?? _clefBottomDiatonic['treble']!;
   return diatonic - bottom;
 }
 
+/// 五线底线对应的全音阶绝对位置：高音谱号 E4 = 4*7+2，低音谱号 G2 = 2*7+4。
+const Map<String, int> _clefBottomDiatonic = <String, int>{
+  'treble': 30,
+  'bass': 18,
+};
+
+/// [musicStaffStepForEvent] 的逆映射：半间距偏移 → 记谱音高（不应用调号）。
+///
+/// 打击谱号没有音高语义，返回占位 C4；鼓件名由 [musicStaffDrumForStep] 决定。
+/// 越界偏移（八度 <0 或 >9）仍照实返回，由调用方决定是否算安全命中。
+({String step, int octave}) musicStaffPitchForStep(int staffStep, String clef) {
+  if (clef == 'percussion') return (step: 'C', octave: 4);
+  const List<String> steps = <String>['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+  final int diatonic =
+      staffStep + (_clefBottomDiatonic[clef] ?? _clefBottomDiatonic['treble']!);
+  return (step: steps[diatonic % 7], octave: diatonic ~/ 7);
+}
+
 /// 鼓件名 → 打击谱号上的半间距偏移（底线上方：kick 最低，crash 最高）。
-int musicStaffDrumStep(String drum) {
-  const Map<String, int> drumSteps = <String, int>{
-    'kick': 0,
-    'tom': 2,
-    'snare': 4,
-    'openhat': 6,
-    'hihat': 8,
-    'ride': 10,
-    'crash': 12,
-  };
-  return drumSteps[drum] ?? 4;
+///
+/// 顺序即音高顺序（[musicStaffDrumForStep] 的「等距取低」依赖这个稳定顺序）。
+const Map<String, int> _drumSteps = <String, int>{
+  'kick': 0,
+  'tom': 2,
+  'snare': 4,
+  'openhat': 6,
+  'hihat': 8,
+  'ride': 10,
+  'crash': 12,
+};
+
+int musicStaffDrumStep(String drum) => _drumSteps[drum] ?? 4;
+
+/// [musicStaffDrumStep] 的逆映射：半间距偏移 → 最近的鼓件名。
+///
+/// 两个鼓件等距时取音高更低（更靠下）的那个，保证命中换算确定。
+String musicStaffDrumForStep(int staffStep) {
+  String nearest = 'snare';
+  int bestDistance = 1 << 30;
+  for (final MapEntry<String, int> entry in _drumSteps.entries) {
+    final int distance = (entry.value - staffStep).abs();
+    if (distance >= bestDistance) continue;
+    bestDistance = distance;
+    nearest = entry.key;
+  }
+  return nearest;
 }
 
 /// 符尾数量：四分及以上 0，八分 1，十六分 2，三十二分 3（上限 4）。
@@ -801,6 +838,190 @@ bool _listEquals<T>(List<T> a, List<T> b) {
 }
 
 // ---------------------------------------------------------------------------
+// 命中测试纯函数：可视坐标（含缩放）→ 行/小节/五线位置 → 音高
+// ---------------------------------------------------------------------------
+
+/// 五线谱点击命中结果（task-14）。
+///
+/// 只描述几何命中：轨道/小节 + 五线半间距偏移 + 换算出的记谱音高。命中已有音符
+/// 时额外给 [eventIndex]/[eventId]（供后续「点音符」交互；本次插入不依赖它）。
+@immutable
+final class MusicStaffHit {
+  const MusicStaffHit({
+    required this.rowIndex,
+    required this.trackIndex,
+    required this.measureIndex,
+    required this.clef,
+    required this.staffStep,
+    required this.step,
+    required this.alter,
+    required this.octave,
+    this.drum = '',
+    this.eventIndex,
+    this.eventId,
+  });
+
+  /// 排版行下标（[MusicStaffLayout.rows] 中的位置）。
+  final int rowIndex;
+
+  final int trackIndex;
+  final int measureIndex;
+
+  /// 'treble' / 'bass' / 'percussion'。
+  final String clef;
+
+  /// 相对五线底线的半间距偏移（0 = 底线；正数向上）。
+  final int staffStep;
+
+  /// 换算出的记谱音高（打击谱号是占位 C4，真实音色看 [drum]）。
+  final String step;
+  final int alter;
+  final int octave;
+
+  /// 打击谱号命中的鼓件名（'' = 非鼓轨）。
+  final String drum;
+
+  /// 命中已有音符时的事件位置；空白（或未命中符头）为 null。
+  final int? eventIndex;
+  final String? eventId;
+
+  bool get isPercussion => clef == 'percussion';
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'rowIndex': rowIndex,
+    'trackIndex': trackIndex,
+    'measureIndex': measureIndex,
+    'clef': clef,
+    'staffStep': staffStep,
+    'step': step,
+    'alter': alter,
+    'octave': octave,
+    'drum': drum,
+    'eventIndex': eventIndex,
+    'eventId': eventId,
+  };
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is MusicStaffHit &&
+        other.rowIndex == rowIndex &&
+        other.trackIndex == trackIndex &&
+        other.measureIndex == measureIndex &&
+        other.clef == clef &&
+        other.staffStep == staffStep &&
+        other.step == step &&
+        other.alter == alter &&
+        other.octave == octave &&
+        other.drum == drum &&
+        other.eventIndex == eventIndex &&
+        other.eventId == eventId;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    rowIndex,
+    trackIndex,
+    measureIndex,
+    clef,
+    staffStep,
+    step,
+    alter,
+    octave,
+    drum,
+    eventIndex,
+    eventId,
+  );
+
+  @override
+  String toString() =>
+      'MusicStaffHit(track: $trackIndex, measure: $measureIndex, '
+      'staffStep: $staffStep, ${isPercussion ? drum : '$step$octave'})';
+}
+
+/// 把可视坐标 [local]（已含 [zoom]，即 GestureDetector 的 `localPosition`）换算回
+/// [layout] 的排版坐标，命中一行/一小节/一个五线位置。
+///
+/// 安全返回 null 的情形：布局没有行、坐标/缩放非有限、落在行外、落在行首
+/// 谱号+调号+拍号区或小节区外、距五线超过 [kMusicStaffHitLineTolerance]、以及
+/// 换算出的八度超出 0–9。命中空白/越界绝不抛异常。
+MusicStaffHit? staffHitTest(
+  MusicStaffLayout layout,
+  Offset local, {
+  double zoom = 1.0,
+}) {
+  if (layout.rows.isEmpty) return null;
+  if (!local.dx.isFinite || !local.dy.isFinite) return null;
+  if (!zoom.isFinite || zoom <= 0) return null;
+  final Offset point = local / zoom;
+  MusicStaffRow? row;
+  for (final MusicStaffRow candidate in layout.rows) {
+    if (point.dy >= candidate.top &&
+        point.dy <= candidate.top + candidate.height) {
+      row = candidate;
+      break;
+    }
+  }
+  if (row == null) return null;
+  // 行首谱号/调号/拍号区不是小节，点它按空白处理（不猜小节）。
+  final double contentLeft = row.contentLeft;
+  final double contentRight = row.contentLeft + row.systemWidth;
+  if (point.dx < contentLeft || point.dx > contentRight) return null;
+  MusicStaffColumn? column;
+  for (final MusicStaffColumn candidate in row.columns) {
+    if (point.dx >= candidate.x && point.dx < candidate.x + candidate.width) {
+      column = candidate;
+      break;
+    }
+  }
+  if (column == null) {
+    // 最右边界（最后一个列右沿）落到最后一个小节；再往右是空白。
+    if (point.dx != contentRight || row.columns.isEmpty) return null;
+    column = row.columns.last;
+  }
+  final double topLimit = row.staffTop - kMusicStaffHitLineTolerance;
+  final double bottomLimit = row.staffBottom + kMusicStaffHitLineTolerance;
+  if (point.dy < topLimit || point.dy > bottomLimit) return null;
+  // 五线半间距 → 最近的线/间（round 把点击吸附到最近的半间距）。
+  final int staffStep = ((row.staffBottom - point.dy) / (row.lineSpacing / 2))
+      .round();
+  final String clef = row.clef;
+  final bool percussion = clef == 'percussion';
+  final ({String step, int octave}) pitch = musicStaffPitchForStep(
+    staffStep,
+    clef,
+  );
+  if (!percussion && (pitch.octave < 0 || pitch.octave > 9)) return null;
+  int? eventIndex;
+  String? eventId;
+  for (final MusicStaffNote note in column.notes) {
+    if (note.isRest) continue;
+    final Rect head = Rect.fromCenter(
+      center: Offset(note.headX + kMusicStaffHeadWidth / 2, note.headY),
+      width: kMusicStaffHeadWidth * 1.6,
+      height: row.lineSpacing * 1.2,
+    );
+    if (!head.contains(point)) continue;
+    eventIndex = note.eventIndex;
+    eventId = note.eventId;
+    break;
+  }
+  return MusicStaffHit(
+    rowIndex: row.index,
+    trackIndex: row.trackIndex,
+    measureIndex: column.measureIndex,
+    clef: clef,
+    staffStep: staffStep,
+    step: pitch.step,
+    alter: 0,
+    octave: pitch.octave,
+    drum: percussion ? musicStaffDrumForStep(staffStep) : '',
+    eventIndex: eventIndex,
+    eventId: eventId,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 绘制层：只消费 MusicStaffLayout（不重算几何）
 // ---------------------------------------------------------------------------
 
@@ -1285,16 +1506,18 @@ class _MusicStaffPainter extends CustomPainter {
 // 只读视图（缩放 50–150% + 水平滚动）
 // ---------------------------------------------------------------------------
 
-/// 五线谱只读视图：默认显示乐谱全部轨道，由 [trackIndex] 可只看一条轨道。
+/// 五线谱视图：默认显示乐谱全部轨道，由 [trackIndex] 可只看一条轨道。
 ///
-/// 只读契约：不写 `score.json`、不改播放面、不画播放头；左侧轨道列表的选中状态
-/// 只通过 [selectedTrackIndex] 做行底色强调。
+/// 默认只读：不写 `score.json`、不改播放面、不画播放头；左侧轨道列表的选中状态
+/// 只通过 [selectedTrackIndex] 做行底色强调。给出 [onNoteTap] 后点击谱面只回调
+/// [MusicStaffHit]，落盘/校验仍由调用方经编辑出口完成（视图自身不写事实源）。
 class MusicStaffView extends StatefulWidget {
   const MusicStaffView({
     super.key,
     required this.score,
     this.trackIndex,
     this.selectedTrackIndex,
+    this.onNoteTap,
   });
 
   final MusicScore score;
@@ -1304,6 +1527,9 @@ class MusicStaffView extends StatefulWidget {
 
   /// 只用于选中行的视觉强调（不改变排版几何）。
   final int? selectedTrackIndex;
+
+  /// 点击谱面命中的回调；null = 保持只读（不装手势、无点击行为）。
+  final ValueChanged<MusicStaffHit>? onNoteTap;
 
   @override
   State<MusicStaffView> createState() => _MusicStaffViewState();
@@ -1353,7 +1579,7 @@ class _MusicStaffViewState extends State<MusicStaffView> {
                 final double zoom = _zoomPercent / 100;
                 final double paintWidth = layout.width * zoom;
                 final double paintHeight = layout.height * zoom;
-                final Widget painted = CustomPaint(
+                final Widget canvasPaint = CustomPaint(
                   size: Size(paintWidth, paintHeight),
                   painter: _MusicStaffPainter(
                     layout: layout,
@@ -1362,6 +1588,23 @@ class _MusicStaffViewState extends State<MusicStaffView> {
                     highlightTrackIndex: widget.selectedTrackIndex,
                   ),
                 );
+                final ValueChanged<MusicStaffHit>? onNoteTap = widget.onNoteTap;
+                // 只在给了回调时装手势：只读路径（onNoteTap == null）行为不变。
+                final Widget painted = onNoteTap == null
+                    ? canvasPaint
+                    : GestureDetector(
+                        key: const ValueKey('music-staff-hit'),
+                        behavior: HitTestBehavior.opaque,
+                        onTapUp: (TapUpDetails details) {
+                          final MusicStaffHit? hit = staffHitTest(
+                            layout,
+                            details.localPosition,
+                            zoom: zoom,
+                          );
+                          if (hit != null) onNoteTap(hit);
+                        },
+                        child: canvasPaint,
+                      );
                 if (!constraints.hasBoundedHeight) {
                   return SingleChildScrollView(
                     key: const ValueKey('music-staff-scroll'),
@@ -1399,6 +1642,7 @@ class _MusicStaffViewState extends State<MusicStaffView> {
 
   Widget _header(NonPalette p) {
     final String title = widget.score.title.trim();
+    final String suffix = widget.onNoteTap == null ? '五线谱只读' : '五线谱 · 点击插入音符';
     return SizedBox(
       height: 40,
       child: Padding(
@@ -1409,7 +1653,7 @@ class _MusicStaffViewState extends State<MusicStaffView> {
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                title.isEmpty ? '未命名乐谱 · 五线谱只读' : '$title · 五线谱只读',
+                title.isEmpty ? '未命名乐谱 · $suffix' : '$title · $suffix',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 12, color: p.ink2),

@@ -39,6 +39,24 @@ MusicScore _score({String title = '练习曲', int tracks = 1}) => MusicScore(
   ],
 );
 
+/// 空白小节（整小节休止）：点击谱面应在原小节内追加并休止补齐。
+MusicScore _emptyScore() => MusicScore(
+  title: '空白小节',
+  tempo: 96,
+  timeSig: const <int>[4, 4],
+  keySig: 'C',
+  tracks: <MusicTrack>[
+    MusicTrack(
+      id: 'track_0',
+      name: '主旋律',
+      instrument: 'piano',
+      measures: <MusicMeasure>[
+        MusicMeasure(id: 'm1', events: const <MusicEvent>[]),
+      ],
+    ),
+  ],
+);
+
 Widget _app(Widget child) => MaterialApp(
   theme: AppTheme.build(dark: true),
   home: Scaffold(body: child),
@@ -217,7 +235,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
-  testWidgets('桌面：项目/轨道/只读谱面/检查器/运输条同一内容布局', (tester) async {
+  testWidgets('桌面：项目/轨道/谱面/检查器/运输条同一内容布局', (tester) async {
     await viewport(tester, const Size(1440, 900));
     await store.save('study', _score(tracks: 2));
     await tester.pumpWidget(_app(MusicWorkspace(store: store)));
@@ -237,13 +255,13 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('中部谱面默认五线谱（只读），可切到钢琴卷帘再切回；缩放夹在 50–150%', (tester) async {
+  testWidgets('中部谱面默认五线谱（可点击插入音符），可切到钢琴卷帘再切回；缩放夹在 50–150%', (tester) async {
     await viewport(tester, const Size(1440, 900));
     await store.save('study', _score());
     await tester.pumpWidget(_app(MusicWorkspace(store: store)));
     await _settle(tester);
 
-    // 默认 = 五线谱只读；钢琴卷帘不并存（切换是替换，不是叠层）。
+    // 默认 = 五线谱（工作台里可点击插入音符）；钢琴卷帘不并存（切换是替换，不是叠层）。
     expect(find.byKey(const ValueKey('music-staff-view')), findsOneWidget);
     expect(find.byKey(const ValueKey('music-piano-roll')), findsNothing);
     expect(find.byKey(const ValueKey('music-view-toggle')), findsOneWidget);
@@ -591,6 +609,65 @@ void main() {
     expect(find.text('乐谱还没有编译出播放计划，先通过校验'), findsOneWidget);
     expect(find.byKey(const ValueKey('music-playback-surface')), findsNothing);
     expect(factoryCalls, 0, reason: '没有编译产物时不得构造播放面');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('五线谱点击 → 插入四分音符 → 保存 → 重读（满小节新开小节）', (tester) async {
+    await viewport(tester, const Size(1440, 900));
+    await store.save('study', _score());
+    await tester.pumpWidget(_app(MusicWorkspace(store: store)));
+    await _settle(tester);
+
+    final Finder staffHit = find.byKey(const ValueKey('music-staff-hit'));
+    expect(staffHit, findsOneWidget, reason: '有可编辑回调时谱面应可点');
+    // 高音谱号单行：row0 staffBottom=70、半间距 4px，local (80, 50) = 第三间 C5。
+    final Offset tapPoint = tester.getTopLeft(staffHit) + const Offset(80, 50);
+    await tester.tapAt(tapPoint);
+    await _settle(tester);
+    await _settle(tester);
+
+    final MusicProjectSnapshot reread = await store.read('study');
+    final MusicTrack track = reread.score.tracks.single;
+    expect(track.measures, hasLength(2), reason: '原小节整小节已满，点击追加应新开小节');
+    expect(track.measures.first.events, hasLength(1), reason: '原小节不被改动');
+    final MusicMeasure added = track.measures.last;
+    expect(added.events, hasLength(2));
+    expect(added.events.first.isRest, isFalse);
+    expect(added.events.first.step, 'C');
+    expect(added.events.first.octave, 5);
+    expect(added.events.first.durNum, 1);
+    expect(added.events.first.durDen, 4);
+    expect(added.events.last.isRest, isTrue, reason: '新小节按拍号休止补齐');
+    expect(reread.validation.verified, isTrue);
+    expect(reread.playPlan, isNotNull);
+    // 状态行走既有编辑出口的结果文案，不伪造播放/成功。
+    expect(find.text('已插入 C5 四分音符 · 乐谱校验通过'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('五线谱点击空白小节 → 原地追加并休止补齐（不新开小节）', (tester) async {
+    await viewport(tester, const Size(1440, 900));
+    await store.save('study', _emptyScore());
+    await tester.pumpWidget(_app(MusicWorkspace(store: store)));
+    await _settle(tester);
+
+    final Finder staffHit = find.byKey(const ValueKey('music-staff-hit'));
+    expect(staffHit, findsOneWidget);
+    final Offset tapPoint = tester.getTopLeft(staffHit) + const Offset(80, 50);
+    await tester.tapAt(tapPoint);
+    await _settle(tester);
+    await _settle(tester);
+
+    final MusicProjectSnapshot reread = await store.read('study');
+    final MusicTrack track = reread.score.tracks.single;
+    expect(track.measures, hasLength(1), reason: '空小节放得下，不新开');
+    final MusicMeasure measure = track.measures.single;
+    expect(measure.events, hasLength(2));
+    expect(measure.events.first.step, 'C');
+    expect(measure.events.first.octave, 5);
+    expect(measure.events.last.isRest, isTrue);
+    expect(reread.validation.verified, isTrue, reason: '休止补齐后小节时值等于拍号');
+    expect(find.textContaining('已插入 C5 四分音符'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

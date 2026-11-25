@@ -2,7 +2,8 @@
 ///
 /// 2026-11-24 工作台独立适配（UI-4）：左侧项目/轨道、中部谱面 + 演奏页、
 /// 右侧检查器、底部运输条；共享外壳（TitleBar/Rail/右 chat/StatusBar）由外层提供。
-/// 当前批次：谱面只读、检查器最小编辑；**播放面已接线**——有播放计划且校验
+/// 当前批次：五线谱点击插入音符（默认四分音符）与检查器最小编辑都走同一编辑
+/// 出口；**播放面已接线**——有播放计划且校验
 /// 通过时把 [assembleMusicPlayer] 的页面接到 [MusicPlaybackSurface]，底部运输条
 /// 播放/暂停/停止 + 播放头；播放只读，绝不改 `score.json` 事实源。
 library;
@@ -16,6 +17,7 @@ import '../core/music/music_edit.dart';
 import '../core/music/music_player.dart';
 import '../core/music/music_project.dart';
 import '../core/music/music_score.dart';
+import '../core/music/music_staff_edit.dart';
 import '../core/theme.dart';
 import '../core/workbench_layout.dart';
 import 'music_playback_surface.dart';
@@ -78,6 +80,9 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
 
   /// 当前播放面控制器；null = 没有可播放的编译产物（按钮禁用并说明原因）。
   MusicPlaybackController? _playback;
+
+  /// 五线谱点击插入的串行闸：避免快速连点都用同一份旧 snapshot 覆盖彼此。
+  bool _staffTapBusy = false;
 
   /// initState 从 [musicLoadOnOpen] 取到的开局项目名（只消费一次）。
   String? _pendingOpen;
@@ -272,6 +277,46 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   void _setStatus(MusicInspectorStatus status) {
     if (!mounted) return;
     setState(() => _status = status);
+  }
+
+  /// 五线谱点击：把命中的音高/鼓件追加到对应小节（默认四分音符），再走
+  /// [_applyEdit] 的「改模型 → save → 重读 → 刷新」链路。
+  ///
+  /// 点哪一行就把选中轨道切到那一条（当前选中轨道 = 点击轨道）；视图只回调命中，
+  /// 不改事实源。失败由 [_applyEdit] 显性显示，不伪造播放/成功。
+  void _onStaffNoteTap(MusicStaffHit hit) {
+    final MusicProjectSnapshot? snapshot = _snapshot;
+    if (snapshot == null) return;
+    if (hit.trackIndex < 0 || hit.trackIndex >= snapshot.score.tracks.length) {
+      return;
+    }
+    if (_staffTapBusy) return;
+    if (_selectedTrack != hit.trackIndex) {
+      setState(() => _selectedTrack = hit.trackIndex);
+    }
+    final MusicTrack track = snapshot.score.tracks[hit.trackIndex];
+    final String? drum = track.instrument == 'drums' ? hit.drum : null;
+    final String successMessage = musicStaffInsertMessage(
+      step: hit.step,
+      alter: hit.alter,
+      octave: hit.octave,
+      drum: drum,
+    );
+    _staffTapBusy = true;
+    unawaited(
+      _applyEdit(
+        (MusicScore score) => appendNoteAt(
+          score,
+          trackIndex: hit.trackIndex,
+          step: hit.step,
+          alter: hit.alter,
+          octave: hit.octave,
+          targetMeasureIndex: hit.measureIndex,
+          drum: drum,
+        ),
+        successMessage,
+      ).whenComplete(() => _staffTapBusy = false),
+    );
   }
 
   @override
@@ -525,7 +570,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
               const Spacer(),
               Flexible(
                 child: Text(
-                  _staffView ? '只读五线谱 · 不写乐谱' : '只读卷帘 · 不写乐谱',
+                  _staffView ? '点击谱面插入音符 · 默认四分音符' : '只读卷帘 · 不写乐谱',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.right,
@@ -540,6 +585,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
               ? MusicStaffView(
                   score: snapshot.score,
                   selectedTrackIndex: _selectedTrack,
+                  onNoteTap: _onStaffNoteTap,
                 )
               : MusicPianoRoll(
                   score: snapshot.score,
