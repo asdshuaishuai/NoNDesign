@@ -1,11 +1,27 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+// 平台接口桩直接从平台接口库取（测试专用传递依赖）。
+// ignore: depend_on_referenced_packages
+import 'package:webview_platform_interface/webview_platform_interface.dart';
+
+import 'package:nondesign/core/capability_hub.dart';
 import 'package:nondesign/core/creative/creative_plan.dart';
 import 'package:nondesign/core/creative/creative_schema.dart';
 import 'package:nondesign/core/creative/creative_spec.dart';
+import 'package:nondesign/core/models.dart';
+import 'package:nondesign/core/platform_capabilities.dart';
+import 'package:nondesign/core/store.dart';
+import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/core/three/three_workspace.dart';
+import 'package:nondesign/core/three_service.dart';
+import 'package:nondesign/core/toast_service.dart';
+import 'package:nondesign/widgets/three_workspace.dart';
 
 import 'helpers/creative_fixtures.dart';
 
@@ -21,6 +37,187 @@ Map<String, dynamic> _legacySpec() => <String, dynamic>{
   ],
   'acceptance': <String>['行星在场', '环可见 ≤2mm'],
 };
+
+// ---- 视口控制浮层（批次 15 第一批）的 Widget 夹具 ----------------------------
+//
+// 不构造真 WebView：`debugThreeWebViewSupported` 覆盖平台矩阵；fake 平台桩
+// 只承接 WebViewController 的创建（记录 runJavaScript 脚本，用来断言「未就绪
+// 不发命令 / 就绪后真发命令」）。项目夹具直接写旧布局三件套（与本文件 core
+// 侧同一份 spec），不依赖模型调用与真实资源。
+
+const String _viewportPreviewTemplate = '''
+<!DOCTYPE html><html><body>
+<script type="module">
+/*__THREE_MODULE__*/
+/*__SCENE_SOURCE__*/
+window.NON3D.postMessage(JSON.stringify({kind:'metrics', payload:{}}));
+</script></body></html>
+''';
+
+/// 与锚点等长、且能被组装器改写成 `const THREE = {...}` 的渲染库。
+final Uint8List _viewportModuleBytes = () {
+  const head =
+      'const REVISION = "160";\n'
+      'const Scene = class Scene {};\n'
+      'const Mesh = class Mesh {};\n'
+      'const Vector3 = class Vector3 {};\n';
+  const tail = 'export { REVISION, Scene, Mesh, Vector3 };\n';
+  const overhead = 4; // /* */
+  final pad = threeModuleByteLength - head.length - tail.length - overhead;
+  return Uint8List.fromList(utf8.encode('$head/*${'x' * pad}*/$tail'));
+}();
+
+Future<Uint8List> _viewportAsset(String key) async {
+  if (key == threePreviewAssetKey) {
+    return Uint8List.fromList(utf8.encode(_viewportPreviewTemplate));
+  }
+  if (key == threeModuleAssetKey) return _viewportModuleBytes;
+  throw ThreeFailure('asset_missing', key);
+}
+
+/// 旧布局三件套夹具（工作台只读，不新建项目、不碰模型）。
+void _seedPreviewProject(Directory root, String name) {
+  final dir = Directory('${root.path}/$name')..createSync(recursive: true);
+  File('${dir.path}/three-spec.json')
+      .writeAsStringSync(jsonEncode(_legacySpec()));
+  File('${dir.path}/scene.js')
+      .writeAsStringSync('export default function build() { return {}; }\n');
+  File('${dir.path}/build-state.json').writeAsStringSync(
+    jsonEncode(<String, Object?>{
+      'current': 'structure',
+      'blocked': false,
+      'passes': <Object?>[],
+    }),
+  );
+}
+
+ThreeService _previewService(Directory root) => ThreeService(
+  root: root,
+  llm: (request) async => throw const ThreeFailure('llm_error', 'unused'),
+  assets: _viewportAsset,
+);
+
+AppStore _appStore() =>
+    AppStore(
+        toasts: ToastService(autoDismiss: false),
+        // flutter_test 默认平台是 android（会关掉内嵌预览）——显式钉桌面。
+        capabilities: CapabilityHub(
+          platform: PlatformCapabilities.forOs(HostOs.macos),
+        ),
+      )
+      ..ready = true
+      ..view = 'plugin:three'
+      ..settings = AppSettings(
+        providerId: 'deepseek',
+        modelId: 'deepseek-v4.1-flash',
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'test-key',
+      );
+
+Widget _appHost(AppStore store, ThreeService service) =>
+    ChangeNotifierProvider<AppStore>.value(
+      value: store,
+      child: MaterialApp(
+        theme: AppTheme.build(dark: true),
+        home: Scaffold(body: ThreeWorkspace(service: service)),
+      ),
+    );
+
+void _setViewportSize(WidgetTester tester, Size size) {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+/// 真 IO（项目读盘 / 预览组装）要走 runAsync 才推得动；faked clock 下不能
+/// pumpAndSettle（加载指示是无限动画）。
+Future<void> _settle(WidgetTester tester) async {
+  for (var i = 0; i < 20; i++) {
+    await tester.pump();
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    });
+  }
+  await tester.pump(const Duration(milliseconds: 120));
+}
+
+// ---- WebView 平台桩（与 shelf_three_delete_test 同形；不构造真 WebView）----
+
+class _FakeWebViewPlatform extends WebViewPlatform {
+  _FakePlatformController? lastController;
+
+  void install() => WebViewPlatform.instance = this;
+
+  @override
+  PlatformWebViewController createPlatformWebViewController(
+    PlatformWebViewControllerCreationParams params,
+  ) => lastController = _FakePlatformController(params);
+
+  @override
+  PlatformNavigationDelegate createPlatformNavigationDelegate(
+    PlatformNavigationDelegateCreationParams params,
+  ) => _FakeNavigationDelegate(params);
+
+  @override
+  PlatformWebViewWidget createPlatformWebViewWidget(
+    PlatformWebViewWidgetCreationParams params,
+  ) => _FakeWebViewWidget(params);
+}
+
+class _FakePlatformController extends PlatformWebViewController {
+  _FakePlatformController(super.params) : super.implementation();
+
+  dynamic channelParams;
+  _FakeNavigationDelegate? navDelegate;
+  final List<String> jsScripts = <String>[];
+
+  int get jsCalls => jsScripts.length;
+
+  @override
+  Future<void> setJavaScriptMode(JavaScriptMode mode) async {}
+
+  @override
+  Future<void> addJavaScriptChannel(dynamic params) async {
+    channelParams = params;
+  }
+
+  @override
+  Future<void> setPlatformNavigationDelegate(dynamic delegate) async {
+    navDelegate = delegate as _FakeNavigationDelegate;
+  }
+
+  @override
+  Future<void> loadFile(String absoluteFilePath) async {}
+
+  @override
+  Future<void> runJavaScript(String javaScript) async {
+    jsScripts.add(javaScript);
+  }
+
+  void fireJsMessage(String text) {
+    (channelParams as dynamic).onMessageReceived(
+      JavaScriptMessage(message: text),
+    );
+  }
+}
+
+class _FakeNavigationDelegate extends PlatformNavigationDelegate {
+  _FakeNavigationDelegate(super.params) : super.implementation();
+
+  @override
+  Future<void> setOnPageStarted(PageEventCallback cb) async {}
+
+  @override
+  Future<void> setOnWebResourceError(WebResourceErrorCallback cb) async {}
+}
+
+class _FakeWebViewWidget extends PlatformWebViewWidget {
+  _FakeWebViewWidget(super.params) : super.implementation();
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
 
 void main() {
   late Directory temp;
@@ -228,5 +425,135 @@ void main() {
     await store.migrateLegacy('legacy');
     final after = await store.list();
     expect(after.single.migrated, isTrue);
+  });
+
+  // -- 视口控制浮层（批次 15 第一批） -------------------------------------
+  //
+  // 只断言 UI 层与命令面：不构造真 WebView。宽屏内容区是「大纲 | 视口 |
+  // 检查器」三栏，浮层应该叠在视口面上；未就绪/无能力时整组禁用，tooltip
+  // 写真实原因。就绪信号仍是预览页主动上报的 metrics 桥（不是
+  // onPageFinished：平台基类该方法会 throw）。
+  group('视口控制浮层', () {
+    setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
+
+    tearDown(() {
+      debugThreeWebViewSupported = null;
+      threeLoadOnOpen = null;
+    });
+
+    testWidgets('无内嵌预览能力：宽屏浮层存在但整组禁用，tooltip 写真实原因', (tester) async {
+      final root = Directory('${temp.path}/viewport-unsupported')
+        ..createSync(recursive: true);
+      _seedPreviewProject(root, 'saturn');
+      final service = _previewService(root);
+      final appStore = _appStore();
+      debugThreeWebViewSupported = false;
+      _setViewportSize(tester, const Size(1440, 900));
+      threeLoadOnOpen = 'saturn';
+
+      await tester.pumpWidget(_appHost(appStore, service));
+      await _settle(tester);
+
+      expect(
+        find.byKey(const ValueKey('three-viewport-stack')),
+        findsOneWidget,
+        reason: '宽屏预览面必须叠视口浮层',
+      );
+      expect(
+        find.byKey(const ValueKey('three-viewport-controls')),
+        findsOneWidget,
+      );
+      final keys = <Key>[
+        for (final id in const <String>['front', 'top', 'iso'])
+          ValueKey('three-view-$id'),
+        const ValueKey('three-view-grid'),
+        const ValueKey('three-view-reset'),
+      ];
+      for (final key in keys) {
+        expect(find.byKey(key), findsOneWidget, reason: '$key 必须存在');
+        expect(
+          tester.widget<TextButton>(find.byKey(key)).onPressed,
+          isNull,
+          reason: '$key 在这台设备上必须禁用',
+        );
+      }
+      expect(find.byTooltip('这台设备不能内嵌显示 3D 预览'), findsNWidgets(keys.length));
+    });
+
+    testWidgets('预览未就绪：禁用且不发 JS；metrics 到达后启用并真发视角/网格/重置命令', (tester) async {
+      final root = Directory('${temp.path}/viewport-not-ready')
+        ..createSync(recursive: true);
+      _seedPreviewProject(root, 'saturn');
+      final service = _previewService(root);
+      final appStore = _appStore();
+      _setViewportSize(tester, const Size(1440, 900));
+      final previousPlatform = WebViewPlatform.instance;
+      final fake = _FakeWebViewPlatform()..install();
+      // 平台接口不允许把 instance 设回 null；测试进程内没有后续用例依赖
+      // 「无平台」状态，保持 fake 即可（文件内无其它 WebView 用例）。
+      addTearDown(() {
+        if (previousPlatform != null) {
+          WebViewPlatform.instance = previousPlatform;
+        }
+      });
+      threeLoadOnOpen = 'saturn';
+
+      await tester.pumpWidget(_appHost(appStore, service));
+      await _settle(tester);
+
+      final controller = fake.lastController;
+      expect(controller, isNotNull, reason: 'fake 平台应创建预览控制器');
+      expect(
+        find.byKey(const ValueKey('three-viewport-controls')),
+        findsOneWidget,
+      );
+
+      // 未就绪（metrics 桥还没到）：整组禁用，点击零命令。
+      expect(find.byTooltip('预览还没就绪，视角控制暂不可用'), findsNWidgets(5));
+      await tester.tap(find.byKey(const ValueKey('three-view-front')));
+      await tester.pump(const Duration(milliseconds: 30));
+      expect(controller!.jsCalls, 0, reason: '未就绪不得发 runJavaScript');
+
+      // 预览页首帧 metrics 到达 = 唯一就绪信号。
+      controller.fireJsMessage(
+        jsonEncode(<String, dynamic>{
+          'kind': 'metrics',
+          'payload': <String, dynamic>{},
+        }),
+      );
+      await _settle(tester);
+      expect(find.byTooltip('预览还没就绪，视角控制暂不可用'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('three-view-front')));
+      await tester.pump();
+      expect(controller.jsScripts.last, contains('__non3d_view("front")'));
+      await tester.tap(find.byKey(const ValueKey('three-view-iso')));
+      await tester.pump();
+      expect(controller.jsScripts.last, contains('__non3d_view("iso")'));
+      await tester.tap(find.byKey(const ValueKey('three-view-reset')));
+      await tester.pump();
+      expect(controller.jsScripts.last, contains('__non3d_view("reset")'));
+
+      await tester.tap(find.byKey(const ValueKey('three-view-grid')));
+      await tester.pump();
+      expect(controller.jsScripts.last, contains('__non3d_grid(true)'));
+
+      // 沙箱执行面没有可开关网格 → 页面用 grid 回执如实说明 → 开关复原。
+      controller.fireJsMessage(
+        jsonEncode(<String, dynamic>{
+          'kind': 'grid',
+          'supported': false,
+          'visible': true,
+        }),
+      );
+      await _settle(tester);
+      await tester.tap(find.byKey(const ValueKey('three-view-grid')));
+      await tester.pump();
+      expect(
+        controller.jsScripts.last,
+        contains('__non3d_grid(true)'),
+        reason: '不支持回执必须把开关复原，否则这里会发 false',
+      );
+    });
   });
 }

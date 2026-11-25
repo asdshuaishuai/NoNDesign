@@ -44,6 +44,7 @@ import '../core/three_service.dart';
 import '../core/toast_service.dart';
 import 'common.dart';
 import 'workspace_artifact_card.dart';
+import 'three_viewport_controls.dart';
 import 'three_workbench_panels.dart';
 import 'workspace_progress.dart';
 
@@ -128,6 +129,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   // setOnPageFinished**：webview_all 平台接口基类的 setOnPageFinished 直接
   // throw UnimplementedError，而 NavigationDelegate 构造器会同步调用它。
   bool _previewReady = false;
+  // 视口控制（批次 15 第一批）：网格开关的 UI 状态 + 沙箱执行面的「不支持」
+  // 回执去重。两者都是预览页会话级状态——重挂预览 / 新导航 / 换项目一律复位。
+  bool _gridVisible = false;
+  bool _gridUnsupportedNotified = false;
   // ThreeUI 组件画廊：清单从应用资源读（失败不空屏，显示可重试的人话）。
   List<ThreeUiComponent>? _uiCatalog;
   String _uiCatalogError = '';
@@ -307,6 +312,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       _errorText = '';
       _errorDetail = '';
       _errorSource = '';
+      _gridVisible = false;
+      _gridUnsupportedNotified = false;
       // 项目边界复位规范编辑守卫：A 项目未保存的编辑不能带进 B；B 自己的
       // 未保存草稿要恢复（跨视图/跨 run 都不丢）。
       _specDirty = false;
@@ -985,6 +992,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     final project = _project;
     if (service == null || project == null) return;
     _previewReady = false;
+    // 新页面 = 新的执行面：旧的网格开关状态与「不支持」提示计数都作废。
+    _gridVisible = false;
+    _gridUnsupportedNotified = false;
     final ThreePreviewBundle bundle;
     try {
       bundle = await service.preparePreview(project);
@@ -1026,7 +1036,11 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   void _onPreviewPageStarted(String url) {
     // 新导航开始：旧页的就绪态作废（本次导航失败会经资源错误置占位）。
     final wasReady = _previewReady;
+    final wasGrid = _gridVisible;
     _previewReady = false;
+    // 新页面没有上一页的网格状态（命令跟页面会话走，不会跨导航残留）。
+    _gridVisible = false;
+    _gridUnsupportedNotified = false;
     if (!mounted) return;
     if (_loadError.isNotEmpty) {
       // 新导航开始：清旧占位，失败会再置。
@@ -1034,14 +1048,51 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _loadError = '';
         _loadDetail = '';
       });
-    } else if (wasReady) {
-      setState(() {}); // 就绪 → 未就绪：截图/四方位按钮要跟着变灰
+    } else if (wasReady || wasGrid) {
+      setState(() {}); // 就绪 → 未就绪：截图/四方位/视口控件要跟着变灰
     }
   }
 
   /// 截图 / 四方位取证：把脚本送进预览页。
   void _runPreviewScript(String script) {
     unawaited(_controller?.runJavaScript(script));
+  }
+
+  // -- 视口控制（视角预设 / 网格开关 / 重置） ---------------------------------
+
+  /// 视角预设：预览页的 `__non3d_view` 在两条执行面上同一入口（沙箱走
+  /// viewer 的 setCamera，旧路径直写 MiniOrbit）。未就绪不发命令。
+  void _applyViewPreset(ThreeViewPreset preset) {
+    if (!_viewportReady) return;
+    _runPreviewScript(
+      'window.__non3d_view && window.__non3d_view("${preset.id}")',
+    );
+  }
+
+  /// 重置到预览页记录的初始视角（页面重挂后初始视角也会重新记录）。
+  void _resetViewport() {
+    if (!_viewportReady) return;
+    _runPreviewScript('window.__non3d_view && window.__non3d_view("reset")');
+  }
+
+  /// 网格开关：先更新本地 UI 态，再发命令。沙箱执行面里没有可开关的网格时，
+  /// 预览页会用 `grid` 回执如实说明，[_onBridgeMessage] 把开关复原并解释
+  /// 一次——不留下「点了没反应」的假象。
+  void _setGridVisible(bool visible) {
+    if (!_viewportReady || _gridVisible == visible) return;
+    setState(() => _gridVisible = visible);
+    _runPreviewScript(
+      'window.__non3d_grid && window.__non3d_grid(${visible ? 'true' : 'false'})',
+    );
+  }
+
+  /// 预览页回执「网格不可开关」：复原开关并只提示一次（重挂预览会清计数）。
+  void _onGridUnsupported() {
+    if (!mounted) return;
+    if (_gridVisible) setState(() => _gridVisible = false);
+    if (_gridUnsupportedNotified) return;
+    _gridUnsupportedNotified = true;
+    _toasts.info('当前预览模式暂不支持网格', '预览里没有可开关的网格。');
   }
 
   void _setLoadError(String message, [String detail = '']) {
@@ -1094,6 +1145,12 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           'data': data['payload'],
           'tag': data['tag'] ?? 'shot',
         });
+      } else if (kind == 'grid') {
+        // 网格开关的如实回执（批次 15）：沙箱执行面没有可开关的网格时，
+        // 复原开关并解释一次；这是 UI 侧状态，不是项目事实，不触发刷新。
+        if (data['supported'] != false) return;
+        _onGridUnsupported();
+        return;
       } else if (kind == 'unsupported') {
         // 这台设备的 WebView 跑不了内嵌预览（模块脚本被拦 / 没有 WebGL）：
         // 这是宿主限制，不是生成失败，不计数、不推进。
@@ -1368,6 +1425,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _v2Project = null;
           _controller = null;
           _previewReady = false;
+          _gridVisible = false;
+          _gridUnsupportedNotified = false;
           _loadError = '';
           _loadDetail = '';
           _lastError = '';
@@ -1926,6 +1985,20 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   /// 按钮亮着但点了没反应比禁用更糟（用户以为取证成功）。
   bool get _captureReady => _previewReady && !_busy && _project != null;
 
+  /// 视口控制浮层的启用判据：预览页已就绪 + 控制器在场 + 没有在飞生成。
+  /// 浮层在「准备预览 / 预览失败 / 设备不支持」时也显示（禁用 + tooltip
+  /// 原因），所以不能只按就绪态构建；这里只决定能不能发命令。
+  bool get _viewportReady =>
+      _previewReady && !_busy && _project != null && _controller != null;
+
+  /// 禁用浮层的 tooltip 文案：按当前真实不可用原因说话，不写一句通用话。
+  String get _viewportDisabledHint {
+    if (!_scenePreviewSupported) return '这台设备不能内嵌显示 3D 预览';
+    if (_loadError.isNotEmpty) return '预览加载失败，视角控制暂不可用';
+    if (_busy) return '正在生成，视角控制暂不可用';
+    return '预览还没就绪，视角控制暂不可用';
+  }
+
   List<Widget> _primaryActions(NonPalette p, {required bool includeAll}) => [
     _TopBtn(
       icon: Icons.folder_open_outlined,
@@ -2104,6 +2177,34 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     }
   }
 
+  /// 预览面上的视口控制浮层（批次 15 第一批，宽屏限定）。
+  ///
+  /// 只叠一层 Stack：预览本身、三栏几何、检查器都不动；浮层在宽屏
+  /// （[WorkbenchLayout.isWide]）才出现——窄屏预览区不足 600px，浮层会盖住
+  /// 场景。未就绪 / 加载失败 / 设备不支持时控件禁用并带 tooltip 原因，绝不
+  /// 留一个点了没反应的亮按钮。
+  Widget _withViewportControls(Widget preview, WorkbenchLayout layout) {
+    if (!layout.isWide) return preview;
+    return Stack(
+      key: const ValueKey('three-viewport-stack'),
+      children: <Widget>[
+        Positioned.fill(child: preview),
+        Positioned(
+          top: 10,
+          right: 10,
+          child: ThreeViewportControls(
+            enabled: _viewportReady,
+            gridVisible: _gridVisible,
+            disabledHint: _viewportDisabledHint,
+            onViewPreset: _applyViewPreset,
+            onGridChanged: _setGridVisible,
+            onReset: _resetViewport,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _body(BuildContext context, NonPalette p, {required double width}) {
     if (_project == null) {
       return _EmptyNew(
@@ -2181,6 +2282,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         width: width,
         height: MediaQuery.sizeOf(context).height,
       );
+      // 宽屏：预览面上方叠一层视口控制浮层（视角预设 / 网格 / 重置）。
+      // 窄屏不显示——预览区本身放不下浮层，控件也没有工具栏位置。
+      final Widget viewport = _withViewportControls(preview, threeLayout);
       final sceneItems = threeOutlinerItemsFromScene(_v2Project?.sceneJson);
       final outlinerItems = sceneItems.isNotEmpty
           ? sceneItems
@@ -2210,7 +2314,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
               SizedBox(width: threeLayout.leftWidth, child: outliner),
             if (threeLayout.left == PanelPolicy.docked && _showOutliner)
               Container(width: 1, color: p.line),
-            Expanded(child: preview),
+            Expanded(child: viewport),
             if (threeLayout.right == PanelPolicy.docked && _showInspector)
               Container(width: 1, color: p.line),
             if (threeLayout.right == PanelPolicy.docked && _showInspector)
@@ -2218,7 +2322,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           ],
         );
       }
-      return preview;
+      return viewport;
     }
     // 横屏/桌面：源码/规范是预览的侧栏，不把预览整块替换掉；
     // 竖屏/手机：保持单面切换（宽度不足，并排会两张都不可读）。

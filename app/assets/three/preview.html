@@ -342,6 +342,88 @@ window.__non3d_legacy_boot = function () {
     step();
   };
 
+  // —— 视口控制（批次 15 第一批）：视角预设 / 网格开关（legacy 执行面） ——
+  //
+  // 视角：camera 由 MiniOrbit 每帧按自持 spherical 重建，直设 position 会被
+  // __loop 覆写（__non3d_turntable 四张同视角截图的事故根因）。这里统一改
+  // goal + spherical，再 update() + render() 一次落到画面上。
+  // 网格：GridHelper 放进**独立场景**渲染，绝不挂进业务 scene —— __measure 用
+  // Box3.setFromObject(scene) 量包围盒，网格会把 bounds 量成网格尺寸、污染
+  // 测量事实。render 包一层的顺序是「业务场景 → 网格场景」，沿用同一深度缓冲，
+  // 模型会正确遮挡网线；autoClear=false + 手动 clear 保证只清一次。
+  var viewGridScene = new THREE.Scene();
+  var viewGrid = new THREE.GridHelper(20, 20, 0x39425a, 0x212836);
+  viewGrid.name = '__non3d_grid';
+  viewGrid.visible = false;
+  viewGridScene.add(viewGrid);
+  var gridVisible = false;
+  var sceneGrid = null; // 场景自带 GridHelper（若有）：只开关它，不重复建。
+  var gridResolved = false;
+
+  var __renderBase = renderer.render.bind(renderer);
+  renderer.render = function (target, cam) {
+    renderer.autoClear = false;
+    renderer.clear();
+    __renderBase(target, cam);
+    if (gridVisible && !sceneGrid && target === scene) {
+      __renderBase(viewGridScene, cam);
+    }
+  };
+
+  var initialView = {
+    theta: controls.spherical.theta,
+    phi: controls.spherical.phi,
+    r: controls.spherical.r,
+    pan: controls.pan.clone(),
+  };
+
+  function resolveSceneGrid() {
+    if (gridResolved) return;
+    gridResolved = true;
+    scene.traverse(function (o) {
+      if (!sceneGrid && (o.type === 'GridHelper' || o.isGridHelper)) {
+        sceneGrid = o;
+      }
+    });
+  }
+
+  window.__non3d_view_impl = function (preset) {
+    if (preset === 'reset') {
+      controls.goal.r = initialView.r;
+      controls.spherical.r = initialView.r;
+      controls.goal.theta = initialView.theta;
+      controls.spherical.theta = initialView.theta;
+      controls.goal.phi = initialView.phi;
+      controls.spherical.phi = initialView.phi;
+      controls.pan.copy(initialView.pan);
+      controls.panGoal.copy(initialView.pan);
+    } else {
+      var poses = {
+        front: [0, Math.PI / 2],
+        top: [0, 0.14],
+        iso: [Math.PI / 4, 0.9553],
+      };
+      var pose = poses[preset];
+      if (!pose) return false;
+      controls.setView(pose[0], pose[1]);
+    }
+    controls.update();
+    renderer.render(scene, camera);
+    return true;
+  };
+
+  window.__non3d_grid_impl = function (visible) {
+    resolveSceneGrid();
+    gridVisible = !!visible;
+    if (sceneGrid) {
+      sceneGrid.visible = gridVisible;
+    } else {
+      viewGrid.visible = gridVisible;
+    }
+    renderer.render(scene, camera);
+    return true;
+  };
+
   setTimeout(__firstFrame, 300);
 };
 </script>
@@ -555,6 +637,95 @@ window.__non3d_legacy_boot = function () {
       __report({ kind: 'unsupported', message: 'preview_boot_timeout' });
     }
   }, 9000);
+
+  // —— 视口控制（批次 15 第一批）：视角预设 / 网格开关 ——
+  //
+  // 全局入口在两种执行面下都叫同一个名字，具体实现由当前生效的路径挂到
+  // __non3d_view_impl / __non3d_grid_impl：
+  //   * 沙箱（three-live）：viewer 的 setCamera（度）/ jumpCameraToGoal /
+  //     resetCamera；网格只能开关模型里自带 grid 命名的网格（沙箱场景在
+  //     Worker 里构建并转 GLB，文档侧拿不到它的场景对象）。
+  //   * 旧路径（legacy）：由 __non3d_legacy_boot 注册，直写 MiniOrbit 与
+  //     自建 GridHelper。
+  // 本轮新增不参与页面启动；页面还没挂上实现时返回 false（宿主按未就绪
+  // 处理），绝不静默。
+  window.__non3d_view = function (preset) {
+    var impl = window.__non3d_view_impl;
+    if (typeof impl !== 'function') return false;
+    try {
+      return impl(String(preset || '')) === true;
+    } catch (e) {
+      __report({ kind: 'error', message: String(e) });
+      return false;
+    }
+  };
+
+  window.__non3d_grid = function (visible) {
+    var impl = window.__non3d_grid_impl;
+    var ok = false;
+    if (typeof impl === 'function') {
+      try {
+        ok = impl(!!visible) === true;
+      } catch (e) {
+        __report({ kind: 'error', message: String(e) });
+      }
+    }
+    // 沙箱模型里没有可开关的网格：如实回传回执，宿主据此把开关复原并
+    // 提示一次，不留下「点了没反应」的假象。
+    if (!ok) __report({ kind: 'grid', supported: false, visible: !!visible });
+    return ok;
+  };
+
+  window.__non3d_view_impl = function (preset) {
+    var el = document.getElementById('non3d-live');
+    if (!el || !el.viewer) return false;
+    if (preset === 'reset') {
+      if (typeof el.resetCamera !== 'function') return false;
+      el.resetCamera();
+      if (typeof el.jumpCameraToGoal === 'function') el.jumpCameraToGoal();
+      return true;
+    }
+    var poses = {
+      front: { theta: 0, phi: 90 },
+      top: { theta: 0, phi: 8 },
+      iso: { theta: 45, phi: 54.7356 },
+    };
+    var pose = poses[preset];
+    if (!pose || typeof el.setCamera !== 'function') return false;
+    var orbit = typeof el.getCameraOrbit === 'function' ? el.getCameraOrbit() : null;
+    var distance = orbit && orbit.radius ? orbit.radius : undefined;
+    el.setCamera(pose.theta, pose.phi, distance);
+    if (typeof el.jumpCameraToGoal === 'function') el.jumpCameraToGoal();
+    return true;
+  };
+
+  window.__non3d_grid_impl = function (visible) {
+    var el = document.getElementById('non3d-live');
+    var v = el && el.viewer;
+    if (!v) return false;
+    // three-live 未来若提供原生网格接口，优先用它（不绑定当前版本）。
+    if (typeof v.setGridVisible === 'function') {
+      v.setGridVisible(!!visible);
+      if (typeof v.render === 'function') v.render();
+      return true;
+    }
+    // 当前版本只能开关模型里自带的网格（name 含 grid）。
+    var lists = [v.meshes || [], v.backdropMeshes || []];
+    var hit = false;
+    for (var i = 0; i < lists.length; i++) {
+      for (var j = 0; j < lists[i].length; j++) {
+        var mesh = lists[i][j];
+        var name = mesh && mesh.name ? String(mesh.name) : '';
+        if (/grid/i.test(name)) {
+          mesh.visible = !!visible;
+          hit = true;
+        }
+      }
+    }
+    if (!hit) return false;
+    if (typeof v.render === 'function') v.render();
+    return true;
+  };
 })();
 </script>
 </body>
