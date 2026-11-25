@@ -1035,6 +1035,27 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  /// 视图名 → workspace run 的 workspaceHint（只有 `plugin:*` 才映射）。
+  ///
+  /// 音乐工作台（`plugin:music`）不在 `AppSettings.chatWorkspaceMode` 的枚举里
+  /// （`kWorkspaceModes` 在 models.dart，本批不改那里），所以用视图反推一次性
+  /// hint：右侧 NaN 面板在音乐工作台里发起任务时，Agent 工具面收窄到
+  /// `music_*`，提示词也落在音乐工作区说明上；不把非法枚举写进 settings。
+  static String workspaceHintForView(String view) {
+    switch (view) {
+      case 'plugin:music':
+        return 'music';
+      case 'plugin:three':
+        return workspaceModeThree;
+      case 'plugin:video':
+        return workspaceModeVideo;
+      case 'plugin:hotapp':
+        return workspaceModeHotapp;
+      default:
+        return '';
+    }
+  }
+
   /// 工具名 → 该工具所属工作台的视图名。
   ///
   /// 仅 [followAgentWorkspace] 消费。工作区彼此独立（用户裁决 2026-11-19）：
@@ -1109,6 +1130,7 @@ class AppStore extends ChangeNotifier {
       case 'hotapp_inspect':
       case 'design_verify_prototype':
       case 'video_create':
+      case 'music_create':
         return true;
       default:
         return false;
@@ -1146,6 +1168,8 @@ class AppStore extends ChangeNotifier {
       setHotApp(pendingName);
     } else if (tool.startsWith('video_')) {
       setVideoProjectName(pendingName);
+    } else if (tool.startsWith('music_')) {
+      setMusicProjectName(pendingName);
     }
   }
 
@@ -1183,6 +1207,22 @@ class AppStore extends ChangeNotifier {
     if (settings.videoProjectName == name) return;
     settings.videoProjectName = name;
     saveSettings();
+    notifyListeners();
+  }
+
+  /// 音乐工作台当前项目名（'' = 无）：NaN 的 `music_create` 成功后写入。
+  ///
+  /// 为什么是 store 内存态而不是 `settings.musicProjectName`：
+  /// `AppSettings`（models.dart）不在本批写入范围，且 R1 音乐工作台是只读
+  /// 列表（尚未消费「当前项目」字段），写一个没人读的持久字段就是假接线。
+  /// 这里先保证「音乐工具成功 → 工作台产物已认领」在 store 层可观察可续接
+  /// （notify 让各监听方刷新；下一批工作台接上后改读这个字段即可），
+  /// **失败不认领**（失败的项目不存在）。
+  String musicProjectName = '';
+
+  void setMusicProjectName(String name) {
+    if (musicProjectName == name) return;
+    musicProjectName = name;
     notifyListeners();
   }
 
@@ -2774,12 +2814,33 @@ class AppStore extends ChangeNotifier {
   /// （建场景 / 改动画 / 调应用），不能落成设计画布的 BUILD。模式取当前视图
   /// 对应的那个工作台，并记回 [chatWorkspaceMode]（下一次一句话仍落在那里）。
   Future<bool> runWorkspace(String instruction, {String? mode}) {
-    final target = normalizeWorkspaceMode(mode ?? workspaceModeForView(view));
+    final requested = (mode ?? '').trim();
+    final viewHint = workspaceHintForView(view);
+    // 音乐工作台还没有 chatWorkspaceMode 枚举（models.dart 不在本批写入范围）：
+    // 用一次性 workspaceHint 收窄到 music_*，绝不把非法枚举写进 settings。
+    final musicRun =
+        requested == 'music' || (requested.isEmpty && viewHint == 'music');
+    if (musicRun) {
+      return _runAgent('workspace', instruction, workspaceHint: 'music');
+    }
+    final target = normalizeWorkspaceMode(
+      requested.isNotEmpty ? requested : workspaceModeForView(view),
+    );
     if (settings.chatWorkspaceMode != target) {
       settings.chatWorkspaceMode = target;
       unawaited(saveSettings());
     }
-    return _runAgent('workspace', instruction);
+    // 显式 mode 优先，其次当前视图反推，最后回落用户上次选的工作台。
+    final hint = requested.isNotEmpty
+        ? normalizeWorkspaceMode(requested)
+        : (viewHint.isNotEmpty
+              ? viewHint
+              : normalizeWorkspaceMode(settings.chatWorkspaceMode));
+    return _runAgent(
+      'workspace',
+      instruction,
+      workspaceHint: hint == workspaceModeAuto ? '' : hint,
+    );
   }
 
   Future<bool> runBuild(String instruction) => _runAgent('build', instruction);
@@ -4117,7 +4178,11 @@ class AppStore extends ChangeNotifier {
   /// store 锚定桥（[_StoreEngineGate]）走 applyAgentOp——applyOp 同队列
   /// 同提交语义 + AgentGate（绝不绕过引擎门）。
   /// 事件与 server SSE 同形，复用 [_handleAgentEvent] 的时间线/文档/preview 管线。
-  Future<bool> _runDartLoop(String mode, String instruction) async {
+  Future<bool> _runDartLoop(
+    String mode,
+    String instruction, {
+    String workspaceHint = '',
+  }) async {
     if (agentBusy) return false;
     if (settings.apiKey.trim().isEmpty) {
       _toastWarn('先配置模型，内置智能体需要密钥或连接桌面');
@@ -4179,7 +4244,9 @@ class AppStore extends ChangeNotifier {
             : mode == 'refine'
             ? '定位改动，保持设计系统'
             : mode == 'workspace'
-            ? '在${workspaceModeLabel(settings.chatWorkspaceMode)}工作台执行'
+            ? (workspaceHint == 'music'
+                  ? '在音乐工作台执行'
+                  : '在${workspaceModeLabel(settings.chatWorkspaceMode)}工作台执行')
             : '规划页面并落画布',
       ),
     ];
@@ -4210,7 +4277,11 @@ class AppStore extends ChangeNotifier {
     final myRun = runId!;
     final events = StreamController<Map<String, dynamic>>();
     try {
-      final workspaceMode = normalizeWorkspaceMode(settings.chatWorkspaceMode);
+      // 显式 hint（音乐工作台等没有 settings 枚举的工作区）优先；否则沿用
+      // 用户上次选的工作台。
+      final workspaceMode = workspaceHint.isNotEmpty
+          ? workspaceHint
+          : normalizeWorkspaceMode(settings.chatWorkspaceMode);
       final runFuture = runDartAgent(
         request: DartAgentRequest(
           mode: mode,
@@ -4366,7 +4437,11 @@ class AppStore extends ChangeNotifier {
   ///  * `server` → the connected desktop's `agent.run` stream. An explicitly
   ///    requested runtime never silently degrades: no desktop means a visible
   ///    failure, not a quiet local rerun.
-  Future<bool> _runAgent(String mode, String instruction) async {
+  Future<bool> _runAgent(
+    String mode,
+    String instruction, {
+    String workspaceHint = '',
+  }) async {
     _clearStaleAgentLock();
     if (agentBusy) return false;
     final localRuntime = settings.agentRuntime != agentRuntimeServer;
@@ -4380,7 +4455,7 @@ class AppStore extends ChangeNotifier {
       return false;
     }
     if (localRuntime) {
-      return _runDartLoop(mode, instruction);
+      return _runDartLoop(mode, instruction, workspaceHint: workspaceHint);
     }
     if (!hasConnectedDesktop) {
       _toastWarn('还没有连接桌面，无法使用这个运行时');

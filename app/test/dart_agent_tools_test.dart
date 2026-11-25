@@ -322,6 +322,54 @@ class _FakeWorkspace implements AgentWorkspaceServices {
     'spec': <String, dynamic>{'kind': 'science'},
   };
 
+  // -- 音乐工具（music_list / music_read / music_inspect / music_create）--
+  String? lastMusicName;
+  Map<String, dynamic>? lastMusicScore;
+  Map<String, dynamic> musicCreateResult = <String, dynamic>{
+    'ok': true,
+    'project': 'dawn',
+    'title': '晨光',
+    'tracks': 1,
+    'measures': 1,
+    'verified': true,
+    'issues': 0,
+  };
+  Map<String, dynamic> musicListResult = <String, dynamic>{
+    'ok': true,
+    'projects': <dynamic>[
+      <String, dynamic>{
+        'name': 'dawn',
+        'title': '晨光',
+        'tracks': 1,
+        'measures': 8,
+        'verified': true,
+        'corrupt': false,
+      },
+    ],
+    'count': 1,
+  };
+  Map<String, dynamic> musicReadResult = <String, dynamic>{
+    'ok': true,
+    'name': 'dawn',
+    'title': '晨光',
+    'verified': true,
+    'issues': 0,
+    'chars': 220,
+    'scoreJson': '{"schemaVersion": 1, "title": "晨光"}',
+    'truncated': false,
+  };
+  Map<String, dynamic> musicInspectResult = <String, dynamic>{
+    'ok': true,
+    'name': 'dawn',
+    'title': '晨光',
+    'tracks': 1,
+    'measures': 8,
+    'totalTicks': 122880,
+    'seconds': 32.0,
+    'verified': true,
+    'issues': 0,
+  };
+
   @override
   Future<Map<String, dynamic>> threeList() async {
     calls.add('three_list');
@@ -622,6 +670,43 @@ class _FakeWorkspace implements AgentWorkspaceServices {
   }
 
   @override
+  Future<Map<String, dynamic>> musicList() async {
+    calls.add('music_list');
+    return Map<String, dynamic>.from(musicListResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> musicRead(String name) async {
+    calls.add('music_read:$name');
+    lastMusicName = name;
+    return Map<String, dynamic>.from(musicReadResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> musicInspect(String name) async {
+    calls.add('music_inspect:$name');
+    lastMusicName = name;
+    return Map<String, dynamic>.from(musicInspectResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> musicCreate({
+    required String name,
+    required Map<String, dynamic> score,
+  }) async {
+    calls.add('music_create:$name');
+    lastMusicName = name;
+    lastMusicScore = score;
+    if (musicCreateResult['ok'] == true) {
+      return <String, dynamic>{
+        ...musicCreateResult,
+        'project': musicCreateResult['project'] ?? name,
+      };
+    }
+    return Map<String, dynamic>.from(musicCreateResult);
+  }
+
+  @override
   Future<Map<String, dynamic>> nonAppList() async {
     calls.add('nonapp_list');
     return <String, dynamic>{'ok': true, 'apps': <dynamic>[]};
@@ -719,6 +804,10 @@ void main() {
         'video_review': '视频 · 对照检查',
         'nonapp_list': '应用包',
         'figma_export': '导出 Figma 包',
+        'music_list': '音乐',
+        'music_read': '音乐 · 读谱',
+        'music_inspect': '音乐 · 查看',
+        'music_create': '音乐 · 新建',
       };
       mapping.forEach(
         (tool, label) => expect(toolLabel(tool), label, reason: tool),
@@ -728,6 +817,7 @@ void main() {
       expect(toolLabel('video_future_tool'), '视频');
       expect(toolLabel('video_create'), '视频 · 新建');
       expect(toolLabel('nonapp_future_tool'), '应用包');
+      expect(toolLabel('music_future_tool'), '音乐');
       expect(toolLabel('mystery_tool'), '智能体操作');
       // 任何工具标签都不许是裸 snake_case 代号。
       final bare = RegExp(r'^[a-z0-9]+(_[a-z0-9]+)+$');
@@ -742,6 +832,8 @@ void main() {
         'video_review',
         'nonapp_future_tool',
         'mystery_tool',
+        'music_future_tool',
+        'music_create',
       ]) {
         expect(bare.hasMatch(toolLabel(tool)), isFalse, reason: tool);
       }
@@ -805,6 +897,19 @@ void main() {
       );
       expect(toolFailureMessage('hotapp_name_taken'), '已经有同名应用了，换一个名字');
       expect(toolFailureMessage('hotapp_brief_empty'), '先写一句想要的动画或玩法');
+      // 音乐项目落盘（music_create / read / inspect）的失败码：模块人话表。
+      expect(
+        toolFailureMessage('music_score_invalid'),
+        '乐谱还没有通过校验：先修好小节/时值/关系再保存',
+      );
+      expect(
+        toolFailureMessage('music_score_unsupported_version'),
+        '这份乐谱版本太新，暂时读不了',
+      );
+      expect(toolFailureMessage('music_no_project'), '没有找到这个音乐项目');
+      expect(toolFailureMessage('music_invalid_name'), '音乐项目名只能用字母、数字、下划线和短横线');
+      expect(toolFailureMessage('music_project_exists'), '已经有同名音乐项目了，换一个名字再试');
+      expect(toolFailureMessage('music_io_error'), '乐谱文件没能读写，请稍后再试');
       // 映射结果里不出现裸错误码。
       final bare = RegExp(r'^[a-z0-9]+(_[a-z0-9]+)+$');
       for (final code in <String>[
@@ -819,6 +924,8 @@ void main() {
         'video_io_error',
         'three_invalid_name',
         'hotapp_name_taken',
+        'music_score_invalid',
+        'music_no_project',
         'whatever_code',
       ]) {
         expect(bare.hasMatch(toolFailureMessage(code)), isFalse, reason: code);
@@ -2023,6 +2130,90 @@ void main() {
         names.where((n) => n.startsWith('three_') || n.startsWith('video_')),
         isEmpty,
       );
+    });
+
+    test('music 收窄：只暴露 music_* + 通用只读，其他工作台前缀不可见', () async {
+      final names = await surfaceFor('music');
+      expect(
+        names,
+        containsAll(<String>[
+          'music_list',
+          'music_read',
+          'music_inspect',
+          'music_create',
+        ]),
+      );
+      expect(
+        names.where(
+          (n) =>
+              n.startsWith('three_') ||
+              n.startsWith('video_') ||
+              n.startsWith('hotapp_') ||
+              n.startsWith('nonapp_') ||
+              n.startsWith('figma_') ||
+              n.startsWith('design_'),
+        ),
+        isEmpty,
+        reason: 'music run 不该暴露其他模块工具',
+      );
+      // 与 three/video/hotapp 同法：通用工具（ask_user / finish / read_docs）
+      // 不受模块收窄影响；画布/文档写工具不可见。
+      expect(names, containsAll(<String>['ask_user', 'finish', 'read_docs']));
+      for (final canvas in <String>[
+        'design_op',
+        'generate_page',
+        'read_mbt',
+        'inspect',
+        'write_doc',
+        'write_design_spec',
+      ]) {
+        expect(names.contains(canvas), isFalse, reason: '工作区 run 不该暴露 $canvas');
+      }
+    });
+
+    test('音乐工作台 run：music_create 真执行且算真实交付（remoteCalls 水位）', () async {
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      final model = ScriptedAgentModel(<List<Part>>[
+        <Part>[
+          scriptToolCall(
+            toolName: 'music_create',
+            input: <String, dynamic>{
+              'name': 'dawn',
+              'score': <String, dynamic>{
+                'schemaVersion': 1,
+                'tracks': <dynamic>[],
+              },
+            },
+          ),
+        ],
+        <Part>[
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '完成'},
+          ),
+        ],
+      ]);
+      final result = await runDartAgent(
+        request: workspaceRequest('music'),
+        modelOverride: model.model,
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      expect(result.ok, isTrue);
+      expect(workspace.calls, contains('music_create:dawn'));
+      expect(workspace.lastMusicScore, isNotNull);
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'music_create',
+      );
+      expect(end['ok'], isTrue);
+      expect(
+        result.remoteCalls,
+        greaterThanOrEqualTo(1),
+        reason: '成功的音乐新建必须移动交付水位（不能被当成「工作台里没有东西」）',
+      );
+      // 工具标签必须是人话（出货文案门）。
+      expect(toolLabel('music_create'), '音乐 · 新建');
     });
 
     test('3D 工作台 run：three_create 真执行（不再 unknown tool）', () async {

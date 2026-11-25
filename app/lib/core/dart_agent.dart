@@ -65,6 +65,9 @@ import 'creative/creative_skill.dart';
 import 'figma_export.dart';
 import 'hotapp_service.dart';
 import 'models.dart';
+import 'music/music_compile.dart';
+import 'music/music_project.dart';
+import 'music/music_score.dart';
 import 'nonapp_library.dart';
 import 'three/three_workspace.dart';
 import 'three_service.dart';
@@ -431,7 +434,8 @@ class LocalEngineGate
 /// 术语表（docs/copy-glossary.md）：`design_op` → 设计变更、`read_mbt` →
 /// 读取设计稿、`inspect` → 检查、`generate_page` → 生成页面、`write_doc` →
 /// 撰写文档、`write_design_spec` → 更新设计规范、`three_*` → 3D 场景、
-/// `hotapp_*` → 热应用、`video_*` → 视频、`nonapp_*` → 应用包。
+/// `hotapp_*` → 热应用、`video_*` → 视频、`nonapp_*` → 应用包、
+/// `music_*` → 音乐。
 ///
 /// 未知工具一律回落「智能体操作」——**绝不把原始工具名（snake_case 代码
 /// 代号）回显给用户**。
@@ -499,11 +503,20 @@ String toolLabel(String tool) {
       return '应用包';
     case 'nonapp_inspect':
       return '应用包 · 查看';
+    case 'music_list':
+      return '音乐';
+    case 'music_read':
+      return '音乐 · 读谱';
+    case 'music_inspect':
+      return '音乐 · 查看';
+    case 'music_create':
+      return '音乐 · 新建';
   }
   if (tool.startsWith('three_')) return '3D 场景';
   if (tool.startsWith('hotapp_')) return '热应用';
   if (tool.startsWith('video_')) return '视频';
   if (tool.startsWith('nonapp_')) return '应用包';
+  if (tool.startsWith('music_')) return '音乐';
   return '智能体操作';
 }
 
@@ -688,6 +701,13 @@ String toolFailureMessage(String? rawError) {
       // 工作台服务的细分失败码统一带模块前缀（`three_invalid_name` /
       // `hotapp_name_taken` / `video_expr_syntax_error` …）：按模块自己的
       // 人话表映射，避免每加一个码就漏一句文案。
+      // 音乐模块失败码同样是 `music_<module-code>`（`music_score_invalid` /
+      // `music_no_project` …）：人话表由 music_project.dart 单点维护。
+      if (code.startsWith('music_')) {
+        return musicProjectFailureMessage(
+          MusicProjectFailure(code.substring(6)),
+        );
+      }
       if (code.startsWith('video_')) {
         return videoFailureMessage(code.substring(6));
       }
@@ -840,6 +860,24 @@ abstract class AgentWorkspaceServices {
   Future<Map<String, dynamic>> videoList();
   Future<Map<String, dynamic>> videoSample({int index = 0});
 
+  // -- 音乐编曲（score.json 是唯一事实源；契约见 docs/music-contract.md §7）--
+  /// 列本机音乐项目（名称/标题/轨道数/小节数/校验状态）。
+  Future<Map<String, dynamic>> musicList();
+
+  /// 读一份乐谱的 score.json 原文。整形层会把超长 JSON 截断并标注
+  /// （模型拿到的是有上限的上下文，不是整谱爆量）。
+  Future<Map<String, dynamic>> musicRead(String name);
+
+  /// 摘要面：标题/轨道/小节/tick/时长/校验状态/问题数，不回全谱。
+  Future<Map<String, dynamic>> musicInspect(String name);
+
+  /// 由**完整** score.json 对象创建项目：先过 [verifyMusicScore] 再落盘，
+  /// 校验失败不写半成品目录（写谱后先过校验器再交付）。
+  Future<Map<String, dynamic>> musicCreate({
+    required String name,
+    required Map<String, dynamic> score,
+  });
+
   // -- 应用包（批次 07） --
   Future<Map<String, dynamic>> nonAppList();
   Future<Map<String, dynamic>> nonAppInspect(String name);
@@ -866,6 +904,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
     Future<NonAppLibrary> Function()? nonAppFactory,
     VideoService? video,
     VideoProjectStore? videoProjects,
+    MusicProjectStore? musicProjects,
     FigmaExporter? figma,
     this.designPrototypeVerify,
     this.creativeJudgeRunner,
@@ -875,6 +914,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
        _nonAppFactory = nonAppFactory ?? (() => NonAppLibrary.open()),
        _video = video ?? VideoService.instance,
        _videoProjects = videoProjects ?? VideoProjectStore.instance,
+       _musicProjects = musicProjects ?? MusicProjectStore.instance,
        _figma = figma ?? FigmaExporter();
 
   final String model;
@@ -892,6 +932,10 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
 
   /// 视频生成项目的本地库（工作台与工具共用同一存储；测试注入临时根）。
   final VideoProjectStore _videoProjects;
+
+  /// 音乐项目的本地库（默认生产 instance；测试注入 `MusicProjectStore(root:)`
+  /// 临时目录，绝不落用户文档目录）。
+  final MusicProjectStore _musicProjects;
 
   final FigmaExporter _figma;
 
@@ -1487,6 +1531,191 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
           'must be new; timeline/spec are pre-validated and written to the video '
           'workspace (played live, no file export). Review with video_review.',
     };
+  }
+
+  // -- 音乐 -----------------------------------------------------------------
+
+  /// music_read 的上下文防爆上限：超长 score.json 截断并标注（视频示例的
+  /// `_videoSampleJsonLimit` 同族纪律——模型拿到有上限的上下文）。
+  static const int musicReadJsonLimit = 4000;
+
+  static String _capMusicJson(String text) => text.length <= musicReadJsonLimit
+      ? text
+      : '${text.substring(0, musicReadJsonLimit)}\n…[truncated]';
+
+  /// tick → 秒（`sec = tick * 60 / (bpm * ppq)`；契约 §2）。编译不可用时回 0。
+  static double _musicSeconds(MusicScore score, MusicPlayPlan? plan) {
+    if (plan == null || score.tempo <= 0 || plan.ppq <= 0) return 0;
+    return double.parse(
+      (plan.totalTicks * 60 / (score.tempo * plan.ppq)).toStringAsFixed(2),
+    );
+  }
+
+  /// 音乐失败信封：错误码统一 `music_` 前缀（`music_no_project` /
+  /// `music_score_invalid` / `music_invalid_name` …），人话由
+  /// [musicProjectFailureMessage] 单点映射；原始诊断只进 `detail`。
+  static Map<String, dynamic> _musicFailureEnvelope(Object error) {
+    if (error is MusicProjectFailure) {
+      final code = 'music_${error.code}';
+      return _failure(code, musicProjectFailureMessage(error), error.detail);
+    }
+    return _failure(
+      'music_io_error',
+      musicProjectFailureMessage(const MusicProjectFailure('io_error')),
+      '$error',
+    );
+  }
+
+  @override
+  Future<Map<String, dynamic>> musicList() async {
+    final List<MusicProjectEntry> projects;
+    try {
+      projects = await _musicProjects.list();
+    } catch (error) {
+      return _musicFailureEnvelope(error);
+    }
+    final rows = <Map<String, dynamic>>[];
+    for (final entry in projects) {
+      final row = entry.toJson();
+      // 契约 §7：列表带时长。entry 只有轨道/小节计数，时长要从编好的
+      // PlayPlan 派生；坏项目（corrupt）跳过，绝不拖垮整张表（与
+      // MusicProjectStore.list 同一纪律）。
+      if (!entry.corrupt) {
+        try {
+          final snapshot = await _musicProjects.read(entry.name);
+          row['totalTicks'] = snapshot.playPlan?.totalTicks ?? 0;
+          row['seconds'] = _musicSeconds(snapshot.score, snapshot.playPlan);
+        } catch (_) {
+          row['corrupt'] = true;
+        }
+      }
+      rows.add(row);
+    }
+    return <String, dynamic>{
+      'ok': true,
+      'projects': rows,
+      'count': rows.length,
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> musicRead(String name) async {
+    final MusicProjectSnapshot snapshot;
+    try {
+      snapshot = await _musicProjects.read(name);
+    } catch (error) {
+      return _musicFailureEnvelope(error);
+    }
+    final text = const JsonEncoder.withIndent(' ').convert(snapshot.raw);
+    return <String, dynamic>{
+      'ok': true,
+      'name': snapshot.name,
+      'title': snapshot.score.title,
+      'verified': snapshot.validation.verified,
+      'issues': snapshot.validation.blockingIssues.length,
+      'chars': text.length,
+      'scoreJson': _capMusicJson(text),
+      'truncated': text.length > musicReadJsonLimit,
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> musicInspect(String name) async {
+    final MusicProjectSnapshot snapshot;
+    try {
+      snapshot = await _musicProjects.read(name);
+    } catch (error) {
+      return _musicFailureEnvelope(error);
+    }
+    final score = snapshot.score;
+    final plan = snapshot.playPlan;
+    final blocking = snapshot.validation.blockingIssues;
+    return <String, dynamic>{
+      'ok': true,
+      'name': snapshot.name,
+      'title': score.title,
+      'tempo': score.tempo,
+      'timeSig': score.timeSig,
+      'keySig': score.keySig,
+      'tracks': score.tracks.length,
+      'trackNames': <String>[for (final track in score.tracks) track.name],
+      'measures': score.measureCount,
+      'totalTicks': plan?.totalTicks ?? 0,
+      'seconds': _musicSeconds(score, plan),
+      'compiled': plan != null,
+      'verified': snapshot.validation.verified,
+      'issues': blocking.length,
+      // 摘要面不回全谱：只给前几条可执行的校验指针（修谱用），不是整份 checks。
+      if (blocking.isNotEmpty)
+        'issueHints': <Map<String, dynamic>>[
+          for (final issue in blocking.take(5))
+            <String, dynamic>{
+              'pointer': issue.pointer,
+              'code': issue.code,
+              'message': issue.message,
+            },
+        ],
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> musicCreate({
+    required String name,
+    required Map<String, dynamic> score,
+  }) async {
+    // 写谱后先过校验器再交付：parseMusicScore 是唯一校验入口（§3 硬门）。
+    final parsed = parseMusicScore(score);
+    final MusicScore? parsedScore = parsed.score;
+    if (parsedScore == null) {
+      final blocking = parsed.issues
+          .where((issue) => issue.blocking)
+          .toList(growable: false);
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'music_score_invalid',
+        'message': musicProjectFailureMessage(
+          const MusicProjectFailure('score_invalid'),
+        ),
+        'detail': blocking
+            .map((issue) => '${issue.pointer}: ${issue.code} ${issue.message}')
+            .join('；'),
+        'issues': <Map<String, dynamic>>[
+          for (final issue in parsed.issues.take(12)) issue.toJson(),
+        ],
+      };
+    }
+    try {
+      final entries = await _musicProjects.list();
+      if (entries.any((entry) => entry.name == name)) {
+        return _failure(
+          'music_project_exists',
+          musicProjectFailureMessage(
+            const MusicProjectFailure('project_exists'),
+          ),
+          'project_exists: $name',
+        );
+      }
+      final validation = await _musicProjects.save(name, parsedScore);
+      MusicPlayPlan? plan;
+      try {
+        plan = compileMusicScore(parsedScore);
+      } on MusicCompileError {
+        plan = null;
+      }
+      return <String, dynamic>{
+        'ok': true,
+        'project': name,
+        'title': parsedScore.title,
+        'tracks': parsedScore.tracks.length,
+        'measures': parsedScore.measureCount,
+        'totalTicks': plan?.totalTicks ?? 0,
+        'seconds': _musicSeconds(parsedScore, plan),
+        'verified': validation.verified,
+        'issues': validation.blockingIssues.length,
+      };
+    } catch (error) {
+      return _musicFailureEnvelope(error);
+    }
   }
 
   // -- 应用包 ---------------------------------------------------------------
@@ -2186,6 +2415,11 @@ List<String> _workspaceToolLines(String target) {
   const video = '- Video: video_list / video_sample / video_create / video_review '
       '(code-driven animation: sample → create on disk → review; no file export)';
   const nonapp = '- App packages: nonapp_list / nonapp_inspect';
+  const music =
+      '- Music: music_list / music_read / music_inspect / music_create '
+      '(score.json v1 is the only source of truth; 写谱后先过校验器再交付 — '
+      'music_create validates the score first and saves nothing when it fails; '
+      'music_read is capped at 4000 chars, use music_inspect for the summary)';
   switch (target.trim()) {
     case 'three':
       return const <String>[three];
@@ -2193,11 +2427,14 @@ List<String> _workspaceToolLines(String target) {
       return const <String>[video];
     case 'hotapp':
       return const <String>[hotapp, nonapp];
+    case 'music':
+      return const <String>[music];
     default:
       return const <String>[
         three,
         hotapp,
         video,
+        music,
         nonapp,
         '- Figma: figma_export (pass an absolute folder path)',
       ];
@@ -3254,6 +3491,7 @@ ToolSet _buildTools(_Ctx ctx, Genkit ai) {
     'hotapp_refine',
     'design_verify_prototype',
     'video_create',
+    'music_create',
     'figma_export',
   };
 
@@ -3895,6 +4133,9 @@ ToolSet _buildTools(_Ctx ctx, Genkit ai) {
       if (workspaceHint == 'hotapp') {
         return name.startsWith('hotapp_') || name.startsWith('nonapp_');
       }
+      // 音乐工作台（`plugin:music` 经 store 的 views→hint 映射）只见 music_*；
+      // finish / ask_user / read_docs 等通用工具在别的注册块里，不受这条影响。
+      if (workspaceHint == 'music') return name.startsWith('music_');
       return true;
     }
 
@@ -4160,6 +4401,82 @@ ToolSet _buildTools(_Ctx ctx, Genkit ai) {
       },
       const <String>['name'],
       (args) => workspace.hotAppInspect(str(args, 'name')),
+    );
+
+    // 音乐编曲（score.json 唯一事实源）：四件套 list / read / inspect / create。
+    // create 的参数是**完整** score JSON，先过校验器再落盘（写谱后先过校验器
+    // 再交付）；失败不写半成品目录。
+    addWorkspaceTool(
+      'music_list',
+      'List local music projects on this device (name, title, track/measure counts, '
+          'validator state). Look before you create so you do not collide with an '
+          'existing name.',
+      const <String, dynamic>{},
+      const <String>[],
+      (_) => workspace.musicList(),
+    );
+    addWorkspaceTool(
+      'music_read',
+      'Read one music project score.json (the only source of truth). Returns the JSON '
+          'text capped at 4000 chars with truncated=true past that; use music_inspect '
+          'when you only need the summary.',
+      const <String, dynamic>{
+        'name': {
+          'type': 'string',
+          'description': 'ASCII project name (a-z0-9_-)',
+        },
+      },
+      const <String>['name'],
+      (args) => workspace.musicRead(str(args, 'name')),
+    );
+    addWorkspaceTool(
+      'music_inspect',
+      'Inspect one music project summary: title, track/measure counts, total ticks, '
+          'seconds, verified flag and blocking-issue count. Summary only — never the '
+          'full score.',
+      const <String, dynamic>{
+        'name': {'type': 'string'},
+      },
+      const <String>['name'],
+      (args) => workspace.musicInspect(str(args, 'name')),
+    );
+    addWorkspaceTool(
+      'music_create',
+      'Create a music project from a COMPLETE score.json v1 object '
+          '(schemaVersion/title/tempo/timeSig/keySig/tracks[measures[events]]). '
+          'The score is validated first — nothing is written unless it passes the '
+          'validator (写谱后先过校验器再交付); a blocking issue returns '
+          'music_score_invalid with issue pointers. name is ASCII a-z0-9_- and must '
+          'be new (existing projects are never overwritten).',
+      const <String, dynamic>{
+        'name': {
+          'type': 'string',
+          'description': 'ASCII project name (a-z0-9_-), must be unique',
+        },
+        'score': {
+          'type': 'object',
+          'description':
+              'Complete score.json v1 object: schemaVersion=1, title, tempo, '
+              'timeSig [num,den], keySig, tracks[] with measures[] and events[]',
+        },
+      },
+      const <String>['name', 'score'],
+      (args) {
+        final score = args['score'];
+        if (score is! Map) {
+          return Future.value(<String, dynamic>{
+            'ok': false,
+            'error': 'invalid_args',
+            'message':
+                '乐谱格式不对：score 要一整份 score.json 对象（先 music_inspect '
+                '看一份现有乐谱的结构，再按同样形状填写）',
+          });
+        }
+        return workspace.musicCreate(
+          name: str(args, 'name'),
+          score: Map<String, dynamic>.from(score),
+        );
+      },
     );
     if (ctx.request.mode == 'workspace') {
       addWorkspaceTool(
