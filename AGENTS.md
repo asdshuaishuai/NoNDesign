@@ -470,7 +470,9 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   实跑通过** —— `scripts/wf/run_webview_smoke.sh` → `integration_test/webview_pages_test.dart`
   覆盖：音乐播放页（页面就绪 + 音频时钟真实推进 1.5s + beat 桥）、3D 视频预览页
   （150 帧时间表 + seekFrame + 播放时钟推进）、3D 视口控制（`__non3d_view` 返回 true；
-  沙箱面 `__non3d_grid` 无命名网格时如实回 `supported:false` 回执）。
+  沙箱面 `__non3d_grid` 无命名网格时如实回 `supported:false` 回执）、生产
+  `MusicPlaybackSurface`/`Video3dPreviewSurface`（真实控制器就绪 + 时钟推进/seekFrame
+  同步）、**浮层遮挡**（Flutter 控件叠在真实 WebView 上仍可点击，且动作能驱动页面 JS）。
   **Windows WebView2 / iOS / Android 真机仍未复验**，仍按原登记待补。
 - **WebView 宿主裁剪纪律（2026-11-26 真机事故）**：`Container(decoration + clipBehavior)`
   生成的是 `ClipPath`（任意路径），`webview_all_linux`（WebKitGTK）无法把它映射到原生
