@@ -1423,6 +1423,86 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     }
   }
 
+  /// 检查器受控编辑 → 合并进当前规范 → 走同一条规范保存链路。
+  ///
+  /// 面板只给「改哪个对象的哪些字段」，这里负责合并、再校验一遍并复用
+  /// [_saveSpec]（服务侧 components/acceptance 门 + 原子落盘 + 快照刷新）。
+  /// 任何一步失败都走 [_showError]：人话上屏、原始诊断进折叠的技术详情。
+  Future<void> _saveInspectorEdit(ThreeInspectorEdit edit) async {
+    _beginAction();
+    final service = _service;
+    final project = _project;
+    final snapshot = _snapshot;
+    if (service == null || project == null || snapshot == null) {
+      _showError(
+        '还没有可保存的 3D 项目',
+        'service=$service project=$project snapshot=$snapshot',
+        key: 'inspector|no_project',
+      );
+      return;
+    }
+    final String? invalid = validateThreeInspectorEdit(edit);
+    if (invalid != null) {
+      _showError(
+        invalid,
+        'validate ${edit.kind.name}:${edit.id} ${jsonEncode(edit.fields)}',
+        key: 'inspector|invalid|${edit.kind.name}|${edit.id}',
+      );
+      return;
+    }
+    final spec = _inspectorBaseSpec();
+    if (spec == null) {
+      _showError(
+        '规范页还有没保存的修改，先把它们整理成合法内容，再改检查器属性',
+        'spec draft is not a valid JSON object',
+        key: 'inspector|draft_invalid',
+      );
+      return;
+    }
+    final Map<String, dynamic>? merged;
+    try {
+      merged = applyThreeInspectorEdit(spec, edit);
+    } catch (error) {
+      _showError(
+        threeFailureMessage(null),
+        '$error',
+        key: 'inspector|merge|$error',
+      );
+      return;
+    }
+    if (merged == null) {
+      _showError(
+        '检查器里的对象已经不在当前项目里了，请重新选择后再改',
+        'target ${edit.kind.name}:${edit.id} missing from current spec',
+        key: 'inspector|missing|${edit.kind.name}|${edit.id}',
+      );
+      return;
+    }
+    // 把合并后的规范灌回规范页文本，再走既有 [_saveSpec]：格式错误已不可能，
+    // 剩下的是服务侧校验/落盘/刷新，与手编规范完全同一条路径。
+    _specCtl.text = const JsonEncoder.withIndent('  ').convert(merged);
+    _specDirty = true;
+    await _saveSpec();
+  }
+
+  /// 检查器编辑的合并基底：未脏用最近快照；规范页有未保存草稿时优先草稿
+  /// （草稿非法则拒绝合并，绝不静默覆盖用户的未保存内容）。
+  Map<String, dynamic>? _inspectorBaseSpec() {
+    final snapshot = _snapshot?.spec;
+    if (snapshot == null) return null;
+    if (!_specDirty) return snapshot;
+    // 规范页有未保存草稿：草稿必须是合法对象才允许在其上合并；清空/非法
+    // 草稿一律拒绝（报错给用户），绝不拿快照悄悄覆盖用户的未保存内容。
+    final text = _specCtl.text.trim();
+    if (text.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(text);
+      return decoded is Map ? decoded.cast<String, dynamic>() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _revealProject() async {
     final project = _project;
     final service = _service;
@@ -2118,6 +2198,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         item: selected,
         sceneChars: _sceneJs.length,
         currentPass: '${_state?['current'] ?? ''}',
+        onSaveEdit: (edit) => unawaited(_saveInspectorEdit(edit)),
       );
       if (threeLayout.left == PanelPolicy.docked ||
           threeLayout.right == PanelPolicy.docked) {

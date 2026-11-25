@@ -5,6 +5,8 @@
 /// 状态条；共享外壳（TitleBar/Rail/右 chat/StatusBar）仍由外层提供。
 library;
 
+import 'dart:convert';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../core/theme.dart';
@@ -36,6 +38,153 @@ final class ThreeOutlinerItem {
     ThreeOutlinerKind.camera => Icons.videocam_outlined,
     ThreeOutlinerKind.node => Icons.widgets_outlined,
   };
+}
+
+/// 检查器一次受控属性编辑：只描述「哪个对象、改哪些字段」，不持有事实源。
+///
+/// 面板只产出补丁；合并进项目规范、走服务校验与刷新由工作台负责
+/// （3D 视口/gizmo 与 scene.json 编辑器不在本批次）。
+final class ThreeInspectorEdit {
+  const ThreeInspectorEdit({
+    required this.kind,
+    required this.id,
+    required this.fields,
+  });
+
+  final ThreeOutlinerKind kind;
+
+  /// 组件/材质的裸 id（不含 `component:`/`material:` 前缀）；相机固定为 `camera`。
+  final String id;
+
+  /// 只包含**改动过的**字段（未动过的字段不写入，避免把默认值写回规范）。
+  final Map<String, Object?> fields;
+
+  @override
+  String toString() => 'ThreeInspectorEdit(${kind.name}:$id, $fields)';
+}
+
+const Set<String> _componentEditableKeys = <String>{
+  'what',
+  'size_scale',
+  'material',
+};
+const Set<String> _materialEditableKeys = <String>{
+  'color_hex',
+  'roughness',
+  'metalness',
+};
+const Set<String> _cameraEditableKeys = <String>{'view'};
+
+/// `#RRGGBB` 颜色文本（检查器受控输入的唯一合法形状）。
+final RegExp _colorHexPattern = RegExp(r'^#[0-9a-fA-F]{6}$');
+
+/// 校验一条检查器补丁，返回 null 表示可以保存；否则是一句可直接上屏的修正提示。
+///
+/// 工作台保存前再跑一遍（面板本地校验 + 主链路服务校验，不做单点信任）。
+String? validateThreeInspectorEdit(ThreeInspectorEdit edit) {
+  if (edit.fields.isEmpty) return '还没有要保存的修改';
+  switch (edit.kind) {
+    case ThreeOutlinerKind.component:
+      for (final String key in edit.fields.keys) {
+        if (!_componentEditableKeys.contains(key)) {
+          return '组件不支持属性「$key」';
+        }
+      }
+      final Object? what = edit.fields['what'];
+      if (what != null && (what is! String || what.trim().isEmpty)) {
+        return '组件名称不能为空';
+      }
+      final Object? sizeScale = edit.fields['size_scale'];
+      if (sizeScale != null &&
+          (sizeScale is! num || !sizeScale.isFinite || sizeScale <= 0)) {
+        return '尺寸比例要填一个大于 0 的数字';
+      }
+      final Object? material = edit.fields['material'];
+      if (material != null && material is! String) {
+        return '材质引用要填材质 id';
+      }
+      break;
+    case ThreeOutlinerKind.material:
+      for (final String key in edit.fields.keys) {
+        if (!_materialEditableKeys.contains(key)) {
+          return '材质不支持属性「$key」';
+        }
+      }
+      final Object? color = edit.fields['color_hex'];
+      if (color != null &&
+          (color is! String || !_colorHexPattern.hasMatch(color.trim()))) {
+        return '颜色要写成 #RRGGBB（例如 #c9a06a）';
+      }
+      for (final String key in const <String>['roughness', 'metalness']) {
+        final Object? value = edit.fields[key];
+        if (value != null &&
+            (value is! num || !value.isFinite || value < 0 || value > 1)) {
+          return '粗糙度和金属感要填 0 到 1 之间的数字';
+        }
+      }
+      break;
+    case ThreeOutlinerKind.camera:
+      for (final String key in edit.fields.keys) {
+        if (!_cameraEditableKeys.contains(key)) {
+          return '相机不支持属性「$key」';
+        }
+      }
+      final Object? view = edit.fields['view'];
+      if (view != null && (view is! String || view.trim().isEmpty)) {
+        return '相机视角不能为空';
+      }
+      break;
+    case ThreeOutlinerKind.node:
+      return '场景节点属性编辑在场景编辑器批次接入';
+  }
+  return null;
+}
+
+/// 把一条检查器补丁合并进一份规范副本；返回 null 表示目标对象已不在大纲里。
+///
+/// 纯函数：不修改传入的 [spec]（列表/对象都是浅拷贝后替换目标项），
+/// 供工作台在保存前做受控合并，也让测试能单独锚定字段白名单/定位语义。
+/// 调用方应先跑 [validateThreeInspectorEdit]。
+Map<String, dynamic>? applyThreeInspectorEdit(
+  Map<String, dynamic> spec,
+  ThreeInspectorEdit edit,
+) {
+  if (edit.kind == ThreeOutlinerKind.node || edit.fields.isEmpty) return null;
+  final Set<String> allowed = switch (edit.kind) {
+    ThreeOutlinerKind.component => _componentEditableKeys,
+    ThreeOutlinerKind.material => _materialEditableKeys,
+    ThreeOutlinerKind.camera => _cameraEditableKeys,
+    ThreeOutlinerKind.node => const <String>{},
+  };
+  for (final String key in edit.fields.keys) {
+    if (!allowed.contains(key)) {
+      throw ArgumentError('检查器不支持属性字段：$key');
+    }
+  }
+  final String targetId = edit.id.trim();
+  if (edit.kind == ThreeOutlinerKind.camera) {
+    final Object? rawCamera = spec['camera'];
+    if (rawCamera is! Map) return null;
+    final Map<String, dynamic> next = Map<String, dynamic>.from(spec);
+    next['camera'] = Map<String, dynamic>.from(rawCamera)..addAll(edit.fields);
+    return next;
+  }
+  final String listKey = edit.kind == ThreeOutlinerKind.component
+      ? 'components'
+      : 'materials';
+  final Object? rawList = spec[listKey];
+  if (rawList is! List) return null;
+  final List<dynamic> items = List<dynamic>.from(rawList);
+  for (var i = 0; i < items.length; i++) {
+    final Object? raw = items[i];
+    if (raw is! Map) continue;
+    if ((raw['id'] ?? '').toString().trim() != targetId) continue;
+    items[i] = Map<String, dynamic>.from(raw)..addAll(edit.fields);
+    final Map<String, dynamic> next = Map<String, dynamic>.from(spec);
+    next[listKey] = items;
+    return next;
+  }
+  return null;
 }
 
 /// 从 3D legacy spec 投影出大纲条目（components/materials/camera）。
@@ -250,22 +399,496 @@ class ThreeOutlinerPanel extends StatelessWidget {
 }
 
 /// 右侧节点检查器（3D 专属；与设计检查器/视频镜头检查器分开）。
-class ThreeNodeInspector extends StatelessWidget {
+///
+/// 组件/材质/相机走受控控件（TextField / Slider / 颜色文本），面板只维护
+/// 草稿并显式产出 [ThreeInspectorEdit]；保存/重置动作可见，面板不直接改
+/// 事实源。v2 `scene.json` 的节点（`node`）仍只读——场景编辑器不在本批次。
+class ThreeNodeInspector extends StatefulWidget {
   const ThreeNodeInspector({
     super.key,
     this.item,
     this.sceneChars = 0,
     this.currentPass = '',
+    this.onSaveEdit,
   });
 
   final ThreeOutlinerItem? item;
   final int sceneChars;
   final String currentPass;
 
+  /// 保存动作：只回传受控补丁；合并规范、写盘与刷新由工作台接线。
+  /// 为 null 时视为只读预览（保存按钮禁用）。
+  final ValueChanged<ThreeInspectorEdit>? onSaveEdit;
+
+  @override
+  State<ThreeNodeInspector> createState() => _ThreeNodeInspectorState();
+}
+
+class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
+  final TextEditingController _whatCtl = TextEditingController();
+  final TextEditingController _sizeCtl = TextEditingController();
+  final TextEditingController _materialCtl = TextEditingController();
+  final TextEditingController _colorCtl = TextEditingController();
+  final TextEditingController _viewCtl = TextEditingController();
+
+  /// 当前选中项的可编辑字段「磁盘值」，重置与脏判断都以它为基准。
+  Map<String, Object?> _source = const <String, Object?>{};
+  double _roughness = 0.5;
+  double _metalness = 0.0;
+  double _roughnessSeed = 0.5;
+  double _metalnessSeed = 0.0;
+  String _signature = '';
+  String? _localError;
+
+  @override
+  void initState() {
+    super.initState();
+    _seedFrom(widget.item);
+  }
+
+  @override
+  void dispose() {
+    _whatCtl.dispose();
+    _sizeCtl.dispose();
+    _materialCtl.dispose();
+    _colorCtl.dispose();
+    _viewCtl.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant ThreeNodeInspector oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_signatureFor(widget.item) != _signature) {
+      // 保存后快照刷新 / 外部生成改写了规范：以磁盘值为准重新播种。
+      _seedFrom(widget.item);
+    }
+  }
+
+  /// 只把「检查器可见的可编辑字段」纳入签名：run 刷新里无关字段变化不应
+  /// 把用户正在输入的草稿抹掉。
+  static String _signatureFor(ThreeOutlinerItem? item) {
+    if (item == null) return '';
+    final Map<String, Object?> data = item.data;
+    final List<Object?> values = switch (item.kind) {
+      ThreeOutlinerKind.component => <Object?>[
+        data['what'],
+        data['size_scale'],
+        data['material'],
+      ],
+      ThreeOutlinerKind.material => <Object?>[
+        data['color_hex'],
+        data['roughness'],
+        data['metalness'],
+      ],
+      ThreeOutlinerKind.camera => <Object?>[data['view']],
+      ThreeOutlinerKind.node => <Object?>[item.id],
+    };
+    return '${item.id}|${jsonEncode(values)}';
+  }
+
+  void _seedFrom(ThreeOutlinerItem? item) {
+    _localError = null;
+    _source = const <String, Object?>{};
+    _roughnessSeed = 0.5;
+    _metalnessSeed = 0.0;
+    _roughness = _roughnessSeed;
+    _metalness = _metalnessSeed;
+    _signature = _signatureFor(item);
+    _whatCtl.clear();
+    _sizeCtl.clear();
+    _materialCtl.clear();
+    _colorCtl.clear();
+    _viewCtl.clear();
+    final Map<String, Object?> data = item?.data ?? const <String, Object?>{};
+    switch (item?.kind) {
+      case ThreeOutlinerKind.component:
+        final String what = (data['what'] ?? '').toString();
+        final Object? rawSize = data['size_scale'];
+        final String material = (data['material'] ?? '').toString();
+        _source = <String, Object?>{
+          'what': what,
+          'size_scale': rawSize,
+          'material': material,
+        };
+        _whatCtl.text = what;
+        _sizeCtl.text = rawSize is num ? '$rawSize' : '';
+        _materialCtl.text = material;
+        break;
+      case ThreeOutlinerKind.material:
+        final String color = (data['color_hex'] ?? '').toString();
+        _source = <String, Object?>{
+          'color_hex': color,
+          'roughness': data['roughness'],
+          'metalness': data['metalness'],
+        };
+        _colorCtl.text = color;
+        _roughnessSeed = _unitSeed(data['roughness'], 0.5);
+        _metalnessSeed = _unitSeed(data['metalness'], 0.0);
+        _roughness = _roughnessSeed;
+        _metalness = _metalnessSeed;
+        break;
+      case ThreeOutlinerKind.camera:
+        final String view = (data['view'] ?? '').toString();
+        _source = <String, Object?>{'view': view};
+        _viewCtl.text = view;
+        break;
+      case ThreeOutlinerKind.node:
+      case null:
+        break;
+    }
+  }
+
+  static double _unitSeed(Object? raw, double fallback) {
+    if (raw is num && raw.isFinite) {
+      return raw.toDouble().clamp(0.0, 1.0);
+    }
+    return fallback;
+  }
+
+  String _sourceText(String key) => (_source[key] ?? '').toString();
+
+  String _sourceTrimmed(String key) => _sourceText(key).trim();
+
+  bool _sizeChanged() {
+    final String text = _sizeCtl.text.trim();
+    final Object? source = _source['size_scale'];
+    if (text.isEmpty) return source != null;
+    final double? parsed = double.tryParse(text);
+    if (source is! num) return true;
+    return parsed != source.toDouble();
+  }
+
+  bool get _dirty => switch (widget.item?.kind) {
+    ThreeOutlinerKind.component =>
+      _whatCtl.text.trim() != _sourceTrimmed('what') ||
+          _sizeChanged() ||
+          _materialCtl.text.trim() != _sourceTrimmed('material'),
+    ThreeOutlinerKind.material =>
+      _colorCtl.text.trim() != _sourceTrimmed('color_hex') ||
+          _roughness != _roughnessSeed ||
+          _metalness != _metalnessSeed,
+    ThreeOutlinerKind.camera => _viewCtl.text.trim() != _sourceTrimmed('view'),
+    ThreeOutlinerKind.node => false,
+    null => false,
+  };
+
+  static Set<String> _editableKeysOf(ThreeOutlinerKind kind) => switch (kind) {
+    ThreeOutlinerKind.component => _componentEditableKeys,
+    ThreeOutlinerKind.material => _materialEditableKeys,
+    ThreeOutlinerKind.camera => _cameraEditableKeys,
+    ThreeOutlinerKind.node => const <String>{},
+  };
+
+  static String _bareId(ThreeOutlinerItem item) {
+    if (item.id.startsWith('component:')) {
+      return item.id.substring('component:'.length);
+    }
+    if (item.id.startsWith('material:')) {
+      return item.id.substring('material:'.length);
+    }
+    return item.id;
+  }
+
+  void _reset() {
+    setState(() => _seedFrom(widget.item));
+  }
+
+  ThreeInspectorEdit? _reject(String message) {
+    setState(() => _localError = message);
+    return null;
+  }
+
+  void _save() {
+    final ThreeOutlinerItem? item = widget.item;
+    final ValueChanged<ThreeInspectorEdit>? onSave = widget.onSaveEdit;
+    if (item == null || onSave == null) return;
+    final ThreeInspectorEdit? edit = _collectEdit(item);
+    if (edit == null) return;
+    if (edit.fields.isEmpty) {
+      setState(() => _localError = '还没有要保存的修改');
+      return;
+    }
+    final String? invalid = validateThreeInspectorEdit(edit);
+    if (invalid != null) {
+      setState(() => _localError = invalid);
+      return;
+    }
+    setState(() => _localError = null);
+    onSave(edit);
+  }
+
+  ThreeInspectorEdit? _collectEdit(ThreeOutlinerItem item) {
+    final Map<String, Object?> fields = <String, Object?>{};
+    switch (item.kind) {
+      case ThreeOutlinerKind.component:
+        final String what = _whatCtl.text.trim();
+        if (what.isEmpty) return _reject('组件名称不能为空');
+        if (what != _sourceTrimmed('what')) fields['what'] = what;
+        final Object? sourceSize = _source['size_scale'];
+        final String sizeText = _sizeCtl.text.trim();
+        if (sizeText.isEmpty) {
+          if (sourceSize != null) return _reject('尺寸比例要填一个大于 0 的数字');
+        } else {
+          final double? size = double.tryParse(sizeText);
+          if (size == null || !size.isFinite || size <= 0) {
+            return _reject('尺寸比例要填一个大于 0 的数字');
+          }
+          if (sourceSize is! num || sourceSize.toDouble() != size) {
+            fields['size_scale'] = size;
+          }
+        }
+        final String material = _materialCtl.text.trim();
+        if (material != _sourceTrimmed('material')) {
+          fields['material'] = material;
+        }
+        break;
+      case ThreeOutlinerKind.material:
+        final String color = _colorCtl.text.trim();
+        final String sourceColor = _sourceTrimmed('color_hex');
+        if (color.isEmpty) {
+          if (sourceColor.isNotEmpty) {
+            return _reject('颜色要写成 #RRGGBB（例如 #c9a06a）');
+          }
+        } else if (!_colorHexPattern.hasMatch(color)) {
+          return _reject('颜色要写成 #RRGGBB（例如 #c9a06a）');
+        }
+        if (color != sourceColor) fields['color_hex'] = color;
+        if (_roughness != _roughnessSeed) fields['roughness'] = _roughness;
+        if (_metalness != _metalnessSeed) fields['metalness'] = _metalness;
+        break;
+      case ThreeOutlinerKind.camera:
+        final String view = _viewCtl.text.trim();
+        if (view.isEmpty) return _reject('相机视角不能为空');
+        if (view != _sourceTrimmed('view')) fields['view'] = view;
+        break;
+      case ThreeOutlinerKind.node:
+        return null;
+    }
+    return ThreeInspectorEdit(
+      kind: item.kind,
+      id: _bareId(item),
+      fields: fields,
+    );
+  }
+
+  Widget _fieldText(
+    NonPalette p,
+    String field,
+    TextEditingController controller, {
+    String? hint,
+    bool numeric = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(field, style: TextStyle(fontSize: 10, color: p.ink4)),
+          const SizedBox(height: 3),
+          TextField(
+            key: ValueKey('three-inspector-field-$field'),
+            controller: controller,
+            style: TextStyle(fontSize: 11, color: p.ink),
+            cursorColor: p.accent,
+            keyboardType: numeric
+                ? const TextInputType.numberWithOptions(decimal: true)
+                : null,
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: hint,
+              hintStyle: TextStyle(fontSize: 10, color: p.ink4),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 7,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: BorderSide(color: p.line),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: BorderSide(color: p.line),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: BorderSide(color: p.accent),
+              ),
+            ),
+            onChanged: (_) => setState(() => _localError = null),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _fieldSlider(
+    NonPalette p,
+    String field,
+    double value,
+    ValueChanged<double> onChanged,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Text(field, style: TextStyle(fontSize: 10, color: p.ink4)),
+              const Spacer(),
+              Text(
+                value.toStringAsFixed(2),
+                style: TextStyle(
+                  fontSize: 10,
+                  fontFamily: 'Menlo',
+                  color: p.ink2,
+                ),
+              ),
+            ],
+          ),
+          Slider(
+            key: ValueKey('three-inspector-field-$field'),
+            value: value,
+            divisions: 100,
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _editableFields(NonPalette p, ThreeOutlinerItem item) {
+    switch (item.kind) {
+      case ThreeOutlinerKind.component:
+        return Column(
+          children: <Widget>[
+            _fieldText(p, 'what', _whatCtl, hint: '组件是什么'),
+            _fieldText(
+              p,
+              'size_scale',
+              _sizeCtl,
+              hint: '大于 0 的比例',
+              numeric: true,
+            ),
+            _fieldText(p, 'material', _materialCtl, hint: '材质 id，可留空'),
+          ],
+        );
+      case ThreeOutlinerKind.material:
+        return Column(
+          children: <Widget>[
+            _fieldText(p, 'color_hex', _colorCtl, hint: '#RRGGBB'),
+            _fieldSlider(
+              p,
+              'roughness',
+              _roughness,
+              (value) => setState(() {
+                _roughness = value;
+                _localError = null;
+              }),
+            ),
+            _fieldSlider(
+              p,
+              'metalness',
+              _metalness,
+              (value) => setState(() {
+                _metalness = value;
+                _localError = null;
+              }),
+            ),
+          ],
+        );
+      case ThreeOutlinerKind.camera:
+        return _fieldText(p, 'view', _viewCtl, hint: '例如：略高处斜看');
+      case ThreeOutlinerKind.node:
+        return const SizedBox.shrink();
+    }
+  }
+
+  /// 不在可编辑白名单里的其余字段仍按只读行展示（不丢信息、不误导）。
+  Widget _readOnlyRows(NonPalette p, ThreeOutlinerItem item) {
+    final Set<String> editable = _editableKeysOf(item.kind);
+    final List<MapEntry<String, Object?>> rows = <MapEntry<String, Object?>>[
+      for (final MapEntry<String, Object?> entry in item.data.entries)
+        if (entry.key != 'id' && !editable.contains(entry.key)) entry,
+    ];
+    if (rows.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const SizedBox(height: 4),
+        Text('其他属性', style: TextStyle(fontSize: 10, color: p.ink4)),
+        const SizedBox(height: 4),
+        for (final entry in rows)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 5),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SizedBox(
+                  width: 78,
+                  child: Text(
+                    entry.key,
+                    style: TextStyle(fontSize: 10, color: p.ink4),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    '${entry.value}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: p.ink2,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _actions(NonPalette p) {
+    final bool editable =
+        widget.item != null && widget.item!.kind != ThreeOutlinerKind.node;
+    final bool canSave = editable && _dirty && widget.onSaveEdit != null;
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        children: <Widget>[
+          TextButton(
+            key: const ValueKey('three-inspector-reset'),
+            onPressed: editable && _dirty ? _reset : null,
+            style: TextButton.styleFrom(
+              foregroundColor: p.ink3,
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 30),
+            ),
+            child: const Text('重置', style: TextStyle(fontSize: 11)),
+          ),
+          const Spacer(),
+          FilledButton(
+            key: const ValueKey('three-inspector-save'),
+            onPressed: canSave ? _save : null,
+            style: FilledButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              minimumSize: const Size(0, 30),
+              textStyle: const TextStyle(fontSize: 11),
+            ),
+            child: const Text('保存属性'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
-    final item = this.item;
+    final NonPalette p = context.palette;
+    final ThreeOutlinerItem? item = widget.item;
     return Container(
       key: const ValueKey('three-workbench-inspector'),
       color: p.panel,
@@ -293,8 +916,8 @@ class ThreeNodeInspector extends StatelessWidget {
           if (item == null)
             _InspectorEmpty(
               p: p,
-              sceneChars: sceneChars,
-              currentPass: currentPass,
+              sceneChars: widget.sceneChars,
+              currentPass: widget.currentPass,
             )
           else
             Expanded(
@@ -319,42 +942,53 @@ class ThreeNodeInspector extends StatelessWidget {
                       ThreeOutlinerKind.node => '节点',
                     }, style: TextStyle(fontSize: 10, color: p.ink4)),
                     const SizedBox(height: 10),
-                    for (final entry in item.data.entries)
-                      if (entry.key != 'what' && entry.key != 'id')
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              SizedBox(
-                                width: 78,
-                                child: Text(
-                                  entry.key.toString(),
-                                  style: TextStyle(fontSize: 10, color: p.ink4),
-                                ),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  '${entry.value}',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: p.ink2,
-                                    height: 1.35,
-                                  ),
-                                ),
-                              ),
-                            ],
+                    if (item.kind == ThreeOutlinerKind.node) ...<Widget>[
+                      _readOnlyRows(p, item),
+                      const SizedBox(height: 8),
+                      Text(
+                        '场景节点属性编辑在场景编辑器批次接入；这里只做只读投影。',
+                        style: TextStyle(
+                          fontSize: 10,
+                          height: 1.45,
+                          color: p.ink4,
+                        ),
+                      ),
+                    ] else ...<Widget>[
+                      _editableFields(p, item),
+                      _readOnlyRows(p, item),
+                      if (widget.onSaveEdit == null)
+                        Text(
+                          '只读预览：打开项目后可以保存属性。',
+                          style: TextStyle(
+                            fontSize: 10,
+                            height: 1.45,
+                            color: p.ink4,
                           ),
                         ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '属性编辑在 3D 视口/受控 patch 批次接入；本检查器当前只读。',
-                      style: TextStyle(
-                        fontSize: 10,
-                        height: 1.45,
-                        color: p.ink4,
+                      if (_localError != null)
+                        Padding(
+                          key: const ValueKey('three-inspector-error'),
+                          padding: const EdgeInsets.only(top: 2, bottom: 6),
+                          child: Text(
+                            _localError!,
+                            style: TextStyle(
+                              fontSize: 10,
+                              height: 1.4,
+                              color: p.danger,
+                            ),
+                          ),
+                        ),
+                      _actions(p),
+                      const SizedBox(height: 6),
+                      Text(
+                        '保存后写回项目规范，不改场景代码；重新生成时生效。',
+                        style: TextStyle(
+                          fontSize: 10,
+                          height: 1.45,
+                          color: p.ink4,
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),
@@ -397,7 +1031,7 @@ class _InspectorEmpty extends StatelessWidget {
             _kv(p, '场景代码', '$sceneChars 字符'),
             const SizedBox(height: 8),
             Text(
-              '在左侧大纲选择组件/材质/相机查看只读属性。',
+              '在左侧大纲选择组件/材质/相机查看并编辑属性。',
               style: TextStyle(fontSize: 10, height: 1.45, color: p.ink4),
             ),
           ],
