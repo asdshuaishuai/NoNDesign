@@ -13,7 +13,8 @@
 > [research/raea.md](research/raea.md)（只参考：composition/词级时间/check/story 契约）·
 > [skills/creative-workbench/references/story-short.md](skills/creative-workbench/references/story-short.md)（3D 短剧工艺参考）·
 > [docs/README.md](README.md) §2 决策台账 ·
-> [plan-workbench-ui.md](plan-workbench-ui.md)（工作台交互姿态/UI 独立适配，另一条并行批次）。
+> [plan-workbench-ui.md](plan-workbench-ui.md)（工作台交互姿态/UI 独立适配，另一条并行批次） ·
+> 设计草案：[video-tracks-adr.md](design/video-tracks-adr.md) · [video3d-execution.md](design/video3d-execution.md) · [video3d-contract.md](design/video3d-contract.md)。
 
 ## 0. 本轮修正（相对 v1/v2）
 
@@ -63,12 +64,12 @@ raea 只提供契约参考，不进入代码依赖。
 
 ### D · 设计阶段（3–5 天，**只设计不实现**）
 
-**D1. 视频双轨 ADR**（`docs/design/video-tracks-adr.md`）
+**D1. 视频双轨 ADR**（`docs/design/video-tracks-adr.md`，**草案已落盘**）
 - 定义 V-A/V-B 事实源、执行面、时间模型、共享字段、产物边界；明确 3D 视频不替换
   three-live 建模面、不引入 raea；写出与旧裁决的差异/保留。
 - 验收：用户 review 通过；与 `plan-creative-workbench` §5 的差异逐条登记。
 
-**D2. 3D 视频执行面设计（three-live）**（`docs/design/video3d-execution.md`）
+**D2. 3D 视频执行面设计（three-live）**（`docs/design/video3d-execution.md`，**草案已落盘**）
 必须回答：
 1. 场景合成：`scene3d.json` 如何确定性编译成 three-live 可执行的 `src/scene.js`（复用
    3D 的 scene 编译器/材质约定，还是视频专用编译器？）；节点/灯光/相机/glTF 的资源边界。
@@ -82,7 +83,7 @@ raea 只提供契约参考，不进入代码依赖。
    进我们的校验/QA，不引其运行时。
 6. 不引入边界：不引 React/Bevy/JS 运行时、不把 raea CLI 作为依赖、不做第二套 agent。
 
-**D3. 3D 视频数据契约**（`docs/design/video3d-contract.md`）
+**D3. 3D 视频数据契约**（`docs/design/video3d-contract.md`，**草案已落盘**）
 - `scene3d.json` / `screenplay3d.json` v1 字段、路径白名单、体积上限、缺资产显性失败；
   与 3D 建模 `scene.json` 的关系（只读兼容/不混写）。
 - 与 story-short 的 8 段脚本/词级时间/镜头表/look 参数映射；toon_3d 只作为 style 候选。
