@@ -227,12 +227,68 @@ void main() {
     expect(find.text('音乐工作台'), findsOneWidget);
     expect(find.byKey(const ValueKey('music-project-list')), findsOneWidget);
     expect(find.byKey(const ValueKey('music-track-list')), findsOneWidget);
-    expect(find.byKey(const ValueKey('music-piano-roll')), findsOneWidget);
+    expect(find.byKey(const ValueKey('music-staff-view')), findsOneWidget);
+    expect(find.byKey(const ValueKey('music-view-toggle')), findsOneWidget);
     expect(find.byKey(const ValueKey('music-inspector')), findsOneWidget);
     expect(find.byKey(const ValueKey('music-transport')), findsOneWidget);
     expect(find.text('主旋律'), findsWidgets);
     expect(find.text('乐谱校验通过'), findsOneWidget);
     expect(find.byKey(const ValueKey('music-transport-time')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('中部谱面默认五线谱（只读），可切到钢琴卷帘再切回；缩放夹在 50–150%', (tester) async {
+    await viewport(tester, const Size(1440, 900));
+    await store.save('study', _score());
+    await tester.pumpWidget(_app(MusicWorkspace(store: store)));
+    await _settle(tester);
+
+    // 默认 = 五线谱只读；钢琴卷帘不并存（切换是替换，不是叠层）。
+    expect(find.byKey(const ValueKey('music-staff-view')), findsOneWidget);
+    expect(find.byKey(const ValueKey('music-piano-roll')), findsNothing);
+    expect(find.byKey(const ValueKey('music-view-toggle')), findsOneWidget);
+    expect(find.byKey(const ValueKey('music-staff-zoom')), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const ValueKey('music-staff-zoom'))).data,
+      '100%',
+    );
+
+    // 切换到钢琴卷帘：卷帘出现、五线谱退场。
+    await tester.tap(find.byKey(const ValueKey('music-view-roll')));
+    await _settle(tester);
+    expect(find.byKey(const ValueKey('music-piano-roll')), findsOneWidget);
+    expect(find.byKey(const ValueKey('music-staff-view')), findsNothing);
+
+    // 切回五线谱：只读视图回来（默认仍是五线谱）。
+    await tester.tap(find.byKey(const ValueKey('music-view-staff')));
+    await _settle(tester);
+    expect(find.byKey(const ValueKey('music-staff-view')), findsOneWidget);
+    expect(find.byKey(const ValueKey('music-piano-roll')), findsNothing);
+
+    // 缩放：默认 100%，5 步缩到 50%，10 步放大回 150%（夹紧边界）。
+    for (int i = 0; i < 5; i++) {
+      await tester.tap(find.byKey(const ValueKey('music-staff-zoom-out')));
+      await tester.pump();
+    }
+    expect(
+      tester.widget<Text>(find.byKey(const ValueKey('music-staff-zoom'))).data,
+      '50%',
+    );
+    for (int i = 0; i < 10; i++) {
+      await tester.tap(find.byKey(const ValueKey('music-staff-zoom-in')));
+      await tester.pump();
+    }
+    expect(
+      tester.widget<Text>(find.byKey(const ValueKey('music-staff-zoom'))).data,
+      '150%',
+    );
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const ValueKey('music-staff-zoom-in')))
+          .onPressed,
+      isNull,
+      reason: '到 150% 上限后放大按钮禁用',
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -255,6 +311,8 @@ void main() {
     await _settle(tester);
     expect(find.text('还没有音乐项目'), findsOneWidget);
     expect(find.byKey(const ValueKey('music-piano-roll')), findsNothing);
+    expect(find.byKey(const ValueKey('music-staff-view')), findsNothing);
+    expect(find.byKey(const ValueKey('music-view-toggle')), findsNothing);
   });
 
   testWidgets('坏项目：读取失败给人话，不空白', (tester) async {

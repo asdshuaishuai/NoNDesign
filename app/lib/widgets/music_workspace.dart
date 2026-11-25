@@ -19,6 +19,7 @@ import '../core/music/music_score.dart';
 import '../core/theme.dart';
 import '../core/workbench_layout.dart';
 import 'music_playback_surface.dart';
+import 'music_staff_view.dart';
 import 'music_workbench_panels.dart';
 
 /// 跨实例打开通道（与 `threeLoadOnOpen` / `videoLoadOnOpen` 同模式）：
@@ -69,6 +70,11 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   MusicProjectFailure? _failure;
   MusicInspectorStatus? _status;
   int _selectedTrack = 0;
+
+  /// 中部谱面预览的本地视图选择：默认五线谱（只读），可切回钢琴卷帘。
+  ///
+  /// 只影响本实例的显示，不写设置/项目、不改变编辑与播放语义；切项目保留选择。
+  bool _staffView = true;
 
   /// 当前播放面控制器；null = 没有可播放的编译产物（按钮禁用并说明原因）。
   MusicPlaybackController? _playback;
@@ -456,15 +462,9 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
       );
     }
     final MusicPlaybackController? playback = _playback;
+    final Widget preview = _scorePreview(snapshot);
     if (playback == null) {
-      return Padding(
-        padding: const EdgeInsets.all(12),
-        child: MusicPianoRoll(
-          score: snapshot.score,
-          playPlan: snapshot.playPlan,
-          selectedTrack: _selectedTrack,
-        ),
-      );
+      return Padding(padding: const EdgeInsets.all(12), child: preview);
     }
     // 谱面优先：谱面占大头，演奏页在下方给一块能看能点的画位；运输条在底部
     // 驱动同一份播放控制器（播放头 / 错误都经它回调刷新）。
@@ -474,11 +474,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
           flex: 3,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-            child: MusicPianoRoll(
-              score: snapshot.score,
-              playPlan: snapshot.playPlan,
-              selectedTrack: _selectedTrack,
-            ),
+            child: preview,
           ),
         ),
         Expanded(
@@ -489,6 +485,119 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
           ),
         ),
       ],
+    );
+  }
+
+  /// 中部谱面预览：本地切换「五线谱（默认，只读）/ 钢琴卷帘」。
+  ///
+  /// 切换只换显示，不改 snapshot、不重建播放面；两种视图都只读 `score.json`。
+  Widget _scorePreview(MusicProjectSnapshot snapshot) {
+    final p = context.palette;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        SizedBox(
+          height: 34,
+          child: Row(
+            key: const ValueKey('music-view-toggle'),
+            children: <Widget>[
+              _MusicViewTab(
+                key: const ValueKey('music-view-staff'),
+                label: '五线谱',
+                icon: Icons.music_note_outlined,
+                selected: _staffView,
+                onTap: () {
+                  if (_staffView) return;
+                  setState(() => _staffView = true);
+                },
+              ),
+              const SizedBox(width: 6),
+              _MusicViewTab(
+                key: const ValueKey('music-view-roll'),
+                label: '钢琴卷帘',
+                icon: Icons.piano_outlined,
+                selected: !_staffView,
+                onTap: () {
+                  if (!_staffView) return;
+                  setState(() => _staffView = false);
+                },
+              ),
+              const Spacer(),
+              Flexible(
+                child: Text(
+                  _staffView ? '只读五线谱 · 不写乐谱' : '只读卷帘 · 不写乐谱',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(fontSize: 10, color: p.ink4),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _staffView
+              ? MusicStaffView(
+                  score: snapshot.score,
+                  selectedTrackIndex: _selectedTrack,
+                )
+              : MusicPianoRoll(
+                  score: snapshot.score,
+                  playPlan: snapshot.playPlan,
+                  selectedTrack: _selectedTrack,
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 中部谱面预览的本地切换按钮（五线谱 / 钢琴卷帘）。
+class _MusicViewTab extends StatelessWidget {
+  const _MusicViewTab({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected ? p.accentSoft : null,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: selected ? p.accent.withValues(alpha: 0.5) : p.line,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(icon, size: 12, color: selected ? p.accent : p.ink4),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                color: selected ? p.accent : p.ink3,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
