@@ -1,14 +1,14 @@
 # 音乐模块契约（编曲工作台 · score.json 唯一事实源）
 
-> 状态：**R1 契约核心 + 编辑闭环 + 播放页编译产物 + 播放面接入 + music_* 工具族（含 music_patch）+ 项目跟随已落地（2026-11-24/25）· 五线谱编辑交互/配乐联动未施工**。已落地：
+> 状态：**R1 契约核心 + 编辑闭环 + 播放页编译产物 + 播放面接入 + music_* 工具族（含 music_patch）+ 项目跟随已落地（2026-11-24/25）· 谱面精确插槽/拖移删除、配乐联动未施工**。已落地：
 > score.json v1 解析/未知字段保留、`verifyMusicScore` 硬门、整数 tick 编译器（ppq=3840）、
 > `MusicProjectStore` 存储；`plugin:music` + `MusicWorkspace` 只读钢琴卷帘/检查器/运输条；
 > `music_edit.dart` 最小编辑闭环（纯函数 + 可保存检查器）；`music_player.dart` 自包含
 > Web Audio 播放页编译产物（CSP/确定性/六音色）；`music_playback_surface.dart` 把播放页接进
 > 工作台（WebView + 运输条播放/暂停/停止/播放头，未校验/无计划时禁用并说明）；
 > `music_list/read/inspect/create/patch` 工具族 + workspace 工具面收窄 + 成功产物认领；
-> 作品集/顶栏菜单/工作台打开通道的项目跟随；`music_staff_view.dart` 五线谱只读视图 +
-> `musicStaffLayout` 确定性排版纯函数（工作台默认五线谱）；本文契约增量：
+> 作品集/顶栏菜单/工作台打开通道的项目跟随；`music_staff_view.dart` 五线谱只读视图 + `musicStaffLayout` 确定性排版纯函数（工作台默认五线谱）；
+> `staffHitTest` + `appendNoteAt` 谱面点击插入音符（最小编辑交互）；本文契约增量：
 > score.json v1、整数 tick 编译、`verifyScore`（拟实现）硬门、五线谱、播放页、存储、工具族、配乐联动与验收。
 >
 > 相关：[plan-music-module.md](plan-music-module.md)（方案事实源）·

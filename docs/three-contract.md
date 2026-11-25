@@ -167,6 +167,11 @@ judge/rNN/  brief.md + montages + judgment.json + score.json（每轮一个 git 
   camera（view）提供受控编辑；面板只产出最小补丁（`ThreeInspectorEdit`），
   `validateThreeInspectorEdit`/`applyThreeInspectorEdit` 纯函数合并，`three_workspace.dart`
   复用既有 `_saveSpec` 落盘并刷新快照；v2 scene.json 节点仍只读。测试：`three_workbench_panels_test`（13 例）。
+* 视口控件（2026-11-26）：`assets/three/preview.html` 追加 `window.__non3d_view(front|top|iso|reset)`
+  与 `window.__non3d_grid(visible)`（legacy 网格用独立 scene 渲染，不污染 `__measure` 的包围盒事实；
+  沙箱面网格按命名 mesh 开关，缺失时 `supported:false` 如实回复、宿主复原并提示一次）；
+  `three_viewport_controls.dart` 提供预置视角/网格/重置浮层，宽屏预览面上方挂载，未就绪时禁用并给真因。
+  测试：`three_viewport_controls_test`（3）+ `three_workspace_test`（视图控件分支）。
 * **待后续**：GLB 导出、多视角 render_views、
   建模视口（大纲/视口/gizmo/检查器）、scene/graphics 轨门、judge 打包。
 
