@@ -69,7 +69,7 @@ raea 只提供契约参考，不进入代码依赖。
   three-live 建模面、不引入 raea；写出与旧裁决的差异/保留。
 - 验收：用户 review 通过；与 `plan-creative-workbench` §5 的差异逐条登记。
 
-**D2. 3D 视频执行面设计（three-live）**（`docs/design/video3d-execution.md`，**草案已落盘**）
+**D2. 3D 视频执行面设计（three-live）**（`docs/design/video3d-execution.md`，**草案已落盘 + 项目层/预览页编译器已实现**：`core/video3d/video3d_project.dart` / `video3d_player.dart`，25 例测试）
 必须回答：
 1. 场景合成：`scene3d.json` 如何确定性编译成 three-live 可执行的 `src/scene.js`（复用
    3D 的 scene 编译器/材质约定，还是视频专用编译器？）；节点/灯光/相机/glTF 的资源边界。

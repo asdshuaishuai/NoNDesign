@@ -129,7 +129,8 @@ WorkbenchLayout resolveWorkbenchLayout({
   乐谱检查器（右）、只读运输条（底，BPM/拍号/总 tick/时长；播放引擎不假装可点）。
   数据接 `MusicProjectStore` / `verifyMusicScore` / `compileMusicScore` 真结果。
   **已补（2026-11-25）**：Web Audio 播放面接进工作台（运输条播放/暂停/停止/播放头；未校验或无计划时禁用并说明）、
-  `music_*` 工具族与工具面收窄。**待做**：五线谱编辑器/放音、`music_patch`、项目跟随/作品集。
+  `music_*` 工具族与工具面收窄。**已补（2026-11-25）**：音乐项目跟随（作品集/顶栏菜单/打开通道）；`music_patch` 确定性补丁。
+  **待做**：五线谱编辑器/放音。
 
 ## 5. 共享与不变量
 

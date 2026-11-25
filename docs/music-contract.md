@@ -1,13 +1,13 @@
 # 音乐模块契约（编曲工作台 · score.json 唯一事实源）
 
-> 状态：**R1 契约核心 + 编辑闭环 + 播放页编译产物 + 播放面接入 + music_* 工具族已落地（2026-11-24/25）· 五线谱编辑器/music_patch/配乐联动未施工**。已落地：
+> 状态：**R1 契约核心 + 编辑闭环 + 播放页编译产物 + 播放面接入 + music_* 工具族（含 music_patch）+ 项目跟随已落地（2026-11-24/25）· 五线谱编辑器/配乐联动未施工**。已落地：
 > score.json v1 解析/未知字段保留、`verifyMusicScore` 硬门、整数 tick 编译器（ppq=3840）、
 > `MusicProjectStore` 存储；`plugin:music` + `MusicWorkspace` 只读钢琴卷帘/检查器/运输条；
 > `music_edit.dart` 最小编辑闭环（纯函数 + 可保存检查器）；`music_player.dart` 自包含
 > Web Audio 播放页编译产物（CSP/确定性/六音色）；`music_playback_surface.dart` 把播放页接进
 > 工作台（WebView + 运输条播放/暂停/停止/播放头，未校验/无计划时禁用并说明）；
-> `music_list/read/inspect/create` 工具族 + workspace 工具面收窄 + 成功产物认领；
-> 本文契约增量：
+> `music_list/read/inspect/create/patch` 工具族 + workspace 工具面收窄 + 成功产物认领；
+> 作品集/顶栏菜单/工作台打开通道的项目跟随；本文契约增量：
 > score.json v1、整数 tick 编译、`verifyScore`（拟实现）硬门、五线谱、播放页、存储、工具族、配乐联动与验收。
 >
 > 相关：[plan-music-module.md](plan-music-module.md)（方案事实源）·
@@ -89,7 +89,7 @@ AudioContext.currentTime
 | `music_list` | ✅ 已实现：列本机音乐项目（名称/轨道数/小节数/时长） |
 | `music_create` | ✅ 已实现（v1 由调用方给完整 score JSON，先校验后原子保存；brief 作曲待后续） |
 | `music_read` | ✅ 已实现（4000 字截断并标注） |
-| `music_patch` | RFC6902 风格确定性补丁；改后自动校验并如实回报（**未实现**，待补丁批次） |
+| `music_patch` | ✅ 已实现：RFC6902 风格最小补丁（路径白名单 add/replace/remove；改后强制 parse+verify；失败带全部指针） |
 | `music_inspect` | ✅ 已实现：摘要面（轨道/小节/时长/校验状态/≤5 条 issue hint），不回全谱 |
 
 * workspace 模式只暴露 `music_*` + 通用只读；跨模块动作只走裁决过的联动通道（§8）。`AgentWorkspaceServices` 扩方法、`LocalWorkspaceServices` 实现（工厂可注入，测试不落用户目录）；成功产物走 workspace 产物认领链；提示词教学加「写谱后先过校验器再交付」。
