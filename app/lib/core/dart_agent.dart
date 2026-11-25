@@ -66,6 +66,7 @@ import 'figma_export.dart';
 import 'hotapp_service.dart';
 import 'models.dart';
 import 'music/music_compile.dart';
+import 'music/music_patch.dart';
 import 'music/music_project.dart';
 import 'music/music_score.dart';
 import 'nonapp_library.dart';
@@ -511,6 +512,8 @@ String toolLabel(String tool) {
       return '音乐 · 查看';
     case 'music_create':
       return '音乐 · 新建';
+    case 'music_patch':
+      return '音乐 · 修改';
   }
   if (tool.startsWith('three_')) return '3D 场景';
   if (tool.startsWith('hotapp_')) return '热应用';
@@ -703,6 +706,11 @@ String toolFailureMessage(String? rawError) {
       // 人话表映射，避免每加一个码就漏一句文案。
       // 音乐模块失败码同样是 `music_<module-code>`（`music_score_invalid` /
       // `music_no_project` …）：人话表由 music_project.dart 单点维护。
+      // 确定性补丁的细分码是 `music_patch_<code>`：人话表由
+      // music_patch.dart 单点维护（路径/越界/校验失败各有可执行的一句话）。
+      if (code.startsWith('music_patch_')) {
+        return musicPatchFailureMessage(code.substring('music_patch_'.length));
+      }
       if (code.startsWith('music_')) {
         return musicProjectFailureMessage(
           MusicProjectFailure(code.substring(6)),
@@ -876,6 +884,17 @@ abstract class AgentWorkspaceServices {
   Future<Map<String, dynamic>> musicCreate({
     required String name,
     required Map<String, dynamic> score,
+  });
+
+  /// 对现有音乐项目做确定性补丁（RFC6902 风格 add / remove / replace，只限
+  /// 安全路径：标题、速度、轨道名称/音色/音量/静音、小节事件）。
+  ///
+  /// 读盘 → 补丁 → 改后必须过 [parseMusicScore] → 落盘；补丁本身或校验失败
+  /// 返回显性信封 `{ok, error, message, detail}`（`music_patch_` 码 + 人话），
+  /// 不写盘、不改入参（见 [applyMusicPatch]）。
+  Future<Map<String, dynamic>> musicPatch({
+    required String name,
+    required List<Map<String, dynamic>> ops,
   });
 
   // -- 应用包（批次 07） --
@@ -1566,6 +1585,18 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
     );
   }
 
+  /// 音乐补丁失败信封：错误码统一 `music_patch_` 前缀 + 人话 + 原始诊断
+  /// （`detail` 只进折叠的技术详情）。补丁失败不是项目失败：路径/越界/值/
+  /// 改后校验各自有可执行的细分码，不能静默成「操作没有完成」。
+  static Map<String, dynamic> _musicPatchFailureEnvelope(
+    MusicPatchFailure error,
+  ) => <String, dynamic>{
+    'ok': false,
+    'error': 'music_patch_${error.code}',
+    'message': error.message,
+    'detail': error.detail,
+  };
+
   @override
   Future<Map<String, dynamic>> musicList() async {
     final List<MusicProjectEntry> projects;
@@ -1710,6 +1741,60 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         'measures': parsedScore.measureCount,
         'totalTicks': plan?.totalTicks ?? 0,
         'seconds': _musicSeconds(parsedScore, plan),
+        'verified': validation.verified,
+        'issues': validation.blockingIssues.length,
+      };
+    } catch (error) {
+      return _musicFailureEnvelope(error);
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> musicPatch({
+    required String name,
+    required List<Map<String, dynamic>> ops,
+  }) async {
+    final MusicProjectSnapshot snapshot;
+    try {
+      snapshot = await _musicProjects.read(name);
+    } catch (error) {
+      // 读不到项目/已存乐谱本身坏了：沿用项目库的人话表（music_no_project /
+      // music_score_invalid …），不伪装成补丁成功。
+      return _musicFailureEnvelope(error);
+    }
+    // 纯函数补丁：深拷贝入参、逐条应用、最后必须 parseMusicScore 通过才返回；
+    // 失败抛 MusicPatchFailure（带 code + 人话 + detail），此时绝不落盘。
+    final MusicPatchResult patched;
+    try {
+      patched = applyMusicPatch(snapshot.raw, ops);
+    } on MusicPatchFailure catch (error) {
+      return _musicPatchFailureEnvelope(error);
+    } catch (error) {
+      return _failure(
+        'music_patch_failed',
+        musicPatchFailureMessage(''),
+        '$error',
+      );
+    }
+    try {
+      // 改后校验已经由 applyMusicPatch 做过；save 会再校验一次并原子落盘，
+      // 返回的 validation 就是如实结果（verified/issues）。
+      final validation = await _musicProjects.save(name, patched.score);
+      MusicPlayPlan? plan;
+      try {
+        plan = compileMusicScore(patched.score);
+      } on MusicCompileError {
+        plan = null;
+      }
+      return <String, dynamic>{
+        'ok': true,
+        'project': name,
+        'title': patched.score.title,
+        'tracks': patched.score.tracks.length,
+        'measures': patched.score.measureCount,
+        'totalTicks': plan?.totalTicks ?? 0,
+        'seconds': _musicSeconds(patched.score, plan),
+        'applied': patched.applied,
         'verified': validation.verified,
         'issues': validation.blockingIssues.length,
       };
@@ -2416,9 +2501,11 @@ List<String> _workspaceToolLines(String target) {
       '(code-driven animation: sample → create on disk → review; no file export)';
   const nonapp = '- App packages: nonapp_list / nonapp_inspect';
   const music =
-      '- Music: music_list / music_read / music_inspect / music_create '
+      '- Music: music_list / music_read / music_inspect / music_create / music_patch '
       '(score.json v1 is the only source of truth; 写谱后先过校验器再交付 — '
       'music_create validates the score first and saves nothing when it fails; '
+      'music_patch is a deterministic add/remove/replace patch and re-validates '
+      'before saving (确定性补丁，改后自动校验); '
       'music_read is capped at 4000 chars, use music_inspect for the summary)';
   switch (target.trim()) {
     case 'three':
@@ -3492,6 +3579,7 @@ ToolSet _buildTools(_Ctx ctx, Genkit ai) {
     'design_verify_prototype',
     'video_create',
     'music_create',
+    'music_patch',
     'figma_export',
   };
 
@@ -4403,9 +4491,10 @@ ToolSet _buildTools(_Ctx ctx, Genkit ai) {
       (args) => workspace.hotAppInspect(str(args, 'name')),
     );
 
-    // 音乐编曲（score.json 唯一事实源）：四件套 list / read / inspect / create。
+    // 音乐编曲（score.json 唯一事实源）：list / read / inspect / create / patch。
     // create 的参数是**完整** score JSON，先过校验器再落盘（写谱后先过校验器
-    // 再交付）；失败不写半成品目录。
+    // 再交付）；patch 是确定性补丁（RFC6902 风格级），改后必须过同一校验器；
+    // 二者失败都不写半成品。
     addWorkspaceTool(
       'music_list',
       'List local music projects on this device (name, title, track/measure counts, '
@@ -4476,6 +4565,71 @@ ToolSet _buildTools(_Ctx ctx, Genkit ai) {
           name: str(args, 'name'),
           score: Map<String, dynamic>.from(score),
         );
+      },
+    );
+    // 确定性补丁：只在既有项目上做最小改动；改完必须过校验器才落盘。
+    // 路径白名单在 music_patch.dart 单点维护（标题/速度/轨道安全字段/小节事件），
+    // 未知路径/越界/危险字段一律显性拒绝，不做「尽力改」。
+    addWorkspaceTool(
+      'music_patch',
+      'Deterministic RFC6902-style patch for an EXISTING music project '
+          '(add/remove/replace on a safe path whitelist): 确定性补丁，改后自动校验 — '
+          'the score is re-parsed after every patch and NOTHING is written unless it '
+          'passes the validator. Safe paths: /title, /tempo, '
+          '/tracks/<i>/name|instrument|volume|muted, '
+          '/tracks/<i>/measures/<j>/events (add appends/inserts one event object) and '
+          '/tracks/<i>/measures/<j>/events/<k> (remove/replace one event). '
+          'Unknown paths, out-of-range indexes and schemaVersion are rejected. '
+          'Returns applied / verified / issues.',
+      const <String, dynamic>{
+        'name': {
+          'type': 'string',
+          'description': 'ASCII project name (a-z0-9_-)',
+        },
+        'ops': {
+          'type': 'array',
+          'description': 'RFC6902-style operations to apply in order',
+          'items': {
+            'type': 'object',
+            'properties': {
+              'op': {
+                'type': 'string',
+                'enum': <String>['add', 'remove', 'replace'],
+              },
+              'path': {
+                'type': 'string',
+                'description': 'JSON pointer, e.g. /tempo or /tracks/0/volume',
+              },
+              'value': {
+                'description': 'Value for add/replace (any JSON value: string/number/bool/object)',
+              },
+            },
+            'required': <String>['op', 'path'],
+          },
+        },
+      },
+      const <String>['name', 'ops'],
+      (args) {
+        final rawOps = args['ops'];
+        if (rawOps is! List) {
+          return Future.value(<String, dynamic>{
+            'ok': false,
+            'error': 'invalid_args',
+            'message': '音乐补丁参数不对：ops 要是 {op, path, value} 对象的数组。',
+          });
+        }
+        final ops = <Map<String, dynamic>>[];
+        for (final item in rawOps) {
+          if (item is! Map) {
+            return Future.value(<String, dynamic>{
+              'ok': false,
+              'error': 'invalid_args',
+              'message': '音乐补丁参数不对：ops 里每一项都要是 {op, path, value} 对象。',
+            });
+          }
+          ops.add(Map<String, dynamic>.from(item));
+        }
+        return workspace.musicPatch(name: str(args, 'name'), ops: ops);
       },
     );
     if (ctx.request.mode == 'workspace') {

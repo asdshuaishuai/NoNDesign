@@ -322,15 +322,27 @@ class _FakeWorkspace implements AgentWorkspaceServices {
     'spec': <String, dynamic>{'kind': 'science'},
   };
 
-  // -- 音乐工具（music_list / music_read / music_inspect / music_create）--
+  // -- 音乐工具（music_list / music_read / music_inspect / music_create / music_patch）--
   String? lastMusicName;
   Map<String, dynamic>? lastMusicScore;
+  String? lastMusicPatchName;
+  List<Map<String, dynamic>>? lastMusicPatchOps;
   Map<String, dynamic> musicCreateResult = <String, dynamic>{
     'ok': true,
     'project': 'dawn',
     'title': '晨光',
     'tracks': 1,
     'measures': 1,
+    'verified': true,
+    'issues': 0,
+  };
+  Map<String, dynamic> musicPatchResult = <String, dynamic>{
+    'ok': true,
+    'project': 'dawn',
+    'title': '暮色',
+    'tracks': 1,
+    'measures': 2,
+    'applied': 2,
     'verified': true,
     'issues': 0,
   };
@@ -707,6 +719,23 @@ class _FakeWorkspace implements AgentWorkspaceServices {
   }
 
   @override
+  Future<Map<String, dynamic>> musicPatch({
+    required String name,
+    required List<Map<String, dynamic>> ops,
+  }) async {
+    calls.add('music_patch:$name');
+    lastMusicPatchName = name;
+    lastMusicPatchOps = ops;
+    if (musicPatchResult['ok'] == true) {
+      return <String, dynamic>{
+        ...musicPatchResult,
+        'project': musicPatchResult['project'] ?? name,
+      };
+    }
+    return Map<String, dynamic>.from(musicPatchResult);
+  }
+
+  @override
   Future<Map<String, dynamic>> nonAppList() async {
     calls.add('nonapp_list');
     return <String, dynamic>{'ok': true, 'apps': <dynamic>[]};
@@ -808,6 +837,7 @@ void main() {
         'music_read': '音乐 · 读谱',
         'music_inspect': '音乐 · 查看',
         'music_create': '音乐 · 新建',
+        'music_patch': '音乐 · 修改',
       };
       mapping.forEach(
         (tool, label) => expect(toolLabel(tool), label, reason: tool),
@@ -834,6 +864,7 @@ void main() {
         'mystery_tool',
         'music_future_tool',
         'music_create',
+        'music_patch',
       ]) {
         expect(bare.hasMatch(toolLabel(tool)), isFalse, reason: tool);
       }
@@ -910,6 +941,24 @@ void main() {
       expect(toolFailureMessage('music_invalid_name'), '音乐项目名只能用字母、数字、下划线和短横线');
       expect(toolFailureMessage('music_project_exists'), '已经有同名音乐项目了，换一个名字再试');
       expect(toolFailureMessage('music_io_error'), '乐谱文件没能读写，请稍后再试');
+      // 确定性补丁（music_patch）细分码：路径/越界/值/校验失败各有可执行人话。
+      expect(
+        toolFailureMessage('music_patch_invalid_path'),
+        '补丁路径不可用：只能改标题、速度、轨道的安全字段或小节事件',
+      );
+      expect(
+        toolFailureMessage('music_patch_out_of_range'),
+        '补丁路径的下标越界了，先刷新乐谱再试',
+      );
+      expect(
+        toolFailureMessage('music_patch_invalid_value'),
+        '补丁值格式不对，请按乐谱字段要求填写',
+      );
+      expect(
+        toolFailureMessage('music_patch_score_invalid'),
+        '补丁后的乐谱没有通过校验，改动没有保存',
+      );
+      expect(toolFailureMessage('music_patch_too_many_ops'), '一次补丁条数太多，拆成几次再试');
       // 映射结果里不出现裸错误码。
       final bare = RegExp(r'^[a-z0-9]+(_[a-z0-9]+)+$');
       for (final code in <String>[
@@ -926,6 +975,8 @@ void main() {
         'hotapp_name_taken',
         'music_score_invalid',
         'music_no_project',
+        'music_patch_invalid_path',
+        'music_patch_score_invalid',
         'whatever_code',
       ]) {
         expect(bare.hasMatch(toolFailureMessage(code)), isFalse, reason: code);
@@ -2141,6 +2192,7 @@ void main() {
           'music_read',
           'music_inspect',
           'music_create',
+          'music_patch',
         ]),
       );
       expect(
@@ -2214,6 +2266,106 @@ void main() {
       );
       // 工具标签必须是人话（出货文案门）。
       expect(toolLabel('music_create'), '音乐 · 新建');
+    });
+
+    test('音乐工作台 run：music_patch 真执行且算真实交付（remoteCalls 水位）', () async {
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      final model = ScriptedAgentModel(<List<Part>>[
+        <Part>[
+          scriptToolCall(
+            toolName: 'music_patch',
+            input: <String, dynamic>{
+              'name': 'dawn',
+              'ops': <dynamic>[
+                <String, dynamic>{
+                  'op': 'replace',
+                  'path': '/title',
+                  'value': '暮色',
+                },
+                <String, dynamic>{
+                  'op': 'replace',
+                  'path': '/tempo',
+                  'value': 90,
+                },
+              ],
+            },
+          ),
+        ],
+        <Part>[
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '乐谱已改并通过校验'},
+          ),
+        ],
+      ]);
+      final result = await runDartAgent(
+        request: workspaceRequest('music'),
+        modelOverride: model.model,
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      expect(result.ok, isTrue);
+      expect(workspace.calls, contains('music_patch:dawn'));
+      expect(workspace.lastMusicPatchName, 'dawn');
+      expect(workspace.lastMusicPatchOps, hasLength(2));
+      expect(workspace.lastMusicPatchOps!.first['op'], 'replace');
+      expect(workspace.lastMusicPatchOps!.first['path'], '/title');
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'music_patch',
+      );
+      expect(end['ok'], isTrue);
+      expect(end['preview'], contains('applied'));
+      expect(end['preview'], contains('verified'));
+      expect(
+        result.remoteCalls,
+        greaterThanOrEqualTo(1),
+        reason: '成功的确定性补丁也是真实交付（不能被当成 text_only）',
+      );
+      // 工具标签必须是人话；长 ops 数组进轨迹前压成形状摘要。
+      expect(toolLabel('music_patch'), '音乐 · 修改');
+      final start = events.firstWhere(
+        (e) => e['type'] == 'tool_start' && e['tool'] == 'music_patch',
+      );
+      expect((start['args'] as Map)['ops'], '<list 2>');
+    });
+
+    test('音乐补丁入参形状：ops 不是数组 → invalid_args（不调用服务）', () async {
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      final model = ScriptedAgentModel(<List<Part>>[
+        <Part>[
+          scriptToolCall(
+            toolName: 'music_patch',
+            input: <String, dynamic>{'name': 'dawn', 'ops': 'not-a-list'},
+          ),
+        ],
+        <Part>[
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '参数不对'},
+          ),
+        ],
+      ]);
+      final result = await runDartAgent(
+        request: workspaceRequest('music'),
+        modelOverride: model.model,
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      expect(result.ok, isTrue);
+      // 工具层先挡住坏形状：服务层不会被调到，事件面给出人话。
+      expect(
+        workspace.calls.where((c) => c.startsWith('music_patch')),
+        isEmpty,
+      );
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'music_patch',
+      );
+      expect(end['ok'], isFalse);
+      expect(end['error'], 'invalid_args');
+      expect(end['message'], contains('ops'));
+      expect(result.remoteCalls, 0, reason: '被工具层拒绝的补丁不是交付，不能移动水位');
     });
 
     test('3D 工作台 run：three_create 真执行（不再 unknown tool）', () async {
