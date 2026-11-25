@@ -609,16 +609,22 @@ class _MusicPlaybackSurfaceState extends State<MusicPlaybackSurface> {
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: p.line),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: ListenableBuilder(
-        listenable: widget.playback,
-        builder: (BuildContext context, Widget? _) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            _header(context, p),
-            Divider(height: 1, color: p.line),
-            Expanded(child: _stage(context)),
-          ],
+      // WebKitGTK/WebView2 的原生 Overlay 只能表示矩形/RRect/椭圆裁剪；
+      // Container(decoration+clipBehavior) 生成的是任意路径 ClipPath，真机
+      // （Linux WebKitGTK）会把 WebView 直接隐藏（2026-11-26 集成冒烟实测）。
+      // 用 ClipRRect（RRect）保留圆角，外框 Container 不裁剪。
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: ListenableBuilder(
+          listenable: widget.playback,
+          builder: (BuildContext context, Widget? _) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _header(context, p),
+              Divider(height: 1, color: p.line),
+              Expanded(child: _stage(context)),
+            ],
+          ),
         ),
       ),
     );

@@ -162,7 +162,8 @@ class WebViewA2uiPage implements A2uiWebPage {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
-          onNavigationRequest: (request) => a2uiWebNavigationAllowed(request.url)
+          onNavigationRequest: (request) =>
+              a2uiWebNavigationAllowed(request.url)
               ? NavigationDecision.navigate
               : NavigationDecision.prevent,
           onWebResourceError: (error) {
@@ -258,14 +259,14 @@ class A2uiWebAction extends A2uiWebEvent {
   final String? userMessage;
 
   Map<String, Object?> toJson() => {
-        'name': name,
-        'surfaceId': surfaceId,
-        'sourceComponentId': sourceComponentId,
-        'context': context,
-        if (timestamp != null) 'timestamp': timestamp,
-        if (catalogId != null) 'catalogId': catalogId,
-        if (userMessage != null) 'userMessage': userMessage,
-      };
+    'name': name,
+    'surfaceId': surfaceId,
+    'sourceComponentId': sourceComponentId,
+    'context': context,
+    if (timestamp != null) 'timestamp': timestamp,
+    if (catalogId != null) 'catalogId': catalogId,
+    if (userMessage != null) 'userMessage': userMessage,
+  };
 }
 
 /// 页面/消息处理报错（code 只进日志，不直接给用户看）。
@@ -339,8 +340,9 @@ A2uiWebEvent? decodeA2uiWebEvent(String raw) {
         timestamp: decoded['timestamp'] is String
             ? decoded['timestamp'] as String
             : null,
-        catalogId:
-            decoded['catalogId'] is String ? decoded['catalogId'] as String : null,
+        catalogId: decoded['catalogId'] is String
+            ? decoded['catalogId'] as String
+            : null,
         userMessage: decoded['userMessage'] is String
             ? decoded['userMessage'] as String
             : null,
@@ -457,10 +459,7 @@ class _A2uiWebCardState extends State<A2uiWebCard> {
     page.setMessageHandler(_onMessage);
     _bootTimer = Timer(widget.bootTimeout, () {
       if (!mounted || _ready) return;
-      _fail(
-        '离线预览没有启动，请重试',
-        const A2uiWebProtocolException('页面在时限内未就绪'),
-      );
+      _fail('离线预览没有启动，请重试', const A2uiWebProtocolException('页面在时限内未就绪'));
     });
     try {
       final html = await (widget.htmlLoader ?? A2uiWebBundle.loadHtml)();
@@ -494,7 +493,9 @@ class _A2uiWebCardState extends State<A2uiWebCard> {
           debugPrint('[a2ui-web] unexpected protocol: ${ready.protocol}');
         }
         if (ready.bridgeVersion != 1) {
-          debugPrint('[a2ui-web] unexpected bridge version: ${ready.bridgeVersion}');
+          debugPrint(
+            '[a2ui-web] unexpected bridge version: ${ready.bridgeVersion}',
+          );
         }
         widget.onReady?.call(ready);
         _applyTheme();
@@ -574,54 +575,58 @@ class _A2uiWebCardState extends State<A2uiWebCard> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: palette.line),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          if (page != null)
-            Positioned.fill(child: page.buildView()),
-          if (!_ready && _error == null)
-            Positioned.fill(
-              child: ColoredBox(
-                color: palette.panel,
-                child: Center(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: palette.accent,
+      // 不能在这里用 clipBehavior：Container(decoration+clip) 会生成任意路径
+      // ClipPath，WebKitGTK/WebView2 的原生 WebView Overlay 无法表示 → 被隐藏
+      // （Linux 真机集成冒烟 2026-11-26 实测）。改用 ClipRRect（RRect 受支持）。
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          children: [
+            if (page != null) Positioned.fill(child: page.buildView()),
+            if (!_ready && _error == null)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: palette.panel,
+                  child: Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: palette.accent,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '预览准备中…',
-                        style: TextStyle(fontSize: 11, color: palette.ink3),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          if (_error != null)
-            Positioned.fill(
-              child: ColoredBox(
-                color: palette.panel,
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, color: palette.ink2),
+                        const SizedBox(width: 8),
+                        Text(
+                          '预览准备中…',
+                          style: TextStyle(fontSize: 11, color: palette.ink3),
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
+            if (_error != null)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: palette.panel,
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        _error!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 12, color: palette.ink2),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

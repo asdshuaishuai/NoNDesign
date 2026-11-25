@@ -156,7 +156,9 @@ class VideoClipWebPlayback extends VideoClipPlayback {
     try {
       final css = await rootBundle.loadString(videoClipEngineCssAsset);
       final js = await rootBundle.loadString(videoClipEngineJsAsset);
-      final clipHtml = await rootBundle.loadString('$videoClipAssetDir${clip.file}');
+      final clipHtml = await rootBundle.loadString(
+        '$videoClipAssetDir${clip.file}',
+      );
       if (_disposed) return;
 
       final html = assembleVideoClipHtml(
@@ -170,14 +172,19 @@ class VideoClipWebPlayback extends VideoClipPlayback {
       _ensureWebViewPlatform();
       final controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..addJavaScriptChannel(videoClipBridgeChannel, onMessageReceived: _onMessage)
-        ..setNavigationDelegate(NavigationDelegate(
-          onWebResourceError: (error) {
-            // 子资源失败不整块替换；主帧失败才是「页面打不开」。
-            if (error.isForMainFrame == false) return;
-            _fail('动效合成没有启动，可重试');
-          },
-        ));
+        ..addJavaScriptChannel(
+          videoClipBridgeChannel,
+          onMessageReceived: _onMessage,
+        )
+        ..setNavigationDelegate(
+          NavigationDelegate(
+            onWebResourceError: (error) {
+              // 子资源失败不整块替换；主帧失败才是「页面打不开」。
+              if (error.isForMainFrame == false) return;
+              _fail('动效合成没有启动，可重试');
+            },
+          ),
+        );
       _controller = controller;
       notifyListeners();
       // 就绪超时从「页面开始加载」算起：资源读取慢不算页面没启动。
@@ -186,9 +193,9 @@ class VideoClipWebPlayback extends VideoClipPlayback {
       final uri = Uri.file(path);
       if (initialTime != null) {
         await controller.loadRequest(
-          uri.replace(queryParameters: <String, String>{
-            't': '${initialTime!}',
-          }),
+          uri.replace(
+            queryParameters: <String, String>{'t': '${initialTime!}'},
+          ),
         );
       } else {
         await controller.loadFile(path);
@@ -233,7 +240,9 @@ class VideoClipWebPlayback extends VideoClipPlayback {
     final total = duration;
     _t = seconds.isFinite ? seconds.clamp(0.0, total > 0 ? total : 0.0) : 0;
     notifyListeners();
-    await _run('window.__ndClip && window.__ndClip.seek(${_t.toStringAsFixed(3)})');
+    await _run(
+      'window.__ndClip && window.__ndClip.seek(${_t.toStringAsFixed(3)})',
+    );
   }
 
   @override
@@ -342,7 +351,8 @@ class VideoClipWebPlayback extends VideoClipPlayback {
   void _ensureWebViewPlatform() {
     // webview_all 的 WKWebView 平台在插件注册中自动就绪；测试环境保留幂等
     // 注册兜底。守卫同时看 instance——测试注入 fake 平台后不得被真注册覆盖。
-    if ((Platform.isMacOS || Platform.isIOS) && WebViewPlatform.instance == null) {
+    if ((Platform.isMacOS || Platform.isIOS) &&
+        WebViewPlatform.instance == null) {
       WebKitWebViewPlatform.registerWith();
     }
   }
@@ -443,7 +453,8 @@ class _VideoClipSurfaceState extends State<VideoClipSurface> {
     final sameClip = identical(oldWidget.clip, widget.clip);
     final sameInitialTime = oldWidget.initialTime == widget.initialTime;
     // 只按「本机能不能内嵌」这一判据比较；平台对象每次新建也不该触发重挂。
-    final sameHost = videoClipWebViewSupported(oldWidget.host) ==
+    final sameHost =
+        videoClipWebViewSupported(oldWidget.host) ==
         videoClipWebViewSupported(widget.host);
     if (samePlayback && sameClip && sameInitialTime && sameHost) return;
     // 同一位置换了播放源/片段：旧 WebView 与就绪计时器必须当场释放，
@@ -481,7 +492,9 @@ class _VideoClipSurfaceState extends State<VideoClipSurface> {
               border: Border.all(color: context.palette.line),
               borderRadius: BorderRadius.circular(10),
             ),
-            clipBehavior: Clip.antiAlias,
+            // 不要再加 clipBehavior：Container(decoration+clip) 生成任意路径
+            // ClipPath，WebKitGTK 的原生 WebView Overlay 会被隐藏（真机实测
+            // 2026-11-26）。外层已有 ClipRRect，圆角由它负责。
             child: _stage(context),
           ),
         ),
@@ -524,15 +537,18 @@ class _VideoClipSurfaceState extends State<VideoClipSurface> {
     return Container(
       key: const ValueKey('video-clip-loading'),
       alignment: Alignment.center,
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        SizedBox(
-          width: 20,
-          height: 20,
-          child: CircularProgressIndicator(strokeWidth: 2, color: p.accent),
-        ),
-        const SizedBox(height: 10),
-        Text('动效合成准备中…', style: TextStyle(fontSize: 11, color: p.ink3)),
-      ]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2, color: p.accent),
+          ),
+          const SizedBox(height: 10),
+          Text('动效合成准备中…', style: TextStyle(fontSize: 11, color: p.ink3)),
+        ],
+      ),
     );
   }
 
@@ -542,27 +558,30 @@ class _VideoClipSurfaceState extends State<VideoClipSurface> {
       key: const ValueKey('video-clip-error'),
       alignment: Alignment.center,
       padding: const EdgeInsets.all(20),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.movie_outlined, size: 34, color: p.ink4),
-        const SizedBox(height: 10),
-        Text(
-          message,
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 12, color: p.ink2, height: 1.5),
-        ),
-        const SizedBox(height: 10),
-        TextButton.icon(
-          key: const ValueKey('video-clip-retry'),
-          onPressed: _retry,
-          style: TextButton.styleFrom(
-            minimumSize: const Size(0, 30),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.movie_outlined, size: 34, color: p.ink4),
+          const SizedBox(height: 10),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: p.ink2, height: 1.5),
           ),
-          icon: const Icon(Icons.refresh, size: 15),
-          label: const Text('重试', style: TextStyle(fontSize: 11)),
-        ),
-      ]),
+          const SizedBox(height: 10),
+          TextButton.icon(
+            key: const ValueKey('video-clip-retry'),
+            onPressed: _retry,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 30),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+            ),
+            icon: const Icon(Icons.refresh, size: 15),
+            label: const Text('重试', style: TextStyle(fontSize: 11)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -572,21 +591,28 @@ class _VideoClipSurfaceState extends State<VideoClipSurface> {
       key: const ValueKey('video-clip-unsupported'),
       alignment: Alignment.center,
       padding: const EdgeInsets.all(20),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.movie_outlined, size: 34, color: p.ink4),
-        const SizedBox(height: 10),
-        Text(
-          '这台设备不能内嵌播放动效合成',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink2),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          '用电脑上的连接桌面查看',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 11, color: p.ink4, height: 1.5),
-        ),
-      ]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.movie_outlined, size: 34, color: p.ink4),
+          const SizedBox(height: 10),
+          Text(
+            '这台设备不能内嵌播放动效合成',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: p.ink2,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '用电脑上的连接桌面查看',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11, color: p.ink4, height: 1.5),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -619,77 +645,97 @@ class VideoClipTransport extends StatelessWidget {
           listenable: playback,
           builder: (context, _) {
             final rawDuration = playback.duration;
-            final total =
-                rawDuration.isFinite && rawDuration > 0 ? rawDuration : 0.001;
+            final total = rawDuration.isFinite && rawDuration > 0
+                ? rawDuration
+                : 0.001;
             final value = playback.t.isFinite
                 ? playback.t.clamp(0.0, total).toDouble()
                 : 0.0;
-            return Column(mainAxisSize: MainAxisSize.min, children: [
-              SizedBox(
-                height: 22,
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 2,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-                  ),
-                  child: Slider(
-                    key: const ValueKey('video-clip-slider'),
-                    value: value,
-                    max: total,
-                    activeColor: p.accent,
-                    onChanged: (v) => playback.seek(v),
-                  ),
-                ),
-              ),
-              Row(children: [
-                IconButton(
-                  key: const ValueKey('video-clip-play'),
-                  tooltip: playback.playing ? '暂停' : '播放',
-                  onPressed: playback.playing ? playback.pause : playback.play,
-                  icon: Icon(
-                    playback.playing ? Icons.pause : Icons.play_arrow,
-                    size: 20,
-                    color: p.ink2,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                ),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    '${formatVideoTime(playback.t)} / ${formatVideoTime(playback.duration)}',
-                    key: const ValueKey('video-clip-time'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, color: p.ink3, fontFeatures: const [
-                      FontFeature.tabularFigures(),
-                    ]),
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  height: 22,
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 2,
+                      thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 5,
+                      ),
+                      overlayShape: const RoundSliderOverlayShape(
+                        overlayRadius: 10,
+                      ),
+                    ),
+                    child: Slider(
+                      key: const ValueKey('video-clip-slider'),
+                      value: value,
+                      max: total,
+                      activeColor: p.accent,
+                      onChanged: (v) => playback.seek(v),
+                    ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  '帧 ${playback.frame}',
-                  key: const ValueKey('video-clip-frame'),
-                  maxLines: 1,
-                  style: TextStyle(fontSize: 10, color: p.ink3),
+                Row(
+                  children: [
+                    IconButton(
+                      key: const ValueKey('video-clip-play'),
+                      tooltip: playback.playing ? '暂停' : '播放',
+                      onPressed: playback.playing
+                          ? playback.pause
+                          : playback.play,
+                      icon: Icon(
+                        playback.playing ? Icons.pause : Icons.play_arrow,
+                        size: 20,
+                        color: p.ink2,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 32,
+                        minHeight: 32,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        '${formatVideoTime(playback.t)} / ${formatVideoTime(playback.duration)}',
+                        key: const ValueKey('video-clip-time'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: p.ink3,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '帧 ${playback.frame}',
+                      key: const ValueKey('video-clip-frame'),
+                      maxLines: 1,
+                      style: TextStyle(fontSize: 10, color: p.ink3),
+                    ),
+                    IconButton(
+                      key: const ValueKey('video-clip-loop'),
+                      tooltip: '循环播放',
+                      onPressed: () => playback.setLoop(!playback.loop),
+                      icon: Icon(
+                        Icons.repeat,
+                        size: 17,
+                        color: playback.loop ? p.accent : p.ink4,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 32,
+                        minHeight: 32,
+                      ),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  key: const ValueKey('video-clip-loop'),
-                  tooltip: '循环播放',
-                  onPressed: () => playback.setLoop(!playback.loop),
-                  icon: Icon(
-                    Icons.repeat,
-                    size: 17,
-                    color: playback.loop ? p.accent : p.ink4,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                ),
-              ]),
-            ]);
+              ],
+            );
           },
         ),
       ),
