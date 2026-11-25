@@ -7,6 +7,7 @@ library;
 
 import 'package:material_ui/material_ui.dart';
 
+import '../core/music/music_edit.dart';
 import '../core/music/music_project.dart';
 import '../core/music/music_score.dart';
 import '../core/theme.dart';
@@ -32,6 +33,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   String? _name;
   MusicProjectSnapshot? _snapshot;
   MusicProjectFailure? _failure;
+  MusicInspectorStatus? _status;
   int _selectedTrack = 0;
 
   @override
@@ -66,6 +68,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     setState(() {
       _name = name;
       _failure = null;
+      _status = null;
       _selectedTrack = 0;
     });
     try {
@@ -85,6 +88,84 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
         _failure = MusicProjectFailure('io_error', '$error');
       });
     }
+  }
+
+  /// 执行一次编辑：先改模型，再经 [MusicProjectStore.save] 落盘，读完新 snapshot
+  /// 刷新工作台，并把 `save` 返回的校验结果如实回传给检查器。
+  Future<void> _applyEdit(MusicEditAction action, String successMessage) async {
+    final String? name = _name;
+    final MusicProjectSnapshot? snapshot = _snapshot;
+    if (name == null || snapshot == null) return;
+    MusicScore next;
+    try {
+      next = action(snapshot.score);
+    } on MusicEditFailure catch (failure) {
+      _setStatus(MusicInspectorStatus(message: failure.message, isError: true));
+      return;
+    } catch (_) {
+      _setStatus(
+        const MusicInspectorStatus(message: '这次修改没有生效，请再试一次。', isError: true),
+      );
+      return;
+    }
+    MusicValidation validation;
+    try {
+      validation = await _store.save(name, next);
+    } on MusicProjectFailure catch (failure) {
+      _setStatus(
+        MusicInspectorStatus(
+          message: musicProjectFailureMessage(failure),
+          isError: true,
+        ),
+      );
+      return;
+    } catch (_) {
+      _setStatus(
+        const MusicInspectorStatus(message: '乐谱没能保存，请稍后再试。', isError: true),
+      );
+      return;
+    }
+    MusicProjectSnapshot fresh;
+    try {
+      fresh = await _store.read(name);
+    } on MusicProjectFailure catch (failure) {
+      _setStatus(
+        MusicInspectorStatus(
+          message: musicProjectFailureMessage(failure),
+          isError: true,
+        ),
+      );
+      return;
+    } catch (_) {
+      _setStatus(
+        const MusicInspectorStatus(message: '保存后没能刷新乐谱，请点刷新重试。', isError: true),
+      );
+      return;
+    }
+    List<MusicProjectEntry> entries = _entries;
+    try {
+      entries = await _store.list();
+    } catch (_) {
+      entries = _entries;
+    }
+    if (!mounted || _name != name) return;
+    setState(() {
+      _entries = entries;
+      _snapshot = fresh;
+      _failure = null;
+      _status = MusicInspectorStatus(
+        message: validation.verified
+            ? '$successMessage · 乐谱校验通过'
+            : '$successMessage，但乐谱校验未通过',
+        isError: !validation.verified,
+        validation: validation,
+      );
+    });
+  }
+
+  void _setStatus(MusicInspectorStatus status) {
+    if (!mounted) return;
+    setState(() => _status = status);
   }
 
   @override
@@ -143,6 +224,8 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
                       child: MusicInspector(
                         snapshot: _snapshot,
                         selectedTrack: _selectedTrack,
+                        status: _status,
+                        onApply: _applyEdit,
                       ),
                     ),
                 ],
@@ -262,7 +345,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
               ),
               const SizedBox(height: 6),
               Text(
-                '左侧会列出本机音乐项目；后续批次支持在这里写谱与播放。',
+                '左侧会列出本机音乐项目；打开项目后可在右侧检查器做最小编辑。',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
               ),

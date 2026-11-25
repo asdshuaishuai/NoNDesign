@@ -1,8 +1,9 @@
-/// 音乐工作台的内容区专属面板：项目列表、轨道列表、只读谱面预览、检查器、运输条。
+/// 音乐工作台的内容区专属面板：项目列表、轨道列表、只读谱面预览、可编辑检查器、运输条。
 ///
 /// 2026-11-24 工作台独立适配（UI-4 首批）：音乐是**谱面优先**的工作台，左侧项目/
 /// 轨道、中部谱面、右侧检查器、底部运输条；共享外壳仍由外层提供。
-/// 本批只读：不伪造播放按钮（Web Audio 播放页与编辑器在后续批次）。
+/// 本批：谱面只读；检查器提供最小编辑面（标题/速度、小节加删、四分音符/休止、
+/// 轨道音量/静音），编辑动作交给工作台保存。播放引擎尚未接线，不伪造播放按钮。
 library;
 
 import 'dart:math' as math;
@@ -10,6 +11,7 @@ import 'dart:math' as math;
 import 'package:material_ui/material_ui.dart';
 
 import '../core/music/music_compile.dart';
+import '../core/music/music_edit.dart';
 import '../core/music/music_project.dart';
 import '../core/music/music_score.dart';
 import '../core/theme.dart';
@@ -379,25 +381,119 @@ class _PianoRollPainter extends CustomPainter {
       old.palette != palette;
 }
 
-/// 右侧检查器：乐谱元数据 + 校验结果 + 选中轨道。
-class MusicInspector extends StatelessWidget {
+/// 一次编辑动作：接收当前乐谱，返回修改后的乐谱；保存/刷新/报错由工作台负责。
+typedef MusicEditAction = MusicScore Function(MusicScore score);
+
+/// 工作台回传的保存/校验结果（检查器只如实显示，不伪造「已保存」）。
+class MusicInspectorStatus {
+  const MusicInspectorStatus({
+    required this.message,
+    this.isError = false,
+    this.validation,
+  });
+
+  final String message;
+  final bool isError;
+  final MusicValidation? validation;
+}
+
+/// 右侧检查器：乐谱元数据 + 最小编辑面 + 校验结果 + 选中轨道。
+///
+/// 编辑动作通过 [onApply] 交给工作台执行（`MusicProjectStore.save`、刷新 snapshot
+/// 与失败提示都在工作台）；[onApply] 为 null 时检查器保持只读。
+class MusicInspector extends StatefulWidget {
   const MusicInspector({
     super.key,
     required this.snapshot,
     this.selectedTrack = 0,
+    this.status,
+    this.onApply,
   });
 
   final MusicProjectSnapshot? snapshot;
   final int selectedTrack;
+  final MusicInspectorStatus? status;
+  final Future<void> Function(MusicEditAction action, String successMessage)?
+  onApply;
+
+  @override
+  State<MusicInspector> createState() => _MusicInspectorState();
+}
+
+class _MusicInspectorState extends State<MusicInspector> {
+  late final TextEditingController _titleCtrl;
+  late final TextEditingController _tempoCtrl;
+  double? _volumeDraft;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleCtrl = TextEditingController();
+    _tempoCtrl = TextEditingController();
+    _syncFrom(widget.snapshot);
+  }
+
+  @override
+  void didUpdateWidget(covariant MusicInspector oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.snapshot, widget.snapshot) ||
+        oldWidget.selectedTrack != widget.selectedTrack) {
+      _volumeDraft = null;
+      _syncFrom(widget.snapshot, previous: oldWidget.snapshot);
+    }
+  }
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _tempoCtrl.dispose();
+    super.dispose();
+  }
+
+  /// 保存/刷新后用新 snapshot 回填输入框；不覆盖用户还没保存的手输内容。
+  void _syncFrom(
+    MusicProjectSnapshot? snapshot, {
+    MusicProjectSnapshot? previous,
+  }) {
+    final MusicScore? score = snapshot?.score;
+    if (score == null) return;
+    final MusicScore? oldScore = previous?.score;
+    final bool projectChanged =
+        previous == null || previous.name != snapshot!.name;
+    if (projectChanged || oldScore == null || oldScore.title != score.title) {
+      _titleCtrl.text = score.title;
+    }
+    if (projectChanged || oldScore == null || oldScore.tempo != score.tempo) {
+      _tempoCtrl.text = '${score.tempo}';
+    }
+  }
+
+  void _saveMetadata() {
+    final Future<void> Function(MusicEditAction, String)? onApply =
+        widget.onApply;
+    if (onApply == null) return;
+    final String title = _titleCtrl.text;
+    final String tempoText = _tempoCtrl.text.trim();
+    onApply((MusicScore score) {
+      final int? tempo = int.tryParse(tempoText);
+      if (tempo == null) {
+        throw const MusicEditFailure('invalid_tempo', '速度要填 20–300 的整数。');
+      }
+      return editScoreTempo(editScoreTitle(score, title), tempo);
+    }, '标题与速度已保存');
+  }
 
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
-    final snapshot = this.snapshot;
+    final NonPalette p = context.palette;
+    final MusicProjectSnapshot? snapshot = widget.snapshot;
     final MusicScore? score = snapshot?.score;
     final MusicTrack? track = score != null && score.tracks.isNotEmpty
-        ? score.tracks[selectedTrack.clamp(0, score.tracks.length - 1)]
+        ? score.tracks[widget.selectedTrack.clamp(0, score.tracks.length - 1)]
         : null;
+    final MusicValidation? validation =
+        widget.status?.validation ?? snapshot?.validation;
+    final bool editable = widget.onApply != null && score != null;
     return Container(
       key: const ValueKey('music-inspector'),
       color: p.panel,
@@ -418,6 +514,11 @@ class MusicInspector extends StatelessWidget {
                     color: p.ink,
                   ),
                 ),
+                const Spacer(),
+                Text(
+                  editable ? '可编辑' : '只读',
+                  style: TextStyle(fontSize: 9, color: p.ink4),
+                ),
               ],
             ),
           ),
@@ -433,25 +534,19 @@ class MusicInspector extends StatelessWidget {
                 : SingleChildScrollView(
                     padding: const EdgeInsets.all(12),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
-                        _kv(p, '标题', score.title.isEmpty ? '未命名' : score.title),
-                        _kv(p, '速度', '${score.tempo} BPM'),
+                        if (snapshot != null) _kv(p, '项目', snapshot.name),
+                        _titleField(p, editable),
+                        const SizedBox(height: 8),
+                        _tempoRow(p, editable),
                         _kv(p, '拍号', score.timeSig.join('/')),
                         _kv(p, '调号', score.keySig),
                         _kv(p, '轨道', '${score.tracks.length}'),
                         _kv(p, '小节', '${score.measureCount}'),
                         if (track != null) ...<Widget>[
-                          const SizedBox(height: 8),
-                          Text(
-                            '选中轨道',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: p.ink2,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 10),
+                          _sectionLabel(p, '选中轨道'),
                           _kv(
                             p,
                             '名称',
@@ -459,15 +554,20 @@ class MusicInspector extends StatelessWidget {
                           ),
                           _kv(p, '乐器', track.instrument),
                           _kv(p, '谱号', track.clef),
-                          _kv(p, '音量', track.volume.toStringAsFixed(2)),
+                          _volumeRow(p, track, editable),
+                          _muteRow(p, track, editable),
+                          const SizedBox(height: 8),
+                          _actionButtons(track, editable),
                         ],
                         const SizedBox(height: 10),
-                        _VerificationBadge(validation: snapshot?.validation),
-                        if (snapshot?.validation.blockingIssues.isNotEmpty ==
-                            true) ...<Widget>[
+                        if (widget.status != null)
+                          _statusBox(p, widget.status!),
+                        _VerificationBadge(validation: validation),
+                        if (validation != null &&
+                            validation.blockingIssues.isNotEmpty) ...<Widget>[
                           const SizedBox(height: 8),
-                          for (final issue
-                              in snapshot!.validation.blockingIssues)
+                          for (final MusicIssue issue
+                              in validation.blockingIssues)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 4),
                               child: Text(
@@ -488,6 +588,240 @@ class MusicInspector extends StatelessWidget {
       ),
     );
   }
+
+  Widget _titleField(NonPalette p, bool editable) => TextField(
+    key: const ValueKey('music-title-field'),
+    controller: _titleCtrl,
+    enabled: editable,
+    maxLength: musicMaxTitleLength,
+    style: TextStyle(fontSize: 11, color: p.ink2),
+    decoration: InputDecoration(
+      labelText: '标题',
+      isDense: true,
+      counterText: '',
+      labelStyle: TextStyle(fontSize: 10, color: p.ink4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+    ),
+  );
+
+  Widget _tempoRow(NonPalette p, bool editable) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      Expanded(
+        child: TextField(
+          key: const ValueKey('music-tempo-field'),
+          controller: _tempoCtrl,
+          enabled: editable,
+          keyboardType: TextInputType.number,
+          style: TextStyle(fontSize: 11, color: p.ink2),
+          decoration: InputDecoration(
+            labelText: '速度 (BPM)',
+            isDense: true,
+            labelStyle: TextStyle(fontSize: 10, color: p.ink4),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 8,
+              vertical: 6,
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 8),
+      FilledButton(
+        key: const ValueKey('music-save'),
+        onPressed: editable ? _saveMetadata : null,
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(0, 32),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          visualDensity: VisualDensity.compact,
+        ),
+        child: const Text('保存', style: TextStyle(fontSize: 11)),
+      ),
+    ],
+  );
+
+  Widget _volumeRow(NonPalette p, MusicTrack track, bool editable) {
+    final double value = (_volumeDraft ?? track.volume)
+        .clamp(0.0, 1.0)
+        .toDouble();
+    final Future<void> Function(MusicEditAction, String)? onApply =
+        widget.onApply;
+    return Row(
+      children: <Widget>[
+        SizedBox(
+          width: 58,
+          child: Text('音量', style: TextStyle(fontSize: 10, color: p.ink4)),
+        ),
+        Expanded(
+          child: Slider(
+            key: const ValueKey('music-track-volume'),
+            value: value,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            onChanged: editable
+                ? (double next) => setState(() => _volumeDraft = next)
+                : null,
+            onChangeEnd: editable && onApply != null
+                ? (double next) async {
+                    await onApply(
+                      (MusicScore score) =>
+                          editTrackVolume(score, track.id, next),
+                      '轨道音量已保存',
+                    );
+                    if (mounted) setState(() => _volumeDraft = null);
+                  }
+                : null,
+          ),
+        ),
+        SizedBox(
+          width: 32,
+          child: Text(
+            value.toStringAsFixed(2),
+            textAlign: TextAlign.right,
+            style: TextStyle(fontSize: 10, color: p.ink3),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _muteRow(NonPalette p, MusicTrack track, bool editable) {
+    final Future<void> Function(MusicEditAction, String)? onApply =
+        widget.onApply;
+    return Row(
+      children: <Widget>[
+        SizedBox(
+          width: 58,
+          child: Text('静音', style: TextStyle(fontSize: 10, color: p.ink4)),
+        ),
+        Text(
+          track.muted ? '已静音' : '未静音',
+          style: TextStyle(fontSize: 11, color: track.muted ? p.warn : p.ink2),
+        ),
+        const Spacer(),
+        IconButton(
+          key: const ValueKey('music-track-mute'),
+          tooltip: track.muted ? '取消这条轨道的静音' : '静音这条轨道',
+          onPressed: editable && onApply != null
+              ? () => onApply(
+                  (MusicScore score) =>
+                      editTrackMuted(score, track.id, !track.muted),
+                  '轨道静音状态已保存',
+                )
+              : null,
+          iconSize: 15,
+          visualDensity: VisualDensity.compact,
+          icon: Icon(
+            track.muted ? Icons.volume_off : Icons.volume_up,
+            color: track.muted ? p.warn : p.ink3,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _actionButtons(MusicTrack track, bool editable) {
+    final Future<void> Function(MusicEditAction, String)? onApply =
+        widget.onApply;
+    if (!editable || onApply == null) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: <Widget>[
+        _actionButton(
+          key: 'music-append-measure',
+          label: '追加空小节',
+          action: (MusicScore score) => appendEmptyMeasure(score, track.id),
+          successMessage: '已追加空小节',
+        ),
+        _actionButton(
+          key: 'music-remove-measure',
+          label: '删除空小节',
+          action: (MusicScore score) => removeLastEmptyMeasure(score, track.id),
+          successMessage: '已删除末尾空小节',
+        ),
+        _actionButton(
+          key: 'music-append-quarter',
+          label: '追加四分音符',
+          action: (MusicScore score) => appendQuarterNote(score, track.id),
+          successMessage: '已追加四分音符（C4）',
+        ),
+        _actionButton(
+          key: 'music-append-rest',
+          label: '追加四分休止',
+          action: (MusicScore score) => appendQuarterRest(score, track.id),
+          successMessage: '已追加四分休止',
+        ),
+      ],
+    );
+  }
+
+  Widget _actionButton({
+    required String key,
+    required String label,
+    required MusicEditAction action,
+    required String successMessage,
+  }) {
+    final Future<void> Function(MusicEditAction, String)? onApply =
+        widget.onApply;
+    return OutlinedButton(
+      key: ValueKey(key),
+      onPressed: onApply == null ? null : () => onApply(action, successMessage),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(0, 30),
+        padding: const EdgeInsets.symmetric(horizontal: 9),
+        visualDensity: VisualDensity.compact,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Text(label, style: const TextStyle(fontSize: 11)),
+    );
+  }
+
+  Widget _statusBox(NonPalette p, MusicInspectorStatus status) => Container(
+    key: const ValueKey('music-edit-status'),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+    margin: const EdgeInsets.only(bottom: 8),
+    decoration: BoxDecoration(
+      color: status.isError ? p.warn.withValues(alpha: 0.12) : p.panel2,
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(
+        color: status.isError ? p.warn.withValues(alpha: 0.4) : p.line,
+      ),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Icon(
+          status.isError ? Icons.error_outline : Icons.check_circle_outline,
+          size: 13,
+          color: status.isError ? p.warn : p.success,
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            status.message,
+            style: TextStyle(
+              fontSize: 11,
+              height: 1.4,
+              color: status.isError ? p.warn : p.ink2,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _sectionLabel(NonPalette p, String label) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(
+      label,
+      style: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        color: p.ink2,
+      ),
+    ),
+  );
 
   Widget _kv(NonPalette p, String key, String value) => Padding(
     padding: const EdgeInsets.only(bottom: 6),
