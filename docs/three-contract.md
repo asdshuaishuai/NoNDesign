@@ -1,6 +1,6 @@
 # 3D 模块契约（three-live + 3dcodeverse harness）
 
-> 状态：**R3 契约面已落地（2026-11-24）· 建模视口/GLB/多视角/judge/图形门待后续**。已落地：v2 工作区
+> 状态：**R3 契约面 + 检查器属性编辑已落地（2026-11-24/25）· 建模视口/gizmo/GLB/多视角/judge/图形门待后续**。已落地：v2 工作区
 > （spec/plan/src/artifacts + 旧布局只读迁移）、plan 追加校验、对象确定性门纯函数、
 > `three_workspace_migrate` / `three_plan_validate` / `three_measure` / `three_build` / `three_check` /
 > `three_check_placement` 工具；
@@ -162,6 +162,11 @@ judge/rNN/  brief.md + montages + judgment.json + score.json（每轮一个 git 
   （阶段：迁移 → 计划校验 → 测量 → 确定性门；结果卡可查看修复提示/收起）。
 * 测试补充：`app/test/three_measurement_test.dart`（4）、
   `app/test/three_gate_dual_face_store_test.dart`（2）。
+* 检查器属性编辑（2026-11-25）：`three_workbench_panels.dart` 的 `ThreeNodeInspector` 对 legacy
+  `three-spec.json` 的 component（what/size_scale/material）、material（color_hex/roughness/metalness）、
+  camera（view）提供受控编辑；面板只产出最小补丁（`ThreeInspectorEdit`），
+  `validateThreeInspectorEdit`/`applyThreeInspectorEdit` 纯函数合并，`three_workspace.dart`
+  复用既有 `_saveSpec` 落盘并刷新快照；v2 scene.json 节点仍只读。测试：`three_workbench_panels_test`（13 例）。
 * **待后续**：GLB 导出、多视角 render_views、
   建模视口（大纲/视口/gizmo/检查器）、scene/graphics 轨门、judge 打包。
 

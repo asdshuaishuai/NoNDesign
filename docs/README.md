@@ -63,9 +63,9 @@
 | [plan-music-module.md](plan-music-module.md) | **方案定稿，未施工** | 音乐（编曲）模块：score.json、五线谱编辑器、Web Audio 编译播放、music_* 工具面 |
 | [creative-refactor-decisions.md](creative-refactor-decisions.md) | **R0 契约核心已落地；设计 R1、3D R3 契约面已实施（2026-11-24 工作树），视频/音乐未施工** | R0 决策冻结：轮次版本化、blind judge 通道、Phaser 版本、`ink_line` 首版、TTS 随包策略、`scene.json` 双 authoring、评分默认参数；**Genkit 迁移冲突（2026-11-23 同日裁决：保留 genkit、移除 ai_sdk，见 §2 台账）** |
 | [design-contract.md](design-contract.md) | **已实施（R1 设计模块，2026-11-24）** | 设计模块契约：验证原型绑定项目本身（`.ddp` 内 `prototype/`）、覆盖验证规则、`design_verify_prototype` 收口、热应用列表迁移过滤、只借 intake/judge |
-| [three-contract.md](three-contract.md) | **R3 契约面已落地（2026-11-24 工作树；视口/GLB/多视角/judge 待后续）** | 3D 模块契约：三轨 + 双 authoring、工作区、plan schema、确定性门阈值、盲评、10 个 `three_*` 工具（拟实现）、GLB/许可/迁移 |
+| [three-contract.md](three-contract.md) | **R3 契约面 + 检查器属性编辑已落地（2026-11-24/25；视口/gizmo/GLB/多视角/judge 待后续）** | 3D 模块契约：三轨 + 双 authoring、工作区、plan schema、确定性门阈值、盲评、10 个 `three_*` 工具（拟实现）、GLB/许可/迁移 |
 | [video-screenplay-contract.md](video-screenplay-contract.md) | **草案（R0，2026-11-23）· 未施工** | 视频模块契约：`screenplay.json` 唯一事实源、30fps 确定性、TimingCompiler、cutout rig/clip、Phaser 锁版本、三风格、pixelfx 子集、TTS、桥 v2、导出仍屏蔽、v1 兼容 |
-| [music-contract.md](music-contract.md) | **R1 契约核心 + 只读工作台布局已落地（2026-11-24；编辑器/播放/工具族未施工）** | 音乐模块契约：`score.json` v1、整数 tick（ppq 3840）、`verifyScore`、Web Audio 播放页、Bravura/SIL OFL、`music_*` 工具（拟实现）、存储与验收 |
+| [music-contract.md](music-contract.md) | **R1 契约核心 + 编辑闭环 + 播放页编译产物已落地（2026-11-24/25；播放 UI/music_* 工具/五线谱编辑器未施工）** | 音乐模块契约：`score.json` v1、整数 tick（ppq 3840）、`verifyScore`、Web Audio 播放页、Bravura/SIL OFL、`music_*` 工具（拟实现）、存储与验收 |
 | [plan-flutter-3.50-adoption.md](plan-flutter-3.50-adoption.md) | backlog（待排期） | Flutter 3.50 采纳清单 |
 
 ### 1.5 历史快照 / 审查（只读，不作为待办）
@@ -104,6 +104,7 @@
 
 | 日期 | 裁决 | 状态 | 事实源 |
 | --- | --- | --- | --- |
+| 2026-11-25 | **能力批次（音乐编辑/播放编译、3D 检查器属性编辑、3D 视频设计草案）**：音乐 `music_edit.dart` 最小编辑闭环 + 可保存检查器；`music_player.dart` 自包含 Web Audio 播放页（CSP/确定性/六音色，未接 UI）；3D legacy 规范检查器受控编辑走 `_saveSpec`；`docs/design/` 三份 3D 视频设计草案（D1–D3）；**播放 UI 接入、`music_*` 工具族、五线谱编辑器、3D 视口/gizmo 未施工** | **已实施（2026-11-25，已推送）** | [music-contract.md](music-contract.md) · [three-contract.md](three-contract.md) · [design/](design/) |
 | 2026-11-24 | **音乐模块 R1 契约核心 + 只读工作台落地**：`score.json` v1 解析（未知字段保留）+ `verifyMusicScore` 硬门 + 整数 tick 编译器（ppq=3840，三/五连音、字节确定性）+ `MusicProjectStore`（portfolio/music 扫描/读写/原子落盘）；`plugin:music` + `MusicWorkspace` 只读钢琴卷帘/检查器/运输条；编辑器、Web Audio 播放页、`music_*` 工具与项目跟随**未施工** | **已实施（2026-11-24，工作树）** | [music-contract.md](music-contract.md) · `app/lib/core/music/` |
 | 2026-11-24 | **raea 不引入（用户最终裁决）**：复核许可（FSL-1.1-ALv2 的 *Competing Use*）与形态（230 crate 完整应用、无公开库 ABI）后**撤回嵌入方向，只借鉴**；视频仍拆常规视频（保持 v1 表面）与 3D 视频（执行面用现有 three-live），raea 只提供 composition/词级时间/`check`/story 契约与工艺参考，**不 vendor、不嵌入、不引 React/Bevy/JS 运行时** | **已裁决（只参考，不引入）** | [research/raea.md](research/raea.md) · [plan-next-iterations.md](plan-next-iterations.md) |
 | 2026-11-24 | **Material Painter 不嵌入（GPL 阻塞）**：能力面覆盖全领域 3D 材质（绘制/烘焙/节点图/导出预设），但 GPL-3.0-or-later + 仅 GUI 二进制、无 `[lib]`；不 vendor、不随包分发。v1 自建 PBR 材质层；可选外部 MCP 工作站是**未裁决**的外部工具例外候选 | 调研结论（GPL 阻塞） | research/material-painter.md |

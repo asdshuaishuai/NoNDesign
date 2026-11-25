@@ -1,9 +1,10 @@
 # 音乐模块契约（编曲工作台 · score.json 唯一事实源）
 
-> 状态：**R1 契约核心 + 只读工作台布局已落地（2026-11-24）· 编辑器/播放页/工具族未施工**。已落地：
+> 状态：**R1 契约核心 + 编辑闭环 + 播放页编译产物已落地（2026-11-24/25）· 播放 UI 接入/music_* 工具/五线谱编辑器未施工**。已落地：
 > score.json v1 解析/未知字段保留、`verifyMusicScore` 硬门、整数 tick 编译器（ppq=3840）、
 > `MusicProjectStore` 存储；`plugin:music` + `MusicWorkspace` 只读钢琴卷帘/检查器/运输条；
-> 本文契约增量：
+> `music_edit.dart` 最小编辑闭环（纯函数 + 可保存检查器）；`music_player.dart` 自包含
+> Web Audio 播放页编译产物（CSP/确定性/六音色）；本文契约增量：
 > score.json v1、整数 tick 编译、`verifyScore`（拟实现）硬门、五线谱、播放页、存储、工具族、配乐联动与验收。
 >
 > 相关：[plan-music-module.md](plan-music-module.md)（方案事实源）·
@@ -103,8 +104,10 @@ AudioContext.currentTime
 | 版本迁移 | `music_score_migration_test.dart` | 读 N-1 写 N、固定 fixture、不支持版本报错 |
 | tick 编译 | `music_compile_test.dart`（已落地） | ppq=3840、三/五连音、tempoMap、字节确定性、无浮点拍点 |
 | 校验器 | `music_score_test.dart`（已落地） | 小节时值/关系配对/乐器/范围/鼓件正反例 |
-| 播放页 | `music_player_page_test.dart` | CSP 自检、零外联、lookahead 参数、无 Tone.js/采样 |
-| 编辑器/工作台 | `music_editor_test.dart` + `music_workspace_test.dart` + 拟扩 `dart_agent_tools_test.dart` | 放音/拖移/删除/小节操作；谱面重绘确定性；项目跟随落 `plugin:music`；workspace 只见 `music_*` + 通用只读 |
+| 播放页 | `music_player_test.dart`（已落地） | CSP 自检、零外联、lookahead 参数、无 Tone.js/采样、字节确定性 |
+| 编辑器/工作台 | `music_edit_test.dart` + `music_workspace_test.dart`（已落地部分） | 标题/tempo/小节/音符/休止编辑→保存→重读；校验结果如实显示；放音/拖移与 `music_*` 工具待后续 |
+
+**编辑锚点**：`music_edit_test.dart`（已落地，16 例）；**播放页锚点**：`music_player_test.dart`（已落地，10 例）。
 
 **存储锚点**：`music_project_test.dart`（已落地）：save→list/read、坏名/坏文件显性失败、delete。
 
