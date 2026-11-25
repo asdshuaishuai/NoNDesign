@@ -610,4 +610,94 @@ export default function build(THREE, scene, camera, controls, renderer) {
       reason: 'seekFrame(90) 后页面帧号未同步，实得 ${preview.frame}',
     );
   });
+
+  testWidgets('浮层遮挡：Flutter 控件叠在真实 WebView 上仍可点击并驱动页面', (tester) async {
+    final String template = await rootBundle.loadString(
+      'assets/three/preview.html',
+    );
+    final String moduleSource = await rootBundle.loadString(
+      'assets/three/three.module.js',
+    );
+    final String liveSource = await rootBundle.loadString(
+      'assets/three/vendor/three-live.min.js',
+    );
+    final String sceneJs = '''
+export default function build(THREE, scene, camera, controls, renderer) {
+  const box = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshStandardMaterial({ color: 0x66ccff }));
+  box.name = 'probe';
+  scene.add(box);
+  camera.position.set(3, 2, 3);
+  camera.lookAt(0, 0, 0);
+  return { metrics: { probe: true } };
+}
+''';
+    final String html = assembleThreePreview(
+      template: template,
+      threeSource: moduleSource,
+      sceneSource: sceneJs,
+      version: 160,
+      threeLiveSource: liveSource,
+    );
+
+    final _Bridge bridge = _Bridge();
+    final WebViewController controller = await _mount(tester, 'NON3D', bridge);
+    await controller.loadHtmlString(html);
+
+    int taps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Stack(
+            children: <Widget>[
+              Positioned.fill(child: WebViewWidget(controller: controller)),
+              // 与工作台同形：Flutter 浮层（视口控件）压在原生 WebView 之上。
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Material(
+                  key: const ValueKey('overlay-probe'),
+                  color: Colors.black54,
+                  child: InkWell(
+                    onTap: () => taps++,
+                    child: const Padding(
+                      padding: EdgeInsets.all(10),
+                      child: Text('overlay', style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // 页面真的跑起来之后，浮层仍必须能收到点击（原生 Overlay 不能吞掉它）。
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 25));
+    while (DateTime.now().isBefore(deadline) &&
+        bridge.ofKind('metrics').isEmpty) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await tester.pump();
+    }
+    expect(
+      bridge.ofKind('metrics').isNotEmpty,
+      isTrue,
+      reason: '页面没起来就判断不了叠层：桥消息=${bridge.raw}',
+    );
+
+    await tester.tap(find.byKey(const ValueKey('overlay-probe')));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(taps, 1, reason: 'Flutter 浮层没有收到点击（被原生 WebView 吞掉？）');
+
+    // 浮层动作必须真的驱动页面：写一个探针值再读回来。
+    await controller.runJavaScript('window.__nan_overlay_probe = "hit";');
+    final String probe =
+        '${await controller.runJavaScriptReturningResult('window.__nan_overlay_probe')}';
+    // ignore: avoid_print
+    print('[webview-overlay] taps=$taps probe=$probe');
+    expect(probe.contains('hit'), isTrue, reason: '浮层点击后页面 JS 没有生效：$probe');
+  });
 }
