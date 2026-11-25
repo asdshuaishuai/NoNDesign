@@ -196,6 +196,8 @@ flutter run -d macos
 flutter build macos --release
 # 真 WebView 引擎 smoke（WKWebView；Windows/Linux 用同一用例在对应机器跑）
 flutter test integration_test/engine_webview_test.dart -d macos
+# 真 WebView 页面冒烟（Linux WebKitGTK；容器内自动 unshare 挂宿主库）
+../scripts/wf/run_webview_smoke.sh
 
 # 发布包桌面状态（构建后；批次 15 新增）
 cd ..
@@ -463,9 +465,13 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
 - **OHOS 离屏 WebView 缺口**：`webview_all_ohos` 目前没有 `supportsOffscreenWebViews`
   实现，OHOS 上 `startAuto` 会回落到 wasm_run（若该目标没有执行器则 engine_unavailable）；
   补法是等上游实现或给 OHOS 走隐藏 `WebViewWidget` 宿主。
-- **Windows/Linux WebView 引擎尚未本机真机复验**：macOS WKWebView 已由
-  `integration_test/engine_webview_test.dart` 实跑通过；Windows WebView2 / Linux
-  WebKitGTK 采用同一 `OffscreenWebViewSession` 契约，需在对应机器上跑同一测试。
+- **WebView 真机复验（2026-11-26 更新）**：macOS WKWebView 已由
+  `integration_test/engine_webview_test.dart` 实跑通过；**Linux WebKitGTK 已在本机容器内
+  实跑通过** —— `scripts/wf/run_webview_smoke.sh` → `integration_test/webview_pages_test.dart`
+  覆盖：音乐播放页（页面就绪 + 音频时钟真实推进 1.5s + beat 桥）、3D 视频预览页
+  （150 帧时间表 + seekFrame + 播放时钟推进）、3D 视口控制（`__non3d_view` 返回 true；
+  沙箱面 `__non3d_grid` 无命名网格时如实回 `supported:false` 回执）。
+  **Windows WebView2 / iOS / Android 真机仍未复验**，仍按原登记待补。
 - Android debug APK 构建链已修复（`MainActivity.kt` 非空收窄，1fa3a78），可
   产出 debug APK（本会话未复跑 build 复证产物）；本机无 Android 设备/AVD，
   arm64 wasmtime 加载与 `_in` ABI 的真机验收仍未完成。

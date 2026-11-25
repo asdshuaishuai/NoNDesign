@@ -112,8 +112,9 @@ raea 只提供契约参考，不进入代码依赖。
 
 **P1 门**：go/no-go 交用户；no-go 则 3D 视频回到设计/范围收缩（不硬造替代引擎）。
 
-**P1 进展（2026-11-25）**：契约核心/项目存储/自包含预览页编译器与 `plugin:video3d` 只读工作台已落地；
-剩真机 WebView 渲染 smoke 与「真 three 执行面」裁决。
+**P1 进展（2026-11-26）**：契约核心/项目存储/自包含预览页编译器与 `plugin:video3d` 只读工作台已落地；
+**真 WebView 冒烟已在 Linux WebKitGTK 实跑通过**（`scripts/wf/run_webview_smoke.sh`：预览页 150 帧时间表、
+seekFrame 回帧、播放时钟推进）；剩「真 three 执行面」裁决与 Windows/移动真机复验。
 
 ### P2 · 3D 视频最小纵切（1–1.5 周，P1 go 后）
 
