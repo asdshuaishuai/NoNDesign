@@ -472,6 +472,11 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   （150 帧时间表 + seekFrame + 播放时钟推进）、3D 视口控制（`__non3d_view` 返回 true；
   沙箱面 `__non3d_grid` 无命名网格时如实回 `supported:false` 回执）。
   **Windows WebView2 / iOS / Android 真机仍未复验**，仍按原登记待补。
+- **WebView 宿主裁剪纪律（2026-11-26 真机事故）**：`Container(decoration + clipBehavior)`
+  生成的是 `ClipPath`（任意路径），`webview_all_linux`（WebKitGTK）无法把它映射到原生
+  WebView Overlay，**会直接把 WebView 隐藏**——音频/JS 照常在跑，舞台却空白（真机集成
+  冒烟抓到）。WebView 宿主一律用 `ClipRRect`（RRect 可表示）裁剪，外框画在未裁剪的
+  `Container` 上；不要再用带 `clipBehavior` 的装饰容器包 WebView。
 - Android debug APK 构建链已修复（`MainActivity.kt` 非空收窄，1fa3a78），可
   产出 debug APK（本会话未复跑 build 复证产物）；本机无 Android 设备/AVD，
   arm64 wasmtime 加载与 `_in` ABI 的真机验收仍未完成。
