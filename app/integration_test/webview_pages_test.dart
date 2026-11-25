@@ -30,8 +30,12 @@ import 'package:nondesign/core/music/music_compile.dart';
 import 'package:nondesign/core/music/music_player.dart';
 import 'package:nondesign/core/music/music_score.dart';
 import 'package:nondesign/core/video3d/video3d_contract.dart';
+import 'package:nondesign/core/video3d/video3d_compile.dart';
 import 'package:nondesign/core/video3d/video3d_player.dart';
+import 'package:nondesign/core/video3d/video3d_project.dart';
 import 'package:nondesign/core/three_service.dart';
+import 'package:nondesign/widgets/music_playback_surface.dart';
+import 'package:nondesign/widgets/video3d_preview_surface.dart';
 
 /// 24 帧的总片长（4×1 秒）。
 MusicScore _score() => MusicScore(
@@ -482,6 +486,128 @@ export default function build(THREE, scene, camera, controls, renderer) {
     print(
       '[webview-three] view=$view grid=$grid '
       'gridReceipt=${bridge.ofKind('grid').map((m) => m['supported']).toList()}',
+    );
+  });
+
+  testWidgets('生产 MusicPlaybackSurface：真实 WebView 就绪 + 播放头推进', (tester) async {
+    final MusicScore score = _score();
+    final MusicPlayPlan plan = compileMusicScore(score);
+    final MusicPlaybackController playback = createDefaultMusicPlayback(
+      score,
+      plan,
+    );
+    addTearDown(playback.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: MusicPlaybackSurface(playback: playback)),
+      ),
+    );
+    await playback.start();
+
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
+    while (DateTime.now().isBefore(deadline) && !playback.ready) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await tester.pump();
+    }
+    expect(
+      playback.ready,
+      isTrue,
+      reason: '生产播放面没就绪：${playback.loadError} / ${playback.technicalDetail}',
+    );
+    expect(
+      find.byKey(const ValueKey('music-playback-surface')),
+      findsOneWidget,
+    );
+
+    await playback.play();
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
+    await tester.pump();
+    // ignore: avoid_print
+    print(
+      '[webview-music-surface] ready=${playback.ready} '
+      'position=${playback.position} beat=${playback.beat} '
+      'error=${playback.loadError}',
+    );
+    if (playback.loadError.isEmpty) {
+      expect(playback.position, greaterThan(0), reason: '生产播放面播放 1.5s 后播放头未前进');
+    }
+    await playback.stop();
+    await tester.pump(const Duration(milliseconds: 300));
+  });
+
+  testWidgets('生产 Video3dPreviewSurface：真实 WebView 就绪 + seekFrame', (
+    tester,
+  ) async {
+    final Directory dir = await Directory.systemTemp.createTemp(
+      'nan-it-video3d',
+    );
+    addTearDown(() async {
+      if (dir.existsSync()) await dir.delete(recursive: true);
+    });
+    final Video3dProjectStore store = Video3dProjectStore(root: dir);
+    final Video3dVerification saved = await store.save(
+      'smoke',
+      scene: _sceneRaw(),
+      screenplay: _screenplayRaw(),
+    );
+    expect(saved.verified, isTrue, reason: '${saved.toJson()}');
+    final Video3dProjectSnapshot snapshot = await store.read('smoke');
+    final Video3dTimeline timeline = compileVideo3dTimeline(
+      snapshot.screenplay!,
+    );
+
+    final Video3dPreviewController preview = createDefaultVideo3dPreview(
+      snapshot,
+      timeline,
+    );
+    addTearDown(preview.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: Video3dPreviewSurface(preview: preview)),
+      ),
+    );
+    await preview.start();
+
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
+    while (DateTime.now().isBefore(deadline) && !preview.ready) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await tester.pump();
+    }
+    expect(
+      preview.ready,
+      isTrue,
+      reason: '生产预览面没就绪：${preview.loadError} / ${preview.technicalDetail}',
+    );
+    expect(
+      preview.totalFrames,
+      150,
+      reason: '5 秒 @30fps 应为 150 帧，实得 ${preview.totalFrames}',
+    );
+    expect(
+      find.byKey(const ValueKey('video3d-preview-surface')),
+      findsOneWidget,
+    );
+
+    await preview.seekFrame(90);
+    final DateTime seekDeadline = DateTime.now().add(
+      const Duration(seconds: 10),
+    );
+    while (DateTime.now().isBefore(seekDeadline) && preview.frame != 90) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await tester.pump();
+    }
+    // ignore: avoid_print
+    print(
+      '[webview-video3d-surface] ready=${preview.ready} '
+      'totalFrames=${preview.totalFrames} frame=${preview.frame} '
+      'error=${preview.loadError}',
+    );
+    expect(
+      preview.frame,
+      90,
+      reason: 'seekFrame(90) 后页面帧号未同步，实得 ${preview.frame}',
     );
   });
 }
