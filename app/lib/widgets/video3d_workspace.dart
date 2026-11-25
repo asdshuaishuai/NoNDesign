@@ -3,13 +3,14 @@
 ///
 /// 2026-11-24 工作台独立适配：内容区按视频导演台的交互姿态独立排布
 /// （左项目 / 中预览 / 右检查 / 底时间线），共享外壳仍由外层 `WorkspaceChrome`
-/// 提供。本批只做**只读预览**：
+/// 提供。本批做**只读预览 + 新建最小项目**（不做场景/镜头编辑）：
 ///
 ///  * 项目事实源是 `<项目根>/portfolio/video3d/<name>/` 的 `scene3d.json` +
-///    `screenplay3d.json`（[Video3dProjectStore]）；本工作台只读，不写盘。
-///  * 预览面在 `video3d_preview_surface.dart`：经 `assembleVideo3dPreview` 组装的
-///    自包含页面接进 `webview_all`；播放/暂停/seek 只驱动页面播放头，不改项目。
-///  * 只读检查器展示节点 / 灯光 / 相机 / 镜头数 / 时长 / 校验状态与问题数。
+///    `screenplay3d.json`（[Video3dProjectStore]）；工作台可以**新建**一个最小
+///    合法项目（地面 + 主光 + 相机 + 单镜头），创建后自动选中并加载预览。
+///  * 已有项目的**场景/镜头编辑**仍未接线：预览面在
+///    `video3d_preview_surface.dart`，播放/暂停/seek 只驱动页面播放头，不改项目。
+///  * 只读检查器展示标题 / 节点 / 灯光 / 相机 / 镜头数 / 时长 / 校验状态与问题数。
 ///  * 底部镜头时间线按 [compileVideo3dTimeline] 的整数帧表比例绘制；运输条是
 ///    预览面唯一控制面。
 ///  * 没有可播放项目时播放按钮**禁用并说明原因**（项目不存在/坏文件/校验未通过/
@@ -21,11 +22,13 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../core/creative/creative_schema.dart';
 import '../core/theme.dart';
 import '../core/video3d/video3d_compile.dart';
 import '../core/video3d/video3d_contract.dart';
 import '../core/video3d/video3d_project.dart';
 import '../core/workbench_layout.dart';
+import 'common.dart';
 import 'video3d_preview_surface.dart';
 
 /// 跨实例打开通道（与 `threeLoadOnOpen` / `videoLoadOnOpen` 同模式）：
@@ -33,6 +36,12 @@ import 'video3d_preview_surface.dart';
 ///
 /// 空 = 不指定项目：工作台保持「打开列表首项」逻辑。
 String? video3dLoadOnOpen;
+
+/// 一次性通道（与 [video3dLoadOnOpen] 同族）：顶栏「新建 3D 视频」置 true 后
+/// 打开工作台，工作台消费后**不自动打开列表首项**，直接落空态——空态里的
+/// 「新建 3D 视频」按钮就是新建入口。与 [video3dLoadOnOpen] 互斥：带项目的
+/// 打开请求优先。
+bool video3dNewOnOpen = false;
 
 /// 预览面控制器工厂：工作台把已校验的项目与帧表交给它。
 ///
@@ -62,6 +71,77 @@ List<double> video3dShotFractions(Video3dTimeline timeline) {
     for (final Video3dShotFrames shot in timeline.shots)
       shot.frameCount / timeline.totalFrames,
   ];
+}
+
+// ---------------------------------------------------------------------------
+// 新建项目的最小合法事实源
+// ---------------------------------------------------------------------------
+
+/// 新建项目的场景：一块地面 box + 一盏方向主光 + 一台相机。
+///
+/// 只放契约 v1 明确支持的图元与字段；[title] 是项目显示名（可选，作为场景
+/// 文档的额外元数据字段，契约校验不消费它、也不因未知字段报错）。
+Map<String, Object?> buildVideo3dStarterScene({String? title}) {
+  final String trimmedTitle = (title ?? '').trim();
+  return <String, Object?>{
+    'v': video3dVersion,
+    'units': 'm',
+    if (trimmedTitle.isNotEmpty) 'title': trimmedTitle,
+    'environment': <String, Object?>{'background': '#0b0d12'},
+    'nodes': <Object?>[
+      <String, Object?>{
+        'id': 'floor',
+        'type': 'box',
+        'size': <double>[10, 0.1, 10],
+        'position': <double>[0, -0.05, 0],
+        'material': <String, Object?>{
+          'color': '#9a8c7a',
+          'roughness': 0.9,
+          'metalness': 0.0,
+        },
+      },
+    ],
+    'lights': <Object?>[
+      <String, Object?>{
+        'id': 'key',
+        'type': 'directional',
+        'intensity': 1.0,
+        'color': '#ffffff',
+        'position': <double>[4, 6, 4],
+        'target': <double>[0, 0, 0],
+      },
+    ],
+    'cameras': <Object?>[
+      <String, Object?>{
+        'id': 'hero',
+        'position': <double>[4, 2, 4],
+        'target': <double>[0, 0.5, 0],
+        'fov': 45,
+      },
+    ],
+  };
+}
+
+/// 新建项目的镜头表：单镜头，时长 = 对话框输入，固定 30fps。
+///
+/// 顶层 `duration` 与镜头时长用**同一个** double，过 `verifyVideo3d` 的
+/// 「镜头总时长 = 片长」检查（容差在契约层，不靠界面凑数）。
+Map<String, Object?> buildVideo3dStarterScreenplay({
+  required double durationSeconds,
+}) {
+  return <String, Object?>{
+    'v': video3dVersion,
+    'fps': video3dFps,
+    'format': <String, Object?>{'width': 1280, 'height': 720},
+    'duration': durationSeconds,
+    'shots': <Object?>[
+      <String, Object?>{
+        'id': 's1',
+        'duration': durationSeconds,
+        'camera': <String, Object?>{'id': 'hero'},
+      },
+    ],
+  };
 }
 
 /// 3D 视频工作台（只读预览）。
@@ -96,12 +176,18 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
   /// initState 从 [video3dLoadOnOpen] 取到的开局项目名（只消费一次）。
   String? _pendingOpen;
 
+  /// initState 从 [video3dNewOnOpen] 取到的「落新建空态」请求（只消费一次）。
+  bool _pendingNew = false;
+
   @override
   void initState() {
     super.initState();
     // 跨视图打开：项目名由 [openVideo3dWorkspace] 一次性写入，空 = 列表首项。
     _pendingOpen = video3dLoadOnOpen;
     video3dLoadOnOpen = null;
+    // 顶栏「新建 3D 视频」：落空态而不是替用户打开首个项目。
+    _pendingNew = video3dNewOnOpen;
+    video3dNewOnOpen = false;
     unawaited(_refresh());
   }
 
@@ -132,7 +218,12 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       _loading = false;
       _listError = error;
     });
+    final bool pendingNew = _pendingNew;
+    _pendingNew = false;
     if (error.isNotEmpty) return;
+    // 顶栏「新建 3D 视频」：列表照常列，但不替用户选中首个项目——空态里的
+    // 新建按钮才是这次请求的落点。
+    if (pendingNew) return;
     final String? pending = _pendingOpen;
     _pendingOpen = null;
     if (pending != null && pending.isNotEmpty) {
@@ -180,6 +271,23 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     }
     if (!mounted || _name != trimmed) return;
     _bindSnapshot(snapshot);
+  }
+
+  /// 打「新建 3D 视频」小对话框；创建成功返回项目名，随后刷新列表并自动选中
+  /// 新项目（打开预览）。
+  ///
+  /// 写盘交给对话框里的 [Video3dProjectStore.save]（先校验后落盘）；失败留显性
+  /// 人话 + 折叠技术详情，不静默关窗。
+  Future<void> _createProject() async {
+    final String? created = await showNonDialog<String>(
+      context: context,
+      builder: (routeContext) =>
+          _Video3dCreateDialog(projectStore: _projectStore),
+    );
+    if (!mounted || created == null) return;
+    // 刷新列表时把新项目作为开局目标一次性通道消费：列表出现 + 自动选中 + 预览。
+    _pendingOpen = created;
+    await _refresh();
   }
 
   /// 写入新快照、按校验状态重建预览面。
@@ -247,6 +355,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
                   loading: _loading,
                   error: _listError,
                   onOpen: (String name) => unawaited(_open(name)),
+                  onCreate: () => unawaited(_createProject()),
                 ),
               ),
             if (hasLeft) Container(width: 1, color: p.line),
@@ -363,6 +472,14 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
               ),
             ),
           IconButton(
+            key: const ValueKey('video3d-new-project-header'),
+            tooltip: '新建 3D 视频',
+            onPressed: () => unawaited(_createProject()),
+            iconSize: 16,
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.add, color: p.ink3),
+          ),
+          IconButton(
             key: const ValueKey('video3d-refresh'),
             tooltip: '刷新 3D 视频项目',
             onPressed: _loading ? null : _refresh,
@@ -415,7 +532,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
   Widget _emptyPane(NonPalette p) {
     return Center(
       key: const ValueKey('video3d-empty'),
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -432,10 +549,17 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
             ),
             const SizedBox(height: 6),
             Text(
-              '左侧会列出本机的 3D 视频项目；选中后可以只读预览画面、镜头和检查器。'
-              '这一批先做只读预览，新建入口在后续批次提供。',
+              '新建一个最小项目，或者把已有的项目文件放进项目目录后刷新；'
+              '选中项目就能只读预览画面、镜头和检查器。',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
+            ),
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              key: const ValueKey('video3d-new-project-empty'),
+              onPressed: () => unawaited(_createProject()),
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('新建 3D 视频', style: TextStyle(fontSize: 12)),
             ),
           ],
         ),
@@ -468,7 +592,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
             const SizedBox(height: 10),
             _reloadButton(p),
             if (failure.technical.isNotEmpty)
-              _technicalPane(p, '技术详情', failure.technical),
+              _technicalPane('技术详情', failure.technical),
           ],
         ),
       ),
@@ -523,7 +647,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
               ),
             const SizedBox(height: 10),
             _reloadButton(p),
-            _technicalPane(p, '技术详情（问题位置）', detail),
+            _technicalPane('技术详情（问题位置）', detail),
           ],
         ),
       ),
@@ -565,32 +689,9 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     );
   }
 
-  Widget _technicalPane(NonPalette p, String title, String detail) {
+  Widget _technicalPane(String title, String detail) {
     if (detail.isEmpty) return const SizedBox.shrink();
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: Material(
-        type: MaterialType.transparency,
-        child: ExpansionTile(
-          key: const ValueKey('video3d-technical-details'),
-          tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-          dense: true,
-          title: Text(title, style: TextStyle(fontSize: 11, color: p.ink4)),
-          iconColor: p.ink4,
-          collapsedIconColor: p.ink4,
-          children: <Widget>[
-            Align(
-              alignment: Alignment.centerLeft,
-              child: SelectableText(
-                detail,
-                style: TextStyle(fontSize: 10.5, color: p.ink4, height: 1.4),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return _Video3dTechnicalDetails(title: title, detail: detail);
   }
 }
 
@@ -605,6 +706,7 @@ class _Video3dProjectList extends StatelessWidget {
     required this.loading,
     required this.error,
     required this.onOpen,
+    required this.onCreate,
   });
 
   final List<Video3dProjectEntry> entries;
@@ -612,6 +714,7 @@ class _Video3dProjectList extends StatelessWidget {
   final bool loading;
   final String error;
   final ValueChanged<String> onOpen;
+  final VoidCallback onCreate;
 
   @override
   Widget build(BuildContext context) {
@@ -652,6 +755,19 @@ class _Video3dProjectList extends StatelessWidget {
                       color: p.ink4,
                     ),
                   ),
+                IconButton(
+                  key: const ValueKey('video3d-new-project'),
+                  tooltip: '新建 3D 视频',
+                  onPressed: onCreate,
+                  iconSize: 13,
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 22,
+                    minHeight: 22,
+                  ),
+                  icon: Icon(Icons.add, color: p.ink4),
+                ),
               ],
             ),
           ),
@@ -668,7 +784,7 @@ class _Video3dProjectList extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.all(12),
               child: Text(
-                '还没有 3D 视频项目。\n项目文件出现在这里后，选中即可只读预览。',
+                '还没有 3D 视频项目。\n点右上角「+」新建，或把项目文件放进项目目录后刷新。',
                 style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
               ),
             )
@@ -784,6 +900,10 @@ class _Video3dInspector extends StatelessWidget {
     final Video3dProjectSnapshot? snapshot = this.snapshot;
     final Video3dScene? scene = snapshot?.scene;
     final Video3dScreenplay? screenplay = snapshot?.screenplay;
+    // 新建项目时写进场景文档的显示名（可选；未知字段不影响契约校验）。
+    final String? projectTitle = creativeNonEmptyString(
+      snapshot?.sceneRaw['title'],
+    );
     final int issueCount = snapshot?.verification.checks.length ?? 0;
     return Container(
       key: const ValueKey('video3d-inspector'),
@@ -825,6 +945,8 @@ class _Video3dInspector extends StatelessWidget {
             else if (snapshot == null)
               Text('还没有打开的项目', style: TextStyle(fontSize: 11, color: p.ink4))
             else ...<Widget>[
+              if (projectTitle != null)
+                _row(p, '标题', projectTitle, key: 'video3d-inspector-title'),
               _row(p, '场景节点', '${scene?.nodes.length ?? 0}'),
               _row(p, '灯光', '${scene?.lights.length ?? 0}'),
               _row(p, '相机', '${scene?.cameras.length ?? 0}'),
@@ -1233,6 +1355,324 @@ class _Video3dBottomBar extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 折叠的原始诊断（「技术详情」）
+// ---------------------------------------------------------------------------
+
+/// 用户可见文案在上一层；原始错误/问题定位只进这个折叠面板。
+class _Video3dTechnicalDetails extends StatelessWidget {
+  const _Video3dTechnicalDetails({
+    required this.title,
+    required this.detail,
+    this.paneKey = const ValueKey('video3d-technical-details'),
+  });
+
+  final String title;
+  final String detail;
+  final Key paneKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final NonPalette p = context.palette;
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: Material(
+        type: MaterialType.transparency,
+        child: ExpansionTile(
+          key: paneKey,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          dense: true,
+          title: Text(title, style: TextStyle(fontSize: 11, color: p.ink4)),
+          iconColor: p.ink4,
+          collapsedIconColor: p.ink4,
+          children: <Widget>[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SelectableText(
+                detail,
+                style: TextStyle(fontSize: 10.5, color: p.ink4, height: 1.4),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 新建项目小对话框
+// ---------------------------------------------------------------------------
+
+/// 新建项目允许的最长片长（秒）：再长就该走镜头表/脚本，不在小对话框里拼。
+const double kVideo3dCreateMaxDuration = 3600;
+
+/// 新建 3D 视频：名称白名单 + 可选标题 + 时长（秒）。
+///
+/// 写盘在对话框内完成（[Video3dProjectStore.save] 先校验后落盘）：成功返回
+/// 项目名并关窗，调用方刷新列表、自动选中并加载预览；失败**不关窗**，给显性
+/// 人话 + 折叠技术详情，用户能改名字/时长重试。
+class _Video3dCreateDialog extends StatefulWidget {
+  const _Video3dCreateDialog({required this.projectStore});
+
+  final Video3dProjectStore projectStore;
+
+  @override
+  State<_Video3dCreateDialog> createState() => _Video3dCreateDialogState();
+}
+
+class _Video3dCreateDialogState extends State<_Video3dCreateDialog> {
+  final TextEditingController _name = TextEditingController();
+  final TextEditingController _title = TextEditingController();
+  final TextEditingController _duration = TextEditingController(text: '5');
+  bool _saving = false;
+  String _error = '';
+  String _technical = '';
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _title.dispose();
+    _duration.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_saving) return;
+    final String name = _name.text.trim();
+    if (!creativeIsSafeProjectName(name)) {
+      // 与项目库同一句人话（避免这里和存储层各写一份措辞）。
+      setState(() {
+        _error = video3dProjectFailureMessage('invalid_name');
+        _technical = '';
+      });
+      return;
+    }
+    final double? duration = double.tryParse(_duration.text.trim());
+    if (duration == null || !duration.isFinite || duration <= 0) {
+      setState(() {
+        _error = '时长要填一个大于 0 的秒数';
+        _technical = '';
+      });
+      return;
+    }
+    if (duration < video3dMinShotDuration) {
+      setState(() {
+        _error = '时长至少一帧（30 帧/秒下约 0.033 秒）';
+        _technical = '';
+      });
+      return;
+    }
+    if (duration > kVideo3dCreateMaxDuration) {
+      setState(() {
+        _error = '时长最多 $kVideo3dCreateMaxDuration 秒';
+        _technical = '';
+      });
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = '';
+      _technical = '';
+    });
+    Video3dVerification verification;
+    try {
+      verification = await widget.projectStore.save(
+        name,
+        scene: buildVideo3dStarterScene(title: _title.text),
+        screenplay: buildVideo3dStarterScreenplay(durationSeconds: duration),
+      );
+    } on Video3dProjectFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = failure.message;
+        _technical = failure.technical;
+      });
+      return;
+    } catch (error) {
+      if (!mounted) return;
+      // 没归到项目库错误码的异常同样落人话；原始异常只进折叠详情。
+      final Video3dProjectFailure failure = Video3dProjectFailure(
+        'io_error',
+        '$error',
+      );
+      setState(() {
+        _saving = false;
+        _error = failure.message;
+        _technical = failure.technical;
+      });
+      return;
+    }
+    if (!mounted) return;
+    if (!verification.verified) {
+      // 模板本身应当永远合法；走到这里说明契约变了或输入踩了边界——如实说明。
+      setState(() {
+        _saving = false;
+        _error = '生成的场景或镜头没有通过校验，项目没有保存';
+        _technical = <String>[
+          for (final Video3dIssue issue in verification.checks)
+            '${issue.code} @ ${issue.pointer.isEmpty ? '/' : issue.pointer}: '
+                '${issue.message}',
+        ].join('\n');
+      });
+      return;
+    }
+    Navigator.of(context).pop(name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final NonPalette p = context.palette;
+    return AlertDialog(
+      key: const ValueKey('video3d-create-dialog'),
+      backgroundColor: p.panel,
+      title: Text('新建 3D 视频', style: TextStyle(fontSize: 15, color: p.ink)),
+      content: SizedBox(
+        width: 380,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                '会生成一个最小项目：一块地面、一盏主光、一台相机和一个单镜头；'
+                '创建后自动打开预览。',
+                style: TextStyle(fontSize: 11, height: 1.5, color: p.ink3),
+              ),
+              const SizedBox(height: 12),
+              _field(
+                p,
+                label: '项目名',
+                helper: '字母、数字、下划线或短横线',
+                field: TextField(
+                  key: const ValueKey('video3d-create-name'),
+                  controller: _name,
+                  autofocus: true,
+                  enabled: !_saving,
+                  style: TextStyle(fontSize: 12, color: p.ink2),
+                  decoration: _decoration(p, hint: '例如 night-market'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              _field(
+                p,
+                label: '标题（可选）',
+                helper: '默认用项目名',
+                field: TextField(
+                  key: const ValueKey('video3d-create-title'),
+                  controller: _title,
+                  enabled: !_saving,
+                  style: TextStyle(fontSize: 12, color: p.ink2),
+                  decoration: _decoration(p, hint: '显示在检查器里'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              _field(
+                p,
+                label: '时长（秒）',
+                helper: '按 30 帧/秒计时，最多 $kVideo3dCreateMaxDuration 秒',
+                field: TextField(
+                  key: const ValueKey('video3d-create-duration'),
+                  controller: _duration,
+                  enabled: !_saving,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  style: TextStyle(fontSize: 12, color: p.ink2),
+                  decoration: _decoration(p, hint: '5'),
+                  onSubmitted: (_) => unawaited(_submit()),
+                ),
+              ),
+              if (_error.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 12),
+                Container(
+                  key: const ValueKey('video3d-create-error'),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: p.warn.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: p.warn.withValues(alpha: 0.5)),
+                  ),
+                  child: Text(
+                    _error,
+                    style: TextStyle(fontSize: 11, height: 1.4, color: p.warn),
+                  ),
+                ),
+              ],
+              if (_technical.isNotEmpty)
+                _Video3dTechnicalDetails(
+                  title: '技术详情',
+                  detail: _technical,
+                  paneKey: const ValueKey('video3d-create-technical'),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          key: const ValueKey('video3d-create-cancel'),
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const ValueKey('video3d-create-submit'),
+          onPressed: _saving ? null : () => unawaited(_submit()),
+          child: _saving
+              ? const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(strokeWidth: 1.5),
+                )
+              : const Text('创建'),
+        ),
+      ],
+    );
+  }
+
+  Widget _field(
+    NonPalette p, {
+    required String label,
+    required String helper,
+    required Widget field,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: p.ink3,
+          ),
+        ),
+        const SizedBox(height: 5),
+        field,
+        const SizedBox(height: 4),
+        Text(helper, style: TextStyle(fontSize: 10, color: p.ink4)),
+      ],
+    );
+  }
+
+  InputDecoration _decoration(NonPalette p, {required String hint}) {
+    return InputDecoration(
+      isDense: true,
+      filled: true,
+      fillColor: p.panel2,
+      hintText: hint,
+      hintStyle: TextStyle(fontSize: 11, color: p.ink4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
     );
   }
 }

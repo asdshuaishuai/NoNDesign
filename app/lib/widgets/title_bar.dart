@@ -135,6 +135,13 @@ class TitleBar extends StatelessWidget {
                     );
                     return;
                   }
+                  if (value.startsWith('switch:video3d:')) {
+                    openVideo3dWorkspace(
+                      store,
+                      value.substring('switch:video3d:'.length),
+                    );
+                    return;
+                  }
                   switch (value) {
                     case 'new':
                       onNewProject();
@@ -156,6 +163,8 @@ class TitleBar extends StatelessWidget {
                       openVideoWorkspace(store);
                     case 'video3d':
                       openVideo3dWorkspace(store);
+                    case 'new-video3d':
+                      newVideo3dProject(store);
                     case 'music':
                       openMusicWorkspace(store);
                     case 'new-three':
@@ -177,6 +186,10 @@ class TitleBar extends StatelessWidget {
                       .toList();
                   final musicEntries = store.portfolioEntries
                       .where((e) => e.kind == 'music')
+                      .take(5)
+                      .toList();
+                  final video3dEntries = store.portfolioEntries
+                      .where((e) => e.kind == 'video3d')
                       .take(5)
                       .toList();
                   final designFace = !store.view.startsWith('plugin:');
@@ -263,13 +276,6 @@ class TitleBar extends StatelessWidget {
                       '视频工作台',
                       '代码动画',
                     ),
-                    _menu(
-                      context,
-                      'video3d',
-                      Icons.movie_creation_outlined,
-                      '3D 视频工作台',
-                      '只读预览',
-                    ),
                     const PopupMenuDivider(),
                     _sectionLabel(context, '音乐'),
                     for (final e in musicEntries)
@@ -289,6 +295,29 @@ class TitleBar extends StatelessWidget {
                       '音乐工作台',
                       '乐谱 / 编曲',
                     ),
+                    // 3D 视频分区放在音乐之后：既保持既有分区顺序，也让「新建
+                    // 3D 视频」贴着工作台入口（点它进工作台空态，由空态里的
+                    // 新建按钮拉起小对话框）。
+                    const PopupMenuDivider(),
+                    _sectionLabel(context, '3D 视频'),
+                    for (final e in video3dEntries)
+                      _menu(
+                        context,
+                        'switch:video3d:${e.ref}',
+                        Icons.movie_creation_outlined,
+                        e.title,
+                        e.ref == current.$3 && store.view == 'plugin:video3d'
+                            ? '当前'
+                            : '',
+                      ),
+                    _menu(
+                      context,
+                      'video3d',
+                      Icons.movie_creation_outlined,
+                      '3D 视频工作台',
+                      '只读预览',
+                    ),
+                    _menu(context, 'new-video3d', Icons.add, '新建 3D 视频', ''),
                     if (designFace) ...[
                       const PopupMenuDivider(),
                       _menu(

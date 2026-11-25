@@ -1,9 +1,13 @@
-// 3D 视频工作台回归（task-10）：
+// 3D 视频工作台回归（task-10 + task-12）：
 //
 //   * 插件注册表 / 视图映射 / 打开通道（openVideo3dWorkspace + 作品集入口）；
 //   * 工作台：项目列表、空态、坏项目/未过校验项目显性人话、选中项目切预览、
 //     只读检查器数值、底部镜头时间线按帧表比例、运输条禁用原因；
-//   * 顶栏项目菜单「3D 视频工作台」入口 + _activeProject 显示。
+//   * 新建入口（task-12）：空态/项目列表/头部「新建 3D 视频」→ 小对话框 →
+//     Video3dProjectStore 落最小合法场景+单镜头 → 列表出现并自动选中加载预览；
+//     名称白名单与保存失败给显性人话 + 折叠技术详情；
+//   * 顶栏项目菜单「3D 视频」分区（前 5 个项目 + 新建入口）+ _activeProject 显示
+//     + 「新建 3D 视频」落工作台空态的专用通道。
 //
 // 不构造真 WebView：工作台注入 Fake 预览控制器（戳穿真 WebView 的路径由
 // video3d_preview_surface_test.dart 覆盖）。
@@ -235,6 +239,23 @@ Future<void> _settle(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 50));
 }
 
+/// 本地落盘/扫描走 `dart:io`：widget test 的假时钟只推进微任务，不推进真实
+/// IO。交替 pump 与 runAsync 若干轮，让「保存项目 → 刷新列表 → 打开项目 →
+/// 重建预览」整条链路逐段完成；最后再推进一次假时钟把对话框退场动画走完。
+Future<void> _settleIo(WidgetTester tester) async {
+  for (var i = 0; i < 25; i++) {
+    await tester.pump();
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    });
+  }
+  await tester.pump(const Duration(milliseconds: 400));
+}
+
+/// 落盘 JSON 的读取（新建项目测试直接查事实源）。
+Map<String, Object?> _readJsonMap(String path) =>
+    (jsonDecode(File(path).readAsStringSync()) as Map).cast<String, Object?>();
+
 void _viewport(WidgetTester tester, {Size size = const Size(1440, 900)}) {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -273,6 +294,7 @@ Widget _titleBarApp(AppStore store) => ChangeNotifierProvider<AppStore>.value(
 
 void _resetGlobals() {
   video3dLoadOnOpen = null;
+  video3dNewOnOpen = false;
 }
 
 void main() {
@@ -552,6 +574,278 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('新建：空态入口 → 小对话框 → 最小项目落盘 → 列表出现并自动加载预览', (tester) async {
+      _viewport(tester);
+      final _Factory factory = _Factory();
+
+      await tester.pumpWidget(
+        _app(
+          Video3dWorkspace(
+            projectStore: projectStore,
+            previewFactory: factory.call,
+          ),
+        ),
+      );
+      await _settle(tester);
+
+      expect(find.byKey(const ValueKey('video3d-empty')), findsOneWidget);
+      // 三个新建入口都在：空态页 / 左侧列表头 / 顶部工具条。
+      expect(
+        find.byKey(const ValueKey('video3d-new-project-empty')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('video3d-new-project')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('video3d-new-project-header')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('video3d-new-project-empty')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('video3d-create-dialog')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('video3d-create-duration')),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('video3d-create-name')),
+        'fresh',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('video3d-create-title')),
+        '第一段',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('video3d-create-duration')),
+        '6',
+      );
+      await tester.tap(find.byKey(const ValueKey('video3d-create-submit')));
+      await _settleIo(tester);
+
+      // 对话框关窗，新项目出现在列表并自动选中、预览面已加载。
+      expect(find.byKey(const ValueKey('video3d-create-dialog')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('video3d-empty')),
+        findsNothing,
+        reason: '新建成功后应选中新项目而不是停在空态',
+      );
+      expect(
+        find.byKey(const ValueKey('video3d-project-fresh')),
+        findsOneWidget,
+      );
+      expect(factory.created, hasLength(1), reason: '新项目创建后自动加载预览');
+      expect(factory.created.single.ready, isTrue);
+      expect(
+        find.byKey(const ValueKey('video3d-preview-surface')),
+        findsOneWidget,
+      );
+
+      // 检查器：标题 / 时长 / 总帧（6s × 30fps = 180）。
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('video3d-inspector-title')),
+          matching: find.text('第一段'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('video3d-inspector-duration')),
+          matching: find.text('0:06'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('video3d-inspector-frames')),
+          matching: find.text('180'),
+        ),
+        findsOneWidget,
+      );
+
+      // 落盘的是最小合法事实源：地面 box + 方向主光 + 相机 + 单镜头 @30fps。
+      final Map<String, Object?> scene = _readJsonMap(
+        '${temp.path}/fresh/scene3d.json',
+      );
+      final Map<String, Object?> screenplay = _readJsonMap(
+        '${temp.path}/fresh/screenplay3d.json',
+      );
+      expect(scene['v'], 1);
+      expect(scene['title'], '第一段');
+      final Map<String, Object?> node =
+          (scene['nodes']! as List<Object?>).single as Map<String, Object?>;
+      expect(node['type'], 'box');
+      final Map<String, Object?> light =
+          (scene['lights']! as List<Object?>).single as Map<String, Object?>;
+      expect(light['type'], 'directional');
+      final Map<String, Object?> camera =
+          (scene['cameras']! as List<Object?>).single as Map<String, Object?>;
+      expect(camera['id'], 'hero');
+      expect(screenplay['v'], 1);
+      expect(screenplay['fps'], 30);
+      expect(screenplay['duration'], 6);
+      final List<Object?> shots = screenplay['shots']! as List<Object?>;
+      expect(shots, hasLength(1));
+      final Map<String, Object?> shot = shots.single as Map<String, Object?>;
+      expect(shot['duration'], 6);
+      expect(shot['camera'], <String, Object?>{'id': 'hero'});
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('新建：非法项目名 / 非法时长给显性人话，不落盘、不关窗', (tester) async {
+      _viewport(tester);
+      final _Factory factory = _Factory();
+
+      await tester.pumpWidget(
+        _app(
+          Video3dWorkspace(
+            projectStore: projectStore,
+            previewFactory: factory.call,
+          ),
+        ),
+      );
+      await _settle(tester);
+
+      await tester.tap(
+        find.byKey(const ValueKey('video3d-new-project-header')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('video3d-create-dialog')),
+        findsOneWidget,
+      );
+
+      // 名称白名单：空格不在允许字符里，正面说明并且不写盘。
+      await tester.enterText(
+        find.byKey(const ValueKey('video3d-create-name')),
+        'bad name',
+      );
+      await tester.tap(find.byKey(const ValueKey('video3d-create-submit')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('video3d-create-dialog')),
+        findsOneWidget,
+        reason: '校验失败不能关窗',
+      );
+      expect(find.text('项目名只能用字母、数字、下划线和短横线，换一个名字再试'), findsOneWidget);
+      expect(Directory('${temp.path}/bad name').existsSync(), isFalse);
+
+      // 时长边界：0 秒不可保存。
+      await tester.enterText(
+        find.byKey(const ValueKey('video3d-create-name')),
+        'fresh',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('video3d-create-duration')),
+        '0',
+      );
+      await tester.tap(find.byKey(const ValueKey('video3d-create-submit')));
+      await tester.pumpAndSettle();
+      expect(find.text('时长要填一个大于 0 的秒数'), findsOneWidget);
+      expect(Directory('${temp.path}/fresh').existsSync(), isFalse);
+      expect(factory.created, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('新建保存失败：显性人话 + 折叠技术详情，不静默关窗', (tester) async {
+      _viewport(tester);
+      // 项目根指向一个普通文件：目录建不出来，保存必然失败。
+      final File rootAsFile = File('${temp.path}/root-as-file')
+        ..writeAsStringSync('not a directory');
+      final Video3dProjectStore brokenStore = Video3dProjectStore(
+        root: Directory(rootAsFile.path),
+      );
+      final _Factory factory = _Factory();
+
+      await tester.pumpWidget(
+        _app(
+          Video3dWorkspace(
+            projectStore: brokenStore,
+            previewFactory: factory.call,
+          ),
+        ),
+      );
+      await _settle(tester);
+
+      await tester.tap(find.byKey(const ValueKey('video3d-new-project-empty')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('video3d-create-name')),
+        'fine',
+      );
+      await tester.tap(find.byKey(const ValueKey('video3d-create-submit')));
+      await _settleIo(tester);
+
+      expect(
+        find.byKey(const ValueKey('video3d-create-dialog')),
+        findsOneWidget,
+        reason: '保存失败不能静默关窗',
+      );
+      expect(
+        find.text('项目文件没能写入或读取，请重试'),
+        findsOneWidget,
+        reason: '失败给用户可见的人话，不出现原始异常',
+      );
+      // 原始异常只进折叠的技术详情。
+      expect(
+        find.byKey(const ValueKey('video3d-create-technical')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('技术详情'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('FileSystemException'), findsWidgets);
+      await tester.tap(find.byKey(const ValueKey('video3d-create-cancel')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('video3d-create-dialog')), findsNothing);
+      expect(factory.created, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('顶栏「新建 3D 视频」通道：有项目时也落空态，不自动打开首项', (tester) async {
+      _viewport(tester);
+      await projectStore.save(
+        'alpha',
+        scene: _validScene(),
+        screenplay: _validScreenplay(),
+      );
+      video3dNewOnOpen = true;
+      final _Factory factory = _Factory();
+
+      await tester.pumpWidget(
+        _app(
+          Video3dWorkspace(
+            projectStore: projectStore,
+            previewFactory: factory.call,
+          ),
+        ),
+      );
+      await _settleIo(tester);
+
+      expect(video3dNewOnOpen, isFalse, reason: '新建空态通道是一次性的');
+      expect(find.byKey(const ValueKey('video3d-empty')), findsOneWidget);
+      expect(factory.created, isEmpty, reason: '新建请求不替用户打开已有项目');
+      expect(
+        find.byKey(const ValueKey('video3d-project-alpha')),
+        findsOneWidget,
+        reason: '已有项目照常列在左侧，新建/选择都由用户决定',
+      );
+
+      // 空态里的新建按钮就是这次请求的落点。
+      await tester.tap(find.byKey(const ValueKey('video3d-new-project-empty')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('video3d-create-dialog')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('video3d-create-cancel')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('坏项目：列表保留条目，打开时显性人话 + 折叠技术详情', (tester) async {
       _viewport(tester);
       Directory('${temp.path}/broken').createSync(recursive: true);
@@ -800,6 +1094,54 @@ void main() {
       expect(video3dLoadOnOpen, isNull);
       // 当前项目标识随视图切到 3D 视频工作台。
       expect(find.text('3D 视频工作台'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('「3D 视频」分区：列前 5 个项目 + 新建入口；点项目带项目名打开', (tester) async {
+      _viewport(tester);
+      final AppStore store = _store();
+      store.portfolioEntries = <PortfolioEntry>[
+        for (int i = 0; i < 6; i++)
+          PortfolioEntry(
+            kind: 'video3d',
+            ref: 'v$i',
+            title: 'v$i',
+            detail: '3D 视频 · 1 镜头 / 150 帧',
+          ),
+      ];
+
+      await tester.pumpWidget(_titleBarApp(store));
+      await tester.tap(find.byKey(const ValueKey('title-bar-project-menu')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('3D 视频'), findsOneWidget, reason: '菜单有「3D 视频」分区标签');
+      for (final String name in const <String>['v0', 'v1', 'v2', 'v3', 'v4']) {
+        expect(find.text(name), findsOneWidget, reason: '分区列出前 5 个项目');
+      }
+      expect(find.text('v5'), findsNothing, reason: '分区最多列前 5 个');
+      expect(find.text('新建 3D 视频'), findsOneWidget);
+
+      await tester.tap(find.text('v2'));
+      await tester.pumpAndSettle();
+      expect(store.view, 'plugin:video3d');
+      expect(video3dLoadOnOpen, 'v2', reason: '点项目 = 带项目名打开工作台');
+      expect(video3dNewOnOpen, isFalse);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('「新建 3D 视频」→ 工作台空态通道（不自动打开首项）', (tester) async {
+      _viewport(tester);
+      final AppStore store = _store();
+
+      await tester.pumpWidget(_titleBarApp(store));
+      await tester.tap(find.byKey(const ValueKey('title-bar-project-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('新建 3D 视频'));
+      await tester.pumpAndSettle();
+
+      expect(store.view, 'plugin:video3d');
+      expect(video3dNewOnOpen, isTrue, reason: '工作台落空态，空态里的新建按钮拉起对话框');
+      expect(video3dLoadOnOpen, isNull);
       expect(tester.takeException(), isNull);
     });
 

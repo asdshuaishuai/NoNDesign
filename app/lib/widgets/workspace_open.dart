@@ -53,10 +53,25 @@ void openVideoWorkspace(AppStore store) {
 ///
 /// 3D 视频项目由工作台自己的项目库列表切换；传了 [name] 时把项目名经
 /// `video3dLoadOnOpen` 一次性通道交给工作台（initState 消费）。不传 [name]
-/// 则保持「列表首项」逻辑。这一批只做只读预览，不写项目文件。
+/// 则保持「列表首项」逻辑。已有项目的场景/镜头编辑仍未接线；工作台只读
+/// 预览，另提供「新建最小项目」入口。
 void openVideo3dWorkspace(AppStore store, [String? name]) {
   final String trimmed = (name ?? '').trim();
+  // 普通打开一律清掉「落新建空态」标记，避免上一次的请求残留。
+  video3dNewOnOpen = false;
   video3dLoadOnOpen = trimmed.isEmpty ? null : trimmed;
+  store.setView('plugin:video3d');
+}
+
+/// 进 3D 视频工作台并落**新建空态**（顶栏「新建 3D 视频」用）。
+///
+/// 不自动打开列表首项；空态里的「新建 3D 视频」按钮拉起小对话框。已经在
+/// 3D 视频工作台里时是无操作——用工作台自己的头部/列表「+」新建，避免一次
+/// 性通道残留在下一个挂载实例上。
+void newVideo3dProject(AppStore store) {
+  if (store.view == 'plugin:video3d') return;
+  video3dLoadOnOpen = null;
+  video3dNewOnOpen = true;
   store.setView('plugin:video3d');
 }
 
@@ -92,8 +107,8 @@ void openPortfolioEntry(AppStore store, PortfolioEntry entry) {
       videoLoadOnOpen = entry.path ?? entry.ref;
       store.setView('plugin:video');
     case 'video3d':
-      // 作品集后续接 3D 视频项目时直接按项目名打开（当前作品集还没有该来源，
-      // 先把这个类型接上，避免入口出现时另写一份路由）。
+      // 作品集里的 3D 视频项目按项目名打开；写一次性通道 + 切视图，与顶栏
+      // 「3D 视频」分区同一条路由（不在这里另写一份项目读取/预览逻辑）。
       openVideo3dWorkspace(store, entry.ref);
     case 'music':
       openMusicWorkspace(store, entry.ref);
