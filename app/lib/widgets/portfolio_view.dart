@@ -4,16 +4,22 @@
 ///   · 热应用 —— `NonAppLibrary` 扫描 `<项目目录>/hotapps/*`；
 ///   · 原型   —— 本地项目库（当前项目 + 发现结果 + 最近项目去重）；
 ///   · 3D     —— `ThreeService.listProjects()` 扫 `<项目目录>/3d/*`；
-///   · 视频   —— `<项目目录>/videos` 下的 mp4 产物（有就显示）。
+///   · 视频   —— `<项目目录>/videos` 下的 mp4 产物 + **3D 视频项目**（后者不是
+///     在这里再扫一遍目录：它与首页作品集卡同一来源，即 `store.portfolioEntries`
+///     里 kind='video3d' 的条目，由 `loadPortfolioEntries` 扫描
+///     `<项目目录>/portfolio/video3d/*` 生成；这里只按类型过滤后并入「视频」
+///     货架行，详情文案「3D 视频 · N 镜头 / M 帧」负责区分来源）。
 ///
 /// 布局：固定分类签（全部/热应用/原型/视频/3D）+ 每个非空分类一行横向货架
 /// （大卡 260×176）。分类签固定不进动态拼装：空分类也要在架子上可见，
 /// 否则用户无法知道「视频这一类存在但现在没有」。
 ///
-/// 打开契约（四类产物各自直达）：
+/// 打开契约（各类产物各自直达）：
 /// - hotapp   → hotAppLoadOnOpen（应用名）+ plugin:hotapp
 /// - prototype→ store.openProjectPath（needPassword 弹一次口令框重试）
 /// - video    → videoLoadOnOpen（mp4 绝对路径）+ plugin:video
+/// - video3d  → openPortfolioEntry(kind: 'video3d')（项目名一次性通道）+
+///              plugin:video3d（与首页作品集卡/顶栏同一条路由）
 /// - three    → threeLoadOnOpen（项目名）+ plugin:three
 ///
 /// shelf-2 裁决：原型卡片**本地可打开**，但不提供「从艺术架移除」（它不由
@@ -104,7 +110,8 @@ class _PortfolioViewState extends State<PortfolioView> {
   /// 本地 3D 项目。
   List<Map<String, dynamic>> _three = [];
 
-  /// 本地视频产物。
+  /// 视频货架行：本地 mp4 产物 + 3D 视频项目（后者来自 `store.portfolioEntries`
+  /// 的 kind='video3d' 条目，与首页作品集卡同一来源）。
   List<Map<String, dynamic>> _videos = [];
 
   String? _error;
@@ -144,11 +151,16 @@ class _PortfolioViewState extends State<PortfolioView> {
     super.dispose();
   }
 
-  /// 全量刷新：项目发现（本地库 + 可选连接桌面）→ 热应用库 → 3D → 视频。
+  /// 全量刷新：项目发现（本地库 + 可选连接桌面）→ 热应用库 → 3D → 视频
+  /// （mp4 产物 + 3D 视频项目）。
+  ///
+  /// [forcePortfolio]：手动点「刷新」时把作品集来源也强制重扫（首页作品集卡与
+  /// 艺术架共用 `store.portfolioEntries`；自动刷新只在生产启动后的 store 上
+  /// 开启，测试里手动构造的 store 不扫真实用户目录）。
   ///
   /// 每个来源独立 best-effort：一个目录读不到（权限/损坏）不得让其他来源
   /// 消失；只有「热应用库打不开」会作为可见错误条呈现（那是主来源）。
-  Future<void> _load() async {
+  Future<void> _load({bool forcePortfolio = false}) async {
     if (!mounted || _busy) return;
     setState(() {
       _busy = true;
@@ -165,6 +177,7 @@ class _PortfolioViewState extends State<PortfolioView> {
     var hotapps = <Map<String, dynamic>>[];
     var three = <Map<String, dynamic>>[];
     var videos = <Map<String, dynamic>>[];
+    var video3dProjects = <Map<String, dynamic>>[];
 
     try {
       _library ??= await NonAppLibrary.open();
@@ -199,12 +212,39 @@ class _PortfolioViewState extends State<PortfolioView> {
       debugPrint('[shelf] video scan failed: $e');
     }
 
+    // 3D 视频项目不在这里另写一份目录扫描：首页作品集卡（`store.portfolioEntries`
+    // 里 kind='video3d' 的条目）已经由 `loadPortfolioEntries` 扫过
+    // `<项目目录>/portfolio/video3d/*`，艺术架只按类型过滤后并入「视频」货架行；
+    // 详情文案（「3D 视频 · N 镜头 / M 帧」）负责区分来源，点击仍走
+    // openPortfolioEntry 的既有 video3d 路由。
+    try {
+      // 自动刷新门：生产启动后（_bootCompleted=true）才允许扫真实用户目录；
+      // 15 秒缓存让连续刷新不重复 IO，显式刷新按钮才 force。
+      if (store.portfolioAutoRefreshEnabled) {
+        await store.refreshPortfolio(force: forcePortfolio);
+      }
+      video3dProjects = [
+        for (final entry in store.portfolioEntries)
+          if (entry.kind == 'video3d')
+            {
+              'kind': 'video3d',
+              'ref': entry.ref,
+              'title': entry.title,
+              'detail': entry.detail,
+              'path': entry.path,
+              'modified': entry.modified,
+            }
+      ];
+    } catch (e) {
+      debugPrint('[shelf] video3d scan failed: $e');
+    }
+
     if (!mounted) return;
     setState(() {
       _hotapps = hotapps;
       _prototypes = _collectPrototypes(store);
       _three = three;
-      _videos = videos;
+      _videos = _mergeVideoShelf(videos, video3dProjects);
       _error = error;
       _busy = false;
       _hitIds = null; // 条目重载：旧命中集可能指向已消失的条目
@@ -233,9 +273,30 @@ class _PortfolioViewState extends State<PortfolioView> {
           'title': entry.key.uri.pathSegments.last,
           'detail': '视频',
           'path': entry.key.path,
+          'modified': entry.value.millisecondsSinceEpoch,
         }
     ];
   }
+
+  /// 「视频」货架行合并：本地 mp4 产物 + 3D 视频项目，按修改时间倒序排列。
+  ///
+  /// 3D 视频项目没有 mp4 产物时同样是「视频类」作品，统一一行展示；时间读不到
+  /// 的排最后，同一时间按 ref 稳定排序，避免每次刷新同一条目换位置。
+  List<Map<String, dynamic>> _mergeVideoShelf(
+    List<Map<String, dynamic>> products,
+    List<Map<String, dynamic>> projects,
+  ) {
+    final merged = <Map<String, dynamic>>[...products, ...projects];
+    merged.sort((a, b) {
+      final byTime = _shelfModifiedMs(b).compareTo(_shelfModifiedMs(a));
+      if (byTime != 0) return byTime;
+      return (a['ref']?.toString() ?? '').compareTo(b['ref']?.toString() ?? '');
+    });
+    return merged;
+  }
+
+  static int _shelfModifiedMs(Map<String, dynamic> item) =>
+      item['modified'] is num ? (item['modified'] as num).toInt() : 0;
 
   /// 原型项目聚合：当前项目 → 本地发现（workspace/桌面/连接桌面）→ 最近项目，
   /// 按 path 去重（先到先得，当前项目永远在最前）。
@@ -406,8 +467,9 @@ class _PortfolioViewState extends State<PortfolioView> {
       await _openPrototype(ref);
       return;
     }
-    // 三种产物走同一个切换口（工作台跟着项目走）。
-    if (kind == 'hotapp' || kind == 'video' || kind == 'three') {
+    // 各类产物走同一个切换口（工作台跟着项目走）：3D 视频条目与首页作品集卡
+    // 同一条 openPortfolioEntry 路由（video3d → 3D 视频工作台）。
+    if (kind == 'hotapp' || kind == 'video' || kind == 'three' || kind == 'video3d') {
       openPortfolioEntry(
         store,
         PortfolioEntry(
@@ -623,7 +685,7 @@ class _PortfolioViewState extends State<PortfolioView> {
               ),
             IconButton(
               tooltip: '刷新',
-              onPressed: _busy ? null : _load,
+              onPressed: _busy ? null : () => _load(forcePortfolio: true),
               icon: Icon(Icons.refresh, size: 17, color: p.ink3),
               visualDensity: VisualDensity.compact,
               constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
@@ -768,7 +830,7 @@ class _PortfolioViewState extends State<PortfolioView> {
                 style: TextStyle(fontSize: 11, color: p.danger)),
           ),
           TextButton(
-            onPressed: _busy ? null : _load,
+            onPressed: _busy ? null : () => _load(forcePortfolio: true),
             style: TextButton.styleFrom(
               minimumSize: const Size(0, 28),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,

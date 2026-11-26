@@ -700,13 +700,48 @@ class _WelcomeState extends State<Welcome> {
     );
   }
 
+  /// 作品集卡片图标：音乐 / 3D 视频各有专用图标，不走「视频」兜底——
+  /// 「3D 视频」和「视频」在同一个工作区体系里是两种产物，图标混用会让
+  /// 首页看起来像漏了一类。
+  static IconData _shelfIcon(String kind) => switch (kind) {
+        'hotapp' => Icons.auto_fix_high_outlined,
+        'three' => Icons.view_in_ar_outlined,
+        'music' => Icons.music_note,
+        'video3d' => Icons.movie_creation_outlined,
+        _ => Icons.movie_outlined,
+      };
+
+  /// 图标颜色只取 [NonPalette]：音乐用品牌辅助色、3D 视频用主强调色，
+  /// 其余沿用既有墨色；不出现硬编码色值。
+  static Color _shelfIconColor(NonPalette p, String kind) => switch (kind) {
+        'music' => p.accent2,
+        'video3d' => p.accent,
+        _ => p.ink4,
+      };
+
+  /// 副标题：音乐 / 3D 视频保证类型词在前（「音乐 · …」「3D 视频 · …」），
+  /// 统计数字（小节 / 镜头 / 帧）来自 [PortfolioEntry.detail]（扫描层
+  /// `loadPortfolioEntries` 是唯一来源）；detail 已带该前缀时原样使用，
+  /// 只有缺前缀或为空时补齐，首页不重算/猜数字。
+  static String _shelfSubtitle(PortfolioEntry entry) {
+    final detail = entry.detail.trim();
+    switch (entry.kind) {
+      case 'music':
+        if (detail.isEmpty) return '音乐';
+        return detail.startsWith('音乐') ? detail : '音乐 · $detail';
+      case 'video3d':
+        if (detail.isEmpty) return '3D 视频';
+        return detail.startsWith('3D 视频') ? detail : '3D 视频 · $detail';
+      default:
+        return detail;
+    }
+  }
+
   Widget _shelfRow(BuildContext context, AppStore store, PortfolioEntry entry) {
     final p = context.palette;
-    final icon = switch (entry.kind) {
-      'hotapp' => Icons.auto_fix_high_outlined,
-      'three' => Icons.view_in_ar_outlined,
-      _ => Icons.movie_outlined,
-    };
+    final icon = _shelfIcon(entry.kind);
+    final iconColor = _shelfIconColor(p, entry.kind);
+    final subtitle = _shelfSubtitle(entry);
     return InkWell(
       // ref 才唯一：视频产物可能同名（两段都叫 frames.mp4），用标题做 Key 会撞。
       key: ValueKey('welcome-shelf-${entry.kind}-${entry.ref}'),
@@ -721,7 +756,7 @@ class _WelcomeState extends State<Welcome> {
               width: 27,
               height: 27,
               decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
-              child: Icon(icon, size: 13, color: p.ink4),
+              child: Icon(icon, size: 13, color: iconColor),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -734,8 +769,8 @@ class _WelcomeState extends State<Welcome> {
                       style: TextStyle(fontSize: 12, color: p.ink2)),
                   Text(
                     entry.modified == null
-                        ? entry.detail
-                        : '${entry.detail} · ${relativeTime(entry.modified)}',
+                        ? subtitle
+                        : '$subtitle · ${relativeTime(entry.modified)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 10, color: p.ink4),
