@@ -548,4 +548,256 @@ void main() {
       expect(first.toJson()['drum'], '');
     });
   });
+
+  group('小节内拍位换算（task-16）', () {
+    /// 指定拍号/小节数的布局夹具（内容本身不参与 x → 拍位换算）。
+    MusicStaffLayout layoutWithSig(
+      List<int> timeSig, {
+      int measures = 1,
+      double width = 800,
+    }) => musicStaffLayout(
+      MusicScore(
+        title: '拍位测试',
+        tempo: 96,
+        timeSig: timeSig,
+        keySig: 'C',
+        tracks: <MusicTrack>[_track(measures: measures)],
+      ),
+      width: width,
+    );
+
+    /// 第 [tick] 个槽的中心 x（避开边界浮点误差：取槽内 0.5 tick）。
+    double xAtTick(MusicStaffColumn column, int tick, List<int> timeSig) {
+      final int totalTicks = timeSig[0] * kMusicStaffSlotsPerBeat;
+      return column.contentLeft +
+          column.contentWidth * ((tick + 0.5) / totalTicks);
+    }
+
+    test('4/4：16 个 tick 一一对应拍下标/拍内槽；不同 x 给出不同拍位', () {
+      final MusicStaffLayout layout = _layoutSingleRow();
+      final MusicStaffColumn column = layout.rows.single.columns.first;
+      expect(kMusicStaffSlotsPerBeat, 4);
+      for (int tick = 0; tick < 16; tick++) {
+        final MusicStaffHit? hit = staffHitTest(
+          layout,
+          Offset(xAtTick(column, tick, const <int>[4, 4]), 50),
+        );
+        expect(hit, isNotNull, reason: 'tick=$tick 应命中五线内位置');
+        expect(
+          hit!.beatPosition,
+          MusicStaffBeatPosition(
+            beatIndex: tick ~/ kMusicStaffSlotsPerBeat,
+            slotIndex: tick % kMusicStaffSlotsPerBeat,
+            tickOffset: tick,
+          ),
+          reason: 'tick=$tick 的拍位模型',
+        );
+        expect(hit.beatIndex, tick ~/ kMusicStaffSlotsPerBeat);
+        expect(hit.slotIndex, tick % kMusicStaffSlotsPerBeat);
+        expect(hit.tickOffset, tick);
+        // 人话拍号 1 起：第 1–4 拍。
+        expect(hit.beatNumber, tick ~/ kMusicStaffSlotsPerBeat + 1);
+      }
+      // 不同 x 不吞掉拍位：左到右逐槽递增，8 个槽中心至少覆盖 4 个不同拍。
+      final List<int> ticks = <int>[
+        for (int tick = 0; tick < 16; tick++)
+          staffHitTest(
+            layout,
+            Offset(xAtTick(column, tick, const <int>[4, 4]), 50),
+          )!.tickOffset,
+      ];
+      expect(ticks, List<int>.generate(16, (int i) => i));
+      expect(ticks.toSet(), hasLength(16));
+      expect(
+        ticks.map((int tick) => tick ~/ kMusicStaffSlotsPerBeat).toSet(),
+        hasLength(4),
+        reason: '4/4 小节应能点到 4 个不同拍',
+      );
+    });
+
+    test('边界：小节左沿 = 第 1 拍 tick 0，右沿夹到最后一拍最后一槽；拍内边界对齐', () {
+      final MusicStaffLayout layout = _layoutSingleRow();
+      final MusicStaffColumn column = layout.rows.single.columns.first;
+      final MusicStaffHit left = staffHitTest(
+        layout,
+        Offset(column.contentLeft, 50),
+      )!;
+      expect(left.tickOffset, 0);
+      expect(left.beatIndex, 0);
+      expect(left.slotIndex, 0);
+      final MusicStaffHit right = staffHitTest(
+        layout,
+        Offset(column.contentLeft + column.contentWidth, 50),
+      )!;
+      expect(right.tickOffset, 15, reason: '右沿比例 1.0 夹到最后一槽');
+      expect(right.beatIndex, 3);
+      expect(right.slotIndex, 3);
+      // 0.24 / 0.26 分别落在第 1 拍最后一槽 / 第 2 拍第一槽。
+      expect(
+        staffHitTest(
+          layout,
+          Offset(column.contentLeft + column.contentWidth * 0.24, 50),
+        )!.tickOffset,
+        3,
+      );
+      expect(
+        staffHitTest(
+          layout,
+          Offset(column.contentLeft + column.contentWidth * 0.26, 50),
+        )!.tickOffset,
+        4,
+      );
+      // 小节右侧留白（列右沿到下一列之间的 padding 区）仍按列内钳制，不越界。
+      final MusicStaffHit padding = staffHitTest(
+        layout,
+        Offset(column.contentLeft + column.contentWidth + 3, 50),
+      )!;
+      expect(padding.tickOffset, 15);
+    });
+
+    test('拍位按小节重置：第 2 小节左沿仍是第 1 拍；小节内不跨列累加', () {
+      final MusicStaffLayout layout = _layoutSingleRow();
+      final MusicStaffColumn second = layout.rows.single.columns[1];
+      final MusicStaffHit start = staffHitTest(
+        layout,
+        Offset(second.contentLeft, 50),
+      )!;
+      expect(start.measureIndex, 1);
+      expect(start.rowIndex, 0);
+      expect(start.tickOffset, 0);
+      expect(start.beatIndex, 0);
+      final MusicStaffHit end = staffHitTest(
+        layout,
+        Offset(second.contentLeft + second.contentWidth, 50),
+      )!;
+      expect(end.measureIndex, 1);
+      expect(end.tickOffset, 15);
+      // 第一小节最后一拍与第二小节第一拍：小节不同、拍位按小节各自重置。
+      final MusicStaffColumn first = layout.rows.single.columns.first;
+      final MusicStaffHit firstEnd = staffHitTest(
+        layout,
+        Offset(first.contentLeft + first.contentWidth, 50),
+      )!;
+      expect(firstEnd.measureIndex, 0);
+      expect(firstEnd.tickOffset, 15);
+      expect(firstEnd.measureIndex, isNot(start.measureIndex));
+    });
+
+    test('拍数由拍号分子决定：3/4 三拍、6/8 六拍；越右夹到最后一拍', () {
+      final MusicStaffLayout threeFour = layoutWithSig(const <int>[3, 4]);
+      final MusicStaffColumn c34 = threeFour.rows.single.columns.single;
+      final MusicStaffHit end34 = staffHitTest(
+        threeFour,
+        Offset(c34.contentLeft + c34.contentWidth, 50),
+      )!;
+      expect(end34.beatIndex, 2, reason: '3/4 只有 3 拍');
+      expect(end34.slotIndex, 3);
+      expect(end34.beatNumber, 3);
+      final MusicStaffHit second34 = staffHitTest(
+        threeFour,
+        Offset(xAtTick(c34, 4, const <int>[3, 4]), 50),
+      )!;
+      expect(second34.beatIndex, 1);
+      expect(second34.slotIndex, 0);
+      expect(second34.beatNumber, 2);
+
+      final MusicStaffLayout sixEight = layoutWithSig(const <int>[6, 8]);
+      final MusicStaffColumn c68 = sixEight.rows.single.columns.single;
+      final MusicStaffHit fourth68 = staffHitTest(
+        sixEight,
+        Offset(xAtTick(c68, 12, const <int>[6, 8]), 50),
+      )!;
+      expect(fourth68.beatIndex, 3, reason: '6/8 第 4 拍');
+      expect(fourth68.beatNumber, 4);
+      expect(fourth68.beatIndex < 6, isTrue);
+    });
+
+    test('多轨道/鼓轨：拍位总是相对所在小节且与音高无关', () {
+      final MusicScore score = _score(tracks: 2, measures: 1);
+      final MusicStaffLayout layout = musicStaffLayout(score, width: 800);
+      expect(layout.rows, hasLength(2));
+      final MusicStaffColumn first = layout.rows[0].columns.single;
+      final MusicStaffColumn second = layout.rows[1].columns.single;
+      final MusicStaffHit treble = staffHitTest(
+        layout,
+        Offset(xAtTick(first, 8, const <int>[4, 4]), 50),
+      )!;
+      expect(treble.trackIndex, 0);
+      expect(treble.beatIndex, 2);
+      // 低音谱号第二行（staffBottom=182）：同一水平位置（拍位）换算一致。
+      final MusicStaffHit bass = staffHitTest(
+        layout,
+        Offset(xAtTick(second, 8, const <int>[4, 4]), 182),
+      )!;
+      expect(bass.trackIndex, 1);
+      expect(bass.beatIndex, 2);
+      expect(bass.slotIndex, 0);
+      expect(bass.staffStep, 0, reason: '拍位与五线高度是两条独立轴');
+
+      final MusicScore drumsScore = _score(
+        trackList: <MusicTrack>[
+          _track(
+            id: 'drums',
+            name: '鼓组',
+            instrument: 'drums',
+            clef: 'treble',
+            measures: 1,
+          ),
+        ],
+      );
+      final MusicStaffLayout drumsLayout = musicStaffLayout(
+        drumsScore,
+        width: 800,
+      );
+      final MusicStaffColumn drumsColumn =
+          drumsLayout.rows.single.columns.single;
+      final MusicStaffHit drums = staffHitTest(
+        drumsLayout,
+        Offset(xAtTick(drumsColumn, 4, const <int>[4, 4]), 54),
+      )!;
+      expect(drums.isPercussion, isTrue);
+      expect(drums.beatIndex, 1);
+      expect(drums.drum, 'snare');
+    });
+
+    test('缩放换算：不同 zoom 下同一小节拍位不变', () {
+      final MusicStaffLayout layout = _layoutSingleRow();
+      final MusicStaffColumn column = layout.rows.single.columns.first;
+      final double x = xAtTick(column, 8, const <int>[4, 4]);
+      final MusicStaffHit zoomed = staffHitTest(
+        layout,
+        Offset(x * 2, 100),
+        zoom: 2.0,
+      )!;
+      expect(zoomed.tickOffset, 8);
+      expect(zoomed.beatIndex, 2);
+      final MusicStaffHit half = staffHitTest(
+        layout,
+        Offset(x * 0.5, 25),
+        zoom: 0.5,
+      )!;
+      expect(half.tickOffset, 8);
+      expect(half.beatPosition, zoomed.beatPosition);
+    });
+
+    test('命中结果 JSON 带拍位模型；同输入两次结果相等', () {
+      final MusicStaffLayout layout = _layoutSingleRow();
+      final MusicStaffColumn column = layout.rows.single.columns.first;
+      final Offset point = Offset(xAtTick(column, 5, const <int>[4, 4]), 50);
+      final MusicStaffHit first = staffHitTest(layout, point)!;
+      final MusicStaffHit second = staffHitTest(layout, point)!;
+      expect(first, second);
+      expect(first.hashCode, second.hashCode);
+      expect(first.tickOffset, 5);
+      expect(first.beatIndex, 1);
+      expect(first.beatNumber, 2);
+      expect(first.toJson()['beatPosition'], <String, Object?>{
+        'beatIndex': 1,
+        'slotIndex': 1,
+        'tickOffset': 5,
+      });
+      expect(jsonEncode(first.toJson()), jsonEncode(second.toJson()));
+      expect(first.beatPosition.toString(), contains('beat: 2'));
+    });
+  });
 }

@@ -65,6 +65,11 @@ const int kMusicStaffZoomStepPercent = 10;
 /// 点击命中的五线垂直容差：底线/顶线外 ±2 个线间距（够到加线音符；再远算空白）。
 const double kMusicStaffHitLineTolerance = kMusicStaffLineSpacing * 2;
 
+/// 小节内拍位换算的拍内细分槽数：每拍 [kMusicStaffSlotsPerBeat] 个槽（4/4 里一个
+/// 槽 = 十六分音符）。[MusicStaffBeatPosition.slotIndex]/[MusicStaffBeatPosition.tickOffset]
+/// 都按这套刻度；按拍位插入只需要 [MusicStaffBeatPosition.beatIndex]。
+const int kMusicStaffSlotsPerBeat = 4;
+
 // ---------------------------------------------------------------------------
 // 纯函数：MusicScore → 可断言几何
 // ---------------------------------------------------------------------------
@@ -841,10 +846,62 @@ bool _listEquals<T>(List<T> a, List<T> b) {
 // 命中测试纯函数：可视坐标（含缩放）→ 行/小节/五线位置 → 音高
 // ---------------------------------------------------------------------------
 
-/// 五线谱点击命中结果（task-14）。
+/// 小节内拍位（task-16）：0 起拍下标 + 拍内细分槽 + 小节内 tick 偏移。
 ///
-/// 只描述几何命中：轨道/小节 + 五线半间距偏移 + 换算出的记谱音高。命中已有音符
-/// 时额外给 [eventIndex]/[eventId]（供后续「点音符」交互；本次插入不依赖它）。
+/// 刻度固定：每拍 [kMusicStaffSlotsPerBeat] 个 tick，因此
+/// `beatIndex == tickOffset ~/ kMusicStaffSlotsPerBeat`、
+/// `slotIndex == tickOffset % kMusicStaffSlotsPerBeat`。拍位总是**相对所在小节**，
+/// 跨小节/换行不累加。**0 起编码**：界面「第 N 拍」= [beatIndex] + 1
+/// （见 [beatNumber]）。
+@immutable
+final class MusicStaffBeatPosition {
+  const MusicStaffBeatPosition({
+    required this.beatIndex,
+    required this.slotIndex,
+    required this.tickOffset,
+  });
+
+  /// 小节内 0 起的拍下标（0 ≤ beatIndex < 拍号分子）。
+  final int beatIndex;
+
+  /// 拍内细分槽（0 ≤ slotIndex < [kMusicStaffSlotsPerBeat]）。
+  final int slotIndex;
+
+  /// 小节内 tick 偏移（第 1 拍第 1 槽 = 0；每拍 [kMusicStaffSlotsPerBeat] tick）。
+  final int tickOffset;
+
+  /// 界面文案用的人话拍号（1 起，例：第 2 拍 → 2）。
+  int get beatNumber => beatIndex + 1;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'beatIndex': beatIndex,
+    'slotIndex': slotIndex,
+    'tickOffset': tickOffset,
+  };
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is MusicStaffBeatPosition &&
+        other.beatIndex == beatIndex &&
+        other.slotIndex == slotIndex &&
+        other.tickOffset == tickOffset;
+  }
+
+  @override
+  int get hashCode => Object.hash(beatIndex, slotIndex, tickOffset);
+
+  @override
+  String toString() =>
+      'MusicStaffBeatPosition(beat: $beatNumber, slot: $slotIndex, '
+      'tick: $tickOffset)';
+}
+
+/// 五线谱点击命中结果（task-14 / task-16）。
+///
+/// 只描述几何命中：轨道/小节 + 小节内拍位 + 五线半间距偏移 + 换算出的记谱音高。
+/// 命中已有音符时额外给 [eventIndex]/[eventId]（供「点音符选中/删除」交互；
+/// 按拍位插入只用 [beatPosition]）。纯数据；不写事实源。
 @immutable
 final class MusicStaffHit {
   const MusicStaffHit({
@@ -856,6 +913,7 @@ final class MusicStaffHit {
     required this.step,
     required this.alter,
     required this.octave,
+    required this.beatPosition,
     this.drum = '',
     this.eventIndex,
     this.eventId,
@@ -878,6 +936,9 @@ final class MusicStaffHit {
   final int alter;
   final int octave;
 
+  /// 命中位置在所在小节里的拍位（按拍位插入用它，与只读渲染无关）。
+  final MusicStaffBeatPosition beatPosition;
+
   /// 打击谱号命中的鼓件名（'' = 非鼓轨）。
   final String drum;
 
@@ -886,6 +947,18 @@ final class MusicStaffHit {
   final String? eventId;
 
   bool get isPercussion => clef == 'percussion';
+
+  /// 小节内 0 起拍下标（见 [beatPosition]）。
+  int get beatIndex => beatPosition.beatIndex;
+
+  /// 拍内细分槽（见 [beatPosition]）。
+  int get slotIndex => beatPosition.slotIndex;
+
+  /// 小节内 tick 偏移（见 [beatPosition]）。
+  int get tickOffset => beatPosition.tickOffset;
+
+  /// 界面文案用的人话拍号（1 起）。
+  int get beatNumber => beatPosition.beatNumber;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'rowIndex': rowIndex,
@@ -896,6 +969,7 @@ final class MusicStaffHit {
     'step': step,
     'alter': alter,
     'octave': octave,
+    'beatPosition': beatPosition.toJson(),
     'drum': drum,
     'eventIndex': eventIndex,
     'eventId': eventId,
@@ -913,6 +987,7 @@ final class MusicStaffHit {
         other.step == step &&
         other.alter == alter &&
         other.octave == octave &&
+        other.beatPosition == beatPosition &&
         other.drum == drum &&
         other.eventIndex == eventIndex &&
         other.eventId == eventId;
@@ -928,6 +1003,7 @@ final class MusicStaffHit {
     step,
     alter,
     octave,
+    beatPosition,
     drum,
     eventIndex,
     eventId,
@@ -936,7 +1012,8 @@ final class MusicStaffHit {
   @override
   String toString() =>
       'MusicStaffHit(track: $trackIndex, measure: $measureIndex, '
-      'staffStep: $staffStep, ${isPercussion ? drum : '$step$octave'})';
+      'beat: $beatNumber, staffStep: $staffStep, '
+      '${isPercussion ? drum : '$step$octave'})';
 }
 
 /// 把可视坐标 [local]（已含 [zoom]，即 GestureDetector 的 `localPosition`）换算回
@@ -982,6 +1059,12 @@ MusicStaffHit? staffHitTest(
   final double topLimit = row.staffTop - kMusicStaffHitLineTolerance;
   final double bottomLimit = row.staffBottom + kMusicStaffHitLineTolerance;
   if (point.dy < topLimit || point.dy > bottomLimit) return null;
+  // x → 小节内拍位（按「小节内容宽度 = 拍号容量」比例换算，与布局同一映射）。
+  final MusicStaffBeatPosition beatPosition = _beatPositionAt(
+    layout.timeSig,
+    column,
+    point.dx,
+  );
   // 五线半间距 → 最近的线/间（round 把点击吸附到最近的半间距）。
   final int staffStep = ((row.staffBottom - point.dy) / (row.lineSpacing / 2))
       .round();
@@ -1015,10 +1098,48 @@ MusicStaffHit? staffHitTest(
     step: pitch.step,
     alter: 0,
     octave: pitch.octave,
+    beatPosition: beatPosition,
     drum: percussion ? musicStaffDrumForStep(staffStep) : '',
     eventIndex: eventIndex,
     eventId: eventId,
   );
+}
+
+/// 小节列内 x → 小节内拍位。
+///
+/// 布局把「小节时值游标 0..容量」线性映射到列内容宽度，所以这里用同一比例反算：
+/// `tickOffset = floor(比例 × 拍数 × kMusicStaffSlotsPerBeat)`，并把小节右沿
+/// （比例 1.0）夹到最后一拍最后一槽。拍位**相对本小节**（跨小节重置）。
+MusicStaffBeatPosition _beatPositionAt(
+  List<int> timeSig,
+  MusicStaffColumn column,
+  double dx,
+) {
+  final int beats = _beatsPerMeasure(timeSig);
+  final int totalTicks = beats * kMusicStaffSlotsPerBeat;
+  final double width = column.contentWidth;
+  final double ratio;
+  if (!width.isFinite || width <= 0) {
+    ratio = 0.0;
+  } else {
+    ratio = ((dx - column.contentLeft) / width).clamp(0.0, 1.0);
+  }
+  int tickOffset = (ratio * totalTicks).floor();
+  if (tickOffset >= totalTicks) tickOffset = totalTicks - 1;
+  if (tickOffset < 0) tickOffset = 0;
+  return MusicStaffBeatPosition(
+    beatIndex: tickOffset ~/ kMusicStaffSlotsPerBeat,
+    slotIndex: tickOffset % kMusicStaffSlotsPerBeat,
+    tickOffset: tickOffset,
+  );
+}
+
+/// 拍号分子 = 一小节的拍数（非法拍号回退 4，与布局容量语义保持同一退化方向）。
+int _beatsPerMeasure(List<int> timeSig) {
+  if (timeSig.length == 2 && timeSig[0] > 0 && timeSig[1] > 0) {
+    return timeSig[0];
+  }
+  return 4;
 }
 
 // ---------------------------------------------------------------------------
@@ -1031,6 +1152,7 @@ class _MusicStaffPainter extends CustomPainter {
     required this.palette,
     required this.zoom,
     this.highlightTrackIndex,
+    this.selectedEventId,
   });
 
   final MusicStaffLayout layout;
@@ -1041,6 +1163,9 @@ class _MusicStaffPainter extends CustomPainter {
 
   /// 当前左侧轨道列表选中的轨道（只做行底色/标签强调，不改几何）。
   final int? highlightTrackIndex;
+
+  /// 谱面上被选中的音符事件 id（只画选中光圈；不改几何/不改乐谱）。
+  final String? selectedEventId;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1261,10 +1386,42 @@ class _MusicStaffPainter extends CustomPainter {
         if (note.isRest) {
           _paintRest(canvas, row, note);
         } else {
+          // 选中光圈画在符头下面，不改变音符本体的线宽/颜色。
+          if (selectedEventId != null && note.eventId == selectedEventId) {
+            _paintSelectionHalo(canvas, row, note);
+          }
           _paintNote(canvas, row, note, staffLinePaint);
         }
       }
     }
+  }
+
+  /// 选中音符的光圈：低透明度填充 + 细描边，只做「选中了哪一个」的提示。
+  void _paintSelectionHalo(
+    Canvas canvas,
+    MusicStaffRow row,
+    MusicStaffNote note,
+  ) {
+    final Offset center = Offset(
+      note.headX + kMusicStaffHeadWidth / 2,
+      note.headY,
+    );
+    final Rect halo = Rect.fromCenter(
+      center: center,
+      width: kMusicStaffHeadWidth * 2.4,
+      height: row.lineSpacing * 2.4,
+    );
+    canvas.drawOval(
+      halo,
+      Paint()..color = palette.accent.withValues(alpha: 0.16),
+    );
+    canvas.drawOval(
+      halo,
+      Paint()
+        ..color = palette.accent.withValues(alpha: 0.6)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2,
+    );
   }
 
   void _paintNote(
@@ -1499,6 +1656,7 @@ class _MusicStaffPainter extends CustomPainter {
       oldDelegate.zoom != zoom ||
       oldDelegate.palette != palette ||
       oldDelegate.highlightTrackIndex != highlightTrackIndex ||
+      oldDelegate.selectedEventId != selectedEventId ||
       oldDelegate.layout != layout;
 }
 
@@ -1509,7 +1667,8 @@ class _MusicStaffPainter extends CustomPainter {
 /// 五线谱视图：默认显示乐谱全部轨道，由 [trackIndex] 可只看一条轨道。
 ///
 /// 默认只读：不写 `score.json`、不改播放面、不画播放头；左侧轨道列表的选中状态
-/// 只通过 [selectedTrackIndex] 做行底色强调。给出 [onNoteTap] 后点击谱面只回调
+/// 只通过 [selectedTrackIndex] 做行底色强调；[selectedEventId] 只给命中的音符画
+/// 选中光圈（仍不改乐谱/几何）。给出 [onNoteTap] 后点击谱面只回调
 /// [MusicStaffHit]，落盘/校验仍由调用方经编辑出口完成（视图自身不写事实源）。
 class MusicStaffView extends StatefulWidget {
   const MusicStaffView({
@@ -1517,6 +1676,7 @@ class MusicStaffView extends StatefulWidget {
     required this.score,
     this.trackIndex,
     this.selectedTrackIndex,
+    this.selectedEventId,
     this.onNoteTap,
   });
 
@@ -1527,6 +1687,9 @@ class MusicStaffView extends StatefulWidget {
 
   /// 只用于选中行的视觉强调（不改变排版几何）。
   final int? selectedTrackIndex;
+
+  /// 被选中的音符事件 id（null = 没有选中；只画光圈，不改乐谱）。
+  final String? selectedEventId;
 
   /// 点击谱面命中的回调；null = 保持只读（不装手势、无点击行为）。
   final ValueChanged<MusicStaffHit>? onNoteTap;
@@ -1586,6 +1749,7 @@ class _MusicStaffViewState extends State<MusicStaffView> {
                     palette: p,
                     zoom: zoom,
                     highlightTrackIndex: widget.selectedTrackIndex,
+                    selectedEventId: widget.selectedEventId,
                   ),
                 );
                 final ValueChanged<MusicStaffHit>? onNoteTap = widget.onNoteTap;
@@ -1642,7 +1806,15 @@ class _MusicStaffViewState extends State<MusicStaffView> {
 
   Widget _header(NonPalette p) {
     final String title = widget.score.title.trim();
-    final String suffix = widget.onNoteTap == null ? '五线谱只读' : '五线谱 · 点击插入音符';
+    final String suffix;
+    if (widget.onNoteTap == null) {
+      suffix = '五线谱只读';
+    } else if (widget.selectedEventId != null &&
+        widget.selectedEventId!.isNotEmpty) {
+      suffix = '五线谱 · 已选中音符';
+    } else {
+      suffix = '五线谱 · 点击插入音符';
+    }
     return SizedBox(
       height: 40,
       child: Padding(

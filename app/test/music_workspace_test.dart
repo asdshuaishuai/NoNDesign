@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nondesign/core/music/music_compile.dart';
@@ -8,6 +9,7 @@ import 'package:nondesign/core/music/music_score.dart';
 import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/widgets/music_playback_surface.dart';
 import 'package:nondesign/widgets/music_workspace.dart';
+import 'package:nondesign/widgets/music_staff_view.dart';
 
 MusicScore _score({String title = '练习曲', int tracks = 1}) => MusicScore(
   title: title,
@@ -213,6 +215,43 @@ MusicProjectSnapshot _staleSnapshot({
     playPlan: withPlan ? compileMusicScore(score) : null,
     dir: dir.path,
   );
+}
+
+// ---------------------------------------------------------------------------
+// 谱面点击几何：用 musicStaffLayout 的产出算点击点（不手写魔法数）
+// ---------------------------------------------------------------------------
+
+Finder _staffHitFinder() => find.byKey(const ValueKey('music-staff-hit'));
+
+/// 谱面命中的排版几何（100% 缩放时 CustomPaint 宽 = 排版宽）。
+MusicStaffLayout _staffLayoutOf(WidgetTester tester, MusicScore score) =>
+    musicStaffLayout(score, width: tester.getSize(_staffHitFinder()).width);
+
+/// 谱面第 [tick] 个细分槽中心的全局坐标（单行高音谱：y=50 是 C5 一带）。
+Offset _staffPointAtTick(
+  WidgetTester tester,
+  MusicStaffLayout layout,
+  int tick, {
+  List<int> timeSig = const <int>[4, 4],
+  double y = 50,
+}) {
+  final MusicStaffColumn column = layout.rows.first.columns.first;
+  final int totalTicks = timeSig[0] * kMusicStaffSlotsPerBeat;
+  final double x =
+      column.contentLeft + column.contentWidth * ((tick + 0.5) / totalTicks);
+  return tester.getTopLeft(_staffHitFinder()) + Offset(x, y);
+}
+
+/// 谱面第一个音符符头中心的全局坐标（用来「点中已有音符」）。
+Offset _staffPointOnFirstNote(WidgetTester tester, MusicStaffLayout layout) {
+  final MusicStaffNote note = layout.rows.first.columns.first.notes.firstWhere(
+    (MusicStaffNote candidate) => !candidate.isRest,
+  );
+  final Offset headCenter = Offset(
+    note.headX + kMusicStaffHeadWidth / 2,
+    note.headY,
+  );
+  return tester.getTopLeft(_staffHitFinder()) + headCenter;
 }
 
 void main() {
@@ -612,48 +651,127 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('五线谱点击 → 插入四分音符 → 保存 → 重读（满小节新开小节）', (tester) async {
+  testWidgets('五线谱点击第 2 拍 → 按拍位插入 → 保存 → 重读确认真在第 2 拍', (tester) async {
     await viewport(tester, const Size(1440, 900));
-    await store.save('study', _score());
+    await store.save('study', _emptyScore());
     await tester.pumpWidget(_app(MusicWorkspace(store: store)));
     await _settle(tester);
 
-    final Finder staffHit = find.byKey(const ValueKey('music-staff-hit'));
+    final Finder staffHit = _staffHitFinder();
     expect(staffHit, findsOneWidget, reason: '有可编辑回调时谱面应可点');
-    // 高音谱号单行：row0 staffBottom=70、半间距 4px，local (80, 50) = 第三间 C5。
-    final Offset tapPoint = tester.getTopLeft(staffHit) + const Offset(80, 50);
+    final MusicStaffLayout layout = _staffLayoutOf(tester, _emptyScore());
+    expect(layout.rows.single.columns.single.notes, isEmpty);
+    // tick 4..7 = 第 2 拍（0 起拍下标 1）：点第 5 个槽的中心。
+    final Offset tapPoint = _staffPointAtTick(tester, layout, 5);
     await tester.tapAt(tapPoint);
     await _settle(tester);
     await _settle(tester);
 
     final MusicProjectSnapshot reread = await store.read('study');
     final MusicTrack track = reread.score.tracks.single;
-    expect(track.measures, hasLength(2), reason: '原小节整小节已满，点击追加应新开小节');
-    expect(track.measures.first.events, hasLength(1), reason: '原小节不被改动');
-    final MusicMeasure added = track.measures.last;
-    expect(added.events, hasLength(2));
-    expect(added.events.first.isRest, isFalse);
-    expect(added.events.first.step, 'C');
-    expect(added.events.first.octave, 5);
-    expect(added.events.first.durNum, 1);
-    expect(added.events.first.durDen, 4);
-    expect(added.events.last.isRest, isTrue, reason: '新小节按拍号休止补齐');
+    expect(track.measures, hasLength(1), reason: '按拍位插入在原小节内完成，不新开小节');
+    final MusicMeasure measure = track.measures.single;
+    expect(measure.events, hasLength(3));
+    expect(measure.events[0].isRest, isTrue);
+    expect(measure.events[0].durationValue, closeTo(0.25, 1e-9));
+    final MusicEvent note = measure.events[1];
+    expect(note.isRest, isFalse);
+    expect(note.step, 'C');
+    expect(note.octave, 5);
+    expect(note.durNum, 1, reason: '默认四分音符');
+    expect(note.durDen, 4);
+    expect(measure.events[2].isRest, isTrue);
+    // 起始拍 = 前面休止时值 × 拍号分母（4/4 里 1/4 → 第 2 拍），不是「追加到末尾」。
+    final double startBeatValue = measure.events[0].durationValue;
+    expect(startBeatValue, closeTo(0.25, 1e-9));
+    expect((startBeatValue * 4).round(), 1, reason: '0 起拍下标 1 = 第 2 拍');
+    expect(
+      measure.events.fold<double>(
+        0,
+        (double sum, MusicEvent event) => sum + event.durationValue,
+      ),
+      closeTo(1.0, 1e-9),
+    );
     expect(reread.validation.verified, isTrue);
     expect(reread.playPlan, isNotNull);
-    // 状态行走既有编辑出口的结果文案，不伪造播放/成功。
-    expect(find.text('已插入 C5 四分音符 · 乐谱校验通过'), findsOneWidget);
+    // 成功状态行如实写拍位，不伪造播放。
+    expect(find.text('已在第 2 拍插入 C5 · 乐谱校验通过'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('五线谱点击空白小节 → 原地追加并休止补齐（不新开小节）', (tester) async {
+  testWidgets('五线谱点击已有音符 → 选中 → Delete 删除 → 保存 → 重读', (tester) async {
+    await viewport(tester, const Size(1440, 900));
+    await store.save('study', _score());
+    await tester.pumpWidget(_app(MusicWorkspace(store: store)));
+    await _settle(tester);
+
+    final MusicStaffLayout layout = _staffLayoutOf(tester, _score());
+    final Offset headPoint = _staffPointOnFirstNote(tester, layout);
+    await tester.tapAt(headPoint);
+    await _settle(tester);
+    // 点音符只选中、不插入：状态行给选中提示。
+    expect(find.text('已选中音符，按键盘 Delete 或 Backspace 删除。'), findsOneWidget);
+    final MusicProjectSnapshot afterSelect = await store.read('study');
+    expect(
+      afterSelect.score.tracks.single.measures.single.events,
+      hasLength(1),
+      reason: '点已有音符不应插入新事件',
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await _settle(tester);
+    await _settle(tester);
+
+    final MusicProjectSnapshot reread = await store.read('study');
+    final MusicMeasure measure = reread.score.tracks.single.measures.single;
+    expect(measure.events, hasLength(1));
+    expect(measure.events.single.isRest, isTrue, reason: '删除后用等长休止占原拍位');
+    expect(measure.events.single.durationValue, closeTo(1.0, 1e-9));
+    expect(measure.events.single.id, isNot('n1_0'), reason: '被删事件 id 退场');
+    expect(reread.validation.verified, isTrue);
+    expect(find.text('已删除音符 · 乐谱校验通过'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('选中音符后 Backspace 也能删除', (tester) async {
     await viewport(tester, const Size(1440, 900));
     await store.save('study', _emptyScore());
     await tester.pumpWidget(_app(MusicWorkspace(store: store)));
     await _settle(tester);
 
-    final Finder staffHit = find.byKey(const ValueKey('music-staff-hit'));
-    expect(staffHit, findsOneWidget);
-    final Offset tapPoint = tester.getTopLeft(staffHit) + const Offset(80, 50);
+    // 先在空小节第 1 拍插一个音，再点它选中。
+    final MusicStaffLayout layout = _staffLayoutOf(tester, _emptyScore());
+    await tester.tapAt(_staffPointAtTick(tester, layout, 1));
+    await _settle(tester);
+    await _settle(tester);
+    final MusicProjectSnapshot inserted = await store.read('study');
+    final MusicMeasure insertedMeasure =
+        inserted.score.tracks.single.measures.single;
+    expect(insertedMeasure.events.first.isRest, isFalse);
+    final MusicStaffLayout afterInsert = _staffLayoutOf(tester, inserted.score);
+    await tester.tapAt(_staffPointOnFirstNote(tester, afterInsert));
+    await _settle(tester);
+    expect(find.text('已选中音符，按键盘 Delete 或 Backspace 删除。'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await _settle(tester);
+    await _settle(tester);
+    final MusicProjectSnapshot reread = await store.read('study');
+    final MusicMeasure measure = reread.score.tracks.single.measures.single;
+    expect(measure.events.every((MusicEvent event) => event.isRest), isTrue);
+    expect(reread.validation.verified, isTrue);
+    expect(find.text('已删除音符 · 乐谱校验通过'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('五线谱点击空白小节第 1 拍 → 原地插入并休止补齐（不新开小节）', (tester) async {
+    await viewport(tester, const Size(1440, 900));
+    await store.save('study', _emptyScore());
+    await tester.pumpWidget(_app(MusicWorkspace(store: store)));
+    await _settle(tester);
+
+    final MusicStaffLayout layout = _staffLayoutOf(tester, _emptyScore());
+    final Offset tapPoint = _staffPointAtTick(tester, layout, 1);
     await tester.tapAt(tapPoint);
     await _settle(tester);
     await _settle(tester);
@@ -665,9 +783,32 @@ void main() {
     expect(measure.events, hasLength(2));
     expect(measure.events.first.step, 'C');
     expect(measure.events.first.octave, 5);
+    expect(measure.events.first.durationValue, closeTo(0.25, 1e-9));
     expect(measure.events.last.isRest, isTrue);
+    expect(measure.events.last.durationValue, closeTo(0.75, 1e-9));
     expect(reread.validation.verified, isTrue, reason: '休止补齐后小节时值等于拍号');
-    expect(find.textContaining('已插入 C5 四分音符'), findsOneWidget);
+    expect(find.text('已在第 1 拍插入 C5 · 乐谱校验通过'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('五线谱点击已被音符占用的拍位 → 显性失败，不写盘（不伪造成功）', (tester) async {
+    await viewport(tester, const Size(1440, 900));
+    await store.save('study', _score());
+    await tester.pumpWidget(_app(MusicWorkspace(store: store)));
+    await _settle(tester);
+
+    final MusicStaffLayout layout = _staffLayoutOf(tester, _score());
+    // 整小节被一个全音符占满：点第 2 拍（已在音符内）必须显性失败。
+    await tester.tapAt(_staffPointAtTick(tester, layout, 5));
+    await _settle(tester);
+    await _settle(tester);
+
+    expect(find.textContaining('第 2 拍已经有音符了'), findsOneWidget);
+    expect(find.textContaining('已插入'), findsNothing, reason: '失败不伪造成功');
+    final MusicProjectSnapshot reread = await store.read('study');
+    final MusicMeasure measure = reread.score.tracks.single.measures.single;
+    expect(measure.events, hasLength(1), reason: '失败不改动文件');
+    expect(reread.score.tracks.single.measures, hasLength(1));
     expect(tester.takeException(), isNull);
   });
 

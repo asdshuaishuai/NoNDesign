@@ -10,6 +10,7 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../core/music/music_compile.dart';
@@ -82,7 +83,17 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   MusicPlaybackController? _playback;
 
   /// 五线谱点击插入的串行闸：避免快速连点都用同一份旧 snapshot 覆盖彼此。
+  ///
+  /// 插入与删除共用同一把闸（同一时刻只允许一个谱面编辑在保存/重读链路上）。
   bool _staffTapBusy = false;
+
+  /// 谱面当前选中的已有音符（点击符头选中；Delete/Backspace 删除后清空）。
+  ///
+  /// 选中只用于键盘删除与光圈提示，不写乐谱、不改播放面。
+  ({int trackIndex, int measureIndex, String eventId})? _selectedEvent;
+
+  /// 谱面键盘焦点（点谱面时主动索取，Delete/Backspace 才能落到谱面）。
+  final FocusNode _staffFocus = FocusNode(debugLabel: 'music-staff-hit');
 
   /// initState 从 [musicLoadOnOpen] 取到的开局项目名（只消费一次）。
   String? _pendingOpen;
@@ -145,6 +156,8 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
       _failure = null;
       _status = null;
       _selectedTrack = 0;
+      _selectedEvent = null;
+      _staffTapBusy = false;
     });
     try {
       final snapshot = await _store.read(name);
@@ -190,6 +203,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   @override
   void dispose() {
     musicProjectSwitch.removeListener(_onSwitchRequest);
+    _staffFocus.dispose();
     _playback?.dispose();
     _playback = null;
     super.dispose();
@@ -197,7 +211,14 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
 
   /// 执行一次编辑：先改模型，再经 [MusicProjectStore.save] 落盘，读完新 snapshot
   /// 刷新工作台，并把 `save` 返回的校验结果如实回传给检查器。
-  Future<void> _applyEdit(MusicEditAction action, String successMessage) async {
+  ///
+  /// [onSaved] 只在「保存成功且已刷新 snapshot」后调用（失败分支绝不调用），
+  /// 供调用方清理只属于本次编辑的临时状态（例如删除后的谱面选中项）。
+  Future<void> _applyEdit(
+    MusicEditAction action,
+    String successMessage, {
+    VoidCallback? onSaved,
+  }) async {
     final String? name = _name;
     final MusicProjectSnapshot? snapshot = _snapshot;
     if (name == null || snapshot == null) return;
@@ -272,6 +293,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     });
     previousPlayback?.dispose();
     if (nextPlayback != null) unawaited(nextPlayback.start());
+    onSaved?.call();
   }
 
   void _setStatus(MusicInspectorStatus status) {
@@ -279,11 +301,12 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     setState(() => _status = status);
   }
 
-  /// 五线谱点击：把命中的音高/鼓件追加到对应小节（默认四分音符），再走
-  /// [_applyEdit] 的「改模型 → save → 重读 → 刷新」链路。
+  /// 五线谱点击（task-16）：点已有音符 = 选中它（随后可用 Delete/Backspace 删除）；
+  /// 点空白 = 在命中的**小节内拍位**插入音符（默认四分音符），再走 [_applyEdit]
+  /// 的「改模型 → save → 重读 → 刷新」链路。
   ///
   /// 点哪一行就把选中轨道切到那一条（当前选中轨道 = 点击轨道）；视图只回调命中，
-  /// 不改事实源。失败由 [_applyEdit] 显性显示，不伪造播放/成功。
+  /// 不改事实源。失败（如拍位已被音符占用）由 [_applyEdit] 显性显示，不伪造成功。
   void _onStaffNoteTap(MusicStaffHit hit) {
     final MusicProjectSnapshot? snapshot = _snapshot;
     if (snapshot == null) return;
@@ -291,12 +314,35 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
       return;
     }
     if (_staffTapBusy) return;
+    // 点谱面即索取键盘焦点：选中后 Delete/Backspace 才能落到谱面。
+    _staffFocus.requestFocus();
     if (_selectedTrack != hit.trackIndex) {
       setState(() => _selectedTrack = hit.trackIndex);
     }
+    // 已有音符：只选中，不插入；删除走键盘出口（见 [_onStaffKey]）。
+    final String? eventId = hit.eventId;
+    if (eventId != null &&
+        eventId.isNotEmpty &&
+        hit.eventIndex != null &&
+        hit.eventIndex! >= 0) {
+      setState(() {
+        _selectedEvent = (
+          trackIndex: hit.trackIndex,
+          measureIndex: hit.measureIndex,
+          eventId: eventId,
+        );
+        _status = const MusicInspectorStatus(
+          message: '已选中音符，按键盘 Delete 或 Backspace 删除。',
+        );
+      });
+      return;
+    }
+    // 点空白 = 按拍位插入；拍面选中的旧音符先取消选中。
+    if (_selectedEvent != null) setState(() => _selectedEvent = null);
     final MusicTrack track = snapshot.score.tracks[hit.trackIndex];
     final String? drum = track.instrument == 'drums' ? hit.drum : null;
-    final String successMessage = musicStaffInsertMessage(
+    final String successMessage = musicStaffInsertAtMessage(
+      beatIndex: hit.beatIndex,
       step: hit.step,
       alter: hit.alter,
       octave: hit.octave,
@@ -305,16 +351,58 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     _staffTapBusy = true;
     unawaited(
       _applyEdit(
-        (MusicScore score) => appendNoteAt(
+        (MusicScore score) => insertNoteAt(
           score,
           trackIndex: hit.trackIndex,
+          measureIndex: hit.measureIndex,
+          beatIndex: hit.beatIndex,
           step: hit.step,
           alter: hit.alter,
           octave: hit.octave,
-          targetMeasureIndex: hit.measureIndex,
           drum: drum,
         ),
         successMessage,
+      ).whenComplete(() => _staffTapBusy = false),
+    );
+  }
+
+  /// 谱面键盘出口：选中音符后 Delete/Backspace 删除。
+  ///
+  /// 忙（保存/重读链路未走完）时吞掉按键，避免同一次按键叠加多次删除；
+  /// 没有选中音符时按键继续冒泡（返回 ignored），不抢其它快捷键。
+  KeyEventResult _onStaffKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final LogicalKeyboardKey key = event.logicalKey;
+    if (key != LogicalKeyboardKey.delete &&
+        key != LogicalKeyboardKey.backspace) {
+      return KeyEventResult.ignored;
+    }
+    if (_selectedEvent == null) return KeyEventResult.ignored;
+    if (_staffTapBusy) return KeyEventResult.handled;
+    _deleteSelectedEvent();
+    return KeyEventResult.handled;
+  }
+
+  /// 删除当前选中的音符：走同一编辑出口，成功后清空选中并显示「已删除音符」。
+  ///
+  /// 失败（如事件连着连线、事件已不存在）保留选中并显性提示，绝不静默改坏乐谱。
+  void _deleteSelectedEvent() {
+    final selected = _selectedEvent;
+    if (selected == null || _staffTapBusy) return;
+    _staffTapBusy = true;
+    unawaited(
+      _applyEdit(
+        (MusicScore score) => deleteNoteAt(
+          score,
+          trackIndex: selected.trackIndex,
+          measureIndex: selected.measureIndex,
+          eventId: selected.eventId,
+        ),
+        musicStaffDeleteMessage(),
+        onSaved: () {
+          if (!mounted) return;
+          setState(() => _selectedEvent = null);
+        },
       ).whenComplete(() => _staffTapBusy = false),
     );
   }
@@ -570,7 +658,11 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
               const Spacer(),
               Flexible(
                 child: Text(
-                  _staffView ? '点击谱面插入音符 · 默认四分音符' : '只读卷帘 · 不写乐谱',
+                  !_staffView
+                      ? '只读卷帘 · 不写乐谱'
+                      : _selectedEvent == null
+                      ? '点击谱面按拍插入音符 · 默认四分音符'
+                      : '已选中音符 · 按 Delete / Backspace 删除',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.right,
@@ -582,10 +674,16 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
         ),
         Expanded(
           child: _staffView
-              ? MusicStaffView(
-                  score: snapshot.score,
-                  selectedTrackIndex: _selectedTrack,
-                  onNoteTap: _onStaffNoteTap,
+              ? Focus(
+                  key: const ValueKey('music-staff-focus'),
+                  focusNode: _staffFocus,
+                  onKeyEvent: _onStaffKey,
+                  child: MusicStaffView(
+                    score: snapshot.score,
+                    selectedTrackIndex: _selectedTrack,
+                    selectedEventId: _selectedEvent?.eventId,
+                    onNoteTap: _onStaffNoteTap,
+                  ),
                 )
               : MusicPianoRoll(
                   score: snapshot.score,
