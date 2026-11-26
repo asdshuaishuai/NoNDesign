@@ -290,7 +290,8 @@ void main() {
   // 视图 → 打包 kind
   // -------------------------------------------------------------------------
 
-  test('packKindForView：三个工作台映射到容器 kind，其它视图没有打包入口', () {
+  test('packKindForView：四个内容工作台映射到容器 kind，其它视图没有打包入口', () {
+    expect(appStore.packKindForView('plugin:three'), 'three');
     expect(appStore.packKindForView('plugin:music'), 'music');
     expect(appStore.packKindForView('plugin:video'), 'video');
     expect(appStore.packKindForView('plugin:video3d'), 'video3d');
@@ -300,13 +301,13 @@ void main() {
       'docs',
       'play',
       'source',
-      'plugin:three',
       'plugin:hotapp',
       '',
     ]) {
       expect(appStore.packKindForView(other), isNull, reason: '$other 没有打包入口');
     }
     // 扩展名唯一来源是容器层（UI 的文件选择器按它过滤）。
+    expect(packExtensionFor('three'), '.n3d');
     expect(packExtensionFor('music'), '.nmu');
     expect(packExtensionFor('video'), '.nvdo');
     expect(packExtensionFor('video3d'), '.n3v');
@@ -399,12 +400,8 @@ void main() {
     }
   });
 
-  test('视图不支持打包（设计 / 3D 场景 / 热应用）：人话提示，不写盘', () async {
-    for (final String view in <String>[
-      'design',
-      'plugin:three',
-      'plugin:hotapp',
-    ]) {
+  test('视图不支持打包（设计 / 热应用）：人话提示，不写盘', () async {
+    for (final String view in <String>['design', 'plugin:hotapp']) {
       appStore.view = view;
       final File? file = await appStore.exportWorkbenchPack();
       expect(file, isNull);

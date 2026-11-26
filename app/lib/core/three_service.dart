@@ -53,6 +53,8 @@ import 'three/three_plan.dart';
 import 'three/three_scene.dart';
 import 'three/three_scene_gates.dart';
 import 'three/three_workspace.dart';
+import 'workbench_pack.dart';
+import 'workbench_pack_io.dart';
 
 // ---------------------------------------------------------------------------
 // 常量：分层、上限、资源
@@ -1043,6 +1045,152 @@ class ThreeService {
     }
     if (!dir.existsSync()) throw ThreeFailure('no_project', name);
     dir.deleteSync(recursive: true);
+  }
+
+  // -- 单一容器（nan.pack/1） ----------------------------------------------
+
+  /// 3D 项目导出时额外排除的运行痕迹 / 派生产物。
+  ///
+  /// 容器只收**源码类**文本：默认排除（[workbenchPackDefaultExcludes]）已经
+  /// 剪掉 `build-state.json` / `history/` / `artifacts/` / `.tmp` / 缓存；这里
+  /// 再补 3D 项目目录特有的几类——
+  ///  * `history.jsonl` 是逐条记账（默认规则只剪 `history/` 目录，同名文件
+  ///    不在默认表里）；
+  ///  * `evidence/` 是截图证据（二进制产物）；
+  ///  * `preview.html` / `three.module.js` / `three-live.min.js` 是每次挂载都
+  ///    可从应用资源重建的派生预览件（`preview.html` 内联 1.2 MB 渲染库）；
+  ///  * `*.bak` / `*.tmp` 是原子写与进度自愈留下的备份 / 残留。
+  ///
+  /// 这些都不进容器：`.n3d` 是「可带走的事实源」，不是产物压缩包。
+  static const Set<String> _packExclude = <String>{
+    'history.jsonl',
+    'evidence',
+    'preview.html',
+    'three.module.js',
+    'three-live.min.js',
+    '*.bak',
+    '*.tmp',
+  };
+
+  /// 把 3D 项目打包成单一容器（`nan.pack/1`），原子写项目根：
+  /// `<根>/<name>.n3d`（项目根 = [projectDir] 的父目录，与 [listProjects]
+  /// 同源）。
+  ///
+  /// 容器字段：
+  ///  * `kind = three`（扩展名 `.n3d`，唯一来源 [packExtensionFor]）；
+  ///  * `title` 取 `three-spec.json` 的 `title`，缺省 / 空白回退项目名；
+  ///  * `docs` 取项目内 `docs.md` / `brief.md` 的正文（有正文才带，与
+  ///    [readProjectDocs] 同口径）；
+  ///  * `spec` 取 `three-spec.json` 解码后的 JSON（v2 项目没有旧规范文件时
+  ///    为 null，源码照常打包）；
+  ///  * `files` 只收项目目录里的 UTF-8 文本源码（排除规则见 [_packExclude]
+  ///    与 [workbenchPackDefaultExcludes]）。
+  ///
+  /// 写盘复用 [WorkbenchPack.writeTo]（同目录临时文件 + rename 原子替换）：
+  /// 失败时旧容器保持原样，临时文件被清理。项目不存在 / 规范文件坏到读不
+  /// 出来 / 目录里没有任何可打包源码时显性抛 [ThreeFailure]（不产出空容器）。
+  ///
+  /// 说明：[exportProjectPack] 没有 `exclude` 钩子（默认排除不足以剪掉
+  /// `history.jsonl` 等 3D 特有产物），因此这里复用 [filesFromDirectory] +
+  /// [WorkbenchPack] 自行组装；目标路径、容器字段与原子写语义与
+  /// [exportProjectPack] 一致。
+  Future<File> exportPack(String name) async {
+    final Directory dir = projectDir(name);
+    if (!dir.existsSync()) throw ThreeFailure('no_project', name);
+    final Object? spec = _readPackSpec(name);
+    final Map<String, String> files = filesFromDirectory(
+      dir,
+      exclude: _packExclude,
+    );
+    if (files.isEmpty) throw ThreeFailure('no_project', name);
+    final WorkbenchPack pack = WorkbenchPack(
+      kind: WorkbenchPackKind.three,
+      name: name,
+      title: _packTitle(spec, name),
+      docs: readProjectDocs(dir),
+      spec: spec,
+      files: files,
+    );
+    final File target = File(
+      '${dir.parent.path}/$name${packExtensionFor(WorkbenchPackKind.three.wire)}',
+    );
+    await pack.writeTo(target);
+    return target;
+  }
+
+  /// 从单一容器导入一个 3D 项目；目标目录名取容器内 `name`。
+  ///
+  /// 目标已存在时拒绝（[importProjectPack] 抛 `pack_target_exists`，不覆盖、
+  /// 不合并既有项目）；错 kind / 坏容器 / 版本不支持同样显性失败
+  /// （[WorkbenchPackFailure] 的 code / message 原样透传，不换壳）；包内
+  /// name 不合本存储白名单时抛 [ThreeFailure] `invalid_name`（不建目录）。
+  ///
+  /// 解包由 [importProjectPack] 负责：先完整写进同父目录的暂存目录、再整体
+  /// rename，任何失败都清掉暂存——**不留半成品**。
+  ///
+  /// `build-state.json` 不是容器事实源（导出时排除），解包后若项目还没有
+  /// 进度权威，这里补一份初始进度：否则导入的项目会因为没有进度文件被
+  /// [readProject] / [listProjects] 当成不存在。补写失败时撤掉刚解出的目录，
+  /// 保持「要么完整出现、要么什么都不出现」。
+  Future<void> importPack(File file) async {
+    final WorkbenchPack pack = await WorkbenchPack.readFrom(file);
+    requirePackKind(pack, WorkbenchPackKind.three.wire);
+    final Directory target = projectDir(pack.name);
+    await importProjectPack(
+      file,
+      projectDir: target,
+      expectKind: WorkbenchPackKind.three.wire,
+    );
+    try {
+      if (!File('${target.path}/build-state.json').existsSync()) {
+        _writeState(pack.name, initialThreeState());
+      }
+    } catch (error) {
+      try {
+        if (target.existsSync()) target.deleteSync(recursive: true);
+      } catch (_) {
+        // 清理失败不能盖掉原始错误。
+      }
+      throw WorkbenchPackFailure(
+        WorkbenchPackFailureCode.ioFailed,
+        'imported project could not be given an initial progress state: $error',
+      );
+    }
+  }
+
+  /// 项目根下所有 `.n3d` 容器（按文件名排序）。
+  ///
+  /// 隐藏 / 临时文件与文件名不合本项目白名单（[projectDir] 同一正则）的包
+  /// 不列：列出来的包一定能被 [importPack] 导入。不影响 [listProjects]——
+  /// 它只认项目目录。
+  Future<List<File>> listPacks() async => listProjectPacks(
+    _root,
+    kind: WorkbenchPackKind.three.wire,
+    accept: (String name) => name.isNotEmpty && _namePattern.hasMatch(name),
+  );
+
+  /// 读 `three-spec.json` 的 JSON 视图（容器 `spec` 字段的唯一来源）。
+  ///
+  /// 文件缺失 = 项目还没有旧规范（v2 工作区的事实源是 `spec.json` /
+  /// `scene.json`）→ null；文件在场但读不出来 → 与 [readProject] 同口径显性
+  /// 失败（坏规范不打包）。
+  Object? _readPackSpec(String name) {
+    final File file = File('${projectDir(name).path}/three-spec.json');
+    if (!file.existsSync()) return null;
+    try {
+      return jsonDecode(file.readAsStringSync());
+    } catch (error) {
+      throw ThreeFailure('spec_corrupt', '$error');
+    }
+  }
+
+  /// 容器标题：优先规范里的 `title`，缺省 / 空白回退项目名。
+  String _packTitle(Object? spec, String name) {
+    if (spec is Map) {
+      final Object? title = spec['title'];
+      if (title is String && title.trim().isNotEmpty) return title.trim();
+    }
+    return name;
   }
 
   // -- 预览 ----------------------------------------------------------------

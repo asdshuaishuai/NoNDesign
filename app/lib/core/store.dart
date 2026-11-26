@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'three_service.dart';
 import 'inspect/check_field.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -1276,6 +1277,8 @@ class AppStore extends ChangeNotifier {
   /// 返回值是 `nan.pack/1` 的稳定 wire 值（见 [WorkbenchPackKind]）。
   String? packKindForView(String view) {
     switch (view) {
+      case 'plugin:three':
+        return WorkbenchPackKind.three.wire;
       case 'plugin:music':
         return WorkbenchPackKind.music.wire;
       case 'plugin:video':
@@ -1291,6 +1294,7 @@ class AppStore extends ChangeNotifier {
   /// 打包入口启用条件与导出目标名的唯一来源：音乐/视频读各自持久化的当前
   /// 项目名，3D 视频读 [video3dProjectName]。
   String get currentPackProjectName => switch (packKindForView(view)) {
+    'three' => settings.threeProjectName.trim(),
     'music' => musicProjectName.trim(),
     'video' => settings.videoProjectName.trim(),
     'video3d' => video3dProjectName.trim(),
@@ -1314,6 +1318,16 @@ class AppStore extends ChangeNotifier {
   /// 生产实现弹系统文件对话框；测试注入 fake，不弹真对话框。
   @visibleForTesting
   Future<String?> Function(String extension)? pickPackFileOverride;
+
+  /// 测试注入：3D 服务（生产走懒加载的 [ThreeService.open]）。
+  @visibleForTesting
+  ThreeService? threeServiceOverride;
+
+  ThreeService? _threePackService;
+
+  /// 3D 打包用的服务实例（懒创建，避免在没有 3D 项目时碰用户目录）。
+  Future<ThreeService> _threeForPack() async =>
+      threeServiceOverride ?? (_threePackService ??= await ThreeService.open());
 
   MusicProjectStore get _musicProjects =>
       musicProjectsOverride ?? MusicProjectStore.instance;
@@ -1342,6 +1356,7 @@ class AppStore extends ChangeNotifier {
     }
     try {
       final File file = switch (kind) {
+        'three' => await (await _threeForPack()).exportPack(name),
         'music' => await _musicProjects.exportPack(name),
         'video' => await _videoProjects.exportPack(name),
         _ => await _video3dProjects.exportPack(name),
@@ -1382,6 +1397,9 @@ class AppStore extends ChangeNotifier {
       // 坏包 / 目标已存在的判定仍由对应 store 的 importPack 负责。
       final WorkbenchPack pack = await WorkbenchPack.readFrom(file);
       switch (kind) {
+        case 'three':
+          await (await _threeForPack()).importPack(file);
+          setThreeProjectName(pack.name);
         case 'music':
           await _musicProjects.importPack(file);
           setMusicProjectName(pack.name);
@@ -1426,6 +1444,8 @@ class AppStore extends ChangeNotifier {
   /// 「当前工作台没有打开项目」时的人话（下一步是先在对应工作台打开项目）。
   static String _packNoProjectMessage(String kind) {
     switch (kind) {
+      case 'three':
+        return '先在 3D 工作台打开一个项目，再打包';
       case 'music':
         return '先在音乐工作台打开一个项目，再打包';
       case 'video':
@@ -1438,6 +1458,7 @@ class AppStore extends ChangeNotifier {
   /// 打包器 / 三个项目库的失败码 → 用户可见的一句话；原始诊断由调用方送进
   /// `_toastError` 的 technical 位（只进日志/折叠的「技术详情」）。
   static String _packFailureMessage(Object? error, {required bool importing}) {
+    if (error is ThreeFailure) return threeFailureMessage(error);
     if (error is MusicProjectFailure) return musicProjectFailureMessage(error);
     if (error is VideoProjectFailure) return videoProjectFailureMessage(error);
     if (error is Video3dProjectFailure) {
