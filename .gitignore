@@ -34,3 +34,7 @@ dist/
 
 # 本地工具配置（勿入库）
 .zcode/
+
+# 本机 agent/skill 安装产物（不属于项目源码）
+.agents/
+.claude/
