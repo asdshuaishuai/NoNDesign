@@ -16,8 +16,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nondesign/core/theme.dart';
 
 /// 棘轮上限：`lib/widgets/**` 中 `fontSize: <数字>` 的出现次数。
-/// 2026-11-26 首次盘点为 870；每完成一个工作台的令牌迁移就下调。
-const int rawFontSizeCeiling = 870;
+/// 2026-11-26 首次盘点为 870；工作台外壳 + 设置面板 + 设计 + 3D + 视频/音乐
+/// 五个批次迁移完成后降到 317。继续迁移（chat_stream / welcome / docs_view /
+/// agent_panel / portfolio_view 等）时同步下调本值。
+const int rawFontSizeCeiling = 317;
 
 void main() {
   test('排版尺度严格递增且覆盖 8 个档位', () {

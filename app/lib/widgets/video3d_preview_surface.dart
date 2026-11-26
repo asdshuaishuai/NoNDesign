@@ -632,7 +632,7 @@ class Video3dPreviewSurface extends StatelessWidget {
       key: const ValueKey('video3d-preview-surface'),
       decoration: BoxDecoration(
         color: p.panel2,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(NonRadius.md),
         border: Border.all(color: p.line),
       ),
       // WebKitGTK/WebView2 的原生 Overlay 只能表示矩形/RRect/椭圆裁剪；
@@ -640,17 +640,18 @@ class Video3dPreviewSurface extends StatelessWidget {
       // （Linux WebKitGTK）会把 WebView 直接隐藏（2026-11-26 集成冒烟实测）。
       // 用 ClipRRect（RRect）保留圆角，外框 Container 不裁剪。
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: ListenableBuilder(
-          listenable: preview,
-          builder: (BuildContext context, Widget? _) => Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              _header(context, p),
-              Divider(height: 1, color: p.line),
-              Expanded(child: _stage(context, p)),
-            ],
-          ),
+        borderRadius: BorderRadius.circular(NonRadius.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            // 头部只跟着状态文案重建（帧号刷新的 notify 不会重挂舞台）。
+            ListenableBuilder(
+              listenable: preview,
+              builder: (BuildContext context, Widget? _) => _header(context, p),
+            ),
+            Divider(height: 1, color: p.line),
+            Expanded(child: _Video3dPreviewStage(surface: this)),
+          ],
         ),
       ),
     );
@@ -670,33 +671,38 @@ class Video3dPreviewSurface extends StatelessWidget {
         ? (preview.playing ? p.accent : p.ink3)
         : p.ink4;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
+      padding: const EdgeInsets.fromLTRB(
+        NonSpace.md,
+        NonSpace.sm,
+        NonSpace.md,
+        NonSpace.sm,
+      ),
       child: Row(
         children: <Widget>[
           Icon(Icons.movie_creation_outlined, size: 13, color: p.ink4),
-          const SizedBox(width: 6),
+          const SizedBox(width: NonSpace.sm),
           Text(
             '3D 视频预览',
             style: TextStyle(
-              fontSize: 12,
+              fontSize: NonType.body,
               fontWeight: FontWeight.w600,
               color: p.ink,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: NonSpace.sm),
           Flexible(
             child: Text(
               '只读预览，不改项目文件',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
             ),
           ),
           const Spacer(),
           Text(
             status,
             key: const ValueKey('video3d-preview-status'),
-            style: TextStyle(fontSize: 10, color: statusColor),
+            style: TextStyle(fontSize: NonType.micro, color: statusColor),
           ),
         ],
       ),
@@ -723,7 +729,9 @@ class Video3dPreviewSurface extends StatelessWidget {
     return Container(
       key: const ValueKey('video3d-preview-stage'),
       color: const Color(0xFF0B0D12),
-      child: WebViewWidget(controller: controller),
+      // WebView 宿主单独一层重绘边界：父级（工作台/运输条）每次刷新不重绘
+      // 原生 WebView 覆盖层。裁剪仍在外层 ClipRRect（RRect 可表示）。
+      child: RepaintBoundary(child: WebViewWidget(controller: controller)),
     );
   }
 
@@ -738,8 +746,11 @@ class Video3dPreviewSurface extends StatelessWidget {
             height: 20,
             child: CircularProgressIndicator(strokeWidth: 2, color: p.accent),
           ),
-          const SizedBox(height: 10),
-          Text('预览页准备中…', style: TextStyle(fontSize: 11, color: p.ink3)),
+          const SizedBox(height: NonSpace.md),
+          Text(
+            '预览页准备中…',
+            style: TextStyle(fontSize: NonType.caption, color: p.ink3),
+          ),
         ],
       ),
     );
@@ -750,29 +761,33 @@ class Video3dPreviewSurface extends StatelessWidget {
     return Center(
       key: const ValueKey('video3d-preview-error'),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(NonSpace.lg),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Icon(Icons.movie_filter_outlined, size: 30, color: p.ink4),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             Text(
               message,
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 12.5,
+                fontSize: NonType.body,
                 fontWeight: FontWeight.w600,
                 color: p.ink2,
-                height: 1.5,
+                height: NonType.lineBody,
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: NonSpace.sm),
             Text(
               '场景和镜头文件都还在，可以继续检查；修好后重试预览。',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: p.ink4, height: 1.5),
+              style: TextStyle(
+                fontSize: NonType.caption,
+                color: p.ink4,
+                height: NonType.lineBody,
+              ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             if (preview is Video3dWebPreview)
               TextButton.icon(
                 key: const ValueKey('video3d-preview-retry'),
@@ -780,10 +795,13 @@ class Video3dPreviewSurface extends StatelessWidget {
                 style: TextButton.styleFrom(
                   minimumSize: const Size(0, 30),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
                 ),
                 icon: const Icon(Icons.refresh, size: 15),
-                label: const Text('重试', style: TextStyle(fontSize: 11)),
+                label: const Text(
+                  '重试',
+                  style: TextStyle(fontSize: NonType.caption),
+                ),
               ),
             if (preview.technicalDetail.isNotEmpty)
               Theme(
@@ -793,12 +811,22 @@ class Video3dPreviewSurface extends StatelessWidget {
                   type: MaterialType.transparency,
                   child: ExpansionTile(
                     key: const ValueKey('video3d-preview-technical'),
-                    tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-                    childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    tilePadding: const EdgeInsets.symmetric(
+                      horizontal: NonSpace.md,
+                    ),
+                    childrenPadding: const EdgeInsets.fromLTRB(
+                      NonSpace.md,
+                      0,
+                      NonSpace.md,
+                      NonSpace.sm,
+                    ),
                     dense: true,
                     title: Text(
                       '技术详情',
-                      style: TextStyle(fontSize: 11, color: p.ink4),
+                      style: TextStyle(
+                        fontSize: NonType.caption,
+                        color: p.ink4,
+                      ),
                     ),
                     iconColor: p.ink4,
                     collapsedIconColor: p.ink4,
@@ -808,9 +836,9 @@ class Video3dPreviewSurface extends StatelessWidget {
                         child: SelectableText(
                           preview.technicalDetail,
                           style: TextStyle(
-                            fontSize: 10.5,
+                            fontSize: NonType.micro,
                             color: p.ink4,
-                            height: 1.4,
+                            height: NonType.lineCaption,
                           ),
                         ),
                       ),
@@ -822,5 +850,73 @@ class Video3dPreviewSurface extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// 舞台层：只在「就绪度 / 错误面」变化时重建，播放头每 80ms 的帧 notify
+/// 不会重挂 WebView 覆盖层；父级（工作台运输条）刷新也不触发舞台重绘。
+class _Video3dPreviewStage extends StatefulWidget {
+  const _Video3dPreviewStage({required this.surface});
+
+  final Video3dPreviewSurface surface;
+
+  @override
+  State<_Video3dPreviewStage> createState() => _Video3dPreviewStageState();
+}
+
+class _Video3dPreviewStageState extends State<_Video3dPreviewStage> {
+  Video3dPreviewController get _preview => widget.surface.preview;
+
+  late bool _ready;
+  late String _error;
+  late bool _hasWebView;
+
+  @override
+  void initState() {
+    super.initState();
+    _capture();
+    _preview.addListener(_onPreviewChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _Video3dPreviewStage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final Video3dPreviewController previous = oldWidget.surface.preview;
+    if (identical(previous, _preview)) return;
+    previous.removeListener(_onPreviewChanged);
+    _preview.addListener(_onPreviewChanged);
+    _capture();
+  }
+
+  void _capture() {
+    _ready = _preview.ready;
+    _error = _preview.loadError;
+    _hasWebView =
+        _preview is Video3dWebPreview &&
+        (_preview as Video3dWebPreview).webView != null;
+  }
+
+  void _onPreviewChanged() {
+    if (!mounted) return;
+    final bool ready = _preview.ready;
+    final String error = _preview.loadError;
+    final bool hasWebView =
+        _preview is Video3dWebPreview &&
+        (_preview as Video3dWebPreview).webView != null;
+    if (ready == _ready && error == _error && hasWebView == _hasWebView) {
+      return;
+    }
+    setState(_capture);
+  }
+
+  @override
+  void dispose() {
+    _preview.removeListener(_onPreviewChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.surface._stage(context, context.palette);
   }
 }

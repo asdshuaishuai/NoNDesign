@@ -89,6 +89,11 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   int _sampleIdx = 0;
   int _fps = 10;
   VideoDocument? _doc;
+
+  /// 导演台镜头表缓存：文档实例不变就只投影一次；播放头每帧回调触发的
+  /// 重建不再重算整条镜头树（[videoShotsFromTimeline] 不便宜）。
+  List<VideoShotItem> _shots = const <VideoShotItem>[];
+  VideoDocument? _shotsDoc;
   VideoReviewResult? _review;
   // UI-3：导演台当前选中镜头（只读检查器/时间线联动；不写事实源）。
   int? _selectedShotIndex;
@@ -436,10 +441,13 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('删除生成项目', style: TextStyle(fontSize: 15)),
+        title: const Text(
+          '删除生成项目',
+          style: TextStyle(fontSize: NonType.subtitle),
+        ),
         content: Text(
           '「$title」会从磁盘上删除，删掉后不能恢复。',
-          style: TextStyle(fontSize: 12, height: 1.5),
+          style: TextStyle(fontSize: NonType.body, height: NonType.lineBody),
         ),
         actions: [
           TextButton(
@@ -757,6 +765,15 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     );
   }
 
+  /// 导演台镜头表：按文档实例缓存（时间线不变就不重新投影）。
+  List<VideoShotItem> _shotsFor(VideoDocument doc) {
+    if (!identical(_shotsDoc, doc)) {
+      _shotsDoc = doc;
+      _shots = videoShotsFromTimeline(doc.timeline);
+    }
+    return _shots;
+  }
+
   /// 一块播放面铺满主区 + 底部一行不抢画面的提示。
   ///
   /// 矢量动画与动效合成共用同一块留边：主区 14 边距，播放面自己圆角；
@@ -770,7 +787,12 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         children: [
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
+              padding: const EdgeInsets.fromLTRB(
+                NonSpace.lg,
+                NonSpace.lg,
+                NonSpace.lg,
+                NonSpace.sm,
+              ),
               child: _previewPane(context),
             ),
           ),
@@ -782,10 +804,11 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       builder: (context, constraints) {
         final layout = resolveWorkbenchLayout(
           kind: WorkbenchKind.video,
+          // 用工作台自己的约束高度（不是整窗高度）：嵌入壳/画中画同样正确。
           width: constraints.maxWidth,
-          height: MediaQuery.sizeOf(context).height,
+          height: constraints.maxHeight,
         );
-        final shots = videoShotsFromTimeline(doc.timeline);
+        final shots = _shotsFor(doc);
         int? selected;
         for (final shot in shots) {
           if (shot.index == _selectedShotIndex) selected = shot.index;
@@ -824,7 +847,12 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                     Container(width: 1, color: context.palette.line),
                   Expanded(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+                      padding: const EdgeInsets.fromLTRB(
+                        NonSpace.md,
+                        NonSpace.md,
+                        NonSpace.md,
+                        NonSpace.sm,
+                      ),
                       child: preview,
                     ),
                   ),
@@ -844,6 +872,8 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                 playheadSeconds: _playheadSeconds,
                 playing: _previewPlaying,
                 controller: _previewController,
+                // 底栏高度来自视频工作台规格（WorkbenchLayout），不再写死 92。
+                height: layout.bottomBarHeight,
               ),
             if (layout.isPhone) _playerHint(context),
           ],
@@ -854,19 +884,27 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   }
 
   Widget _playerHint(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+    padding: const EdgeInsets.fromLTRB(
+      NonSpace.lg,
+      0,
+      NonSpace.lg,
+      NonSpace.sm,
+    ),
     child: Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Icon(Icons.play_circle_outline, size: 12, color: context.palette.ink4),
-        const SizedBox(width: 6),
+        const SizedBox(width: NonSpace.sm),
         Flexible(
           child: Text(
             '代码动画直接播放，暂不导出成片',
             key: const ValueKey('video-player-hint'),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 10, color: context.palette.ink4),
+            style: TextStyle(
+              fontSize: NonType.micro,
+              color: context.palette.ink4,
+            ),
           ),
         ),
       ],
@@ -880,7 +918,12 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       children: [
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
+            padding: const EdgeInsets.fromLTRB(
+              NonSpace.lg,
+              NonSpace.lg,
+              NonSpace.lg,
+              NonSpace.sm,
+            ),
             child: VideoClipSurface(
               // 换短片即换实例：旧 WebView/计时器随旧播放面释放。
               key: ObjectKey(clip),
@@ -894,10 +937,20 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         if (playback != null)
           VideoClipTransport(
             playback: playback,
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+            padding: const EdgeInsets.fromLTRB(
+              NonSpace.lg,
+              0,
+              NonSpace.lg,
+              NonSpace.sm,
+            ),
           ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+          padding: const EdgeInsets.fromLTRB(
+            NonSpace.lg,
+            0,
+            NonSpace.lg,
+            NonSpace.sm,
+          ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -906,14 +959,17 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                 size: 12,
                 color: context.palette.ink4,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: NonSpace.sm),
               Flexible(
                 child: Text(
                   'HTML/CSS/JS 动效合成，应用内实时播放，暂不导出成片',
                   key: const ValueKey('video-clip-hint'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10, color: context.palette.ink4),
+                  style: TextStyle(
+                    fontSize: NonType.micro,
+                    color: context.palette.ink4,
+                  ),
                 ),
               ),
             ],
@@ -934,7 +990,9 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         color: p.bgElevated,
         border: Border(bottom: BorderSide(color: p.line)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      // 窄屏（320 手机/画中画）工具条内容多：水平内边距压到 sm，
+      // 保证 1.1x 字号缩放下也不横向溢出。
+      padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
@@ -954,39 +1012,44 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                 onPressed: () => store.setView('home'),
               ),
               if (artifact != null) ...[
-                const SizedBox(width: 2),
+                const SizedBox(width: NonSpace.xxs),
                 Icon(Icons.movie_outlined, size: 17, color: p.accent),
-                const SizedBox(width: 6),
+                const SizedBox(width: NonSpace.sm),
                 Flexible(
                   child: Text(
                     '视频产物 · ${_artifactName(artifact)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: NonType.bodyStrong,
                       fontWeight: FontWeight.w700,
                       color: p.ink,
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: NonSpace.sm),
                 TextButton(
                   onPressed: _leaveArtifact,
                   style: TextButton.styleFrom(
                     minimumSize: const Size(0, 28),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: NonSpace.sm,
+                    ),
                   ),
-                  child: const Text('返回创作台', style: TextStyle(fontSize: 11)),
+                  child: const Text(
+                    '返回创作台',
+                    style: TextStyle(fontSize: NonType.caption),
+                  ),
                 ),
                 const Spacer(),
               ] else if (_clip != null) ...[
                 // 动效合成：成品短片没有脚本可编辑，工具条只留返回主页 /
                 // 规格对照（只读卡）/ 加示例。
                 if (width >= 520) ...[
-                  const SizedBox(width: 2),
+                  const SizedBox(width: NonSpace.xxs),
                   Icon(Icons.movie_outlined, size: 17, color: p.accent),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: NonSpace.sm),
                 ],
                 if (showTitle)
                   ConstrainedBox(
@@ -996,29 +1059,37 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: NonType.bodyStrong,
                         fontWeight: FontWeight.w700,
                         color: p.ink,
                       ),
                     ),
                   ),
-                if (labels) const Spacer() else const SizedBox(width: 6),
+                if (labels)
+                  const Spacer()
+                else
+                  const SizedBox(width: NonSpace.sm),
                 if (labels) ...[
                   _samplePicker(context, maxWidth: 260),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: NonSpace.sm),
                   _clipReviewChip(context, showLabel: true),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: NonSpace.xs),
                   _addClipSampleButton(context),
                 ] else ...[
-                  Flexible(child: _samplePicker(context, maxWidth: 150)),
-                  const SizedBox(width: 2),
+                  Flexible(
+                    child: _samplePicker(
+                      context,
+                      maxWidth: width < 420 ? 120 : 150,
+                    ),
+                  ),
+                  const SizedBox(width: NonSpace.xxs),
                   _clipReviewChip(context, showLabel: false),
-                  const SizedBox(width: 2),
+                  const SizedBox(width: NonSpace.xxs),
                   _addClipSampleButton(context),
                 ],
               ] else ...[
                 if (width >= 520) ...[
-                  const SizedBox(width: 2),
+                  const SizedBox(width: NonSpace.xxs),
                   Icon(
                     _projectName != null
                         ? Icons.video_library_outlined
@@ -1026,7 +1097,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                     size: 17,
                     color: p.accent,
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: NonSpace.sm),
                 ],
                 if (showTitle)
                   ConstrainedBox(
@@ -1037,18 +1108,21 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: NonType.bodyStrong,
                         fontWeight: FontWeight.w700,
                         color: p.ink,
                       ),
                     ),
                   ),
-                if (labels) const Spacer() else const SizedBox(width: 6),
+                if (labels)
+                  const Spacer()
+                else
+                  const SizedBox(width: NonSpace.sm),
                 if (labels) ...[
                   _samplePicker(context, maxWidth: 240),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: NonSpace.sm),
                   _fpsControl(context),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: NonSpace.xs),
                   // 生成项目是 NaN 产出的成品，不给「编辑脚本」入口（改了也不
                   // 落盘）；示例仍保留脚本编辑。
                   if (_projectName != null)
@@ -1060,21 +1134,31 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                       style: TextButton.styleFrom(
                         minimumSize: const Size(0, 28),
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: NonSpace.sm,
+                        ),
                       ),
                       icon: const Icon(Icons.edit_note_outlined, size: 16),
-                      label: const Text('编辑脚本', style: TextStyle(fontSize: 11)),
+                      label: const Text(
+                        '编辑脚本',
+                        style: TextStyle(fontSize: NonType.caption),
+                      ),
                     ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: NonSpace.xs),
                   _reviewChip(context, showLabel: true),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: NonSpace.xs),
                   if (_projectName == null) _loadSampleButton(context),
                 ] else ...[
-                  Flexible(child: _samplePicker(context, maxWidth: 140)),
-                  const SizedBox(width: 2),
+                  Flexible(
+                    child: _samplePicker(
+                      context,
+                      maxWidth: width < 420 ? 110 : 140,
+                    ),
+                  ),
+                  const SizedBox(width: NonSpace.xxs),
                   _reviewChip(context, showLabel: false),
                   if (_projectName == null) _loadSampleButton(context),
-                  const SizedBox(width: 2),
+                  const SizedBox(width: NonSpace.xxs),
                   PopupMenuButton<String>(
                     key: const ValueKey('video-more-menu'),
                     tooltip: '更多',
@@ -1089,7 +1173,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                         height: 40,
                         child: Text(
                           '帧率 $_fps',
-                          style: TextStyle(fontSize: 12, color: p.ink2),
+                          style: TextStyle(
+                            fontSize: NonType.body,
+                            color: p.ink2,
+                          ),
                         ),
                       ),
                       if (_projectName != null)
@@ -1098,7 +1185,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                           height: 40,
                           child: Text(
                             '删除项目',
-                            style: TextStyle(fontSize: 12, color: p.ink2),
+                            style: TextStyle(
+                              fontSize: NonType.body,
+                              color: p.ink2,
+                            ),
                           ),
                         )
                       else
@@ -1107,7 +1197,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                           height: 40,
                           child: Text(
                             '编辑脚本',
-                            style: TextStyle(fontSize: 12, color: p.ink2),
+                            style: TextStyle(
+                              fontSize: NonType.body,
+                              color: p.ink2,
+                            ),
                           ),
                         ),
                     ],
@@ -1146,7 +1239,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       },
       color: p.panel2,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(NonRadius.md),
         side: BorderSide(color: p.line),
       ),
       itemBuilder: (context) => <PopupMenuEntry<Object>>[
@@ -1154,13 +1247,19 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         PopupMenuItem<Object>(
           enabled: false,
           height: 26,
-          child: Text('生成项目', style: TextStyle(fontSize: 10, color: p.ink4)),
+          child: Text(
+            '生成项目',
+            style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+          ),
         ),
         if (_projectsLoading)
           PopupMenuItem<Object>(
             enabled: false,
             height: 34,
-            child: Text('载入中…', style: TextStyle(fontSize: 11, color: p.ink4)),
+            child: Text(
+              '载入中…',
+              style: TextStyle(fontSize: NonType.caption, color: p.ink4),
+            ),
           )
         else if (_projects.isEmpty)
           PopupMenuItem<Object>(
@@ -1174,7 +1273,11 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                     : _projectsError,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 10, color: p.ink4, height: 1.4),
+                style: TextStyle(
+                  fontSize: NonType.micro,
+                  color: p.ink4,
+                  height: NonType.lineCaption,
+                ),
               ),
             ),
           )
@@ -1191,21 +1294,21 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: NonType.body,
                       color: clip == null && _projectName == entry.name
                           ? p.accent
                           : p.ink2,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: NonSpace.xs),
                   Text(
                     entry.corrupt
                         ? '打不开 · 文件可能被改动'
                         : '片长 ${formatVideoTime(entry.seconds)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, color: p.ink4),
+                    style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                   ),
                 ],
               ),
@@ -1214,7 +1317,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         PopupMenuItem<Object>(
           enabled: false,
           height: 26,
-          child: Text('矢量动画', style: TextStyle(fontSize: 10, color: p.ink4)),
+          child: Text(
+            '矢量动画',
+            style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+          ),
         ),
         for (var i = 0; i < samples.length; i++)
           PopupMenuItem<Object>(
@@ -1226,7 +1332,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                 Text(
                   samples[i].label,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: NonType.body,
                     color:
                         clip == null && _projectName == null && i == _sampleIdx
                         ? p.accent
@@ -1234,12 +1340,12 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: NonSpace.xs),
                 Text(
                   samples[i].note,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10, color: p.ink4),
+                  style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                 ),
               ],
             ),
@@ -1248,13 +1354,19 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         PopupMenuItem<Object>(
           enabled: false,
           height: 26,
-          child: Text('动效合成', style: TextStyle(fontSize: 10, color: p.ink4)),
+          child: Text(
+            '动效合成',
+            style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+          ),
         ),
         if (_clipsLoading)
           PopupMenuItem<Object>(
             enabled: false,
             height: 34,
-            child: Text('载入中…', style: TextStyle(fontSize: 11, color: p.ink4)),
+            child: Text(
+              '载入中…',
+              style: TextStyle(fontSize: NonType.caption, color: p.ink4),
+            ),
           )
         else if (_clips.isEmpty)
           PopupMenuItem<Object>(
@@ -1264,7 +1376,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
               _clipsError.isEmpty ? '暂无动效合成示例' : _clipsError,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
             ),
           )
         else
@@ -1278,19 +1390,19 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                   Text(
                     _clips[i].title,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: NonType.body,
                       color: clip?.id == _clips[i].id ? p.accent : p.ink2,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: NonSpace.xs),
                   Text(
                     _clips[i].subtitle.isEmpty
                         ? _clips[i].file
                         : _clips[i].subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, color: p.ink4),
+                    style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                   ),
                 ],
               ),
@@ -1300,10 +1412,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         constraints: BoxConstraints(maxWidth: maxWidth),
         child: Container(
           height: 28,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
           decoration: BoxDecoration(
             color: p.panel2,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(NonRadius.md),
             border: Border.all(color: p.line),
           ),
           child: Row(
@@ -1313,9 +1425,9 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                 clip != null
                     ? '动效合成'
                     : (_projectName != null ? '生成项目' : '标杆示例'),
-                style: TextStyle(fontSize: 9, color: p.ink4),
+                style: TextStyle(fontSize: NonType.micro, color: p.ink4),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: NonSpace.sm),
               Flexible(
                 child: Text(
                   clip != null
@@ -1331,10 +1443,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                                         .label)),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, color: p.ink2),
+                  style: TextStyle(fontSize: NonType.caption, color: p.ink2),
                 ),
               ),
-              const SizedBox(width: 2),
+              const SizedBox(width: NonSpace.xxs),
               Icon(Icons.expand_more, size: 14, color: p.ink4),
             ],
           ),
@@ -1351,14 +1463,17 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       style: TextButton.styleFrom(
         minimumSize: const Size(0, 28),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.speed_outlined, size: 14, color: p.ink3),
-          const SizedBox(width: 5),
-          Text('帧率 $_fps', style: TextStyle(fontSize: 11, color: p.ink2)),
+          const SizedBox(width: NonSpace.xs),
+          Text(
+            '帧率 $_fps',
+            style: TextStyle(fontSize: NonType.caption, color: p.ink2),
+          ),
         ],
       ),
     );
@@ -1370,13 +1485,15 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     return InkWell(
       key: const ValueKey('video-review-chip'),
       onTap: _showReviewSheet,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(NonRadius.lg),
       child: Container(
         height: 28,
-        padding: EdgeInsets.symmetric(horizontal: showLabel ? 10 : 6),
+        padding: EdgeInsets.symmetric(
+          horizontal: showLabel ? NonSpace.md : NonSpace.xs,
+        ),
         decoration: BoxDecoration(
           color: status.color.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(NonRadius.lg),
           border: Border.all(color: status.color.withValues(alpha: 0.5)),
         ),
         child: Row(
@@ -1384,14 +1501,17 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           children: [
             Icon(status.icon, size: 13, color: status.color),
             if (showLabel) ...[
-              const SizedBox(width: 5),
-              Text('规范对照', style: TextStyle(fontSize: 11, color: p.ink2)),
+              const SizedBox(width: NonSpace.xs),
+              Text(
+                '规范对照',
+                style: TextStyle(fontSize: NonType.caption, color: p.ink2),
+              ),
             ],
-            const SizedBox(width: 5),
+            const SizedBox(width: NonSpace.xs),
             Text(
               status.label,
               style: TextStyle(
-                fontSize: 11,
+                fontSize: NonType.caption,
                 fontWeight: FontWeight.w600,
                 color: status.color,
               ),
@@ -1409,9 +1529,9 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       style: TextButton.styleFrom(
         minimumSize: const Size(0, 28),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.xs),
       ),
-      child: const Text('加载示例', style: TextStyle(fontSize: 11)),
+      child: const Text('加载示例', style: TextStyle(fontSize: NonType.caption)),
     );
   }
 
@@ -1421,13 +1541,15 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     return InkWell(
       key: const ValueKey('video-clip-review-chip'),
       onTap: _showClipReviewSheet,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(NonRadius.lg),
       child: Container(
         height: 28,
-        padding: EdgeInsets.symmetric(horizontal: showLabel ? 10 : 6),
+        padding: EdgeInsets.symmetric(
+          horizontal: showLabel ? NonSpace.md : NonSpace.xs,
+        ),
         decoration: BoxDecoration(
           color: p.accent.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(NonRadius.lg),
           border: Border.all(color: p.accent.withValues(alpha: 0.5)),
         ),
         child: Row(
@@ -1435,13 +1557,16 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           children: [
             Icon(Icons.rule_outlined, size: 13, color: p.accent),
             if (showLabel) ...[
-              const SizedBox(width: 5),
-              Text('规格对照', style: TextStyle(fontSize: 11, color: p.ink2)),
-              const SizedBox(width: 5),
+              const SizedBox(width: NonSpace.xs),
+              Text(
+                '规格对照',
+                style: TextStyle(fontSize: NonType.caption, color: p.ink2),
+              ),
+              const SizedBox(width: NonSpace.xs),
               Text(
                 '只读',
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: NonType.caption,
                   fontWeight: FontWeight.w600,
                   color: p.accent,
                 ),
@@ -1461,9 +1586,9 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       style: TextButton.styleFrom(
         minimumSize: const Size(0, 28),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.xs),
       ),
-      child: const Text('加示例', style: TextStyle(fontSize: 11)),
+      child: const Text('加示例', style: TextStyle(fontSize: NonType.caption)),
     );
   }
 
@@ -1475,9 +1600,9 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       children: [
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(NonSpace.lg),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(NonRadius.md),
               child: VideoPlayerSurface(
                 path: path,
                 // 平台判定交给能力矩阵（唯一事实源）：macos/ios 走内嵌
@@ -1494,17 +1619,20 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
             color: p.bgElevated,
             border: Border(top: BorderSide(color: p.line)),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(
+            horizontal: NonSpace.md,
+            vertical: NonSpace.sm,
+          ),
           child: Row(
             children: [
               Icon(Icons.movie_outlined, size: 14, color: p.ink4),
-              const SizedBox(width: 8),
+              const SizedBox(width: NonSpace.sm),
               Expanded(
                 child: SelectableText(
                   path,
                   maxLines: 1,
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: NonType.caption,
                     color: p.ink3,
                     fontFamily: 'monospace',
                   ),
@@ -1515,10 +1643,13 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                 style: TextButton.styleFrom(
                   minimumSize: const Size(0, 28),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
                 ),
                 icon: const Icon(Icons.copy_all_outlined, size: 14),
-                label: const Text('复制路径', style: TextStyle(fontSize: 11)),
+                label: const Text(
+                  '复制路径',
+                  style: TextStyle(fontSize: NonType.caption),
+                ),
               ),
               if (host.supportsRevealInFolder)
                 TextButton.icon(
@@ -1526,10 +1657,15 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                   style: TextButton.styleFrom(
                     minimumSize: const Size(0, 28),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: NonSpace.sm,
+                    ),
                   ),
                   icon: const Icon(Icons.folder_open_outlined, size: 14),
-                  label: const Text('在文件夹中显示', style: TextStyle(fontSize: 11)),
+                  label: const Text(
+                    '在文件夹中显示',
+                    style: TextStyle(fontSize: NonType.caption),
+                  ),
                 ),
             ],
           ),
@@ -1554,10 +1690,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       style: TextButton.styleFrom(
         minimumSize: const Size(0, 28),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
       ),
       icon: const Icon(Icons.delete_outline, size: 15),
-      label: const Text('删除项目', style: TextStyle(fontSize: 11)),
+      label: const Text('删除项目', style: TextStyle(fontSize: NonType.caption)),
     );
   }
 
@@ -1568,17 +1704,20 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       key: const ValueKey('video-project-loading'),
       decoration: BoxDecoration(
         color: p.panel2,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(NonRadius.md),
         border: Border.all(color: p.line),
       ),
       alignment: Alignment.center,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(NonSpace.xl),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.hourglass_empty, size: 32, color: p.ink4),
-          const SizedBox(height: 10),
-          Text('正在打开生成项目…', style: TextStyle(fontSize: 12, color: p.ink2)),
+          const SizedBox(height: NonSpace.md),
+          Text(
+            '正在打开生成项目…',
+            style: TextStyle(fontSize: NonType.body, color: p.ink2),
+          ),
         ],
       ),
     );
@@ -1595,35 +1734,39 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       key: const ValueKey('video-project-error'),
       decoration: BoxDecoration(
         color: p.panel2,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(NonRadius.md),
         border: Border.all(color: p.line),
       ),
       alignment: Alignment.center,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(NonSpace.xl),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.broken_image_outlined, size: 38, color: p.ink4),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             Text(
               '这个生成项目打不开',
               style: TextStyle(
-                fontSize: 13,
+                fontSize: NonType.bodyStrong,
                 fontWeight: FontWeight.w600,
                 color: p.ink2,
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: NonSpace.sm),
             Text(
               failure.message,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5),
+              style: TextStyle(
+                fontSize: NonType.caption,
+                color: p.ink3,
+                height: NonType.lineBody,
+              ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: NonSpace.sm,
+              runSpacing: NonSpace.sm,
               alignment: WrapAlignment.center,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
@@ -1633,9 +1776,14 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                   style: FilledButton.styleFrom(
                     minimumSize: const Size(0, 30),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: NonSpace.lg,
+                    ),
                   ),
-                  child: const Text('重新读取', style: TextStyle(fontSize: 12)),
+                  child: const Text(
+                    '重新读取',
+                    style: TextStyle(fontSize: NonType.body),
+                  ),
                 ),
                 TextButton(
                   key: const ValueKey('video-project-use-sample'),
@@ -1643,13 +1791,18 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                   style: TextButton.styleFrom(
                     minimumSize: const Size(0, 30),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: NonSpace.md,
+                    ),
                   ),
-                  child: const Text('用内置示例', style: TextStyle(fontSize: 12)),
+                  child: const Text(
+                    '用内置示例',
+                    style: TextStyle(fontSize: NonType.body),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             // Material 包一层：ExpansionTile 的 ListTile 直接在带底色的
             // DecoratedBox 里会触发 Flutter 的「ink 不可见」调试断言。
             Material(
@@ -1692,29 +1845,33 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       return Container(
         decoration: BoxDecoration(
           color: p.panel2,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(NonRadius.md),
           border: Border.all(color: p.line),
         ),
         alignment: Alignment.center,
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(NonSpace.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.movie_outlined, size: 38, color: p.ink4),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             Text(
               '还没有视频',
               style: TextStyle(
-                fontSize: 13,
+                fontSize: NonType.bodyStrong,
                 fontWeight: FontWeight.w600,
                 color: p.ink2,
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: NonSpace.sm),
             Text(
               problem.isEmpty ? '选一个例子，点播放就能看到代码动画' : problem,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5),
+              style: TextStyle(
+                fontSize: NonType.caption,
+                color: p.ink3,
+                height: NonType.lineBody,
+              ),
             ),
           ],
         ),
@@ -1762,7 +1919,7 @@ class _FpsDialogState extends State<_FpsDialog> {
   Widget build(BuildContext context) {
     final p = context.palette;
     return AlertDialog(
-      title: const Text('播放帧率', style: TextStyle(fontSize: 15)),
+      title: const Text('播放帧率', style: TextStyle(fontSize: NonType.subtitle)),
       content: SizedBox(
         width: 300,
         child: Column(
@@ -1773,10 +1930,13 @@ class _FpsDialogState extends State<_FpsDialog> {
               children: [
                 Text(
                   '$_value 帧/秒',
-                  style: TextStyle(fontSize: 12, color: p.ink2),
+                  style: TextStyle(fontSize: NonType.body, color: p.ink2),
                 ),
                 const Spacer(),
-                Text('1–30', style: TextStyle(fontSize: 10, color: p.ink4)),
+                Text(
+                  '1–30',
+                  style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+                ),
               ],
             ),
             Slider(
@@ -1792,7 +1952,7 @@ class _FpsDialogState extends State<_FpsDialog> {
             ),
             Text(
               '越高画面越连贯；改动只影响播放，不改脚本本身。',
-              style: TextStyle(fontSize: 10, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
             ),
           ],
         ),
@@ -1840,11 +2000,18 @@ class _ReviewSheet extends StatelessWidget {
       key: const ValueKey('video-review-sheet'),
       color: p.bgElevated,
       clipBehavior: Clip.antiAlias,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+      borderRadius: const BorderRadius.vertical(
+        top: Radius.circular(NonRadius.lg),
+      ),
       child: SafeArea(
         top: false,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+          padding: const EdgeInsets.fromLTRB(
+            NonSpace.lg,
+            NonSpace.lg,
+            NonSpace.lg,
+            NonSpace.lg,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1852,11 +2019,11 @@ class _ReviewSheet extends StatelessWidget {
               Row(
                 children: [
                   Icon(Icons.rule_outlined, size: 16, color: color),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: NonSpace.sm),
                   Text(
                     '规范对照',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: NonType.bodyStrong,
                       fontWeight: FontWeight.w700,
                       color: p.ink,
                     ),
@@ -1864,18 +2031,18 @@ class _ReviewSheet extends StatelessWidget {
                   const Spacer(),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
+                      horizontal: NonSpace.sm,
+                      vertical: NonSpace.xs,
                     ),
                     decoration: BoxDecoration(
                       color: color.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(NonRadius.lg),
                       border: Border.all(color: color.withValues(alpha: 0.5)),
                     ),
                     child: Text(
                       statusLabel,
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: NonType.caption,
                         fontWeight: FontWeight.w600,
                         color: color,
                       ),
@@ -1883,43 +2050,43 @@ class _ReviewSheet extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: NonSpace.sm),
               Text(
                 review?.summary ?? '还没有对照结果',
-                style: TextStyle(fontSize: 11, color: p.ink3),
+                style: TextStyle(fontSize: NonType.caption, color: p.ink3),
               ),
               if (!hasDocument) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: NonSpace.sm),
                 Text(
                   '选一个例子，点播放就能看到代码动画',
-                  style: TextStyle(fontSize: 11, color: p.ink4),
+                  style: TextStyle(fontSize: NonType.caption, color: p.ink4),
                 ),
               ],
               if (problems.isNotEmpty) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: NonSpace.md),
                 Text(
                   '需要修正',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: NonType.caption,
                     fontWeight: FontWeight.w700,
                     color: p.danger,
                   ),
                 ),
                 for (final problem in problems)
                   Padding(
-                    padding: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.only(top: NonSpace.sm),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Icon(Icons.error_outline, size: 13, color: p.danger),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: NonSpace.sm),
                         Expanded(
                           child: Text(
                             problem,
                             style: TextStyle(
-                              fontSize: 11,
+                              fontSize: NonType.caption,
                               color: p.ink2,
-                              height: 1.5,
+                              height: NonType.lineBody,
                             ),
                           ),
                         ),
@@ -1928,30 +2095,30 @@ class _ReviewSheet extends StatelessWidget {
                   ),
               ],
               if (notes.isNotEmpty) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: NonSpace.md),
                 Text(
                   '值得留意',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: NonType.caption,
                     fontWeight: FontWeight.w700,
                     color: p.warn,
                   ),
                 ),
                 for (final note in notes)
                   Padding(
-                    padding: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.only(top: NonSpace.sm),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Icon(Icons.info_outline, size: 13, color: p.warn),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: NonSpace.sm),
                         Expanded(
                           child: Text(
                             note,
                             style: TextStyle(
-                              fontSize: 11,
+                              fontSize: NonType.caption,
                               color: p.ink2,
-                              height: 1.5,
+                              height: NonType.lineBody,
                             ),
                           ),
                         ),
@@ -1960,18 +2127,18 @@ class _ReviewSheet extends StatelessWidget {
                   ),
               ],
               if (review != null && review.technical.isNotEmpty) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: NonSpace.sm),
                 _TechnicalDetails(text: review.technical.join('\n')),
               ],
-              const SizedBox(height: 12),
+              const SizedBox(height: NonSpace.md),
               Row(
                 children: [
                   Icon(Icons.play_circle_outline, size: 12, color: p.ink4),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: NonSpace.sm),
                   Expanded(
                     child: Text(
                       '代码动画直接播放，暂不导出成片',
-                      style: TextStyle(fontSize: 10, color: p.ink4),
+                      style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                     ),
                   ),
                   TextButton.icon(
@@ -1979,10 +2146,15 @@ class _ReviewSheet extends StatelessWidget {
                     style: TextButton.styleFrom(
                       minimumSize: const Size(0, 28),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: NonSpace.sm,
+                      ),
                     ),
                     icon: const Icon(Icons.edit_note_outlined, size: 15),
-                    label: const Text('编辑脚本', style: TextStyle(fontSize: 11)),
+                    label: const Text(
+                      '编辑脚本',
+                      style: TextStyle(fontSize: NonType.caption),
+                    ),
                   ),
                 ],
               ),
@@ -2007,12 +2179,12 @@ class _TechnicalDetails extends StatelessWidget {
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
-        childrenPadding: const EdgeInsets.only(bottom: 8),
+        childrenPadding: const EdgeInsets.only(bottom: NonSpace.sm),
         dense: true,
         title: Text(
           '技术详情',
           style: TextStyle(
-            fontSize: 11,
+            fontSize: NonType.caption,
             color: p.ink4,
             fontWeight: FontWeight.w600,
           ),
@@ -2020,18 +2192,18 @@ class _TechnicalDetails extends StatelessWidget {
         children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(NonSpace.sm),
             decoration: BoxDecoration(
               color: p.panel2,
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(NonRadius.sm),
             ),
             child: SelectableText(
               text,
               style: TextStyle(
-                fontSize: 10,
+                fontSize: NonType.micro,
                 fontFamily: 'monospace',
                 color: p.ink4,
-                height: 1.4,
+                height: NonType.lineCaption,
               ),
             ),
           ),
@@ -2077,13 +2249,13 @@ class _ScriptEditorDialogState extends State<_ScriptEditorDialog> {
   Widget build(BuildContext context) {
     final p = context.palette;
     final style = TextStyle(
-      fontSize: 11,
+      fontSize: NonType.caption,
       fontFamily: 'monospace',
       color: p.ink2,
-      height: 1.5,
+      height: NonType.lineBody,
     );
     return AlertDialog(
-      title: const Text('编辑脚本', style: TextStyle(fontSize: 15)),
+      title: const Text('编辑脚本', style: TextStyle(fontSize: NonType.subtitle)),
       content: SizedBox(
         width: 680,
         height: 460,
@@ -2097,7 +2269,7 @@ class _ScriptEditorDialogState extends State<_ScriptEditorDialog> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Expanded(child: timelineField),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: NonSpace.md),
                   Expanded(child: specField),
                 ],
               );
@@ -2105,7 +2277,7 @@ class _ScriptEditorDialogState extends State<_ScriptEditorDialog> {
             return Column(
               children: [
                 Expanded(child: timelineField),
-                const SizedBox(height: 10),
+                const SizedBox(height: NonSpace.md),
                 Expanded(child: specField),
               ],
             );
@@ -2140,12 +2312,12 @@ class _ScriptEditorDialogState extends State<_ScriptEditorDialog> {
         Text(
           label,
           style: TextStyle(
-            fontSize: 11,
+            fontSize: NonType.caption,
             fontWeight: FontWeight.w600,
             color: p.ink3,
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: NonSpace.sm),
         Expanded(
           child: TextField(
             controller: controller,
@@ -2156,9 +2328,9 @@ class _ScriptEditorDialogState extends State<_ScriptEditorDialog> {
             decoration: InputDecoration(
               filled: true,
               fillColor: p.panel2,
-              contentPadding: const EdgeInsets.all(10),
+              contentPadding: const EdgeInsets.all(NonSpace.md),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(NonRadius.md),
               ),
             ),
           ),
@@ -2206,11 +2378,18 @@ class _ClipReviewSheet extends StatelessWidget {
       key: const ValueKey('video-clip-review-sheet'),
       color: p.bgElevated,
       clipBehavior: Clip.antiAlias,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+      borderRadius: const BorderRadius.vertical(
+        top: Radius.circular(NonRadius.lg),
+      ),
       child: SafeArea(
         top: false,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+          padding: const EdgeInsets.fromLTRB(
+            NonSpace.lg,
+            NonSpace.lg,
+            NonSpace.lg,
+            NonSpace.lg,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2218,11 +2397,11 @@ class _ClipReviewSheet extends StatelessWidget {
               Row(
                 children: [
                   Icon(Icons.rule_outlined, size: 16, color: p.accent),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: NonSpace.sm),
                   Text(
                     '规格对照',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: NonType.bodyStrong,
                       fontWeight: FontWeight.w700,
                       color: p.ink,
                     ),
@@ -2230,12 +2409,12 @@ class _ClipReviewSheet extends StatelessWidget {
                   const Spacer(),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
+                      horizontal: NonSpace.sm,
+                      vertical: NonSpace.xs,
                     ),
                     decoration: BoxDecoration(
                       color: p.accent.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(NonRadius.lg),
                       border: Border.all(
                         color: p.accent.withValues(alpha: 0.5),
                       ),
@@ -2243,7 +2422,7 @@ class _ClipReviewSheet extends StatelessWidget {
                     child: Text(
                       '只读',
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: NonType.caption,
                         fontWeight: FontWeight.w600,
                         color: p.accent,
                       ),
@@ -2251,79 +2430,90 @@ class _ClipReviewSheet extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: NonSpace.md),
               Text(
                 clip.title,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: NonType.bodyStrong,
                   fontWeight: FontWeight.w700,
                   color: p.ink,
                 ),
               ),
               if (clip.subtitle.isNotEmpty) ...[
-                const SizedBox(height: 4),
+                const SizedBox(height: NonSpace.xs),
                 Text(
                   clip.subtitle,
-                  style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5),
+                  style: TextStyle(
+                    fontSize: NonType.caption,
+                    color: p.ink3,
+                    height: NonType.lineBody,
+                  ),
                 ),
               ],
               if (clip.tags.isNotEmpty) ...[
-                const SizedBox(height: 10),
+                const SizedBox(height: NonSpace.md),
                 Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
+                  spacing: NonSpace.sm,
+                  runSpacing: NonSpace.sm,
                   children: [
                     for (final tag in clip.tags)
                       Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
+                          horizontal: NonSpace.sm,
+                          vertical: NonSpace.xs,
                         ),
                         decoration: BoxDecoration(
                           color: p.panel2,
-                          borderRadius: BorderRadius.circular(20),
+                          borderRadius: BorderRadius.circular(NonRadius.lg),
                           border: Border.all(color: p.line),
                         ),
                         child: Text(
                           '#$tag',
-                          style: TextStyle(fontSize: 10, color: p.ink3),
+                          style: TextStyle(
+                            fontSize: NonType.micro,
+                            color: p.ink3,
+                          ),
                         ),
                       ),
                   ],
                 ),
               ],
-              const SizedBox(height: 12),
+              const SizedBox(height: NonSpace.md),
               Row(
                 children: [
                   Icon(Icons.schedule, size: 13, color: p.ink4),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: NonSpace.sm),
                   Text(
                     '时长 ${formatVideoTime(clip.duration)}',
-                    style: TextStyle(fontSize: 11, color: p.ink3),
+                    style: TextStyle(fontSize: NonType.caption, color: p.ink3),
                   ),
                   const SizedBox(width: 14),
                   Icon(Icons.brush_outlined, size: 13, color: p.ink4),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: NonSpace.sm),
                   Text(
                     _clipStyleLabel(clip.style),
-                    style: TextStyle(fontSize: 11, color: p.ink3),
+                    style: TextStyle(fontSize: NonType.caption, color: p.ink3),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: NonSpace.md),
               Text(
                 '这支短片是成品合成，画面与节奏由短片自身决定；这里只做只读对照。',
-                style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5),
+                style: TextStyle(
+                  fontSize: NonType.caption,
+                  color: p.ink3,
+                  height: NonType.lineBody,
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: NonSpace.md),
               Row(
                 children: [
                   Icon(Icons.play_circle_outline, size: 12, color: p.ink4),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: NonSpace.sm),
                   Expanded(
                     child: Text(
                       'HTML/CSS/JS 动效合成，应用内实时播放，暂不导出成片',
-                      style: TextStyle(fontSize: 10, color: p.ink4),
+                      style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                     ),
                   ),
                 ],

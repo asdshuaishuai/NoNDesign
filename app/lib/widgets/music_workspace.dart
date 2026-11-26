@@ -473,7 +473,12 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
                 children: <Widget>[
                   Expanded(child: body),
                   if (layout.bottomBar)
-                    MusicTransportBar(snapshot: _snapshot, playback: _playback),
+                    MusicTransportBar(
+                      snapshot: _snapshot,
+                      playback: _playback,
+                      // 运输条高度来自音乐工作台规格（WorkbenchLayout）。
+                      height: layout.bottomBarHeight,
+                    ),
                 ],
               );
             },
@@ -488,7 +493,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     return Container(
       key: const ValueKey('music-header'),
       height: 46,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
       decoration: BoxDecoration(
         color: p.bgElevated,
         border: Border(bottom: BorderSide(color: p.line)),
@@ -496,28 +501,31 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
       child: Row(
         children: <Widget>[
           Icon(Icons.library_music_outlined, size: 16, color: p.ink3),
-          const SizedBox(width: 8),
+          const SizedBox(width: NonSpace.sm),
           Text(
             '音乐工作台',
             style: TextStyle(
-              fontSize: 13,
+              fontSize: NonType.bodyStrong,
               fontWeight: FontWeight.w600,
               color: p.ink,
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: NonSpace.md),
           Flexible(
             child: Text(
               title.isEmpty ? (_name ?? '还没有打开的乐谱') : '$title · $_name',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: p.ink4),
+              style: TextStyle(fontSize: NonType.caption, color: p.ink4),
             ),
           ),
           const Spacer(),
           if (_snapshot?.validation.verified != true && _snapshot != null)
-            Text('校验未通过', style: TextStyle(fontSize: 10, color: p.warn)),
-          const SizedBox(width: 8),
+            Text(
+              '校验未通过',
+              style: TextStyle(fontSize: NonType.micro, color: p.warn),
+            ),
+          const SizedBox(width: NonSpace.sm),
           IconButton(
             key: const ValueKey('music-refresh'),
             tooltip: '刷新音乐项目',
@@ -534,31 +542,38 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   Widget _centerPane(BuildContext context, NonPalette p) {
     if (_loading && _snapshot == null) {
       return Center(
-        child: Text('正在读取音乐项目…', style: TextStyle(fontSize: 12, color: p.ink3)),
+        child: Text(
+          '正在读取音乐项目…',
+          style: TextStyle(fontSize: NonType.body, color: p.ink3),
+        ),
       );
     }
     final failure = _failure;
     if (failure != null) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(NonSpace.xl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               Icon(Icons.music_off_outlined, size: 28, color: p.warn),
-              const SizedBox(height: 8),
+              const SizedBox(height: NonSpace.sm),
               Text(
                 musicProjectFailureMessage(failure),
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, height: 1.45, color: p.ink2),
+                style: TextStyle(
+                  fontSize: NonType.bodyStrong,
+                  height: NonType.lineBody,
+                  color: p.ink2,
+                ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: NonSpace.sm),
               Text(
                 failure.detail.isEmpty
                     ? failure.code
                     : '${failure.code}: ${failure.detail}',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 10, color: p.ink4),
+                style: TextStyle(fontSize: NonType.micro, color: p.ink4),
               ),
             ],
           ),
@@ -569,25 +584,29 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     if (snapshot == null) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(NonSpace.xl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               Icon(Icons.piano_outlined, size: 30, color: p.ink4),
-              const SizedBox(height: 10),
+              const SizedBox(height: NonSpace.md),
               Text(
                 '还没有音乐项目',
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: NonType.bodyStrong,
                   fontWeight: FontWeight.w600,
                   color: p.ink2,
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: NonSpace.sm),
               Text(
                 '左侧会列出本机音乐项目；打开项目后可在右侧检查器做最小编辑。',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
+                style: TextStyle(
+                  fontSize: NonType.caption,
+                  height: NonType.lineBody,
+                  color: p.ink4,
+                ),
               ),
             ],
           ),
@@ -597,7 +616,10 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     final MusicPlaybackController? playback = _playback;
     final Widget preview = _scorePreview(snapshot);
     if (playback == null) {
-      return Padding(padding: const EdgeInsets.all(12), child: preview);
+      return Padding(
+        padding: const EdgeInsets.all(NonSpace.md),
+        child: preview,
+      );
     }
     // 谱面优先：谱面占大头，演奏页在下方给一块能看能点的画位；运输条在底部
     // 驱动同一份播放控制器（播放头 / 错误都经它回调刷新）。
@@ -606,14 +628,24 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
         Expanded(
           flex: 3,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+            padding: const EdgeInsets.fromLTRB(
+              NonSpace.md,
+              NonSpace.md,
+              NonSpace.md,
+              NonSpace.sm,
+            ),
             child: preview,
           ),
         ),
         Expanded(
           flex: 2,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            padding: const EdgeInsets.fromLTRB(
+              NonSpace.md,
+              0,
+              NonSpace.md,
+              NonSpace.md,
+            ),
             child: MusicPlaybackSurface(playback: playback),
           ),
         ),
@@ -629,8 +661,10 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        SizedBox(
-          height: 34,
+        // 视图切换条不再写死 34 高：按内容（图标+文字）取自然高度，
+        // 窄屏/手机字号放大也不会把切换条挤爆。
+        Padding(
+          padding: const EdgeInsets.only(bottom: NonSpace.xs),
           child: Row(
             key: const ValueKey('music-view-toggle'),
             children: <Widget>[
@@ -644,7 +678,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
                   setState(() => _staffView = true);
                 },
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: NonSpace.sm),
               _MusicViewTab(
                 key: const ValueKey('music-view-roll'),
                 label: '钢琴卷帘',
@@ -666,7 +700,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.right,
-                  style: TextStyle(fontSize: 10, color: p.ink4),
+                  style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                 ),
               ),
             ],
@@ -716,12 +750,15 @@ class _MusicViewTab extends StatelessWidget {
     final p = context.palette;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(NonRadius.sm),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        padding: const EdgeInsets.symmetric(
+          horizontal: NonSpace.sm,
+          vertical: NonSpace.xs,
+        ),
         decoration: BoxDecoration(
           color: selected ? p.accentSoft : null,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(NonRadius.sm),
           border: Border.all(
             color: selected ? p.accent.withValues(alpha: 0.5) : p.line,
           ),
@@ -730,11 +767,11 @@ class _MusicViewTab extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Icon(icon, size: 12, color: selected ? p.accent : p.ink4),
-            const SizedBox(width: 5),
+            const SizedBox(width: NonSpace.xs),
             Text(
               label,
               style: TextStyle(
-                fontSize: 11,
+                fontSize: NonType.caption,
                 color: selected ? p.accent : p.ink3,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
               ),

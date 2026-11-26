@@ -484,13 +484,13 @@ class _VideoClipSurfaceState extends State<VideoClipSurface> {
       child: AspectRatio(
         aspectRatio: 16 / 9,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(NonRadius.md),
           child: Container(
             key: const ValueKey('video-clip-surface'),
             decoration: BoxDecoration(
               color: const Color(0xFF0B0D12),
               border: Border.all(color: context.palette.line),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(NonRadius.md),
             ),
             // 不要再加 clipBehavior：Container(decoration+clip) 生成任意路径
             // ClipPath，WebKitGTK 的原生 WebView Overlay 会被隐藏（真机实测
@@ -505,30 +505,33 @@ class _VideoClipSurfaceState extends State<VideoClipSurface> {
   Widget _stage(BuildContext context) {
     final playback = _playback;
     if (playback == null) return _unsupported(context);
+    return _VideoClipStage(state: this, playback: playback);
+  }
 
-    return ListenableBuilder(
-      listenable: playback,
-      builder: (context, _) {
-        final error = playback.loadError;
-        if (error.isNotEmpty) return _errorPane(context, error);
+  /// 舞台内容：只在就绪度/错误面变化时重建；页面 30Hz 的 state 消息不会
+  /// 重挂 WebView 宿主（运输条自己读同一份播放源刷新读数）。
+  Widget _stageContent(BuildContext context) {
+    final playback = _playback!;
+    final error = playback.loadError;
+    if (error.isNotEmpty) return _errorPane(context, error);
 
-        final owned = _owned;
-        if (owned == null) {
-          // 注入的播放源（测试/外托管）：只占住 16:9 的画位，不构造 WebView。
-          return const ColoredBox(
-            key: ValueKey('video-clip-stage'),
-            color: Color(0xFF0B0D12),
-          );
-        }
+    final owned = _owned;
+    if (owned == null) {
+      // 注入的播放源（测试/外托管）：只占住 16:9 的画位，不构造 WebView。
+      return const ColoredBox(
+        key: ValueKey('video-clip-stage'),
+        color: Color(0xFF0B0D12),
+      );
+    }
 
-        final controller = owned.controller;
-        if (!playback.ready || controller == null) return _loading(context);
-        return Container(
-          key: const ValueKey('video-clip-stage'),
-          color: const Color(0xFF0B0D12),
-          child: WebViewWidget(controller: controller),
-        );
-      },
+    final controller = owned.controller;
+    if (!playback.ready || controller == null) return _loading(context);
+    return Container(
+      key: const ValueKey('video-clip-stage'),
+      color: const Color(0xFF0B0D12),
+      // 外层已有 ClipRRect（RRect 可表示）；这里只加一层重绘边界，
+      // 父级运输条/工作台刷新不重绘原生 WebView 覆盖层。
+      child: RepaintBoundary(child: WebViewWidget(controller: controller)),
     );
   }
 
@@ -545,8 +548,11 @@ class _VideoClipSurfaceState extends State<VideoClipSurface> {
             height: 20,
             child: CircularProgressIndicator(strokeWidth: 2, color: p.accent),
           ),
-          const SizedBox(height: 10),
-          Text('动效合成准备中…', style: TextStyle(fontSize: 11, color: p.ink3)),
+          const SizedBox(height: NonSpace.md),
+          Text(
+            '动效合成准备中…',
+            style: TextStyle(fontSize: NonType.caption, color: p.ink3),
+          ),
         ],
       ),
     );
@@ -557,28 +563,35 @@ class _VideoClipSurfaceState extends State<VideoClipSurface> {
     return Container(
       key: const ValueKey('video-clip-error'),
       alignment: Alignment.center,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(NonSpace.xl),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.movie_outlined, size: 34, color: p.ink4),
-          const SizedBox(height: 10),
+          const SizedBox(height: NonSpace.md),
           Text(
             message,
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: p.ink2, height: 1.5),
+            style: TextStyle(
+              fontSize: NonType.body,
+              color: p.ink2,
+              height: NonType.lineBody,
+            ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: NonSpace.md),
           TextButton.icon(
             key: const ValueKey('video-clip-retry'),
             onPressed: _retry,
             style: TextButton.styleFrom(
               minimumSize: const Size(0, 30),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
             ),
             icon: const Icon(Icons.refresh, size: 15),
-            label: const Text('重试', style: TextStyle(fontSize: 11)),
+            label: const Text(
+              '重试',
+              style: TextStyle(fontSize: NonType.caption),
+            ),
           ),
         ],
       ),
@@ -590,26 +603,30 @@ class _VideoClipSurfaceState extends State<VideoClipSurface> {
     return Container(
       key: const ValueKey('video-clip-unsupported'),
       alignment: Alignment.center,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(NonSpace.xl),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.movie_outlined, size: 34, color: p.ink4),
-          const SizedBox(height: 10),
+          const SizedBox(height: NonSpace.md),
           Text(
             '这台设备不能内嵌播放动效合成',
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 12,
+              fontSize: NonType.body,
               fontWeight: FontWeight.w600,
               color: p.ink2,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: NonSpace.sm),
           Text(
             '用电脑上的连接桌面查看',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 11, color: p.ink4, height: 1.5),
+            style: TextStyle(
+              fontSize: NonType.caption,
+              color: p.ink4,
+              height: NonType.lineBody,
+            ),
           ),
         ],
       ),
@@ -635,10 +652,15 @@ class VideoClipTransport extends StatelessWidget {
       padding: padding ?? EdgeInsets.zero,
       child: Container(
         key: const ValueKey('video-clip-transport'),
-        padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
+        padding: const EdgeInsets.fromLTRB(
+          NonSpace.sm,
+          NonSpace.xxs,
+          NonSpace.sm,
+          NonSpace.sm,
+        ),
         decoration: BoxDecoration(
           color: p.panel2,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(NonRadius.md),
           border: Border.all(color: p.line),
         ),
         child: ListenableBuilder(
@@ -695,7 +717,7 @@ class VideoClipTransport extends StatelessWidget {
                         minHeight: 32,
                       ),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: NonSpace.xs),
                     Flexible(
                       child: Text(
                         '${formatVideoTime(playback.t)} / ${formatVideoTime(playback.duration)}',
@@ -703,18 +725,18 @@ class VideoClipTransport extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: NonType.micro,
                           color: p.ink3,
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: NonSpace.sm),
                     Text(
                       '帧 ${playback.frame}',
                       key: const ValueKey('video-clip-frame'),
                       maxLines: 1,
-                      style: TextStyle(fontSize: 10, color: p.ink3),
+                      style: TextStyle(fontSize: NonType.micro, color: p.ink3),
                     ),
                     IconButton(
                       key: const ValueKey('video-clip-loop'),
@@ -741,4 +763,61 @@ class VideoClipTransport extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 动效合成舞台层：只在就绪度/错误面变化时重建。
+///
+/// 页面每帧回传 `state` 只驱动 30Hz 节流的读数刷新；舞台子树（含 WebView
+/// 宿主）不参与这些重建，重绘由 [RepaintBoundary] 隔开。
+class _VideoClipStage extends StatefulWidget {
+  const _VideoClipStage({required this.state, required this.playback});
+
+  final _VideoClipSurfaceState state;
+  final VideoClipPlayback playback;
+
+  @override
+  State<_VideoClipStage> createState() => _VideoClipStageState();
+}
+
+class _VideoClipStageState extends State<_VideoClipStage> {
+  late bool _ready;
+  late String _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _ready = widget.playback.ready;
+    _error = widget.playback.loadError;
+    widget.playback.addListener(_onChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoClipStage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.playback, widget.playback)) return;
+    oldWidget.playback.removeListener(_onChanged);
+    widget.playback.addListener(_onChanged);
+    _ready = widget.playback.ready;
+    _error = widget.playback.loadError;
+  }
+
+  void _onChanged() {
+    if (!mounted) return;
+    final bool ready = widget.playback.ready;
+    final String error = widget.playback.loadError;
+    if (ready == _ready && error == _error) return;
+    setState(() {
+      _ready = ready;
+      _error = error;
+    });
+  }
+
+  @override
+  void dispose() {
+    widget.playback.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.state._stageContent(context);
 }

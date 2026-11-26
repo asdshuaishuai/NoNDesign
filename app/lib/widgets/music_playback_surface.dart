@@ -606,7 +606,7 @@ class _MusicPlaybackSurfaceState extends State<MusicPlaybackSurface> {
       key: const ValueKey('music-playback-surface'),
       decoration: BoxDecoration(
         color: p.panel2,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(NonRadius.md),
         border: Border.all(color: p.line),
       ),
       // WebKitGTK/WebView2 的原生 Overlay 只能表示矩形/RRect/椭圆裁剪；
@@ -614,17 +614,23 @@ class _MusicPlaybackSurfaceState extends State<MusicPlaybackSurface> {
       // （Linux WebKitGTK）会把 WebView 直接隐藏（2026-11-26 集成冒烟实测）。
       // 用 ClipRRect（RRect）保留圆角，外框 Container 不裁剪。
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: ListenableBuilder(
-          listenable: widget.playback,
-          builder: (BuildContext context, Widget? _) => Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              _header(context, p),
-              Divider(height: 1, color: p.line),
-              Expanded(child: _stage(context)),
-            ],
-          ),
+        borderRadius: BorderRadius.circular(NonRadius.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            // 头部跟随状态文案重建；播放头 4Hz 的 notify 不会重挂 WebView。
+            ListenableBuilder(
+              listenable: widget.playback,
+              builder: (BuildContext context, Widget? _) => _header(context, p),
+            ),
+            Divider(height: 1, color: p.line),
+            Expanded(
+              child: _MusicPlaybackStage(
+                state: this,
+                playback: widget.playback,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -645,33 +651,38 @@ class _MusicPlaybackSurfaceState extends State<MusicPlaybackSurface> {
         ? (playback.playing ? p.accent : p.ink3)
         : p.ink4;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
+      padding: const EdgeInsets.fromLTRB(
+        NonSpace.md,
+        NonSpace.sm,
+        NonSpace.md,
+        NonSpace.sm,
+      ),
       child: Row(
         children: <Widget>[
           Icon(Icons.music_note_outlined, size: 13, color: p.ink4),
-          const SizedBox(width: 6),
+          const SizedBox(width: NonSpace.sm),
           Text(
             '演奏页',
             style: TextStyle(
-              fontSize: 12,
+              fontSize: NonType.body,
               fontWeight: FontWeight.w600,
               color: p.ink,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: NonSpace.sm),
           Flexible(
             child: Text(
               '只读播放，不影响乐谱内容',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
             ),
           ),
           const Spacer(),
           Text(
             status,
             key: const ValueKey('music-playback-status'),
-            style: TextStyle(fontSize: 10, color: statusColor),
+            style: TextStyle(fontSize: NonType.micro, color: statusColor),
           ),
         ],
       ),
@@ -695,7 +706,8 @@ class _MusicPlaybackSurfaceState extends State<MusicPlaybackSurface> {
     return Container(
       key: const ValueKey('music-playback-stage'),
       color: const Color(0xFF0B0D12),
-      child: WebViewWidget(controller: controller),
+      // WebView 宿主单独一层重绘边界：工作台运输条/谱面刷新不重绘原生覆盖层。
+      child: RepaintBoundary(child: WebViewWidget(controller: controller)),
     );
   }
 
@@ -711,8 +723,11 @@ class _MusicPlaybackSurfaceState extends State<MusicPlaybackSurface> {
             height: 20,
             child: CircularProgressIndicator(strokeWidth: 2, color: p.accent),
           ),
-          const SizedBox(height: 10),
-          Text('演奏页准备中…', style: TextStyle(fontSize: 11, color: p.ink3)),
+          const SizedBox(height: NonSpace.md),
+          Text(
+            '演奏页准备中…',
+            style: TextStyle(fontSize: NonType.caption, color: p.ink3),
+          ),
         ],
       ),
     );
@@ -727,29 +742,33 @@ class _MusicPlaybackSurfaceState extends State<MusicPlaybackSurface> {
     return Center(
       key: const ValueKey('music-playback-error'),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(NonSpace.lg),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Icon(Icons.music_off_outlined, size: 30, color: p.ink4),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             Text(
               message,
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 12.5,
+                fontSize: NonType.body,
                 fontWeight: FontWeight.w600,
                 color: p.ink2,
-                height: 1.5,
+                height: NonType.lineBody,
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: NonSpace.sm),
             Text(
               '乐谱和播放计划都还在，可以继续看谱面；修好后重试。',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: p.ink4, height: 1.5),
+              style: TextStyle(
+                fontSize: NonType.caption,
+                color: p.ink4,
+                height: NonType.lineBody,
+              ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             if (playback is MusicWebPlayback)
               TextButton.icon(
                 key: const ValueKey('music-playback-retry'),
@@ -757,10 +776,13 @@ class _MusicPlaybackSurfaceState extends State<MusicPlaybackSurface> {
                 style: TextButton.styleFrom(
                   minimumSize: const Size(0, 30),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
                 ),
                 icon: const Icon(Icons.refresh, size: 15),
-                label: const Text('重试', style: TextStyle(fontSize: 11)),
+                label: const Text(
+                  '重试',
+                  style: TextStyle(fontSize: NonType.caption),
+                ),
               ),
             if (playback.technicalDetail.isNotEmpty)
               Theme(
@@ -769,12 +791,22 @@ class _MusicPlaybackSurfaceState extends State<MusicPlaybackSurface> {
                 child: Material(
                   type: MaterialType.transparency,
                   child: ExpansionTile(
-                    tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-                    childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    tilePadding: const EdgeInsets.symmetric(
+                      horizontal: NonSpace.md,
+                    ),
+                    childrenPadding: const EdgeInsets.fromLTRB(
+                      NonSpace.md,
+                      0,
+                      NonSpace.md,
+                      NonSpace.sm,
+                    ),
                     dense: true,
                     title: Text(
                       '技术详情',
-                      style: TextStyle(fontSize: 11, color: p.ink4),
+                      style: TextStyle(
+                        fontSize: NonType.caption,
+                        color: p.ink4,
+                      ),
                     ),
                     iconColor: p.ink4,
                     collapsedIconColor: p.ink4,
@@ -784,9 +816,9 @@ class _MusicPlaybackSurfaceState extends State<MusicPlaybackSurface> {
                         child: SelectableText(
                           playback.technicalDetail,
                           style: TextStyle(
-                            fontSize: 10.5,
+                            fontSize: NonType.micro,
                             color: p.ink4,
-                            height: 1.4,
+                            height: NonType.lineCaption,
                           ),
                         ),
                       ),
@@ -799,4 +831,70 @@ class _MusicPlaybackSurfaceState extends State<MusicPlaybackSurface> {
       ),
     );
   }
+}
+
+/// 舞台层：只在「就绪度 / 错误面 / 控制器」变化时重建。
+///
+/// 播放头 4Hz 与桥消息的高频 notify 只刷头部状态文案与运输条；WebView 舞台
+/// 子树不参与每帧重建，重绘也由内部的 RepaintBoundary 隔开。
+class _MusicPlaybackStage extends StatefulWidget {
+  const _MusicPlaybackStage({required this.state, required this.playback});
+
+  final _MusicPlaybackSurfaceState state;
+  final MusicPlaybackController playback;
+
+  @override
+  State<_MusicPlaybackStage> createState() => _MusicPlaybackStageState();
+}
+
+class _MusicPlaybackStageState extends State<_MusicPlaybackStage> {
+  late bool _ready;
+  late String _error;
+  late bool _hasController;
+
+  @override
+  void initState() {
+    super.initState();
+    _capture();
+    widget.playback.addListener(_onChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _MusicPlaybackStage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.playback, widget.playback)) return;
+    oldWidget.playback.removeListener(_onChanged);
+    widget.playback.addListener(_onChanged);
+    _capture();
+  }
+
+  void _capture() {
+    final MusicPlaybackController playback = widget.playback;
+    _ready = playback.ready;
+    _error = playback.loadError;
+    _hasController =
+        playback is MusicWebPlayback && playback.controller != null;
+  }
+
+  void _onChanged() {
+    if (!mounted) return;
+    final MusicPlaybackController playback = widget.playback;
+    final bool ready = playback.ready;
+    final String error = playback.loadError;
+    final bool hasController =
+        playback is MusicWebPlayback && playback.controller != null;
+    if (ready == _ready && error == _error && hasController == _hasController) {
+      return;
+    }
+    setState(_capture);
+  }
+
+  @override
+  void dispose() {
+    widget.playback.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.state._stage(context);
 }

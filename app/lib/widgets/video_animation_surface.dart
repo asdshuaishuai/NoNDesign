@@ -315,7 +315,7 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
       key: const ValueKey('video-animation-surface'),
       decoration: BoxDecoration(
         color: p.panel2,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(NonRadius.md),
         border: Border.all(color: p.line),
       ),
       clipBehavior: Clip.antiAlias,
@@ -323,7 +323,7 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
         children: [
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(NonSpace.md),
               child: _framePane(context),
             ),
           ),
@@ -382,16 +382,20 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
     final p = context.palette;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(NonSpace.lg),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.image_not_supported_outlined, size: 22, color: p.ink4),
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             Text(
               frameProblemMessage,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: p.ink3, height: 1.5),
+              style: TextStyle(
+                fontSize: NonType.caption,
+                color: p.ink3,
+                height: NonType.lineBody,
+              ),
             ),
           ],
         ),
@@ -402,7 +406,12 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
   Widget _controls(BuildContext context) {
     final p = context.palette;
     return Container(
-      padding: const EdgeInsets.fromLTRB(6, 2, 10, 4),
+      padding: const EdgeInsets.fromLTRB(
+        NonSpace.sm,
+        NonSpace.xxs,
+        NonSpace.md,
+        NonSpace.xs,
+      ),
       decoration: BoxDecoration(
         border: Border(top: BorderSide(color: p.line)),
       ),
@@ -436,12 +445,12 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
                 'frame $_frameNumber/$_totalFrames',
                 key: const ValueKey('video-animation-frame'),
                 style: TextStyle(
-                  fontSize: 10,
+                  fontSize: NonType.micro,
                   fontFamily: 'monospace',
                   color: p.ink4,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: NonSpace.md),
               Flexible(
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
@@ -450,7 +459,7 @@ class _VideoAnimationSurfaceState extends State<VideoAnimationSurface> {
                     '${formatVideoTime(_t)} / ${formatVideoTime(_duration)}',
                     key: const ValueKey('video-animation-time'),
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: NonType.micro,
                       fontFamily: 'monospace',
                       color: p.ink3,
                     ),

@@ -69,6 +69,78 @@ List<VideoShotItem> videoShotsFromTimeline(Map<String, dynamic>? timeline) {
   return shots;
 }
 
+/// 面板头统一几何（视频导演台三栏；3D 视频项目列表/检查器沿用同一套规格）。
+///
+/// 2026-11-26 工作台内部整理：把「随机字号 + 随机内边距」的面板头收敛为一套
+/// 固定层级——高度 34、水平内边距 NonSpace.md、标题 NonType.bodyStrong（w600）、
+/// 右侧计数/状态 NonType.micro。避免同层面板头在不同工作台里高低/字号不一。
+abstract final class VideoPanelMetrics {
+  /// 小面板头高度（46px 内容工具条之下统一 34）。
+  static const double headerHeight = 34;
+
+  /// 面板列表行高（带 itemExtent 的列表不再逐帧测量子项）。
+  static const double listRowExtent = 34;
+}
+
+/// 面板标题头（左图标 + 标题 + 可选计数/尾部动作）。
+///
+/// 静态标题可直接 `const VideoPanelHeader(...)` 构造，头部子树不进每帧重建。
+class VideoPanelHeader extends StatelessWidget {
+  const VideoPanelHeader({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.meta,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+
+  /// 右侧次要读数（计数/状态），统一 micro 字阶。
+  final String? meta;
+
+  /// 右侧动作（刷新/新建等），由调用方给出，不在此处内联业务逻辑。
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final NonPalette p = context.palette;
+    return SizedBox(
+      height: VideoPanelMetrics.headerHeight,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
+        child: Row(
+          children: <Widget>[
+            Icon(icon, size: NonType.body, color: p.ink4),
+            const SizedBox(width: NonSpace.xs),
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: NonType.bodyStrong,
+                  fontWeight: FontWeight.w600,
+                  color: p.ink,
+                ),
+              ),
+            ),
+            if (meta != null) ...<Widget>[
+              const SizedBox(width: NonSpace.xs),
+              Text(
+                meta!,
+                style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+              ),
+            ],
+            ?trailing,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// 左侧剧本/镜头树（视频专属；不复用设计左栏）。
 class VideoScriptTree extends StatelessWidget {
   const VideoScriptTree({
@@ -91,27 +163,10 @@ class VideoScriptTree extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 10, 8),
-            child: Row(
-              children: <Widget>[
-                Icon(Icons.reorder_outlined, size: 13, color: p.ink4),
-                const SizedBox(width: 6),
-                Text(
-                  '剧本 / 镜头',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: p.ink,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '${shots.length}',
-                  style: TextStyle(fontSize: 10, color: p.ink4),
-                ),
-              ],
-            ),
+          VideoPanelHeader(
+            icon: Icons.reorder_outlined,
+            title: '剧本 / 镜头',
+            meta: '${shots.length}',
           ),
           Divider(height: 1, color: p.line),
           Expanded(
@@ -119,45 +174,46 @@ class VideoScriptTree extends StatelessWidget {
                 ? Center(
                     child: Text(
                       '还没有镜头',
-                      style: TextStyle(fontSize: 11, color: p.ink4),
+                      style: TextStyle(
+                        fontSize: NonType.caption,
+                        color: p.ink4,
+                      ),
                     ),
                   )
                 : ListView.builder(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 6,
-                      horizontal: 6,
-                    ),
+                    padding: const EdgeInsets.symmetric(vertical: NonSpace.xs),
+                    itemExtent: VideoPanelMetrics.listRowExtent,
                     itemCount: shots.length,
                     itemBuilder: (context, index) {
                       final shot = shots[index];
                       final active = shot.index == selectedIndex;
                       return InkWell(
                         key: ValueKey('video-shot-${shot.index}'),
-                        borderRadius: BorderRadius.circular(7),
+                        borderRadius: BorderRadius.circular(NonRadius.md),
                         onTap: () => onSelect(shot),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 7,
+                            horizontal: NonSpace.sm,
+                            vertical: NonSpace.xs,
                           ),
                           child: Row(
                             children: <Widget>[
                               Text(
                                 '${shot.index + 1}',
                                 style: TextStyle(
-                                  fontSize: 10,
+                                  fontSize: NonType.micro,
                                   fontFamily: 'Menlo',
                                   color: active ? p.accent : p.ink4,
                                 ),
                               ),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: NonSpace.sm),
                               Expanded(
                                 child: Text(
                                   shot.label,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: 12,
+                                    fontSize: NonType.body,
                                     color: active ? p.ink : p.ink2,
                                     fontWeight: active
                                         ? FontWeight.w600
@@ -167,7 +223,10 @@ class VideoScriptTree extends StatelessWidget {
                               ),
                               Text(
                                 '${shot.duration.toStringAsFixed(shot.duration >= 10 ? 0 : 1)}s',
-                                style: TextStyle(fontSize: 9, color: p.ink4),
+                                style: TextStyle(
+                                  fontSize: NonType.micro,
+                                  color: p.ink4,
+                                ),
                               ),
                             ],
                           ),
@@ -209,27 +268,14 @@ class VideoShotInspector extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 10, 8),
-            child: Row(
-              children: <Widget>[
-                Icon(Icons.movie_filter_outlined, size: 13, color: p.ink4),
-                const SizedBox(width: 6),
-                Text(
-                  '镜头检查器',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: p.ink,
-                  ),
-                ),
-              ],
-            ),
+          const VideoPanelHeader(
+            icon: Icons.movie_filter_outlined,
+            title: '镜头检查器',
           ),
           Divider(height: 1, color: p.line),
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(NonSpace.md),
               child: shot == null
                   ? _overview(p)
                   : Column(
@@ -238,17 +284,20 @@ class VideoShotInspector extends StatelessWidget {
                         Text(
                           shot.label,
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: NonType.bodyStrong,
                             fontWeight: FontWeight.w700,
                             color: p.ink,
                           ),
                         ),
-                        const SizedBox(height: 3),
+                        const SizedBox(height: NonSpace.xs),
                         Text(
                           '镜头 ${shot.index + 1} · ${_timeRange(shot)}',
-                          style: TextStyle(fontSize: 10, color: p.ink4),
+                          style: TextStyle(
+                            fontSize: NonType.micro,
+                            color: p.ink4,
+                          ),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: NonSpace.md),
                         _kv(p, '时长', '${shot.duration.toStringAsFixed(2)} 秒'),
                         if (shot.background.isNotEmpty)
                           _kv(p, '背景', shot.background),
@@ -257,12 +306,12 @@ class VideoShotInspector extends StatelessWidget {
                           _kv(p, '转场', '${shot.data['transition']}'),
                         if (shot.data['camera'] != null)
                           _kv(p, '镜头', '${shot.data['camera']}'),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: NonSpace.sm),
                         Text(
                           '镜头属性编辑在剧本编译器批次接入；本检查器当前只读。',
                           style: TextStyle(
-                            fontSize: 10,
-                            height: 1.45,
+                            fontSize: NonType.micro,
+                            height: NonType.lineBody,
                             color: p.ink4,
                           ),
                         ),
@@ -281,18 +330,21 @@ class VideoShotInspector extends StatelessWidget {
       Text(
         '项目概览',
         style: TextStyle(
-          fontSize: 13,
+          fontSize: NonType.bodyStrong,
           fontWeight: FontWeight.w700,
           color: p.ink,
         ),
       ),
-      const SizedBox(height: 10),
+      const SizedBox(height: NonSpace.md),
       _kv(p, '标题', title.isEmpty ? '—' : title),
       _kv(p, '镜头', '$shotCount'),
       _kv(p, '片长', '${totalSeconds.toStringAsFixed(2)} 秒'),
       _kv(p, '帧率', fps <= 0 ? '—' : '$fps'),
-      const SizedBox(height: 8),
-      Text('在左侧选择镜头查看时长/背景/元素。', style: TextStyle(fontSize: 10, color: p.ink4)),
+      const SizedBox(height: NonSpace.sm),
+      Text(
+        '在左侧选择镜头查看时长/背景/元素。',
+        style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+      ),
     ],
   );
 
@@ -300,18 +352,25 @@ class VideoShotInspector extends StatelessWidget {
       '${shot.start.toStringAsFixed(2)}–${shot.end.toStringAsFixed(2)}s';
 
   Widget _kv(NonPalette p, String key, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
+    padding: const EdgeInsets.only(bottom: NonSpace.sm),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         SizedBox(
           width: 60,
-          child: Text(key, style: TextStyle(fontSize: 10, color: p.ink4)),
+          child: Text(
+            key,
+            style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+          ),
         ),
         Expanded(
           child: Text(
             value,
-            style: TextStyle(fontSize: 11, color: p.ink2, height: 1.35),
+            style: TextStyle(
+              fontSize: NonType.caption,
+              color: p.ink2,
+              height: NonType.lineCaption,
+            ),
           ),
         ),
       ],
@@ -323,6 +382,9 @@ class VideoShotInspector extends StatelessWidget {
 ///
 /// 共享播放头只读呈现：播放/暂停控制在预览播放器里；本栏显示时间、播放状态
 /// 与当前播放头在镜头条上的位置，供导演台对齐。
+///
+/// 高度由外层 `WorkbenchLayout.bottomBarHeight` 驱动（[height] 缺省 92 仅给
+/// 独立面板测试用）；不在 widget 里再写死第二份魔法数。
 class VideoTimelineStrip extends StatelessWidget {
   const VideoTimelineStrip({
     super.key,
@@ -333,6 +395,7 @@ class VideoTimelineStrip extends StatelessWidget {
     this.playheadSeconds = 0,
     this.playing = false,
     this.controller,
+    this.height = 92.0,
   });
 
   final List<VideoShotItem> shots;
@@ -345,6 +408,9 @@ class VideoTimelineStrip extends StatelessWidget {
   /// 导演台外部运输条控制器（null = 只读指示，不假装可点）。
   final VideoAnimationController? controller;
 
+  /// 底部时间线高度（导演台由 WorkbenchLayout 规格传入）。
+  final double height;
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -354,8 +420,13 @@ class VideoTimelineStrip extends StatelessWidget {
         : playheadSeconds.clamp(0.0, total) / total;
     return Container(
       key: const ValueKey('video-workbench-timeline'),
-      height: 92,
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      height: height,
+      padding: const EdgeInsets.fromLTRB(
+        NonSpace.md,
+        NonSpace.sm,
+        NonSpace.md,
+        NonSpace.sm,
+      ),
       decoration: BoxDecoration(
         color: p.bgElevated,
         border: Border(top: BorderSide(color: p.line)),
@@ -392,14 +463,17 @@ class VideoTimelineStrip extends StatelessWidget {
                     color: p.ink3,
                   ),
                 ),
-              const SizedBox(width: 6),
-              Text('时间线', style: TextStyle(fontSize: 11, color: p.ink3)),
-              const SizedBox(width: 8),
+              const SizedBox(width: NonSpace.sm),
+              Text(
+                '时间线',
+                style: TextStyle(fontSize: NonType.caption, color: p.ink3),
+              ),
+              const SizedBox(width: NonSpace.sm),
               Text(
                 _formatSeconds(playheadSeconds),
                 key: const ValueKey('video-timeline-playhead'),
                 style: TextStyle(
-                  fontSize: 10,
+                  fontSize: NonType.micro,
                   fontFamily: 'Menlo',
                   color: p.ink4,
                 ),
@@ -407,17 +481,17 @@ class VideoTimelineStrip extends StatelessWidget {
               const Spacer(),
               Text(
                 '${total.toStringAsFixed(1)}s · ${fps <= 0 ? '—' : '$fps fps'}',
-                style: TextStyle(fontSize: 10, color: p.ink4),
+                style: TextStyle(fontSize: NonType.micro, color: p.ink4),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: NonSpace.sm),
           Expanded(
             child: total <= 0
                 ? Center(
                     child: Text(
                       '没有可排布的镜头',
-                      style: TextStyle(fontSize: 10, color: p.ink4),
+                      style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                     ),
                   )
                 : LayoutBuilder(
@@ -433,24 +507,28 @@ class VideoTimelineStrip extends StatelessWidget {
                                 ),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 2,
+                                    horizontal: NonSpace.xxs,
                                   ),
                                   child: InkWell(
                                     key: ValueKey(
                                       'video-timeline-shot-${shot.index}',
                                     ),
-                                    borderRadius: BorderRadius.circular(5),
+                                    borderRadius: BorderRadius.circular(
+                                      NonRadius.sm,
+                                    ),
                                     onTap: () => onSelect(shot),
                                     child: Container(
                                       alignment: Alignment.centerLeft,
                                       padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
+                                        horizontal: NonSpace.sm,
                                       ),
                                       decoration: BoxDecoration(
                                         color: shot.index == selectedIndex
                                             ? p.accent.withValues(alpha: 0.24)
                                             : p.panel2,
-                                        borderRadius: BorderRadius.circular(5),
+                                        borderRadius: BorderRadius.circular(
+                                          NonRadius.sm,
+                                        ),
                                         border: Border.all(
                                           color: shot.index == selectedIndex
                                               ? p.accent
@@ -461,7 +539,7 @@ class VideoTimelineStrip extends StatelessWidget {
                                         '${shot.index + 1}',
                                         maxLines: 1,
                                         style: TextStyle(
-                                          fontSize: 10,
+                                          fontSize: NonType.micro,
                                           color: shot.index == selectedIndex
                                               ? p.ink
                                               : p.ink3,

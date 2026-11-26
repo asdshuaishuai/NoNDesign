@@ -30,6 +30,7 @@ import '../core/video3d/video3d_project.dart';
 import '../core/workbench_layout.dart';
 import 'common.dart';
 import 'video3d_preview_surface.dart';
+import 'video_workbench_panels.dart';
 
 /// 跨实例打开通道（与 `threeLoadOnOpen` / `videoLoadOnOpen` 同模式）：
 /// [openVideo3dWorkspace] 写入项目名，工作台在 initState 消费后清空。
@@ -72,6 +73,9 @@ List<double> video3dShotFractions(Video3dTimeline timeline) {
       shot.frameCount / timeline.totalFrames,
   ];
 }
+
+/// 项目列表行高（两行文本：名称 + 节点/镜头摘要；itemExtent 免逐帧测量）。
+const double _video3dProjectRowExtent = 48;
 
 // ---------------------------------------------------------------------------
 // 新建项目的最小合法事实源
@@ -171,6 +175,9 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
   Video3dProjectFailure? _failure;
   Video3dPreviewController? _preview;
   Video3dTimeline? _timeline;
+
+  /// 镜头条比例缓存：随项目快照重算一次，运输条每帧刷新时不再重算帧表。
+  List<double> _shotFractions = const <double>[];
   String _previewError = '';
 
   /// initState 从 [video3dLoadOnOpen] 取到的开局项目名（只消费一次）。
@@ -319,9 +326,14 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       }
     }
     final Video3dPreviewController? previous = _preview;
+    // 帧表比例在绑定快照时算一次（运输条帧刷新只改播放头，不重算比例）。
+    final List<double> shotFractions = timeline == null
+        ? const <double>[]
+        : video3dShotFractions(timeline);
     setState(() {
       _snapshot = snapshot;
       _timeline = timeline;
+      _shotFractions = shotFractions;
       _preview = next;
       _previewError = previewError;
       _opening = false;
@@ -337,7 +349,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final WorkbenchLayout layout = resolveWorkbenchLayout(
-          kind: WorkbenchKind.video,
+          kind: WorkbenchKind.video3d,
           width: constraints.maxWidth,
           height: constraints.maxHeight,
         );
@@ -382,6 +394,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
                 height: layout.bottomBarHeight,
                 snapshot: _snapshot,
                 timeline: _timeline,
+                shotFractions: _shotFractions,
                 preview: _preview,
                 failure: _failure,
               ),
@@ -397,7 +410,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     return Container(
       key: const ValueKey('video3d-header'),
       height: 46,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
       decoration: BoxDecoration(
         color: p.bgElevated,
         border: Border(bottom: BorderSide(color: p.line)),
@@ -405,22 +418,22 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       child: Row(
         children: <Widget>[
           Icon(Icons.movie_creation_outlined, size: 16, color: p.ink3),
-          const SizedBox(width: 8),
+          const SizedBox(width: NonSpace.sm),
           Text(
             '3D 视频工作台',
             style: TextStyle(
-              fontSize: 13,
+              fontSize: NonType.bodyStrong,
               fontWeight: FontWeight.w600,
               color: p.ink,
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: NonSpace.md),
           Flexible(
             child: Text(
               title.isEmpty ? '还没有打开的 3D 视频项目' : '只读预览 · $title',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: p.ink4),
+              style: TextStyle(fontSize: NonType.caption, color: p.ink4),
             ),
           ),
           const Spacer(),
@@ -429,7 +442,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
               verified ? '校验通过' : '校验未通过',
               key: const ValueKey('video3d-header-verify'),
               style: TextStyle(
-                fontSize: 10,
+                fontSize: NonType.micro,
                 color: verified ? p.success : p.warn,
               ),
             ),
@@ -441,7 +454,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
               offset: const Offset(0, 34),
               color: p.panel,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(NonRadius.md),
                 side: BorderSide(color: p.lineStrong),
               ),
               onSelected: (String name) => unawaited(_open(name)),
@@ -453,20 +466,29 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
                     child: Text(
                       entry.corrupt ? '${entry.name}（文件不完整）' : entry.name,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: NonType.body,
                         color: entry.corrupt ? p.warn : p.ink2,
                       ),
                     ),
                   ),
               ],
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: NonSpace.sm,
+                  vertical: NonSpace.sm,
+                ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
                     Icon(Icons.list_alt_outlined, size: 14, color: p.ink3),
-                    const SizedBox(width: 4),
-                    Text('项目', style: TextStyle(fontSize: 11, color: p.ink3)),
+                    const SizedBox(width: NonSpace.xs),
+                    Text(
+                      '项目',
+                      style: TextStyle(
+                        fontSize: NonType.caption,
+                        color: p.ink3,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -497,7 +519,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       return Center(
         child: Text(
           '正在打开 3D 视频项目…',
-          style: TextStyle(fontSize: 12, color: p.ink3),
+          style: TextStyle(fontSize: NonType.body, color: p.ink3),
         ),
       );
     }
@@ -508,7 +530,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
         return Center(
           child: Text(
             '正在读取 3D 视频项目…',
-            style: TextStyle(fontSize: 12, color: p.ink3),
+            style: TextStyle(fontSize: NonType.body, color: p.ink3),
           ),
         );
       }
@@ -524,7 +546,12 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       return _messagePane(p, Icons.movie_filter_outlined, '预览面还没有准备好，可以重试');
     }
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+      padding: const EdgeInsets.fromLTRB(
+        NonSpace.md,
+        NonSpace.md,
+        NonSpace.md,
+        NonSpace.md,
+      ),
       child: Video3dPreviewSurface(preview: preview),
     );
   }
@@ -533,33 +560,40 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     return Center(
       key: const ValueKey('video3d-empty'),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(NonSpace.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Icon(Icons.movie_creation_outlined, size: 30, color: p.ink4),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             Text(
               '还没有 3D 视频项目',
               style: TextStyle(
-                fontSize: 13,
+                fontSize: NonType.bodyStrong,
                 fontWeight: FontWeight.w600,
                 color: p.ink2,
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: NonSpace.sm),
             Text(
               '新建一个最小项目，或者把已有的项目文件放进项目目录后刷新；'
               '选中项目就能只读预览画面、镜头和检查器。',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
+              style: TextStyle(
+                fontSize: NonType.caption,
+                height: NonType.lineBody,
+                color: p.ink4,
+              ),
             ),
             const SizedBox(height: 14),
             FilledButton.icon(
               key: const ValueKey('video3d-new-project-empty'),
               onPressed: () => unawaited(_createProject()),
               icon: const Icon(Icons.add, size: 16),
-              label: const Text('新建 3D 视频', style: TextStyle(fontSize: 12)),
+              label: const Text(
+                '新建 3D 视频',
+                style: TextStyle(fontSize: NonType.body),
+              ),
             ),
           ],
         ),
@@ -571,25 +605,33 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     return Center(
       key: const ValueKey('video3d-project-failure'),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(NonSpace.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Icon(Icons.movie_filter_outlined, size: 28, color: p.warn),
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             Text(
               video3dProjectFailureMessage(failure),
               key: const ValueKey('video3d-project-failure-message'),
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, height: 1.45, color: p.ink2),
+              style: TextStyle(
+                fontSize: NonType.bodyStrong,
+                height: NonType.lineBody,
+                color: p.ink2,
+              ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: NonSpace.sm),
             Text(
               '这个项目暂时打不开；左侧列表里还留着它。修好文件后可以重新读取。',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
+              style: TextStyle(
+                fontSize: NonType.caption,
+                height: NonType.lineBody,
+                color: p.ink4,
+              ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             _reloadButton(p),
             if (failure.technical.isNotEmpty)
               _technicalPane('技术详情', failure.technical),
@@ -609,43 +651,51 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     return Center(
       key: const ValueKey('video3d-verification-failed'),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(NonSpace.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Icon(Icons.rule_folder_outlined, size: 28, color: p.warn),
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             Text(
               '这个项目没有通过校验，暂时不能预览',
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: NonType.bodyStrong,
                 fontWeight: FontWeight.w600,
                 color: p.ink2,
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: NonSpace.sm),
             Text(
               '场景或镜头文件还有 ${issues.length} 个问题；修好后重新读取就能预览。',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
+              style: TextStyle(
+                fontSize: NonType.caption,
+                height: NonType.lineBody,
+                color: p.ink4,
+              ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             for (final Video3dIssue issue in issues.take(4))
               Padding(
-                padding: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.only(bottom: NonSpace.xs),
                 child: Text(
                   '· ${issue.message}',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 11, height: 1.4, color: p.ink3),
+                  style: TextStyle(
+                    fontSize: NonType.caption,
+                    height: NonType.lineCaption,
+                    color: p.ink3,
+                  ),
                 ),
               ),
             if (issues.length > 4)
               Text(
                 '还有 ${issues.length - 4} 个问题',
-                style: TextStyle(fontSize: 10, color: p.ink4),
+                style: TextStyle(fontSize: NonType.micro, color: p.ink4),
               ),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             _reloadButton(p),
             _technicalPane('技术详情（问题位置）', detail),
           ],
@@ -657,16 +707,20 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
   Widget _messagePane(NonPalette p, IconData icon, String message) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(NonSpace.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Icon(icon, size: 28, color: p.ink4),
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12.5, height: 1.45, color: p.ink2),
+              style: TextStyle(
+                fontSize: NonType.body,
+                height: NonType.lineBody,
+                color: p.ink2,
+              ),
             ),
           ],
         ),
@@ -682,10 +736,10 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       style: TextButton.styleFrom(
         minimumSize: const Size(0, 32),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
       ),
       icon: const Icon(Icons.refresh, size: 15),
-      label: const Text('重新读取', style: TextStyle(fontSize: 11)),
+      label: const Text('重新读取', style: TextStyle(fontSize: NonType.caption)),
     );
   }
 
@@ -725,35 +779,18 @@ class _Video3dProjectList extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 9, 10, 7),
-            child: Row(
+          VideoPanelHeader(
+            icon: Icons.movie_creation_outlined,
+            title: '3D 视频项目',
+            meta: loading ? null : '${entries.length}',
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Icon(Icons.movie_creation_outlined, size: 13, color: p.ink4),
-                const SizedBox(width: 6),
-                Text(
-                  '3D 视频项目',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: p.ink,
-                  ),
-                ),
-                const Spacer(),
                 if (loading)
                   const SizedBox(
                     width: 12,
                     height: 12,
                     child: CircularProgressIndicator(strokeWidth: 1.4),
-                  )
-                else
-                  Text(
-                    '${entries.length}',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontFamily: 'Menlo',
-                      color: p.ink4,
-                    ),
                   ),
                 IconButton(
                   key: const ValueKey('video3d-new-project'),
@@ -774,24 +811,33 @@ class _Video3dProjectList extends StatelessWidget {
           Divider(height: 1, color: p.line),
           if (error.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(NonSpace.md),
               child: Text(
                 error,
-                style: TextStyle(fontSize: 11, color: p.warn, height: 1.4),
+                style: TextStyle(
+                  fontSize: NonType.caption,
+                  color: p.warn,
+                  height: NonType.lineCaption,
+                ),
               ),
             )
           else if (entries.isEmpty)
             Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(NonSpace.md),
               child: Text(
                 '还没有 3D 视频项目。\n点右上角「+」新建，或把项目文件放进项目目录后刷新。',
-                style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
+                style: TextStyle(
+                  fontSize: NonType.caption,
+                  height: NonType.lineBody,
+                  color: p.ink4,
+                ),
               ),
             )
           else
             Expanded(
               child: ListView.builder(
-                padding: EdgeInsets.zero,
+                padding: const EdgeInsets.symmetric(vertical: NonSpace.xs),
+                itemExtent: _video3dProjectRowExtent,
                 itemCount: entries.length,
                 itemBuilder: (BuildContext context, int index) {
                   final Video3dProjectEntry entry = entries[index];
@@ -832,7 +878,12 @@ class _ProjectRow extends StatelessWidget {
       onTap: onOpen,
       child: Container(
         color: selected ? p.accentSoft.withValues(alpha: 0.35) : null,
-        padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+        padding: const EdgeInsets.fromLTRB(
+          NonSpace.md,
+          NonSpace.xs,
+          NonSpace.md,
+          NonSpace.xs,
+        ),
         child: Row(
           children: <Widget>[
             Icon(
@@ -840,7 +891,7 @@ class _ProjectRow extends StatelessWidget {
               size: 12,
               color: selected ? p.accent : p.ink4,
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: NonSpace.sm),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -850,18 +901,18 @@ class _ProjectRow extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: NonType.body,
                       color: selected ? p.ink : p.ink2,
                       fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: NonSpace.xxs),
                   Text(
                     meta,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 9.5,
+                      fontSize: NonType.micro,
                       color: entry.corrupt ? p.warn : p.ink4,
                     ),
                   ),
@@ -909,41 +960,43 @@ class _Video3dInspector extends StatelessWidget {
       key: const ValueKey('video3d-inspector'),
       color: p.bgElevated.withValues(alpha: 0.9),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+        padding: const EdgeInsets.fromLTRB(
+          NonSpace.md,
+          NonSpace.md,
+          NonSpace.md,
+          NonSpace.md,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Row(
-              children: <Widget>[
-                Icon(Icons.fact_check_outlined, size: 13, color: p.ink4),
-                const SizedBox(width: 6),
-                Text(
-                  '只读检查器',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: p.ink,
-                  ),
-                ),
-              ],
+            const VideoPanelHeader(
+              icon: Icons.fact_check_outlined,
+              title: '只读检查器',
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: NonSpace.xxs),
             Text(
               snapshot == null ? '选中项目后显示场景与镜头摘要' : snapshot.name,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             Divider(height: 1, color: p.line),
-            const SizedBox(height: 6),
+            const SizedBox(height: NonSpace.sm),
             if (failure != null)
               Text(
                 video3dProjectFailureMessage(failure),
-                style: TextStyle(fontSize: 11, height: 1.4, color: p.warn),
+                style: TextStyle(
+                  fontSize: NonType.caption,
+                  height: NonType.lineCaption,
+                  color: p.warn,
+                ),
               )
             else if (snapshot == null)
-              Text('还没有打开的项目', style: TextStyle(fontSize: 11, color: p.ink4))
+              Text(
+                '还没有打开的项目',
+                style: TextStyle(fontSize: NonType.caption, color: p.ink4),
+              )
             else ...<Widget>[
               if (projectTitle != null)
                 _row(p, '标题', projectTitle, key: 'video3d-inspector-title'),
@@ -971,26 +1024,30 @@ class _Video3dInspector extends StatelessWidget {
                 key: 'video3d-inspector-verify',
                 color: snapshot.verified ? p.success : p.warn,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: NonSpace.sm),
               Divider(height: 1, color: p.line),
-              const SizedBox(height: 8),
+              const SizedBox(height: NonSpace.sm),
               Text(
                 snapshot.verified
                     ? '本批只读：预览、检查器和镜头时间线都不改项目文件。'
                     : '修好场景或镜头文件后点顶栏刷新，就能重新预览。',
-                style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4),
+                style: TextStyle(
+                  fontSize: NonType.micro,
+                  height: NonType.lineBody,
+                  color: p.ink4,
+                ),
               ),
               if (!snapshot.verified && issueCount > 0) ...<Widget>[
-                const SizedBox(height: 8),
+                const SizedBox(height: NonSpace.sm),
                 for (final Video3dIssue issue
                     in snapshot.verification.checks.take(6))
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
+                    padding: const EdgeInsets.only(bottom: NonSpace.xs),
                     child: Text(
                       '· ${issue.message}',
                       style: TextStyle(
-                        fontSize: 10,
-                        height: 1.35,
+                        fontSize: NonType.micro,
+                        height: NonType.lineCaption,
                         color: p.ink3,
                       ),
                     ),
@@ -1012,15 +1069,18 @@ class _Video3dInspector extends StatelessWidget {
   }) {
     return Padding(
       key: key == null ? null : ValueKey<String>(key),
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: NonSpace.xs),
       child: Row(
         children: <Widget>[
-          Text(label, style: TextStyle(fontSize: 11, color: p.ink4)),
+          Text(
+            label,
+            style: TextStyle(fontSize: NonType.caption, color: p.ink4),
+          ),
           const Spacer(),
           Text(
             value,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: NonType.caption,
               color: color ?? p.ink2,
               fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
             ),
@@ -1040,6 +1100,7 @@ class _Video3dBottomBar extends StatelessWidget {
     required this.height,
     required this.snapshot,
     required this.timeline,
+    required this.shotFractions,
     required this.preview,
     required this.failure,
   });
@@ -1047,6 +1108,9 @@ class _Video3dBottomBar extends StatelessWidget {
   final double height;
   final Video3dProjectSnapshot? snapshot;
   final Video3dTimeline? timeline;
+
+  /// 帧表比例（工作台在绑定快照时算一次，这里只读）。
+  final List<double> shotFractions;
   final Video3dPreviewController? preview;
   final Video3dProjectFailure? failure;
 
@@ -1097,30 +1161,35 @@ class _Video3dBottomBar extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Padding(
-            padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
+            padding: const EdgeInsets.fromLTRB(
+              NonSpace.md,
+              NonSpace.sm,
+              NonSpace.md,
+              NonSpace.xxs,
+            ),
             child: Row(
               children: <Widget>[
                 Icon(Icons.linear_scale, size: 12, color: p.ink4),
-                const SizedBox(width: 6),
+                const SizedBox(width: NonSpace.sm),
                 Text(
                   '镜头时间线',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: NonType.caption,
                     fontWeight: FontWeight.w600,
                     color: p.ink3,
                   ),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: NonSpace.sm),
                 Text(
                   shotCount > 0 ? '$shotCount 个镜头 · 只读' : '只读',
-                  style: TextStyle(fontSize: 9.5, color: p.ink4),
+                  style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                 ),
                 const Spacer(),
                 if (timeline != null && timeline.totalFrames > 0)
                   Text(
                     '${timeline.totalFrames} 帧 · ${timeline.durationSeconds.toStringAsFixed(1)} 秒',
                     style: TextStyle(
-                      fontSize: 9.5,
+                      fontSize: NonType.micro,
                       fontFamily: 'Menlo',
                       color: p.ink4,
                     ),
@@ -1129,10 +1198,13 @@ class _Video3dBottomBar extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: SizedBox(height: 30, child: _timeline(p, timeline, preview)),
+            padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
+            child: SizedBox(
+              height: 30,
+              child: _timeline(p, timeline, preview, shotFractions),
+            ),
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: NonSpace.xs),
           Divider(height: 1, color: p.line),
           Expanded(
             child: Center(
@@ -1155,11 +1227,12 @@ class _Video3dBottomBar extends StatelessWidget {
     );
   }
 
-  /// 镜头条：按 [video3dShotFractions] 的帧表比例分段，播放头只读显示。
+  /// 镜头条：按预计算的帧表比例分段，播放头只读显示。
   Widget _timeline(
     NonPalette p,
     Video3dTimeline? timeline,
     Video3dPreviewController? preview,
+    List<double> fractions,
   ) {
     if (timeline == null ||
         timeline.totalFrames <= 0 ||
@@ -1168,11 +1241,10 @@ class _Video3dBottomBar extends StatelessWidget {
         alignment: Alignment.centerLeft,
         child: Text(
           '没有可预览的镜头时间线',
-          style: TextStyle(fontSize: 10, color: p.ink4),
+          style: TextStyle(fontSize: NonType.micro, color: p.ink4),
         ),
       );
     }
-    final List<double> fractions = video3dShotFractions(timeline);
     final double playhead = (((preview?.frame ?? 0) / timeline.totalFrames)
         .clamp(0.0, 1.0));
     return LayoutBuilder(
@@ -1198,13 +1270,16 @@ class _Video3dBottomBar extends StatelessWidget {
                           color: i.isEven
                               ? p.panel3
                               : p.accentSoft.withValues(alpha: 0.28),
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: BorderRadius.circular(NonRadius.sm),
                         ),
                         child: Text(
                           timeline.shots[i].id,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 9, color: p.ink3),
+                          style: TextStyle(
+                            fontSize: NonType.micro,
+                            color: p.ink3,
+                          ),
                         ),
                       ),
                     ),
@@ -1243,7 +1318,10 @@ class _Video3dBottomBar extends StatelessWidget {
     final double maxFrame = totalFrames > 1 ? totalFrames - 1 : 1;
     final double sliderValue = frame.toDouble().clamp(0.0, maxFrame);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: NonSpace.sm,
+        vertical: NonSpace.xs,
+      ),
       child: Row(
         children: <Widget>[
           IconButton(
@@ -1280,7 +1358,7 @@ class _Video3dBottomBar extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
             icon: Icon(Icons.stop, color: p.ink3),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           Expanded(
             child: enabled && preview != null
                 ? SizedBox(
@@ -1308,7 +1386,7 @@ class _Video3dBottomBar extends StatelessWidget {
                   )
                 : _reasonText(p, reason),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: NonSpace.sm),
           Text(
             enabled
                 ? '${formatVideo3dClock(frameSeconds)} / '
@@ -1317,13 +1395,13 @@ class _Video3dBottomBar extends StatelessWidget {
             key: const ValueKey('video3d-transport-time'),
             maxLines: 1,
             style: TextStyle(
-              fontSize: 10,
+              fontSize: NonType.micro,
               fontFamily: 'Menlo',
               color: p.ink4,
               fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: NonSpace.md),
           Flexible(
             child: Text(
               fps > 0 && totalFrames > 0
@@ -1332,7 +1410,7 @@ class _Video3dBottomBar extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 10, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
             ),
           ),
         ],
@@ -1345,13 +1423,13 @@ class _Video3dBottomBar extends StatelessWidget {
       key: const ValueKey('video3d-transport-reason'),
       children: <Widget>[
         Icon(Icons.info_outline, size: 13, color: p.warn),
-        const SizedBox(width: 6),
+        const SizedBox(width: NonSpace.sm),
         Expanded(
           child: Text(
             reason ?? '',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 11, color: p.ink3),
+            style: TextStyle(fontSize: NonType.caption, color: p.ink3),
           ),
         ),
       ],
@@ -1384,10 +1462,18 @@ class _Video3dTechnicalDetails extends StatelessWidget {
         type: MaterialType.transparency,
         child: ExpansionTile(
           key: paneKey,
-          tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          tilePadding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
+          childrenPadding: const EdgeInsets.fromLTRB(
+            NonSpace.md,
+            0,
+            NonSpace.md,
+            NonSpace.sm,
+          ),
           dense: true,
-          title: Text(title, style: TextStyle(fontSize: 11, color: p.ink4)),
+          title: Text(
+            title,
+            style: TextStyle(fontSize: NonType.caption, color: p.ink4),
+          ),
           iconColor: p.ink4,
           collapsedIconColor: p.ink4,
           children: <Widget>[
@@ -1395,7 +1481,11 @@ class _Video3dTechnicalDetails extends StatelessWidget {
               alignment: Alignment.centerLeft,
               child: SelectableText(
                 detail,
-                style: TextStyle(fontSize: 10.5, color: p.ink4, height: 1.4),
+                style: TextStyle(
+                  fontSize: NonType.micro,
+                  color: p.ink4,
+                  height: NonType.lineCaption,
+                ),
               ),
             ),
           ],
@@ -1532,7 +1622,10 @@ class _Video3dCreateDialogState extends State<_Video3dCreateDialog> {
     return AlertDialog(
       key: const ValueKey('video3d-create-dialog'),
       backgroundColor: p.panel,
-      title: Text('新建 3D 视频', style: TextStyle(fontSize: 15, color: p.ink)),
+      title: Text(
+        '新建 3D 视频',
+        style: TextStyle(fontSize: NonType.subtitle, color: p.ink),
+      ),
       content: SizedBox(
         width: 380,
         child: SingleChildScrollView(
@@ -1543,9 +1636,13 @@ class _Video3dCreateDialogState extends State<_Video3dCreateDialog> {
               Text(
                 '会生成一个最小项目：一块地面、一盏主光、一台相机和一个单镜头；'
                 '创建后自动打开预览。',
-                style: TextStyle(fontSize: 11, height: 1.5, color: p.ink3),
+                style: TextStyle(
+                  fontSize: NonType.caption,
+                  height: NonType.lineBody,
+                  color: p.ink3,
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: NonSpace.md),
               _field(
                 p,
                 label: '项目名',
@@ -1555,11 +1652,11 @@ class _Video3dCreateDialogState extends State<_Video3dCreateDialog> {
                   controller: _name,
                   autofocus: true,
                   enabled: !_saving,
-                  style: TextStyle(fontSize: 12, color: p.ink2),
+                  style: TextStyle(fontSize: NonType.body, color: p.ink2),
                   decoration: _decoration(p, hint: '例如 night-market'),
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: NonSpace.md),
               _field(
                 p,
                 label: '标题（可选）',
@@ -1568,11 +1665,11 @@ class _Video3dCreateDialogState extends State<_Video3dCreateDialog> {
                   key: const ValueKey('video3d-create-title'),
                   controller: _title,
                   enabled: !_saving,
-                  style: TextStyle(fontSize: 12, color: p.ink2),
+                  style: TextStyle(fontSize: NonType.body, color: p.ink2),
                   decoration: _decoration(p, hint: '显示在检查器里'),
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: NonSpace.md),
               _field(
                 p,
                 label: '时长（秒）',
@@ -1584,27 +1681,31 @@ class _Video3dCreateDialogState extends State<_Video3dCreateDialog> {
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
-                  style: TextStyle(fontSize: 12, color: p.ink2),
+                  style: TextStyle(fontSize: NonType.body, color: p.ink2),
                   decoration: _decoration(p, hint: '5'),
                   onSubmitted: (_) => unawaited(_submit()),
                 ),
               ),
               if (_error.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 12),
+                const SizedBox(height: NonSpace.md),
                 Container(
                   key: const ValueKey('video3d-create-error'),
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 8,
+                    horizontal: NonSpace.md,
+                    vertical: NonSpace.sm,
                   ),
                   decoration: BoxDecoration(
                     color: p.warn.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(NonRadius.md),
                     border: Border.all(color: p.warn.withValues(alpha: 0.5)),
                   ),
                   child: Text(
                     _error,
-                    style: TextStyle(fontSize: 11, height: 1.4, color: p.warn),
+                    style: TextStyle(
+                      fontSize: NonType.caption,
+                      height: NonType.lineCaption,
+                      color: p.warn,
+                    ),
                   ),
                 ),
               ],
@@ -1651,15 +1752,18 @@ class _Video3dCreateDialogState extends State<_Video3dCreateDialog> {
         Text(
           label,
           style: TextStyle(
-            fontSize: 11,
+            fontSize: NonType.caption,
             fontWeight: FontWeight.w600,
             color: p.ink3,
           ),
         ),
-        const SizedBox(height: 5),
+        const SizedBox(height: NonSpace.xs),
         field,
-        const SizedBox(height: 4),
-        Text(helper, style: TextStyle(fontSize: 10, color: p.ink4)),
+        const SizedBox(height: NonSpace.xs),
+        Text(
+          helper,
+          style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+        ),
       ],
     );
   }
@@ -1670,9 +1774,14 @@ class _Video3dCreateDialogState extends State<_Video3dCreateDialog> {
       filled: true,
       fillColor: p.panel2,
       hintText: hint,
-      hintStyle: TextStyle(fontSize: 11, color: p.ink4),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      hintStyle: TextStyle(fontSize: NonType.caption, color: p.ink4),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: NonSpace.md,
+        vertical: NonSpace.sm,
+      ),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(NonRadius.md),
+      ),
     );
   }
 }
