@@ -23,6 +23,8 @@ import 'dart:io';
 
 import '../app_paths.dart';
 import '../creative/creative_schema.dart';
+import '../workbench_pack.dart';
+import '../workbench_pack_io.dart';
 import 'video3d_compile.dart';
 import 'video3d_contract.dart';
 
@@ -421,5 +423,63 @@ class Video3dProjectStore {
     } catch (_) {
       return null;
     }
+  }
+
+  // --------------------------------------------------------------- 单一容器
+
+  /// 把项目打包成单一容器，原子写到项目根目录：`<根>/<name>.n3v`。
+  ///
+  /// 打包内容 = 两份事实源 `scene3d.json` / `screenplay3d.json` 及其它 UTF-8
+  /// 文本文件（`docs.md` / `brief.md` 有正文时同时进容器的 `docs` 字段）；
+  /// `spec` 字段带两份事实源的解码视图 `{scene, screenplay}`。读不出来（corrupt）
+  /// 不导出；容器或文件系统失败抛 [WorkbenchPackFailure]（code / message
+  /// 原样保留，不吞）。
+  Future<File> exportPack(String name) async {
+    final Video3dProjectSnapshot snapshot = await read(name);
+    final Directory dir = Directory(snapshot.dir);
+    final Object? sceneTitle = snapshot.sceneRaw['title'];
+    return exportProjectPack(
+      kind: WorkbenchPackKind.video3d.wire,
+      projectDir: dir,
+      name: name,
+      title: sceneTitle is String ? sceneTitle : name,
+      docs: readProjectDocs(dir),
+      spec: <String, Object?>{
+        'scene': snapshot.sceneRaw,
+        'screenplay': snapshot.screenplayRaw,
+      },
+    );
+  }
+
+  /// 从单一容器导入项目；包内 `name` 决定目标目录 `<根>/<name>`。
+  ///
+  /// **目标已存在时拒绝**（抛 [WorkbenchPackFailure] `pack_target_exists`），
+  /// 不覆盖、不合并既有项目——重名项目换一个名字再导入。坏容器 / 版本不支持 /
+  /// 错 kind 同样显性失败（`WorkbenchPackFailure`）；包内 name 不合本项目名
+  /// 白名单时抛 [Video3dProjectFailure] `invalid_name`（符号链接目标按
+  /// `path_escape` 拒绝）。任何失败都不留半成品，项目根保持原样。
+  Future<void> importPack(File file) async {
+    final WorkbenchPack pack = await WorkbenchPack.readFrom(file);
+    requirePackKind(pack, WorkbenchPackKind.video3d.wire);
+    final Directory base = await resolveRoot();
+    final Directory target = _projectDir(base, pack.name);
+    await importProjectPack(
+      file,
+      projectDir: target,
+      expectKind: WorkbenchPackKind.video3d.wire,
+    );
+  }
+
+  /// 项目根下所有 `.n3v` 打包文件（按文件名排序）。
+  ///
+  /// 隐藏 / 临时文件与包内 name 不合本项目名白名单的包不列（列出来的包
+  /// 一定能用 [importPack] 导入）。不影响 [list]：它只认项目目录。
+  Future<List<File>> listPacks() async {
+    final Directory base = await resolveRoot();
+    return listProjectPacks(
+      base,
+      kind: WorkbenchPackKind.video3d.wire,
+      accept: creativeIsSafeProjectName,
+    );
   }
 }

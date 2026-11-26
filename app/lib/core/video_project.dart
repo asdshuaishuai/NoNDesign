@@ -27,6 +27,8 @@ import 'dart:io';
 
 import 'app_paths.dart';
 import 'video_service.dart';
+import 'workbench_pack.dart';
+import 'workbench_pack_io.dart';
 
 /// 项目名不可用、写盘失败、内容不合格时的统一异常。
 ///
@@ -63,10 +65,10 @@ String videoProjectFailureMessage(Object? error) {
   final code = error is VideoProjectFailure
       ? error.code
       : error is VideoRejected
-          ? error.code
-          : error is String
-              ? error
-              : '';
+      ? error.code
+      : error is String
+      ? error
+      : '';
   switch (code) {
     case 'invalid_name':
       return '项目名只能用字母、数字、下划线和短横线，换一个名字再试';
@@ -120,12 +122,12 @@ class VideoProjectEntry {
 
   /// 列表/工具信封用的稳定 JSON（字段名与顺序固定）。
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'name': name,
-        'title': title,
-        'seconds': seconds,
-        'fps': fps,
-        'corrupt': corrupt,
-      };
+    'name': name,
+    'title': title,
+    'seconds': seconds,
+    'fps': fps,
+    'corrupt': corrupt,
+  };
 
   /// [toJson] 的逆操作（智能体工具信封 / 列表快照回读）。
   factory VideoProjectEntry.fromJson(Map<String, dynamic> json) {
@@ -251,7 +253,9 @@ class VideoProjectStore {
       return VideoProjectEntry(
         name: name,
         title: title.isEmpty ? name : title,
-        seconds: seconds is num && seconds.isFinite && seconds >= 0 ? seconds.toDouble() : 0,
+        seconds: seconds is num && seconds.isFinite && seconds >= 0
+            ? seconds.toDouble()
+            : 0,
         fps: fps is num && fps > 0 ? fps.toInt() : 30,
       );
     } catch (_) {
@@ -271,7 +275,11 @@ class VideoProjectStore {
 
     final VideoDocument document;
     try {
-      document = VideoDocument.build(timeline: timeline, spec: spec, baseDir: dir);
+      document = VideoDocument.build(
+        timeline: timeline,
+        spec: spec,
+        baseDir: dir,
+      );
     } on VideoRejected catch (error) {
       throw VideoProjectFailure(error.code, error.detail);
     } catch (error) {
@@ -367,8 +375,9 @@ class VideoProjectStore {
     final tl = Map<String, dynamic>.from(timeline);
     // 落盘布局固定：规范文件名归一为 spec.json（不信任调用方随便指向）。
     tl['spec'] = _specFile;
-    final normalizedSpec =
-        spec == null || spec.isEmpty ? null : Map<String, dynamic>.from(spec);
+    final normalizedSpec = spec == null || spec.isEmpty
+        ? null
+        : Map<String, dynamic>.from(spec);
 
     // 硬门 1/2：全部算式预编译通过才允许碰磁盘。
     final VideoDocument document;
@@ -381,11 +390,16 @@ class VideoProjectStore {
     }
 
     final resolvedTitle = title.trim().isEmpty ? name : title.trim();
-    final staging = Directory('${base.path}/.$name.${DateTime.now().microsecondsSinceEpoch}.tmp');
+    final staging = Directory(
+      '${base.path}/.$name.${DateTime.now().microsecondsSinceEpoch}.tmp',
+    );
     try {
       staging.createSync(recursive: true);
       _writeJson(File('${staging.path}/$_timelineFile'), tl);
-      _writeJson(File('${staging.path}/$_specFile'), normalizedSpec ?? const <String, dynamic>{});
+      _writeJson(
+        File('${staging.path}/$_specFile'),
+        normalizedSpec ?? const <String, dynamic>{},
+      );
       _writeJson(File('${staging.path}/$_metaFile'), <String, dynamic>{
         'title': resolvedTitle,
         'seconds': document.totalSeconds,
@@ -441,5 +455,60 @@ class VideoProjectStore {
     try {
       if (dir.existsSync()) dir.deleteSync(recursive: true);
     } catch (_) {}
+  }
+
+  // --------------------------------------------------------------- 单一容器
+
+  /// 把项目打包成单一容器，原子写到项目根目录：`<根>/<name>.nvdo`。
+  ///
+  /// 打包内容 = 项目目录里的 UTF-8 文本文件（`timeline.json` / `spec.json` /
+  /// `video.json` 及其它源码；`docs.md` / `brief.md` 有正文时同时进容器的
+  /// `docs` 字段）；事实源 `spec.json` 的解码视图进 `spec`。项目读不出来
+  /// （缺时间线/规范、规范非法）先抛 [VideoProjectFailure]（坏项目不导出）；
+  /// 容器或文件系统失败抛 [WorkbenchPackFailure]（code / message 原样保留，
+  /// 不吞）。
+  Future<File> exportPack(String name) async {
+    final VideoProjectSnapshot snapshot = await read(name);
+    final Directory dir = Directory(snapshot.dir);
+    return exportProjectPack(
+      kind: WorkbenchPackKind.video.wire,
+      projectDir: dir,
+      name: name,
+      title: snapshot.title,
+      docs: readProjectDocs(dir),
+      spec: snapshot.spec,
+    );
+  }
+
+  /// 从单一容器导入项目；包内 `name` 决定目标目录 `<根>/<name>`。
+  ///
+  /// **目标已存在时拒绝**（抛 [WorkbenchPackFailure] `pack_target_exists`），
+  /// 不覆盖、不合并既有项目——重名项目换一个名字再导入。坏容器 / 版本不支持 /
+  /// 错 kind 同样显性失败（`WorkbenchPackFailure`）；包内 name 不合本存储
+  /// 白名单时抛 [VideoProjectFailure] `invalid_name`。任何失败都不留半成品，
+  /// 项目根保持原样（解包暂存目录会被清理）。
+  Future<void> importPack(File file) async {
+    final WorkbenchPack pack = await WorkbenchPack.readFrom(file);
+    requirePackKind(pack, WorkbenchPackKind.video.wire);
+    final Directory base = await resolveRoot();
+    final Directory target = _projectDir(base, pack.name);
+    await importProjectPack(
+      file,
+      projectDir: target,
+      expectKind: WorkbenchPackKind.video.wire,
+    );
+  }
+
+  /// 视频根下所有 `.nvdo` 打包文件（按文件名排序）。
+  ///
+  /// 隐藏 / 临时文件与包内 name 不合本项目名白名单的包不列（列出来的包
+  /// 一定能用 [importPack] 导入）。不影响 [list]：它只认项目目录。
+  Future<List<File>> listPacks() async {
+    final base = await resolveRoot();
+    return listProjectPacks(
+      base,
+      kind: WorkbenchPackKind.video.wire,
+      accept: (String name) => _namePattern.hasMatch(name),
+    );
   }
 }
