@@ -436,6 +436,10 @@ class MusicInspectorStatus {
 ///
 /// 编辑动作通过 [onApply] 交给工作台执行（`MusicProjectStore.save`、刷新 snapshot
 /// 与失败提示都在工作台）；[onApply] 为 null 时检查器保持只读。
+///
+/// 宽屏下右侧 NaN/检查窄栏才是主编辑入口（检查 tab 的通用属性表），此时工作台
+/// 把内容区这份检查器降级为只读摘要并传 [readOnlyHint] 说明去哪儿改，避免同一
+/// 属性在两处可编辑、状态却不同步。
 class MusicInspector extends StatefulWidget {
   const MusicInspector({
     super.key,
@@ -443,6 +447,7 @@ class MusicInspector extends StatefulWidget {
     this.selectedTrack = 0,
     this.status,
     this.onApply,
+    this.readOnlyHint = '',
   });
 
   final MusicProjectSnapshot? snapshot;
@@ -450,6 +455,9 @@ class MusicInspector extends StatefulWidget {
   final MusicInspectorStatus? status;
   final Future<void> Function(MusicEditAction action, String successMessage)?
   onApply;
+
+  /// 只读原因说明（只在 [onApply] 为 null 且有内容时显示；空 = 不显示）。
+  final String readOnlyHint;
 
   @override
   State<MusicInspector> createState() => _MusicInspectorState();
@@ -541,6 +549,24 @@ class _MusicInspectorState extends State<MusicInspector> {
             meta: editable ? '可编辑' : '只读',
           ),
           Divider(height: 1, color: p.line),
+          if (!editable && widget.readOnlyHint.isNotEmpty)
+            Padding(
+              key: const ValueKey('music-inspector-readonly-hint'),
+              padding: const EdgeInsets.fromLTRB(
+                NonSpace.md,
+                NonSpace.sm,
+                NonSpace.md,
+                0,
+              ),
+              child: Text(
+                widget.readOnlyHint,
+                style: TextStyle(
+                  fontSize: NonType.micro,
+                  height: NonType.lineCaption,
+                  color: p.ink4,
+                ),
+              ),
+            ),
           Expanded(
             child: score == null
                 ? Center(

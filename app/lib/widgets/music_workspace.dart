@@ -20,13 +20,17 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:provider/provider.dart';
 
+import '../core/inspect/check_field.dart';
 import '../core/music/music_compile.dart';
 import '../core/music/music_edit.dart';
+import '../core/music/music_patch.dart';
 import '../core/music/music_player.dart';
 import '../core/music/music_project.dart';
 import '../core/music/music_score.dart';
 import '../core/music/music_staff_edit.dart';
+import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/workbench_layout.dart';
 import 'aqua.dart';
@@ -55,6 +59,13 @@ final class MusicProjectSwitch {
 
   final String name;
 }
+
+/// 谱面里被选中的已有音符（点击符头得到；只用于选中光圈/键盘删除/检查器）。
+typedef _MusicStaffSelection = ({
+  int trackIndex,
+  int measureIndex,
+  String eventId,
+});
 
 class MusicWorkspace extends StatefulWidget {
   const MusicWorkspace({super.key, this.store, this.playbackFactory});
@@ -110,11 +121,23 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
 
   /// 谱面当前选中的已有音符（点击符头选中；Delete/Backspace 删除后清空）。
   ///
-  /// 选中只用于键盘删除与光圈提示，不写乐谱、不改播放面。
-  ({int trackIndex, int measureIndex, String eventId})? _selectedEvent;
+  /// 选中只用于键盘删除、光圈提示与检查器属性表，不写乐谱、不改播放面。
+  _MusicStaffSelection? _selectedEvent;
 
   /// 谱面键盘焦点（点谱面时主动索取，Delete/Backspace 才能落到谱面）。
   final FocusNode _staffFocus = FocusNode(debugLabel: 'music-staff-hit');
+
+  /// 通用检查器控制器（选中轨道/音符 → 右侧「检查」tab 的属性表）。
+  ///
+  /// 写回统一走 [_applyEdit]（save → 重读 → 刷新播放面），不另开编辑通道。
+  late final _MusicCheckController _checkController;
+
+  /// 全局 AppStore（生产壳层里才有：右侧 NaN/检查窄栏挂在它上面）。
+  ///
+  /// 独立测试/纯内容嵌入没有 provider 时保持 null：此时内容区这份音乐检查器
+  /// 就是唯一编辑入口，继续保持可编辑；只有壳层右栏在场（[_appStore] 非空）
+  /// 才把它降级为只读摘要，避免同一属性两处可编辑却不同步。
+  AppStore? _appStore;
 
   /// initState 从 [musicLoadOnOpen] 取到的开局项目名（只消费一次）。
   String? _pendingOpen;
@@ -122,11 +145,42 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   @override
   void initState() {
     super.initState();
+    _checkController = _MusicCheckController(
+      () => _snapshot,
+      () => _selectedTrack,
+      () => _selectedEvent,
+      _applyEdit,
+    );
     // 跨视图打开：项目名由 [openMusicWorkspace] 一次性写入，空 = 走原有首项逻辑。
     _pendingOpen = musicLoadOnOpen;
     musicLoadOnOpen = null;
     musicProjectSwitch.addListener(_onSwitchRequest);
+    // 注册到外壳的检查 tab：等首帧后再挂（避免在 build 阶段 notify 壳层）。
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _attachCheckController(),
+    );
     _refresh();
+  }
+
+  /// 把自己注册成当前工作台的检查器（只有生产壳层提供 AppStore 时才有处可挂）。
+  ///
+  /// 注册后内容区检查器要按「壳层右栏在场」重建一次（降级为只读摘要）。
+  void _attachCheckController() {
+    if (!mounted || _appStore != null) return;
+    final AppStore? appStore = _maybeAppStore(context);
+    if (appStore == null) return;
+    _appStore = appStore;
+    appStore.setCheckController(_checkController);
+    setState(() {});
+  }
+
+  /// 可选地取全局 Store：独立工作台/单测没有 provider 时返回 null（不抛）。
+  static AppStore? _maybeAppStore(BuildContext context) {
+    try {
+      return Provider.of<AppStore>(context, listen: false);
+    } on ProviderNotFoundException {
+      return null;
+    }
   }
 
   /// 已挂载工作台的切项目请求（顶栏「音乐」分区 → 另一个项目）。
@@ -193,12 +247,14 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
         _snapshot = null;
         _failure = failure;
       });
+      _checkController.notifySelectionChanged();
     } catch (error) {
       if (!mounted || _name != name) return;
       setState(() {
         _snapshot = null;
         _failure = MusicProjectFailure('io_error', '$error');
       });
+      _checkController.notifySelectionChanged();
     }
   }
 
@@ -222,6 +278,8 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     });
     previous?.dispose();
     if (next != null) unawaited(next.start());
+    // 快照换了 = 属性表的当前值/来源都可能变，让检查 tab 重取。
+    _checkController.notifySelectionChanged();
   }
 
   MusicPlaybackController? _createPlayback(MusicProjectSnapshot snapshot) {
@@ -383,6 +441,12 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     _staffFocus.dispose();
     _playback?.dispose();
     _playback = null;
+    // 只清掉自己的注册：切工作台时新实例可能已经登记，不能误删别人的控制器。
+    final AppStore? appStore = _appStore;
+    if (appStore != null && appStore.checkController == _checkController) {
+      appStore.setCheckController(null);
+    }
+    _checkController.dispose();
     super.dispose();
   }
 
@@ -391,25 +455,28 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   ///
   /// [onSaved] 只在「保存成功且已刷新 snapshot」后调用（失败分支绝不调用），
   /// 供调用方清理只属于本次编辑的临时状态（例如删除后的谱面选中项）。
-  Future<void> _applyEdit(
+  ///
+  /// 返回值 = 本次编辑是否「落盘且刷新成功」：检查器（[WorkbenchCheckController]）
+  /// 必须靠它区分成功与拒绝，失败时保持旧值、不伪造成功。
+  Future<bool> _applyEdit(
     MusicEditAction action,
     String successMessage, {
     VoidCallback? onSaved,
   }) async {
     final String? name = _name;
     final MusicProjectSnapshot? snapshot = _snapshot;
-    if (name == null || snapshot == null) return;
+    if (name == null || snapshot == null) return false;
     MusicScore next;
     try {
       next = action(snapshot.score);
     } on MusicEditFailure catch (failure) {
       _setStatus(MusicInspectorStatus(message: failure.message, isError: true));
-      return;
+      return false;
     } catch (_) {
       _setStatus(
         const MusicInspectorStatus(message: '这次修改没有生效，请再试一次。', isError: true),
       );
-      return;
+      return false;
     }
     MusicValidation validation;
     try {
@@ -421,12 +488,12 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
           isError: true,
         ),
       );
-      return;
+      return false;
     } catch (_) {
       _setStatus(
         const MusicInspectorStatus(message: '乐谱没能保存，请稍后再试。', isError: true),
       );
-      return;
+      return false;
     }
     MusicProjectSnapshot fresh;
     try {
@@ -438,12 +505,12 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
           isError: true,
         ),
       );
-      return;
+      return false;
     } catch (_) {
       _setStatus(
         const MusicInspectorStatus(message: '保存后没能刷新乐谱，请点刷新重试。', isError: true),
       );
-      return;
+      return false;
     }
     List<MusicProjectEntry> entries = _entries;
     try {
@@ -451,7 +518,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     } catch (_) {
       entries = _entries;
     }
-    if (!mounted || _name != name) return;
+    if (!mounted || _name != name) return false;
     // 四栏目数据随新快照一起刷新：`score.json` 原文变了，源码栏/规范栏要跟着
     // 更新（文档不变也重读一次，保持「栏目数据 == 快照」这一条口径）。
     final String? docsMarkdown = _readDocs(fresh.dir);
@@ -477,6 +544,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     previousPlayback?.dispose();
     if (nextPlayback != null) unawaited(nextPlayback.start());
     onSaved?.call();
+    return true;
   }
 
   void _setStatus(MusicInspectorStatus status) {
@@ -518,10 +586,15 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
           message: '已选中音符，按键盘 Delete 或 Backspace 删除。',
         );
       });
+      // 选中音符 → 检查器换成「音符」属性表。
+      _checkController.notifySelectionChanged();
       return;
     }
     // 点空白 = 按拍位插入；拍面选中的旧音符先取消选中。
-    if (_selectedEvent != null) setState(() => _selectedEvent = null);
+    if (_selectedEvent != null) {
+      setState(() => _selectedEvent = null);
+      _checkController.notifySelectionChanged();
+    }
     final MusicTrack track = snapshot.score.tracks[hit.trackIndex];
     final String? drum = track.instrument == 'drums' ? hit.drum : null;
     final String successMessage = musicStaffInsertAtMessage(
@@ -585,6 +658,8 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
         onSaved: () {
           if (!mounted) return;
           setState(() => _selectedEvent = null);
+          // 选中音符被删掉 → 检查器回到该轨道的属性表。
+          _checkController.notifySelectionChanged();
         },
       ).whenComplete(() => _staffTapBusy = false),
     );
@@ -632,6 +707,11 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
         final bool hasLeft = layout.left == PanelPolicy.docked;
         final bool hasRight = layout.right == PanelPolicy.docked;
         final Widget center = _centerPane(context, p);
+        // 宽屏下壳层右栏的「检查」tab 才是主编辑入口（本工作台已注册通用检查
+        // 控制器）；内容区这份检查器只在宽屏可停靠时出现，因此降级为只读摘要，
+        // 避免同一属性两处可编辑、状态却不同步。独立测试/纯内容嵌入没有全局
+        // store，内容区就是唯一入口，保持原样可编辑。
+        final bool inspectorReadOnly = _appStore != null;
         final Widget body = Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
@@ -653,8 +733,14 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
                         child: MusicTrackList(
                           tracks: score.tracks,
                           selectedIndex: _selectedTrack,
-                          onSelect: (index) =>
-                              setState(() => _selectedTrack = index),
+                          onSelect: (index) {
+                            // 选轨道 = 取消谱面上的音符选中（检查器跟着换对象）。
+                            setState(() {
+                              _selectedTrack = index;
+                              _selectedEvent = null;
+                            });
+                            _checkController.notifySelectionChanged();
+                          },
                         ),
                       ),
                     ],
@@ -671,7 +757,10 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
                   snapshot: _snapshot,
                   selectedTrack: _selectedTrack,
                   status: _status,
-                  onApply: _applyEdit,
+                  onApply: inspectorReadOnly ? null : _applyEdit,
+                  readOnlyHint: inspectorReadOnly
+                      ? '宽屏下请到右侧「检查」面板改属性；这里只读。'
+                      : '',
                 ),
               ),
           ],
@@ -986,6 +1075,472 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
         ),
       ],
     );
+  }
+}
+
+/// 音乐检查控制器：把「选中轨道 / 选中音符」映射成通用属性表，写回 `score.json`。
+///
+/// 写回纪律（最小编辑、绝不写坏乐谱）：
+/// * 音量/静音直接用 `music_edit.dart` 的既有纯函数
+///   （[editTrackVolume] / [editTrackMuted]）；
+/// * 名称/乐器/音符字段用 `core/music/music_patch.dart` 的既有确定性补丁
+///   （`music_edit.dart` 没有这些纯函数；补丁层同样经 `parseMusicScore` 硬门，
+///   未知字段与事件 id 原样保留）；
+/// * 谱号/时值/附点没有既有纯函数、也没有补丁白名单路径 → 字段显性只读，
+///   `update` 返回 false 且不写盘（不在 widget 层另发明乐谱语义）；
+/// * 任何写入都经工作台既有 [_MusicWorkspaceState._applyEdit]（save → 重读 →
+///   刷新播放面）；失败返回 false，调用方保持旧值。
+final class _MusicCheckController extends WorkbenchCheckController {
+  /// 参数依次是：当前快照读取、选中轨道下标读取、选中音符读取、编辑出口。
+  ///
+  /// 控制器不持有项目事实源，只按工作台当前选中把「元素 → 属性表」映射出来，
+  /// 写回统一交给工作台的 `_applyEdit`。
+  _MusicCheckController(
+    this._snapshot,
+    this._selectedTrackIndex,
+    this._selectedEvent,
+    this._applyEdit,
+  );
+
+  final MusicProjectSnapshot? Function() _snapshot;
+  final int Function() _selectedTrackIndex;
+  final _MusicStaffSelection? Function() _selectedEvent;
+  final Future<bool> Function(
+    MusicEditAction action,
+    String successMessage, {
+    VoidCallback? onSaved,
+  })
+  _applyEdit;
+
+  bool _disposed = false;
+
+  /// 时值下拉选项（契约里的常用时值；实际时值不在表内时下拉显示「选择」，
+  /// 且该字段本来就是只读——改时值必须同时改填充休止，core/music 没有这条纯函数）。
+  static const Map<String, (int, int)> _durationOptions = <String, (int, int)>{
+    '全音符': (1, 1),
+    '二分音符': (1, 2),
+    '四分音符': (1, 4),
+    '八分音符': (1, 8),
+    '十六分音符': (1, 16),
+    '三十二分音符': (1, 32),
+  };
+
+  /// 谱号选项（渲染层支持的三类谱号；契约 v1 未开放该字段编辑）。
+  static const List<String> _clefOptions = <String>[
+    'treble',
+    'bass',
+    'percussion',
+  ];
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  @override
+  void notifySelectionChanged() {
+    if (!_disposed) super.notifySelectionChanged();
+  }
+
+  @override
+  CheckSheet? get sheet {
+    final MusicProjectSnapshot? snapshot = _snapshot();
+    if (snapshot == null) return null; // 无项目 / 坏项目：检查器显示空态
+    final MusicScore score = snapshot.score;
+    final _MusicStaffSelection? selection = _selectedEvent();
+    if (selection != null) {
+      final CheckSheet? noteSheet = _noteSheet(score, selection);
+      if (noteSheet != null) return noteSheet;
+    }
+    final List<MusicTrack> tracks = score.tracks;
+    if (tracks.isEmpty) return null;
+    int index = _selectedTrackIndex();
+    if (index < 0) index = 0;
+    if (index >= tracks.length) index = tracks.length - 1;
+    return _trackSheet(tracks[index]);
+  }
+
+  CheckSheet _trackSheet(MusicTrack track) {
+    final String name = track.name.isEmpty ? track.id : track.name;
+    return CheckSheet(
+      title: '轨道「$name」',
+      subtitle: '来自 score.json',
+      kindLabel: '轨道',
+      fields: <CheckField>[
+        CheckField(
+          key: 'name',
+          label: '名称',
+          kind: CheckFieldKind.text,
+          value: name,
+        ),
+        CheckField(
+          key: 'instrument',
+          label: '乐器',
+          kind: CheckFieldKind.select,
+          value: track.instrument,
+          options: musicInstruments.toList(growable: false),
+        ),
+        CheckField(
+          key: 'volume',
+          label: '音量',
+          kind: CheckFieldKind.number,
+          value: track.volume,
+          min: 0,
+          max: 1,
+        ),
+        CheckField(
+          key: 'muted',
+          label: '静音',
+          kind: CheckFieldKind.toggle,
+          value: track.muted,
+        ),
+        // 谱号：core/music 没有改谱号的纯函数，补丁白名单也不含 clef →
+        // 显性只读（能看见当前契约值，但不假装可编辑）。
+        CheckField(
+          key: 'clef',
+          label: '谱号',
+          kind: CheckFieldKind.select,
+          value: track.clef,
+          options: _clefOptions,
+          enabled: false,
+        ),
+      ],
+    );
+  }
+
+  CheckSheet? _noteSheet(MusicScore score, _MusicStaffSelection selection) {
+    final int trackIndex = selection.trackIndex;
+    if (trackIndex < 0 || trackIndex >= score.tracks.length) return null;
+    final MusicTrack track = score.tracks[trackIndex];
+    final int measureIndex = selection.measureIndex;
+    if (measureIndex < 0 || measureIndex >= track.measures.length) return null;
+    final MusicMeasure measure = track.measures[measureIndex];
+    final int eventIndex = _eventIndex(measure, selection.eventId);
+    if (eventIndex < 0) return null;
+    final MusicEvent event = measure.events[eventIndex];
+    final bool pitched = !event.isRest;
+    final String durationLabel = musicDurationLabel(event.durNum, event.durDen);
+    final String? durationValue = _durationOptions.containsKey(durationLabel)
+        ? durationLabel
+        : null;
+    return CheckSheet(
+      title: '音符 · 第 ${_beatNumberOf(score, measure, event)} 拍',
+      subtitle: '来自 score.json',
+      kindLabel: '音符',
+      fields: <CheckField>[
+        CheckField(
+          key: 'step',
+          label: '音高',
+          kind: CheckFieldKind.select,
+          value: event.step,
+          options: musicSteps.toList(growable: false),
+          enabled: pitched,
+        ),
+        CheckField(
+          key: 'octave',
+          label: '八度',
+          kind: CheckFieldKind.number,
+          value: event.octave,
+          min: 1,
+          max: 8,
+          enabled: pitched,
+        ),
+        CheckField(
+          key: 'alter',
+          label: '变音',
+          kind: CheckFieldKind.select,
+          value: '${event.alter}',
+          options: const <String>['-1', '0', '1'],
+          enabled: pitched,
+        ),
+        // 时值/附点：改它们会改变小节时值总和（必须同时改填充休止），
+        // core/music 没有这类纯函数 → 只读展示，update 显性拒绝。
+        CheckField(
+          key: 'dur',
+          label: '时值',
+          kind: CheckFieldKind.select,
+          value: durationValue,
+          options: _durationOptions.keys.toList(growable: false),
+          enabled: false,
+        ),
+        CheckField(
+          key: 'dot',
+          label: '附点',
+          kind: CheckFieldKind.toggle,
+          value: event.dot == 1,
+          enabled: false,
+        ),
+        CheckField(
+          key: 'isRest',
+          label: '休止',
+          kind: CheckFieldKind.toggle,
+          value: event.isRest,
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<bool> update(String key, Object? value) async {
+    if (_disposed) return false;
+    final MusicProjectSnapshot? snapshot = _snapshot();
+    if (snapshot == null) return false;
+    final ({MusicEditAction action, String message})? edit = _buildEdit(
+      snapshot,
+      key,
+      value,
+    );
+    if (edit == null) return false; // 非法值/契约外字段：不构造编辑、不写盘
+    final bool saved = await _applyEdit(edit.action, edit.message);
+    if (!saved || _disposed) return saved;
+    // 保存成功 → 新 snapshot 已就位，通知检查面板重取当前值。
+    notifyListeners();
+    return true;
+  }
+
+  /// 找当前选中对象（音符优先，否则选中轨道）对应的一次最小编辑。
+  ({MusicEditAction action, String message})? _buildEdit(
+    MusicProjectSnapshot snapshot,
+    String key,
+    Object? value,
+  ) {
+    final MusicScore score = snapshot.score;
+    final _MusicStaffSelection? selection = _selectedEvent();
+    if (selection != null) {
+      final int trackIndex = selection.trackIndex;
+      if (trackIndex >= 0 && trackIndex < score.tracks.length) {
+        final int measureIndex = selection.measureIndex;
+        final List<MusicMeasure> measures = score.tracks[trackIndex].measures;
+        if (measureIndex >= 0 && measureIndex < measures.length) {
+          final MusicMeasure measure = measures[measureIndex];
+          final int eventIndex = _eventIndex(measure, selection.eventId);
+          if (eventIndex >= 0) {
+            return _noteEdit(
+              measure.events[eventIndex],
+              selection,
+              eventIndex,
+              key,
+              value,
+            );
+          }
+        }
+      }
+    }
+    final List<MusicTrack> tracks = score.tracks;
+    if (tracks.isEmpty) return null;
+    int index = _selectedTrackIndex();
+    if (index < 0) index = 0;
+    if (index >= tracks.length) index = tracks.length - 1;
+    return _trackEdit(tracks[index], index, key, value);
+  }
+
+  ({MusicEditAction action, String message})? _trackEdit(
+    MusicTrack track,
+    int trackIndex,
+    String key,
+    Object? value,
+  ) {
+    if (key == 'name') {
+      if (value is! String) return null;
+      final String name = value.trim();
+      if (name.isEmpty) return null;
+      return (
+        action: (MusicScore score) => _patch(score, <Object?>[
+          <String, Object?>{
+            'op': 'replace',
+            'path': '/tracks/$trackIndex/name',
+            'value': name,
+          },
+        ]),
+        message: '轨道名称已保存',
+      );
+    }
+    if (key == 'instrument') {
+      if (value is! String || !musicInstruments.contains(value)) return null;
+      return (
+        action: (MusicScore score) => _patch(score, <Object?>[
+          <String, Object?>{
+            'op': 'replace',
+            'path': '/tracks/$trackIndex/instrument',
+            'value': value,
+          },
+        ]),
+        message: '轨道乐器已保存',
+      );
+    }
+    if (key == 'volume') {
+      if (value is! num || !value.isFinite) return null;
+      final double volume = value.toDouble();
+      if (volume < 0 || volume > 1) return null;
+      return (
+        action: (MusicScore score) => editTrackVolume(score, track.id, volume),
+        message: '轨道音量已保存',
+      );
+    }
+    if (key == 'muted') {
+      if (value is! bool) return null;
+      return (
+        action: (MusicScore score) => editTrackMuted(score, track.id, value),
+        message: value ? '轨道已静音' : '轨道已取消静音',
+      );
+    }
+    // clef：没有既有纯函数（music_edit 不含谱号编辑，补丁白名单不含 clef）。
+    return null;
+  }
+
+  ({MusicEditAction action, String message})? _noteEdit(
+    MusicEvent event,
+    _MusicStaffSelection selection,
+    int eventIndex,
+    String key,
+    Object? value,
+  ) {
+    final ({MusicEvent event, String message})? change = _noteChange(
+      event,
+      key,
+      value,
+    );
+    if (change == null) return null;
+    final Map<String, Object?> valueJson = change.event.toJson();
+    return (
+      action: (MusicScore score) => _patch(score, <Object?>[
+        <String, Object?>{
+          'op': 'replace',
+          'path':
+              '/tracks/${selection.trackIndex}/measures/'
+              '${selection.measureIndex}/events/$eventIndex',
+          'value': valueJson,
+        },
+      ]),
+      message: change.message,
+    );
+  }
+
+  ({MusicEvent event, String message})? _noteChange(
+    MusicEvent event,
+    String key,
+    Object? value,
+  ) {
+    if (key == 'step') {
+      if (event.isRest || value is! String) return null;
+      final String step = value.trim().toUpperCase();
+      if (!musicSteps.contains(step)) return null;
+      return (event: _copyEvent(event, step: step), message: '音符音高已保存');
+    }
+    if (key == 'octave') {
+      if (event.isRest || value is! num || !value.isFinite) return null;
+      final int octave = value.toInt();
+      if (octave < 1 || octave > 8) return null;
+      return (event: _copyEvent(event, octave: octave), message: '音符音高已保存');
+    }
+    if (key == 'alter') {
+      if (event.isRest) return null;
+      final int? alter = _parseAlter(value);
+      if (alter == null) return null;
+      return (event: _copyEvent(event, alter: alter), message: '音符音高已保存');
+    }
+    if (key == 'isRest') {
+      if (value is! bool) return null;
+      return (
+        event: _eventWithType(event, rest: value),
+        message: value ? '音符已改为休止' : '休止已改为音符',
+      );
+    }
+    // 时值/附点：改时值必须同时改填充休止，core/music 没有这条纯函数 → 拒绝。
+    return null;
+  }
+
+  static int? _parseAlter(Object? value) {
+    if (value is int) return value >= -1 && value <= 1 ? value : null;
+    if (value is String) {
+      final int? parsed = int.tryParse(value.trim());
+      if (parsed != null && parsed >= -1 && parsed <= 1) return parsed;
+    }
+    return null;
+  }
+
+  static MusicEvent _copyEvent(
+    MusicEvent source, {
+    String? step,
+    int? octave,
+    int? alter,
+  }) => MusicEvent(
+    id: source.id,
+    isRest: source.isRest,
+    durNum: source.durNum,
+    durDen: source.durDen,
+    step: step ?? source.step,
+    alter: alter ?? source.alter,
+    octave: octave ?? source.octave,
+    dot: source.dot,
+    tupletN: source.tupletN,
+    tupletIn: source.tupletIn,
+    extra: source.extra,
+  );
+
+  /// 音符 ↔ 休止（时值不变，小节时值总和不受影响）。
+  ///
+  /// 休止没有音高：改成音符时给默认 C4（与 `appendQuarterNote` 的默认一致）；
+  /// 已有音高的音符改回音符则保留原音高。
+  static MusicEvent _eventWithType(MusicEvent source, {required bool rest}) {
+    if (rest) {
+      return MusicEvent(
+        id: source.id,
+        isRest: true,
+        durNum: source.durNum,
+        durDen: source.durDen,
+        extra: source.extra,
+      );
+    }
+    final bool pitched = source.step.isNotEmpty;
+    return MusicEvent(
+      id: source.id,
+      isRest: false,
+      durNum: source.durNum,
+      durDen: source.durDen,
+      step: pitched ? source.step : 'C',
+      alter: source.alter,
+      octave: pitched ? source.octave : 4,
+      dot: source.dot,
+      tupletN: source.tupletN,
+      tupletIn: source.tupletIn,
+      extra: source.extra,
+    );
+  }
+
+  /// 对当前乐谱应用一次既有确定性补丁；补丁失败翻译成工作台既有失败类型
+  /// （[_MusicWorkspaceState._applyEdit] 会显性显示 message，而不是静默吞掉）。
+  static MusicScore _patch(MusicScore score, List<Object?> operations) {
+    try {
+      return applyMusicPatch(score.toJson(), operations).score;
+    } on MusicPatchFailure catch (failure) {
+      throw MusicEditFailure(failure.code, failure.message);
+    }
+  }
+
+  static int _eventIndex(MusicMeasure measure, String eventId) {
+    for (int i = 0; i < measure.events.length; i++) {
+      if (measure.events[i].id == eventId) return i;
+    }
+    return -1;
+  }
+
+  /// 事件在小节内的人话拍号（1 起，按拍号分母换算；附点/连音按实际时值算）。
+  static int _beatNumberOf(
+    MusicScore score,
+    MusicMeasure measure,
+    MusicEvent event,
+  ) {
+    double start = 0;
+    for (final MusicEvent current in measure.events) {
+      if (current.id == event.id) break;
+      start += current.durationValue;
+    }
+    final int beatUnit = score.timeSig.length == 2 && score.timeSig[1] > 0
+        ? score.timeSig[1]
+        : 4;
+    return (start * beatUnit + 1e-6).floor() + 1;
   }
 }
 
