@@ -250,6 +250,7 @@ class VideoShotInspector extends StatelessWidget {
     this.fps = 0,
     this.totalSeconds = 0,
     this.shotCount = 0,
+    this.readOnly = false,
   });
 
   final VideoShotItem? shot;
@@ -257,6 +258,11 @@ class VideoShotInspector extends StatelessWidget {
   final int fps;
   final double totalSeconds;
   final int shotCount;
+
+  /// 只读形态：宽屏（右栏常驻）时右侧共享窄栏的「检查」tab 是唯一编辑入口，
+  /// 内容区这块检查器降级为只读摘要，避免同一属性两处可编辑却不同步；
+  /// 窄屏/独立面板保持原样（本检查器本身仍只做展示）。
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -308,7 +314,14 @@ class VideoShotInspector extends StatelessWidget {
                           _kv(p, '镜头', '${shot.data['camera']}'),
                         const SizedBox(height: NonSpace.sm),
                         Text(
-                          '镜头属性编辑在剧本编译器批次接入；本检查器当前只读。',
+                          readOnly
+                              ? '宽屏下请到右侧「检查」面板改镜头属性；这里只读。'
+                              : '镜头属性编辑在剧本编译器批次接入；本检查器当前只读。',
+                          key: readOnly
+                              ? const ValueKey(
+                                  'video-workbench-inspector-readonly-hint',
+                                )
+                              : null,
                           style: TextStyle(
                             fontSize: NonType.micro,
                             height: NonType.lineBody,

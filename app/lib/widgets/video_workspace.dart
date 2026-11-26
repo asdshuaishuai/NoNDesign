@@ -33,6 +33,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../core/capability.dart';
+import '../core/inspect/check_field.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/workbench_layout.dart';
@@ -112,6 +113,18 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   bool _previewPlaying = false;
   final VideoAnimationController _previewController =
       VideoAnimationController();
+
+  /// 通用检查器控制器（导演台选中镜头 → 右侧「检查」tab 的可编辑属性表）。
+  ///
+  /// 写回走工作台自己的保存链路 [_saveShotTimeline]（先按项目规范重新校验，
+  /// 再原子替换 `timeline.json` / `video.json`，最后重新读盘刷新）；控制器
+  /// 不持有项目事实源、不直接写盘。生命周期：首帧后注册到 store，卸载时只
+  /// 清自己的注册（见 [_clearCheckControllerOnDispose]）。
+  late final _VideoCheckController _checkController;
+
+  /// 检查器写回串行闸：一次只跑一条保存链路，避免两次编辑读到同一份旧时间线
+  /// 各自落盘覆盖彼此。
+  Future<bool>? _checkSaveQueue;
 
   /// 产物模式：艺术架点开的某个 mp4（非 null 即整个工作台切到播放面）。
   String? _artifactPath;
@@ -202,6 +215,13 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     _lastStoreProjectName = appStore.settings.videoProjectName;
     _lastAgentBusy = appStore.agentBusy;
     appStore.addListener(_onStoreChanged);
+    // 通用检查器：导演台选中镜头 → 属性表；写回走本工作台的保存链路。
+    _checkController = _VideoCheckController(
+      projectOf: () => _project,
+      selectedShotIndexOf: () => _selectedShotIndex,
+      save: _saveShotTimeline,
+      onReject: _rejectCheckEdit,
+    );
 
     // 清单先读：它不依赖恢复路径，切回创作面时选择器要已经能列出短片。
     _initClips();
@@ -241,12 +261,22 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         if (mounted) store.setVideoState(job: '');
       });
     }
+
+    // 检查控制器等首帧后再注册：setCheckController 会 notifyListeners，构建期
+    // 通知会标脏祖先。产物播放模式在 initState 早退，没有镜头可选，不注册。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _appStore?.setCheckController(_checkController);
+    });
   }
 
   @override
   void dispose() {
     // 切视图即销毁工作台：store 监听与注入的播放源都不能留下。
     _appStore?.removeListener(_onStoreChanged);
+    // 清空检查控制器注册（只清自己的；控制器不 dispose——右侧面板可能还在
+    // 移除监听，ChangeNotifier dispose 后再 removeListener 会断言失败）。
+    _clearCheckControllerOnDispose();
     _appStore = null;
     _releaseClipPlayback();
     _previewController.dispose();
@@ -348,12 +378,15 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       _projectBusy = true;
       _doc = null;
       _review = null;
+      // 切项目 = 切镜头表：旧项目的选中镜头不能带过来。
+      _selectedShotIndex = null;
       // 切项目 = 切内容：四栏目回到呈现效果，旧项目的文档/源码不能带过来。
       _column = WorkbenchColumn.present;
       _docsMarkdown = null;
       _sourceFiles = const <WorkbenchSourceFile>[];
       _videoMetaJson = null;
     });
+    _checkController.notifySelectionChanged();
     unawaited(_loadProject(name, announce: announce, fromStore: fromStore));
     if (refresh) unawaited(_refreshProjects());
   }
@@ -387,6 +420,8 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           spec: snapshot.spec,
         );
       });
+      // 新时间线就位 → 检查器重取当前镜头的属性值。
+      _checkController.notifySelectionChanged();
       if (announce) {
         final title = snapshot.title.isEmpty ? name : snapshot.title;
         _toasts.info(
@@ -403,6 +438,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   void _applyProjectFailure(String name, VideoProjectFailure failure) {
     if (!mounted || _projectName != name) return;
     setState(() {
+      _selectedShotIndex = null;
       _project = null;
       _projectFailure = failure;
       _projectBusy = false;
@@ -421,6 +457,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         technical: <String>[failure.technical],
       );
     });
+    _checkController.notifySelectionChanged();
     // 坏项目在列表里也标出来（corrupt / 可重试）。
     unawaited(_refreshProjects());
   }
@@ -442,6 +479,8 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     _project = null;
     _projectFailure = null;
     _projectBusy = false;
+    // 没有生成项目 = 检查器没有可编辑镜头（内置示例只读）。
+    _selectedShotIndex = null;
     // 内容切走（示例/动效合成）：四栏目回到呈现效果，项目数据不能留在栏目里。
     _column = WorkbenchColumn.present;
     _docsMarkdown = null;
@@ -459,6 +498,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       _clearProject(persist: persist);
       _applySample(_sampleIdx);
     });
+    _checkController.notifySelectionChanged();
   }
 
   /// 手动选择生成项目（选择器里点一行）；actions 都经 setState 收口。
@@ -484,6 +524,157 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
 
   void _useSampleFromProjectFailure() {
     _fallBackToSample();
+  }
+
+  // ------------------------------------------------------------ 检查器写回
+
+  /// 检查器非法值/保存失败的人话提示（上屏；原始诊断不进用户文案）。
+  void _rejectCheckEdit(String message) {
+    if (!mounted) return;
+    _toasts.warn(message);
+  }
+
+  /// 卸载时清空检查控制器注册：只清自己的（别的工作台可能已经接管）。
+  ///
+  /// dispose 常发生在构建期（视图切换），notifyListeners 会标脏祖先，因此推到
+  /// 帧末并先判身份。控制器不 dispose——右侧面板可能还在移除监听，
+  /// ChangeNotifier dispose 后再 removeListener 会断言失败。
+  void _clearCheckControllerOnDispose() {
+    final AppStore? appStore = _appStore;
+    final _VideoCheckController controller = _checkController;
+    if (appStore == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (appStore.checkController == controller) {
+        appStore.setCheckController(null);
+      }
+    });
+  }
+
+  /// 检查器写回串行化：前一条保存链路跑完再跑下一条（两次编辑不能各自读到
+  /// 同一份旧时间线、互相覆盖）。
+  Future<bool> _saveShotTimeline(Map<String, dynamic> timeline) {
+    final Future<bool> previous = _checkSaveQueue ?? Future<bool>.value(true);
+    final Future<bool> result = previous.then(
+      (_) => _persistShotTimeline(timeline),
+    );
+    _checkSaveQueue = result;
+    unawaited(
+      result.whenComplete(() {
+        if (identical(_checkSaveQueue, result)) _checkSaveQueue = null;
+      }),
+    );
+    return result;
+  }
+
+  /// 把检查器编辑结果写回项目：先按项目规范重新校验
+  ///（[VideoDocument.build] 预编译全量算式），再原子替换 `timeline.json` /
+  /// `video.json`，最后重新读盘刷新播放面与镜头表。
+  ///
+  /// 返回值 = 本次编辑是否「落盘且刷新成功」；控制器靠它区分成功与拒绝，
+  /// 失败时绝不伪造成功。
+  Future<bool> _persistShotTimeline(Map<String, dynamic> timeline) async {
+    final VideoProjectSnapshot? project = _project;
+    final String? name = _projectName;
+    if (!mounted || project == null || name == null) return false;
+    final VideoDocument document;
+    try {
+      document = VideoDocument.build(
+        timeline: timeline,
+        spec: project.spec,
+        baseDir: Directory(project.dir),
+      );
+    } on VideoRejected catch (error) {
+      _rejectCheckEdit(videoFailureMessage(error));
+      return false;
+    } catch (_) {
+      _rejectCheckEdit('这次修改没有通过校验，项目文件保持不变。');
+      return false;
+    }
+    try {
+      _writeProjectTimeline(
+        dir: project.dir,
+        timeline: timeline,
+        document: document,
+        title: project.title,
+      );
+    } catch (_) {
+      _rejectCheckEdit('项目文件没能写入，请重试。');
+      return false;
+    }
+    await _loadProject(name);
+    if (!mounted) return false;
+    final bool saved = _project != null && _projectFailure == null;
+    if (saved) _checkController.notifySelectionChanged();
+    return saved;
+  }
+
+  /// 原子替换项目的事实源：`timeline.json` + `video.json`（元数据片长/帧率）。
+  ///
+  /// 两份先写同目录临时文件并 flush，再逐个改名替换；只动这两个文件，
+  /// `docs.md` / 规范文件 / 其它源码一律不碰。改名失败时目标文件保持旧内容
+  ///（Windows 目标在场时先删再改名）。
+  void _writeProjectTimeline({
+    required String dir,
+    required Map<String, dynamic> timeline,
+    required VideoDocument document,
+    required String title,
+  }) {
+    const JsonEncoder encoder = JsonEncoder.withIndent('  ');
+    final String timelineText = '${encoder.convert(timeline)}\n';
+    final Map<String, dynamic> meta = <String, dynamic>{};
+    final File metaFile = File('$dir/video.json');
+    if (metaFile.existsSync()) {
+      try {
+        final Object? decoded = jsonDecode(metaFile.readAsStringSync());
+        if (decoded is Map) meta.addAll(Map<String, dynamic>.from(decoded));
+      } catch (_) {
+        // 元数据坏了不阻塞编辑：重建一份最小元数据（标题/片长/帧率）。
+      }
+    }
+    if ('${meta['title'] ?? ''}'.trim().isEmpty) meta['title'] = title;
+    meta['seconds'] = document.totalSeconds;
+    meta['fps'] = document.fps;
+    final String metaText = '${encoder.convert(meta)}\n';
+    final String stamp = DateTime.now().microsecondsSinceEpoch.toString();
+    final File timelineTmp = File('$dir/.timeline.json.$stamp.tmp');
+    final File metaTmp = File('$dir/.video.json.$stamp.tmp');
+    try {
+      _writeFlushed(timelineTmp, timelineText);
+      _writeFlushed(metaTmp, metaText);
+      _replaceWithTmp(timelineTmp, File('$dir/timeline.json'));
+      _replaceWithTmp(metaTmp, metaFile);
+    } finally {
+      _deleteQuietlyFile(timelineTmp);
+      _deleteQuietlyFile(metaTmp);
+    }
+  }
+
+  /// 临时文件写入并 flush：没 flush 的改名在掉电/崩溃时会变成半截文件。
+  static void _writeFlushed(File file, String text) {
+    final RandomAccessFile handle = file.openSync(mode: FileMode.writeOnly);
+    try {
+      handle.writeStringSync(text);
+      handle.flushSync();
+    } finally {
+      handle.closeSync();
+    }
+  }
+
+  /// 原子替换：先 rename；Windows 目标在场时 rename 可能失败，先删目标再改名。
+  static void _replaceWithTmp(File tmp, File target) {
+    try {
+      tmp.renameSync(target.path);
+    } on FileSystemException {
+      if (target.existsSync()) target.deleteSync();
+      tmp.renameSync(target.path);
+    }
+  }
+
+  /// 清掉残留临时文件；清理失败不能盖掉原始错误。
+  static void _deleteQuietlyFile(File file) {
+    try {
+      if (file.existsSync()) file.deleteSync();
+    } catch (_) {}
   }
 
   /// 删除当前生成项目（确认后删目录、清设置、回退到内置示例）。
@@ -541,6 +732,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       _sampleIdx = index;
       _applySample(index);
     });
+    _checkController.notifySelectionChanged();
     store.setVideoState(sampleIdx: index, clipId: '');
   }
 
@@ -556,6 +748,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       _injectedClipPlayback = injected;
       _clipPlayback = injected;
     });
+    _checkController.notifySelectionChanged();
     store.setVideoState(clipId: clip.id);
   }
 
@@ -1030,6 +1223,9 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           fps: fps,
           totalSeconds: total,
           shotCount: shots.length,
+          // 宽屏（右栏常驻）时右侧共享窄栏的「检查」tab 才是编辑入口；内容区
+          // 这块检查器降级为只读摘要，避免同一属性两处可编辑却不同步。
+          readOnly: layout.right == PanelPolicy.docked,
         );
         final director = Column(
           children: <Widget>[
@@ -2059,6 +2255,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       _playheadSeconds = shot.start;
       _previewPlaying = false;
     });
+    _checkController.notifySelectionChanged();
   }
 
   Widget _previewPane(BuildContext context) {
@@ -2129,6 +2326,216 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       },
       controller: _previewController,
     );
+  }
+}
+
+/// 视频工作台接入通用检查器：把导演台选中镜头映射成一份 [CheckSheet]。
+///
+/// 字段只映射 `timeline.scenes[i]` 里**真实存在且可写**的键：时长 duration、
+/// 文本 title（导演台镜头树的展示名来源）/ 背景色 background。起始时间是前面
+/// 镜头时长累加出来的派生值（只读），元素清单只读；契约里没有音量字段，
+/// 所以不造音量。
+///
+/// 写回**不在这里**：控制器只归一化值并交给工作台保存链路
+///（[_VideoWorkspaceState._saveShotTimeline]：重新校验 → 原子落盘 → 重读刷新）。
+/// 控制器不持有项目事实源，也不直接写盘。
+class _VideoCheckController extends WorkbenchCheckController {
+  _VideoCheckController({
+    required this.projectOf,
+    required this.selectedShotIndexOf,
+    required this.save,
+    required this.onReject,
+  });
+
+  /// 当前生成项目：每次取表都重新读（保存后工作台刷新即看到新值）。
+  /// null = 没有生成项目（内置示例/产物），检查器给空态。
+  final VideoProjectSnapshot? Function() projectOf;
+
+  /// 导演台当前选中镜头下标；null = 没有选中。
+  final int? Function() selectedShotIndexOf;
+
+  /// 工作台保存链路（返回是否真的落盘并刷新成功）。
+  final Future<bool> Function(Map<String, dynamic> timeline) save;
+
+  /// 非法值的人话提示（上屏由工作台负责；控制器不写盘）。
+  final void Function(String message) onReject;
+
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  @override
+  void notifySelectionChanged() {
+    if (!_disposed) super.notifySelectionChanged();
+  }
+
+  static final RegExp _hexPattern = RegExp(r'^#([0-9a-fA-F]{6})$');
+
+  static String _text(Object? value) => (value ?? '').toString();
+
+  /// `#RRGGBB` → ARGB int（检查器颜色控件的值形状）；坏值用中性灰占位，
+  /// 不伪装成项目里的真实颜色。
+  static int _colorOf(Object? raw) {
+    final RegExpMatch? match = _hexPattern.firstMatch(_text(raw).trim());
+    if (match == null) return 0xFF888888;
+    return 0xFF000000 | int.parse(match.group(1)!, radix: 16);
+  }
+
+  /// 场景的项目 id：契约没有强制场景 id，真实存在就用；否则退回镜头文本 /
+  /// 序号（与导演台镜头树的展示口径一致）。
+  static String _sceneId(Map<String, Object?> scene, int index) {
+    final String id = _text(scene['id']).trim();
+    if (id.isNotEmpty) return id;
+    for (final String key in const <String>['title', 'name', 'caption']) {
+      final String text = _text(scene[key]).trim();
+      if (text.isNotEmpty) return text;
+    }
+    return '${index + 1}';
+  }
+
+  /// 选中镜头在原始 `scenes[]` 里的位置：投影会跳过非对象，这里按同一套规则
+  /// 数到第 index 个合法场景，写回时不改坏其它条目。
+  static int _rawSceneIndexOf(Map<String, dynamic> timeline, int index) {
+    final Object? scenes = timeline['scenes'];
+    if (scenes is! List) return -1;
+    int seen = 0;
+    for (int i = 0; i < scenes.length; i++) {
+      if (scenes[i] is! Map) continue;
+      if (seen == index) return i;
+      seen += 1;
+    }
+    return -1;
+  }
+
+  @override
+  CheckSheet? get sheet {
+    final VideoProjectSnapshot? project = projectOf();
+    if (project == null) return null; // 无生成项目：检查器显示空态
+    final List<VideoShotItem> shots = videoShotsFromTimeline(project.timeline);
+    final int? index = selectedShotIndexOf();
+    if (index == null || index < 0 || index >= shots.length) return null;
+    final VideoShotItem shot = shots[index];
+    final int fps = project.document.fps > 0 ? project.document.fps : 30;
+    final Map<String, Object?> rawScene = shot.data;
+    final String label = _text(
+      rawScene['title'] ?? rawScene['name'] ?? rawScene['caption'],
+    ).trim();
+    return CheckSheet(
+      title: '镜头「${_sceneId(shot.data, shot.index)}」',
+      kindLabel: '镜头',
+      subtitle: '来自 timeline.json',
+      fields: <CheckField>[
+        CheckField(
+          key: 'start',
+          label: '起始时间',
+          kind: CheckFieldKind.number,
+          value: shot.start,
+          unit: '秒',
+          enabled: false,
+          hint: '由前面镜头时长累加',
+        ),
+        CheckField(
+          key: 'duration',
+          label: '时长',
+          kind: CheckFieldKind.number,
+          value: shot.duration,
+          unit: '秒',
+          min: 1.0 / fps,
+          hint: '至少一帧',
+        ),
+        CheckField(
+          key: 'label',
+          label: '文本',
+          kind: CheckFieldKind.text,
+          value: label,
+          hint: '镜头标题；留空按序号显示',
+        ),
+        CheckField(
+          key: 'background',
+          label: '背景色',
+          kind: CheckFieldKind.color,
+          value: _colorOf(
+            rawScene['background'] ?? project.timeline['background'],
+          ),
+          hint: '#RRGGBB',
+        ),
+        CheckField(
+          key: 'elements',
+          label: '元素',
+          kind: CheckFieldKind.readOnly,
+          value: '${shot.elementCount}',
+          hint: '只读：元素内容在脚本里编辑',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<bool> update(String key, Object? value) async {
+    if (_disposed) return false;
+    final VideoProjectSnapshot? project = projectOf();
+    if (project == null) return false;
+    final int? index = selectedShotIndexOf();
+    if (index == null || index < 0) return false;
+    final int rawIndex = _rawSceneIndexOf(project.timeline, index);
+    if (rawIndex < 0) return false;
+    final int fps = project.document.fps > 0 ? project.document.fps : 30;
+    Object? normalized;
+    switch (key) {
+      case 'duration':
+        if (value is! num || !value.isFinite) {
+          onReject('镜头时长要填一个数字');
+          return false;
+        }
+        final double next = value.toDouble();
+        if (next <= 0 || next < 1.0 / fps) {
+          onReject('镜头时长至少一帧，改大一点再试');
+          return false;
+        }
+        normalized = next;
+      case 'label':
+        if (value is! String) {
+          onReject('镜头文本要填一段文字');
+          return false;
+        }
+        normalized = value.trim();
+      case 'background':
+        // 通用检查器的颜色控件给 ARGB int；也接受已经是 #RRGGBB 的文本。
+        if (value is int) {
+          normalized =
+              '#${(value & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+        } else if (value is String && _hexPattern.hasMatch(value.trim())) {
+          normalized = value.trim();
+        } else {
+          onReject('背景色要用 #RRGGBB 形式');
+          return false;
+        }
+      default:
+        return false;
+    }
+    // 只改选中的那个场景、只带改动的键；元素/转场等其它字段原样保留。
+    final Map<String, dynamic> nextTimeline = Map<String, dynamic>.from(
+      project.timeline,
+    );
+    final Object? rawScenes = nextTimeline['scenes'];
+    if (rawScenes is! List) return false;
+    final List<dynamic> scenes = List<dynamic>.from(rawScenes);
+    final Map<String, dynamic> scene = Map<String, dynamic>.from(
+      scenes[rawIndex] as Map,
+    );
+    // 文本统一写 title（导演台镜头树的展示名优先读 title/name/caption）。
+    scene[key == 'label' ? 'title' : key] = normalized;
+    scenes[rawIndex] = scene;
+    nextTimeline['scenes'] = scenes;
+    final bool saved = await save(nextTimeline);
+    if (!saved || _disposed) return saved;
+    // 保存成功 → 工作台已重读刷新；通知检查面板重取当前值。
+    notifyListeners();
+    return true;
   }
 }
 

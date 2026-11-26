@@ -23,8 +23,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:provider/provider.dart';
 
 import '../core/creative/creative_schema.dart';
+import '../core/inspect/check_field.dart';
+import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/video3d/video3d_compile.dart';
 import '../core/video3d/video3d_contract.dart';
@@ -184,6 +187,27 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
   List<double> _shotFractions = const <double>[];
   String _previewError = '';
 
+  /// 底部镜头条当前选中的镜头下标（null = 未选中）。
+  ///
+  /// 只用于检查器属性表与镜头条高亮，不写事实源；保存成功后按项目新快照
+  /// 保留同一个下标（镜头表长度变化时自动清空）。
+  int? _selectedShotIndex;
+
+  /// 通用检查器控制器（选中镜头 → 右侧「检查」tab 的可编辑属性表）。
+  ///
+  /// 写回走本工作台既有保存链路（[_Video3dWorkspaceState._saveShotScreenplay]
+  /// → [Video3dProjectStore.save]：先校验后原子落盘）→ 重建预览面与镜头条。
+  late final _Video3dCheckController _checkController;
+
+  /// 全局 AppStore（生产壳层里才有：右侧 NaN/检查窄栏挂在它上面）。
+  ///
+  /// 独立测试/纯内容嵌入没有 provider 时保持 null：此时内容区检查器仍是
+  /// 只读摘要，编辑入口只有检查控制器（没有壳层可挂）——行为与窄屏一致。
+  AppStore? _appStore;
+
+  /// 检查器写回串行闸：前一条保存链路跑完再跑下一条。
+  Future<bool>? _checkSaveQueue;
+
   // ---- 四栏目（呈现效果 / 文档 / 规范 / 源码） --------------------------
 
   /// 当前栏目。用户裁决 2026-11-27：所有工作台内容区固定四栏目；框架在
@@ -206,20 +230,64 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
   @override
   void initState() {
     super.initState();
+    // 通用检查器：镜头条选中镜头 → 属性表；写回走本工作台保存链路。
+    _checkController = _Video3dCheckController(
+      snapshotOf: () => _snapshot,
+      selectedShotIndexOf: () => _selectedShotIndex,
+      save: _saveShotScreenplay,
+      onReject: _rejectCheckEdit,
+    );
     // 跨视图打开：项目名由 [openVideo3dWorkspace] 一次性写入，空 = 列表首项。
     _pendingOpen = video3dLoadOnOpen;
     video3dLoadOnOpen = null;
     // 顶栏「新建 3D 视频」：落空态而不是替用户打开首个项目。
     _pendingNew = video3dNewOnOpen;
     video3dNewOnOpen = false;
+    // 注册到外壳的「检查」tab：等首帧后再挂（避免在 build 阶段 notify 壳层）。
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _attachCheckController(),
+    );
     unawaited(_refresh());
+  }
+
+  /// 把自己注册成当前工作台的检查器（只有生产壳层提供 AppStore 时才有处可挂）。
+  void _attachCheckController() {
+    if (!mounted || _appStore != null) return;
+    final AppStore? appStore = _maybeAppStore(context);
+    if (appStore == null) return;
+    _appStore = appStore;
+    appStore.setCheckController(_checkController);
+  }
+
+  /// 可选地取全局 Store：独立工作台/单测没有 provider 时返回 null（不抛）。
+  static AppStore? _maybeAppStore(BuildContext context) {
+    try {
+      return Provider.of<AppStore>(context, listen: false);
+    } on ProviderNotFoundException {
+      return null;
+    }
   }
 
   @override
   void dispose() {
+    // 清空检查控制器注册（只清自己的；控制器不 dispose——右侧面板可能还在
+    // 移除监听，ChangeNotifier dispose 后再 removeListener 会断言失败）。
+    _clearCheckControllerOnDispose();
     _preview?.dispose();
     _preview = null;
     super.dispose();
+  }
+
+  /// 卸载时清空检查控制器注册：只清自己的（别的工作台可能已经接管）。
+  void _clearCheckControllerOnDispose() {
+    final AppStore? appStore = _appStore;
+    final _Video3dCheckController controller = _checkController;
+    if (appStore == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (appStore.checkController == controller) {
+        appStore.setCheckController(null);
+      }
+    });
   }
 
   Future<void> _refresh() async {
@@ -274,10 +342,13 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       _failure = null;
       _timeline = null;
       _previewError = '';
+      // 切项目 = 切镜头表：旧项目的选中镜头不能带过来。
+      _selectedShotIndex = null;
       // 切项目 = 切内容：旧项目的文档/源码不能带进新项目的栏目。
       _docsMarkdown = null;
       _sourceFiles = const <WorkbenchSourceFile>[];
     });
+    _checkController.notifySelectionChanged();
     Video3dProjectSnapshot snapshot;
     try {
       snapshot = await _projectStore.read(trimmed);
@@ -371,9 +442,107 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       _failure = null;
       _docsMarkdown = docs;
       _sourceFiles = sources;
+      // 镜头表长度变了（保存后/换项目）：越界的选中下标自动清空。
+      final int shotCount = snapshot.screenplay?.shots.length ?? 0;
+      final int? selected = _selectedShotIndex;
+      _selectedShotIndex =
+          selected != null && selected >= 0 && selected < shotCount
+          ? selected
+          : null;
     });
+    // 新快照就位 → 检查器重取当前镜头属性值（选中仍按镜头下标保留）。
+    _checkController.notifySelectionChanged();
     previous?.dispose();
     if (next != null) unawaited(next.start());
+  }
+
+  // ------------------------------------------------------------ 检查器写回
+
+  /// 镜头条选中一个镜头：更新选中态、把预览头落到该镜头起点（若预览可用）、
+  /// 并让检查器重取属性表。只改本实例 UI 状态，不写项目文件。
+  void _selectShot(int index) {
+    final Video3dTimeline? timeline = _timeline;
+    if (timeline == null || index < 0 || index >= timeline.shots.length) return;
+    setState(() => _selectedShotIndex = index);
+    final Video3dPreviewController? preview = _preview;
+    if (preview != null) {
+      unawaited(preview.seekFrame(timeline.shots[index].startFrame));
+    }
+    _checkController.notifySelectionChanged();
+  }
+
+  /// 检查器非法值/保存失败的人话提示（有壳层时走 toast；独立嵌入没有 UI
+  /// 通道，返回 false 即可，不伪造成功）。
+  void _rejectCheckEdit(String message) {
+    if (!mounted) return;
+    _appStore?.toasts.warn(message);
+  }
+
+  /// 检查器写回串行化：前一条保存链路跑完再跑下一条。
+  Future<bool> _saveShotScreenplay(Map<String, Object?> screenplay) {
+    final Future<bool> previous = _checkSaveQueue ?? Future<bool>.value(true);
+    final Future<bool> result = previous.then(
+      (_) => _persistShotScreenplay(screenplay),
+    );
+    _checkSaveQueue = result;
+    unawaited(
+      result.whenComplete(() {
+        if (identical(_checkSaveQueue, result)) _checkSaveQueue = null;
+      }),
+    );
+    return result;
+  }
+
+  /// 走既有 [Video3dProjectStore.save]（先校验后原子落盘，未通过不碰磁盘）；
+  /// 保存成功再读回项目并重建预览面/镜头条，让界面与事实源同一拍。
+  Future<bool> _persistShotScreenplay(Map<String, Object?> screenplay) async {
+    final Video3dProjectSnapshot? snapshot = _snapshot;
+    final String? name = _name;
+    if (!mounted || snapshot == null || name == null) return false;
+    Video3dVerification verification;
+    try {
+      verification = await _projectStore.save(
+        name,
+        scene: snapshot.sceneRaw,
+        screenplay: screenplay,
+      );
+    } on Video3dProjectFailure catch (failure) {
+      _rejectCheckEdit(failure.message);
+      return false;
+    } catch (_) {
+      _rejectCheckEdit('镜头修改没能保存，请重试。');
+      return false;
+    }
+    if (!verification.verified) {
+      final String problem = verification.checks.isEmpty
+          ? '镜头修改没有通过校验，项目文件保持不变。'
+          : verification.checks.first.message;
+      _rejectCheckEdit(problem);
+      return false;
+    }
+    Video3dProjectSnapshot fresh;
+    try {
+      fresh = await _projectStore.read(name);
+    } catch (_) {
+      _rejectCheckEdit('保存后没能重新读取项目，请点顶栏刷新重试。');
+      return false;
+    }
+    if (!mounted || _name != name) return false;
+    _bindSnapshot(fresh);
+    unawaited(_refreshEntriesOnly());
+    return true;
+  }
+
+  /// 只刷新左侧项目列表的只读元数据（不重新打开项目，避免打断预览面）。
+  Future<void> _refreshEntriesOnly() async {
+    List<Video3dProjectEntry> entries;
+    try {
+      entries = await _projectStore.list();
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _entries = entries);
   }
 
   @override
@@ -459,6 +628,9 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
                     snapshot: _snapshot,
                     timeline: _timeline,
                     failure: _failure,
+                    // 宽屏（右栏常驻）时右侧共享窄栏的「检查」tab 才是编辑
+                    // 入口；内容区这块检查器降级为只读摘要。
+                    readOnly: hasRight,
                   ),
                 ),
             ],
@@ -472,6 +644,8 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
             shotFractions: _shotFractions,
             preview: _preview,
             failure: _failure,
+            selectedShotIndex: _selectedShotIndex,
+            onSelectShot: _selectShot,
           ),
       ],
     );
@@ -1145,11 +1319,16 @@ class _Video3dInspector extends StatelessWidget {
     required this.snapshot,
     required this.timeline,
     required this.failure,
+    this.readOnly = false,
   });
 
   final Video3dProjectSnapshot? snapshot;
   final Video3dTimeline? timeline;
   final Video3dProjectFailure? failure;
+
+  /// 只读形态：宽屏（右栏常驻）时右侧共享窄栏的「检查」tab 才是镜头属性
+  /// 编辑入口；内容区这块检查器降级为只读摘要，避免同一属性两处可编辑。
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -1235,8 +1414,13 @@ class _Video3dInspector extends StatelessWidget {
               const SizedBox(height: NonSpace.sm),
               Text(
                 snapshot.verified
-                    ? '本批只读：预览、检查器和镜头时间线都不改项目文件。'
+                    ? (readOnly
+                          ? '宽屏下请到右侧「检查」面板改镜头属性；这里只读。'
+                          : '本批只读：预览、检查器和镜头时间线都不改项目文件。')
                     : '修好场景或镜头文件后点顶栏刷新，就能重新预览。',
+                key: readOnly
+                    ? const ValueKey('video3d-inspector-readonly-hint')
+                    : null,
                 style: TextStyle(
                   fontSize: NonType.micro,
                   height: NonType.lineBody,
@@ -1309,6 +1493,8 @@ class _Video3dBottomBar extends StatelessWidget {
     required this.shotFractions,
     required this.preview,
     required this.failure,
+    required this.selectedShotIndex,
+    required this.onSelectShot,
   });
 
   final double height;
@@ -1319,6 +1505,12 @@ class _Video3dBottomBar extends StatelessWidget {
   final List<double> shotFractions;
   final Video3dPreviewController? preview;
   final Video3dProjectFailure? failure;
+
+  /// 镜头条当前选中的镜头下标（null = 未选中）。
+  final int? selectedShotIndex;
+
+  /// 点镜头条选中回调（只改工作台 UI 状态，不写项目）。
+  final ValueChanged<int> onSelectShot;
 
   @override
   Widget build(BuildContext context) {
@@ -1466,25 +1658,34 @@ class _Video3dBottomBar extends StatelessWidget {
                     width: width * fractions[i],
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 1),
-                      child: Container(
+                      child: InkWell(
                         key: ValueKey<String>(
                           'video3d-shot-${timeline.shots[i].id}',
                         ),
-                        height: 26,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: i.isEven
-                              ? p.panel3
-                              : p.accentSoft.withValues(alpha: 0.28),
-                          borderRadius: BorderRadius.circular(NonRadius.sm),
-                        ),
-                        child: Text(
-                          timeline.shots[i].id,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: NonType.micro,
-                            color: p.ink3,
+                        borderRadius: BorderRadius.circular(NonRadius.sm),
+                        onTap: () => onSelectShot(i),
+                        child: Container(
+                          height: 26,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: i == selectedShotIndex
+                                ? p.accent.withValues(alpha: 0.3)
+                                : i.isEven
+                                ? p.panel3
+                                : p.accentSoft.withValues(alpha: 0.28),
+                            borderRadius: BorderRadius.circular(NonRadius.sm),
+                            border: i == selectedShotIndex
+                                ? Border.all(color: p.accent)
+                                : null,
+                          ),
+                          child: Text(
+                            timeline.shots[i].id,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: NonType.micro,
+                              color: i == selectedShotIndex ? p.ink : p.ink3,
+                            ),
                           ),
                         ),
                       ),
@@ -1989,5 +2190,230 @@ class _Video3dCreateDialogState extends State<_Video3dCreateDialog> {
         borderRadius: BorderRadius.circular(NonRadius.md),
       ),
     );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3D 视频工作台接入通用检查器（镜头条选中镜头 → 右侧「检查」tab 属性表）
+// ---------------------------------------------------------------------------
+
+/// 把镜头条选中的镜头映射成一份 [CheckSheet]。
+///
+/// 字段只映射 `screenplay3d.json` 契约里**真实存在且可写**的部分：镜头时长
+/// duration、相机 `camera.move.from/to` 的 6 个坐标分量（只有真实存在 move
+/// 路径的镜头可编辑；只引用场景相机 id 的镜头显性只读）。cues 数量只读——
+/// v1 契约只保留该字段、不消费音频/特效。
+///
+/// 写回**不在这里**：控制器只归一化值并交给工作台保存链路
+///（[_Video3dWorkspaceState._saveShotScreenplay] → [Video3dProjectStore.save]：
+/// 先校验后原子落盘）。控制器不持有项目事实源，也不直接写盘。
+class _Video3dCheckController extends WorkbenchCheckController {
+  _Video3dCheckController({
+    required this.snapshotOf,
+    required this.selectedShotIndexOf,
+    required this.save,
+    required this.onReject,
+  });
+
+  /// 当前项目快照：每次取表都重新读（保存后工作台刷新即看到新值）。
+  final Video3dProjectSnapshot? Function() snapshotOf;
+
+  /// 镜头条当前选中镜头下标；null = 没有选中。
+  final int? Function() selectedShotIndexOf;
+
+  /// 工作台保存链路（返回是否真的落盘并刷新成功）。
+  final Future<bool> Function(Map<String, Object?> screenplay) save;
+
+  /// 非法值的人话提示（上屏由工作台负责；控制器不写盘）。
+  final void Function(String message) onReject;
+
+  bool _disposed = false;
+
+  /// `camera.move.from/to` 三个分量的后缀（与契约里的 [x, y, z] 顺序一致）。
+  static const List<String> _axes = <String>['x', 'y', 'z'];
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  @override
+  void notifySelectionChanged() {
+    if (!_disposed) super.notifySelectionChanged();
+  }
+
+  @override
+  CheckSheet? get sheet {
+    final Video3dProjectSnapshot? snapshot = snapshotOf();
+    if (snapshot == null) return null; // 无项目：检查器显示空态
+    final Video3dScreenplay? screenplay = snapshot.screenplay;
+    if (screenplay == null) return null; // 坏项目/未过校验：不伪造属性表
+    final int? index = selectedShotIndexOf();
+    if (index == null || index < 0 || index >= screenplay.shots.length) {
+      return null;
+    }
+    final Video3dShot shot = screenplay.shots[index];
+    final List<CheckField> fields = <CheckField>[
+      CheckField(
+        key: 'duration',
+        label: '时长',
+        kind: CheckFieldKind.number,
+        value: shot.duration,
+        unit: '秒',
+        min: video3dMinShotDuration,
+        hint: '至少一帧',
+      ),
+    ];
+    final List<double>? from = shot.camera.moveFrom;
+    final List<double>? to = shot.camera.moveTo;
+    if (from != null && to != null && from.length == 3 && to.length == 3) {
+      for (int axis = 0; axis < 3; axis++) {
+        fields.add(
+          CheckField(
+            key: 'move_from_${_axes[axis]}',
+            label: '相机 from.${_axes[axis]}',
+            kind: CheckFieldKind.number,
+            value: from[axis],
+            unit: 'm',
+          ),
+        );
+      }
+      for (int axis = 0; axis < 3; axis++) {
+        fields.add(
+          CheckField(
+            key: 'move_to_${_axes[axis]}',
+            label: '相机 to.${_axes[axis]}',
+            kind: CheckFieldKind.number,
+            value: to[axis],
+            unit: 'm',
+          ),
+        );
+      }
+    } else {
+      final String? cameraId = shot.camera.id;
+      fields.add(
+        CheckField(
+          key: 'camera',
+          label: '相机',
+          kind: CheckFieldKind.readOnly,
+          value: cameraId == null ? '没有相机' : '引用场景相机「$cameraId」',
+          hint: '这个镜头没有移动路径，坐标不可编辑',
+        ),
+      );
+    }
+    fields.add(
+      CheckField(
+        key: 'cues',
+        label: '提示条',
+        kind: CheckFieldKind.readOnly,
+        value: '${shot.cues.length}',
+        hint: '只读：v1 不消费音频/特效',
+      ),
+    );
+    return CheckSheet(
+      title: '镜头「${shot.id}」',
+      kindLabel: '镜头',
+      subtitle: '来自 screenplay3d.json',
+      fields: fields,
+    );
+  }
+
+  @override
+  Future<bool> update(String key, Object? value) async {
+    if (_disposed) return false;
+    final Video3dProjectSnapshot? snapshot = snapshotOf();
+    if (snapshot == null) return false;
+    final Video3dScreenplay? screenplay = snapshot.screenplay;
+    if (screenplay == null) return false;
+    final int? index = selectedShotIndexOf();
+    if (index == null || index < 0 || index >= screenplay.shots.length) {
+      return false;
+    }
+    final Map<String, Object?> raw = Map<String, Object?>.from(
+      snapshot.screenplayRaw,
+    );
+    final Object? rawShotsValue = raw['shots'];
+    if (rawShotsValue is! List) return false;
+    final List<Object?> rawShots = List<Object?>.from(rawShotsValue);
+    if (index >= rawShots.length) return false;
+    final Object? rawShotValue = rawShots[index];
+    if (rawShotValue is! Map) return false;
+    final Map<String, Object?> rawShot = Map<String, Object?>.from(
+      rawShotValue,
+    );
+
+    switch (key) {
+      case 'duration':
+        if (value is! num || !value.isFinite) {
+          onReject('镜头时长要填一个数字');
+          return false;
+        }
+        final double next = value.toDouble();
+        if (next <= 0 || next < video3dMinShotDuration) {
+          onReject('镜头时长至少一帧（约 0.03 秒），改大一点再试');
+          return false;
+        }
+        rawShot['duration'] = next;
+        rawShots[index] = rawShot;
+        raw['shots'] = rawShots;
+        // 顶层 duration（若声明了）必须与镜头总时长一致；改一条镜头后同步重算。
+        if (raw['duration'] is num) {
+          double total = 0;
+          bool complete = true;
+          for (final Object? item in rawShots) {
+            final Object? duration = item is Map ? item['duration'] : null;
+            if (duration is num && duration.isFinite) {
+              total += duration.toDouble();
+            } else {
+              complete = false;
+              break;
+            }
+          }
+          if (complete) raw['duration'] = total;
+        }
+      default:
+        // 相机路径分量：camera.move.from/to 的 6 个 number。
+        final RegExpMatch? match = RegExp(r'^move_(from|to)_([xyz])$')
+            .firstMatch(key);
+        if (match == null) return false; // 契约外字段/只读字段：拒绝
+        if (value is! num || !value.isFinite) {
+          onReject('相机坐标要填一个数字');
+          return false;
+        }
+        final String which = match.group(1)!;
+        final int axis = _axes.indexOf(match.group(2)!);
+        final Object? cameraValue = rawShot['camera'];
+        if (cameraValue is! Map) {
+          onReject('这个镜头没有可编辑的相机移动');
+          return false;
+        }
+        final Map<String, Object?> camera = Map<String, Object?>.from(
+          cameraValue,
+        );
+        final Object? moveValue = camera['move'];
+        if (moveValue is! Map) {
+          onReject('这个镜头没有可编辑的相机移动');
+          return false;
+        }
+        final Map<String, Object?> move = Map<String, Object?>.from(moveValue);
+        final Object? vectorValue = move[which];
+        if (vectorValue is! List || vectorValue.length != 3) {
+          onReject('镜头相机路径不完整，先修好项目文件再改');
+          return false;
+        }
+        final List<Object?> vector = List<Object?>.from(vectorValue);
+        vector[axis] = value.toDouble();
+        move[which] = vector;
+        camera['move'] = move;
+        rawShot['camera'] = camera;
+        rawShots[index] = rawShot;
+        raw['shots'] = rawShots;
+    }
+    final bool saved = await save(raw);
+    if (!saved || _disposed) return saved;
+    // 保存成功 → 工作台已重建预览面/镜头条；通知检查面板重取当前值。
+    notifyListeners();
+    return true;
   }
 }
