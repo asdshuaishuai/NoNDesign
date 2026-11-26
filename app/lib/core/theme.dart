@@ -61,7 +61,8 @@ class NonPalette extends ThemeExtension<NonPalette> {
     ink: Color(0xFFF0F2F8),
     ink2: Color(0xFFB3BAC9),
     ink3: Color(0xFF98A1B3),
-    ink4: Color(0xFF7C8698),
+    // 对比度修正：旧 #7C8698 在 panel2/panel3 上仅 4.32/3.85。
+    ink4: Color(0xFF8C96A9),
     accent: Color(0xFF5B8CFF),
     accent2: Color(0xFFC07BFF),
     accentSoft: Color(0x2E5B8CFF),
@@ -89,14 +90,17 @@ class NonPalette extends ThemeExtension<NonPalette> {
     lineStrong: Color(0x330F172A),
     ink: Color(0xFF1B1D24),
     ink2: Color(0xFF475063),
-    ink3: Color(0xFF68718A),
-    ink4: Color(0xFF8B93A8),
+    // 对比度修正（2026-11-27，WCAG 4.5:1 审计）：
+    // 旧 ink3 #68718A 在 bg 上仅 4.13；旧 ink4 #8B93A8 在白面上仅 3.07。
+    ink3: Color(0xFF5C6579),
+    ink4: Color(0xFF5B6478),
     // Aqua 的经典水系蓝：凝胶渐变由它派生（#5F9FF5 → #1862D8）。
     accent: Color(0xFF1862D8),
-    accent2: Color(0xFF6E5AE0),
+    // 对比度修正：作为文字时在浅灰底上需 >=4.5（旧 #6E5AE0 仅 4.24）。
+    accent2: Color(0xFF644FD3),
     accentSoft: Color(0x1F1862D8),
-    success: Color(0xFF1C8F5A),
-    warn: Color(0xFFB4700C),
+    success: Color(0xFF177A4E),
+    warn: Color(0xFF945A00),
     danger: Color(0xFFC42B3E),
     canvas: Color(0xFFF4F5F8),
     canvasDot: Color(0x140F172A),
@@ -186,6 +190,15 @@ class NonPalette extends ThemeExtension<NonPalette> {
   }
 }
 
+extension NonMotionX on BuildContext {
+  /// 动画时长：用户开启「减少动效」时归零（WCAG 2.3.3 / prefers-reduced-motion）。
+  ///
+  /// 用法：`AnimatedContainer(duration: context.nonMotion(NonMotion.base), …)`。
+  /// 只改时长、不改终态——单独归零后控件仍会立即到达目标状态。
+  Duration nonMotion(Duration duration) =>
+      MediaQuery.disableAnimationsOf(this) ? Duration.zero : duration;
+}
+
 extension NonThemeX on BuildContext {
   NonPalette get palette =>
       Theme.of(this).extension<NonPalette>() ?? NonPalette.dark;
@@ -220,6 +233,10 @@ class AppTheme {
       // hover 与 IconAction 手写 hover 收敛为同一令牌强度（p.line），
       // 消除「手写 32% 白 vs InkWell 默认 4% 白」的两套语言。
       hoverColor: p.line,
+      // 键盘焦点可见（WCAG 2.2 AA）：Material 默认 focus overlay 太弱，
+      // 统一抬到 accent 22% 叠层；需要更强指示的控件（凝胶按钮/工具圆钮）
+      // 另有 2px 实心焦点环。
+      focusColor: p.accent.withValues(alpha: 0.22),
       colorScheme: base.colorScheme.copyWith(
         brightness: dark ? Brightness.dark : Brightness.light,
         primary: p.accent,

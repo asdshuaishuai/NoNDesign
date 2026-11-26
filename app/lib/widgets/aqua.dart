@@ -659,7 +659,7 @@ class _AquaTabButton extends StatelessWidget {
 /// Aqua 工具条圆钮：白面 + 发丝线 + 柔和内高光；hover/焦点可见，禁用降透明。
 ///
 /// 用于工作台顶部工具条的高频动作（替代裸 `IconButton` 的默认观感）。
-class AquaToolIcon extends StatelessWidget {
+class AquaToolIcon extends StatefulWidget {
   const AquaToolIcon({
     super.key,
     required this.icon,
@@ -676,54 +676,76 @@ class AquaToolIcon extends StatelessWidget {
   final bool selected;
 
   @override
+  State<AquaToolIcon> createState() => _AquaToolIconState();
+}
+
+class _AquaToolIconState extends State<AquaToolIcon> {
+  bool _focused = false;
+
+  @override
   Widget build(BuildContext context) {
     final NonPalette p = context.palette;
     final bool aqua = isAquaTheme(context);
-    final bool enabled = onTap != null;
+    final bool enabled = widget.onTap != null;
+    final IconData icon = widget.icon;
+    final String tooltip = widget.tooltip;
+    final double size = widget.size;
+    final bool selected = widget.selected;
     return Semantics(
       button: true,
       enabled: enabled,
       label: tooltip,
-      child: Tooltip(
-        message: tooltip,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(size / 2),
-          onTap: onTap,
-          child: Container(
-            width: size,
-            height: size,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: selected
-                  ? (aqua ? null : p.accentSoft)
-                  : (aqua ? Colors.white : Colors.transparent),
-              gradient: selected && aqua
-                  ? const LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: <Color>[
-                        NonPalette.aquaGelTop,
-                        NonPalette.aquaGelBottom,
-                      ],
+      child: Focus(
+        onFocusChange: (bool v) => setState(() => _focused = v),
+        child: Tooltip(
+          message: tooltip,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(size / 2),
+            onTap: widget.onTap,
+            focusColor: Colors.transparent,
+            child: Container(
+              width: size,
+              height: size,
+              // 键盘焦点环（WCAG 2.2）：2px 实心 accent 描边，不改变布局尺寸。
+              foregroundDecoration: _focused
+                  ? BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: p.accent, width: 2),
                     )
                   : null,
-              border: aqua ? Border.all(color: p.line) : null,
-              boxShadow: aqua && enabled
-                  ? const <BoxShadow>[
-                      BoxShadow(
-                        color: Color(0x1A123B7A),
-                        blurRadius: 3,
-                        offset: Offset(0, 1),
-                      ),
-                    ]
-                  : null,
-            ),
-            child: Icon(
-              icon,
-              size: NonType.bodyStrong,
-              color: selected
-                  ? (aqua ? Colors.white : p.accent)
-                  : (enabled ? p.ink2 : p.ink4),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: selected
+                    ? (aqua ? null : p.accentSoft)
+                    : (aqua ? Colors.white : Colors.transparent),
+                gradient: selected && aqua
+                    ? const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: <Color>[
+                          NonPalette.aquaGelTop,
+                          NonPalette.aquaGelBottom,
+                        ],
+                      )
+                    : null,
+                border: aqua ? Border.all(color: p.line) : null,
+                boxShadow: aqua && enabled
+                    ? const <BoxShadow>[
+                        BoxShadow(
+                          color: Color(0x1A123B7A),
+                          blurRadius: 3,
+                          offset: Offset(0, 1),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Icon(
+                icon,
+                size: NonType.bodyStrong,
+                color: selected
+                    ? (aqua ? Colors.white : p.accent)
+                    : (enabled ? p.ink2 : p.ink4),
+              ),
             ),
           ),
         ),
