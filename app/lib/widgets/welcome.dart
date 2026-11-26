@@ -7,16 +7,21 @@ import '../core/portfolio_entries.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/toast_service.dart';
+import 'aqua.dart';
 import 'common.dart';
 import 'workspace.dart';
 import 'workspace_open.dart';
 
 /// 主页（用户裁决：布局固定不变，是死规矩）。
 ///
-/// 结构只有三层：顶部品牌栏、中间「一句话 + 目标工作台」入口、下面并排
-/// 作品集 / 最近项目；底部状态行。主页不直接列插件工作台：作品集卡聚合
-/// 热应用 / 3D / 视频三类产物，点条目直达对应工作台；其余入口走顶栏项目
-/// 下拉与作品集。
+/// 结构：顶部品牌栏；中间「一句话 + 目标工作台」输入卡 + **四工作台入口**
+/// （设计 / 3D / 视频 / 音乐，紧凑入口卡，只切既有视图、不新开项目）；下面
+/// 并排作品集 / 最近项目；底部状态行。作品集卡聚合热应用 / 3D / 视频三类
+/// 产物，点条目直达对应工作台；其余入口走顶栏项目下拉与作品集。
+///
+/// 主题：浅色 = Aqua——主输入卡是白面 + 软阴影（[AquaPanelSurface]），唯一
+/// 主 CTA「开始创作」是糖果凝胶按钮（[AquaGelButton]）；深色保持既有面板
+/// 材质，只吃提亮后的新调色板令牌，不加额外装饰。
 class Welcome extends StatefulWidget {
   final VoidCallback onNewProject;
   final void Function(String path) onOpenPath;
@@ -61,6 +66,16 @@ class _WelcomeState extends State<Welcome> {
   /// 可视高度决定上下留白/段落间距：窗口矮就收紧，避免矮窗里先被留白挤爆。
   static const double _wideVerticalRatio = 0.017;
   static const double _wideSectionRatio = 0.034;
+
+  /// 四工作台入口（设计 / 3D / 视频 / 音乐）的 Key、标签、图标与视图名。
+  /// 入口只做视图切换：设计回到设计画布，插件类走各自 `plugin:<id>`；
+  /// 不预置项目、不打开产物——打开语义仍归作品集 / 最近项目 / 项目下拉。
+  static const List<(String, String, IconData, String)> _workbenchEntries = [
+    ('welcome-enter-design', '设计', Icons.dashboard_customize_outlined, 'design'),
+    ('welcome-enter-three', '3D', Icons.view_in_ar_outlined, 'plugin:three'),
+    ('welcome-enter-video', '视频', Icons.movie_outlined, 'plugin:video'),
+    ('welcome-enter-music', '音乐', Icons.music_note, 'plugin:music'),
+  ];
 
   double _wideGutter(double width) => (width * _wideGutterRatio).clamp(16.0, 96.0).toDouble();
   double _narrowGutter(double width) => (width * _narrowGutterRatio).clamp(14.0, 28.0).toDouble();
@@ -282,6 +297,13 @@ class _WelcomeState extends State<Welcome> {
                     ],
                   ),
                   SizedBox(height: sectionGap),
+                  // 四工作台入口（设计 / 3D / 视频 / 音乐）：紧凑入口卡，
+                  // 放在输入区下方、作品集卡上方；只落既有视图，不新开项目。
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: _workbenchEntriesRow(store),
+                  ),
+                  SizedBox(height: sectionGap),
                   // 作品集 / 最近项目：仍两栏并排，宽度吃满内容列（不挤在聊天框下）。
                   // 各自按内容自然高度排在顶部，不强行等高——最近项目列表长，
                   // 拉平会把作品集撑成一块空板。
@@ -320,6 +342,9 @@ class _WelcomeState extends State<Welcome> {
           _briefCard(context, store),
           const SizedBox(height: NonSpace.sm),
           _briefHints(context),
+          const SizedBox(height: NonSpace.md),
+          // 四工作台入口（设计 / 3D / 视频 / 音乐）：窄屏同样在输入区下方。
+          _workbenchEntriesRow(store),
           const SizedBox(height: 18),
           _portfolioCard(context, store),
           const SizedBox(height: 10),
@@ -411,11 +436,19 @@ class _WelcomeState extends State<Welcome> {
   // ---------------------------------------------------------------------------
 
   Widget _briefCard(BuildContext context, AppStore store) {
+    final Widget content = _briefCardContent(context, store);
+    // 浅色 = Aqua：主输入卡是白面 + 深色软阴影的 Aqua 面板（材质由
+    // AquaPanelSurface 负责；几何与内容不变）。
+    if (isAquaTheme(context)) {
+      return AquaPanelSurface(
+        key: const ValueKey('welcome-composer'),
+        radius: NonRadius.lg,
+        padding: const EdgeInsets.all(NonSpace.md),
+        child: content,
+      );
+    }
+    // 深色保持原面板材质，只吃提亮后的新调色板令牌——不加额外装饰。
     final p = context.palette;
-    // 示例都是「设计」任务（先写 PRD 再出原型），只在选择设计时给；
-    // 3D / 视频 / 热应用 / 自动 不摆设计示例，避免把用户带错工作台。
-    final designMode =
-        normalizeWorkspaceMode(store.chatWorkspaceMode) == workspaceModeDesign;
     return Container(
       key: const ValueKey('welcome-composer'),
       padding: const EdgeInsets.all(NonSpace.md),
@@ -425,93 +458,145 @@ class _WelcomeState extends State<Welcome> {
         border: Border.all(color: p.lineStrong),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 50, offset: const Offset(0, 24))],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          TextField(
-            key: const ValueKey('welcome-brief'),
-            controller: _brief,
-            minLines: 3,
-            maxLines: 5,
-            style: TextStyle(fontSize: NonType.bodyStrong, height: 1.55, color: p.ink),
-            decoration: InputDecoration(
-              hintText: '例如：做一个面向自由职业者的发票工具。需要登录、发票列表、新建发票、客户管理和设置；风格专业、克制，移动端优先。',
-              hintStyle: TextStyle(fontSize: NonType.bodyStrong, height: 1.55, color: p.ink4),
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              filled: false,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: NonSpace.xs),
-            ),
-            onSubmitted: (_) => _start(store),
+      child: content,
+    );
+  }
+
+  /// 输入卡内容（宽窄共用）：文本框 → 目标工作台选择器 → 示例 + 开始创作。
+  Widget _briefCardContent(BuildContext context, AppStore store) {
+    final p = context.palette;
+    // 示例都是「设计」任务（先写 PRD 再出原型），只在选择设计时给；
+    // 3D / 视频 / 热应用 / 自动 不摆设计示例，避免把用户带错工作台。
+    final designMode =
+        normalizeWorkspaceMode(store.chatWorkspaceMode) == workspaceModeDesign;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          key: const ValueKey('welcome-brief'),
+          controller: _brief,
+          minLines: 3,
+          maxLines: 5,
+          style: TextStyle(fontSize: NonType.bodyStrong, height: 1.55, color: p.ink),
+          decoration: InputDecoration(
+            hintText: '例如：做一个面向自由职业者的发票工具。需要登录、发票列表、新建发票、客户管理和设置；风格专业、克制，移动端优先。',
+            hintStyle: TextStyle(fontSize: NonType.bodyStrong, height: 1.55, color: p.ink4),
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            filled: false,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: NonSpace.xs),
           ),
-          if (designMode) ...[
-            const SizedBox(height: NonSpace.sm),
-            _briefExamples(),
-          ],
-          const SizedBox(height: 10),
-          // 左下角：这次落到哪个工作台（用户裁决 2026-11-19）。
-          // 选择器独占一行（窗口窄时可以换行），下面一行是说明 + 开始创作，
-          // 按钮固定在右下角——聊天框因此比旧版通栏尺寸小一圈。
-          _workspaceSelector(context, store),
+          onSubmitted: (_) => _start(store),
+        ),
+        if (designMode) ...[
           const SizedBox(height: NonSpace.sm),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: Text(
-                  _workspaceHintText(normalizeWorkspaceMode(store.chatWorkspaceMode)),
-                  key: const ValueKey('welcome-workspace-hint'),
-                  style: TextStyle(fontSize: NonType.micro, height: 1.3, color: p.ink4),
-                ),
-              ),
-              const SizedBox(width: NonSpace.sm),
-              _startButton(store),
-            ],
-          ),
+          _briefExamples(),
         ],
-      ),
+        const SizedBox(height: 10),
+        // 左下角：这次落到哪个工作台（用户裁决 2026-11-19）。
+        // 选择器独占一行（窗口窄时可以换行），下面一行是说明 + 开始创作，
+        // 按钮固定在右下角——聊天框因此比旧版通栏尺寸小一圈。
+        _workspaceSelector(context, store),
+        const SizedBox(height: NonSpace.sm),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: Text(
+                _workspaceHintText(normalizeWorkspaceMode(store.chatWorkspaceMode)),
+                key: const ValueKey('welcome-workspace-hint'),
+                style: TextStyle(fontSize: NonType.micro, height: 1.3, color: p.ink4),
+              ),
+            ),
+            const SizedBox(width: NonSpace.sm),
+            _startButton(store),
+          ],
+        ),
+      ],
     );
   }
 
   /// 设计示例（仅在「设计」工作台选中时出现）：一句话填满输入框。
   Widget _briefExamples() {
     final p = context.palette;
-    return Wrap(
-      spacing: NonSpace.xs,
-      runSpacing: 6,
-      children: [
-        for (final example in ['电商 App', 'SaaS 仪表盘', 'AI 助手', '个人作品集'])
-          InkWell(
-            key: ValueKey('welcome-example-$example'),
-            borderRadius: BorderRadius.circular(4),
-            onTap: () => setState(() {
-              _brief.text = '做一个$example：先写 PRD 与 UI 说明，再生成完整可交互原型。移动端优先，风格现代克制。';
-            }),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-              decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
-              child: Text(example, style: TextStyle(fontSize: NonType.micro, color: p.ink3)),
+    return _menuWidthLimited(
+      context,
+      key: const ValueKey('welcome-examples'),
+      child: Wrap(
+        spacing: NonSpace.xs,
+        runSpacing: 6,
+        children: [
+          for (final example in ['电商 App', 'SaaS 仪表盘', 'AI 助手', '个人作品集'])
+            InkWell(
+              key: ValueKey('welcome-example-$example'),
+              borderRadius: BorderRadius.circular(4),
+              onTap: () => setState(() {
+                _brief.text = '做一个$example：先写 PRD 与 UI 说明，再生成完整可交互原型。移动端优先，风格现代克制。';
+              }),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
+                child: Text(example, style: TextStyle(fontSize: NonType.micro, color: p.ink3)),
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _startButton(AppStore store) {
     final p = context.palette;
+    final busy = store.agentBusy;
+    // 浅色 = Aqua：主页唯一主 CTA 是糖果凝胶按钮（深色保持原 FilledButton，
+    // 只吃提亮后的新调色板）。忙碌时凝胶禁用 + 左侧转圈，语义与深色一致。
+    if (isAquaTheme(context)) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (busy) ...[
+            const SizedBox(
+              width: NonSpace.lg,
+              height: NonSpace.lg,
+              child: CircularProgressIndicator(strokeWidth: 1.5),
+            ),
+            const SizedBox(width: NonSpace.xs),
+          ],
+          AquaGelButton(
+            key: const ValueKey('welcome-start'),
+            label: '开始创作',
+            icon: busy ? null : Icons.auto_awesome,
+            onPressed: busy ? null : () => _start(store),
+          ),
+        ],
+      );
+    }
     return FilledButton.icon(
+      key: const ValueKey('welcome-start'),
       style: FilledButton.styleFrom(
         backgroundColor: p.accent,
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
       ),
-      onPressed: store.agentBusy ? null : () => _start(store),
-      icon: store.agentBusy
+      onPressed: busy ? null : () => _start(store),
+      icon: busy
           ? const SizedBox(width: NonSpace.md, height: NonSpace.md, child: CircularProgressIndicator(strokeWidth: 1.5))
           : const Icon(Icons.auto_awesome, size: 13),
       label: const Text('开始创作', style: TextStyle(fontSize: NonType.body)),
+    );
+  }
+
+  /// 选择器/菜单宽度上限（复用 [nonMenuWidthCap]）：按内容左对齐收缩，超限换行。
+  /// 主页上的 chip 行（工作台选择器、设计示例）都走这里，不随输入卡宽度铺开。
+  Widget _menuWidthLimited(BuildContext context, {required Key key, required Widget child}) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        key: key,
+        constraints: BoxConstraints(maxWidth: nonMenuWidthCap(context)),
+        child: child,
+      ),
     );
   }
 
@@ -519,13 +604,17 @@ class _WelcomeState extends State<Welcome> {
   /// 选择写回 `store.chatWorkspaceMode`（持久化 + 通知），发送时自动生效。
   Widget _workspaceSelector(BuildContext context, AppStore store) {
     final selected = normalizeWorkspaceMode(store.chatWorkspaceMode);
-    return Wrap(
-      spacing: 5,
-      runSpacing: 5,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        for (final mode in kWorkspaceModes) _workspaceChip(context, store, mode, mode == selected),
-      ],
+    return _menuWidthLimited(
+      context,
+      key: const ValueKey('welcome-workspace-selector'),
+      child: Wrap(
+        spacing: 5,
+        runSpacing: 5,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          for (final mode in kWorkspaceModes) _workspaceChip(context, store, mode, mode == selected),
+        ],
+      ),
     );
   }
 
@@ -601,6 +690,69 @@ class _WelcomeState extends State<Welcome> {
           child: Text('打开项目', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
         ),
       ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 四工作台入口（设计 / 3D / 视频 / 音乐）
+  // ---------------------------------------------------------------------------
+
+  /// 主页四工作台入口：紧凑入口卡一行排开。
+  ///
+  /// 入口只做**视图切换**，语义沿用既有实现：设计用 `store.setView('design')`，
+  /// 插件工作台用 `store.setView('plugin:<id>')`——不预置项目、不打开产物
+  /// （那些仍归作品集 / 最近项目 / 顶栏项目下拉）。
+  Widget _workbenchEntriesRow(AppStore store) {
+    return Wrap(
+      key: const ValueKey('welcome-enter-workbenches'),
+      spacing: NonSpace.sm,
+      runSpacing: NonSpace.sm,
+      children: <Widget>[
+        for (final (key, label, icon, view) in _workbenchEntries)
+          _workbenchEntry(context, store, entryKey: key, label: label, icon: icon, view: view),
+      ],
+    );
+  }
+
+  /// 单个工作台入口：紧凑入口卡（浅色 = Aqua 白面 + 软阴影，深色 = 面板色）。
+  Widget _workbenchEntry(
+    BuildContext context,
+    AppStore store, {
+    required String entryKey,
+    required String label,
+    required IconData icon,
+    required String view,
+  }) {
+    final p = context.palette;
+    final aqua = isAquaTheme(context);
+    return AquaPanelSurface(
+      key: ValueKey(entryKey),
+      radius: NonRadius.md,
+      padding: EdgeInsets.zero,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(NonRadius.md),
+        onTap: () => store.setView(view),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: NonSpace.md, vertical: NonSpace.sm),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(icon, size: NonType.bodyStrong, color: aqua ? p.accent : p.ink3),
+              const SizedBox(width: NonSpace.xs),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: NonType.body,
+                  fontWeight: FontWeight.w500,
+                  color: aqua ? p.ink : p.ink2,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

@@ -1,9 +1,9 @@
 // Welcome 主页布局回归（用户裁决：主页布局固定不变）。
 //
-// 新主页只有三层：居中的「标题 + 一句话输入卡（内含目标工作台选择器）」，
-// 下面并排「作品集 / 最近项目」两张卡。插件工作台列表与「NON 的工作方式」
-// 说明卡已从主页删除——工作台入口只剩输入卡选择器 + 顶栏项目下拉 +
-// 主页作品集（⌘5–⌘7 直跳键已随 9f17c0b 删除，工作台切换=项目切换）。
+// 新主页：居中的「标题 + 一句话输入卡（内含目标工作台选择器）」+ 四个工作台
+// 入口卡（设计 / 3D / 视频 / 音乐，task-26 新增；点击只落既有视图），下面并排
+// 「作品集 / 最近项目」两张卡。旧的插件工作台列表与「NON 的工作方式」说明卡
+// 已从主页删除（⌘5–⌘7 直跳键已随 9f17c0b 删除，工作台切换=项目切换）。
 //
 // 整页连续背景 + 自适应回归（用户实机验收）：1440 宽下原有两个角落径向光斑
 // 在页面上划出两条浅色竖带，主页看起来像被切成左/中/右三块；之后又指出内容列
@@ -97,11 +97,13 @@ void _expectWorkspaceSelector() {
     expect(find.byKey(ValueKey('welcome-workspace-$mode')), findsOneWidget,
         reason: '目标工作台选择器缺 $mode');
   }
-  expect(find.text('自动'), findsOneWidget);
-  expect(find.text('设计'), findsOneWidget);
-  expect(find.text('3D'), findsOneWidget);
-  expect(find.text('视频'), findsOneWidget);
-  expect(find.text('热应用'), findsOneWidget);
+  // 主页新增了四工作台入口（设计 / 3D / 视频 / 音乐），入口卡与选择器 chip
+  // 文案重名；选择器标签断言必须限定在输入卡内，不能把入口卡算进来。
+  final composer = find.byKey(const ValueKey('welcome-composer'));
+  for (final label in ['自动', '设计', '3D', '视频', '热应用']) {
+    expect(find.descendant(of: composer, matching: find.text(label)), findsOneWidget,
+        reason: '输入卡选择器缺「$label」');
+  }
 }
 
 BoxDecoration _chipDecoration(WidgetTester tester, String mode) {
