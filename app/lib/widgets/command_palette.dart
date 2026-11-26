@@ -352,6 +352,8 @@ class _CommandPaletteState extends State<_CommandPalette> {
                             padding: const EdgeInsets.fromLTRB(9, 6, 9, 3),
                             child: Text(
                               action.group.toUpperCase(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontSize: NonType.micro,
                                 fontWeight: FontWeight.w700,
@@ -380,6 +382,10 @@ class _CommandPaletteState extends State<_CommandPalette> {
                                 Expanded(
                                   child: Text(
                                     action.label,
+                                    // 模板名/最近项目名是用户数据，可能很长；
+                                    // 1.3 倍字号下也必须单行省略，不换行撑行。
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
                                       fontSize: NonType.body,
                                       color: p.ink2,
@@ -389,6 +395,8 @@ class _CommandPaletteState extends State<_CommandPalette> {
                                 if (action.shortcut.isNotEmpty)
                                   Text(
                                     action.shortcut,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
                                       fontSize: NonType.micro,
                                       fontFamily: 'Menlo',

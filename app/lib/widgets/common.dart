@@ -355,6 +355,26 @@ class IconAction extends StatefulWidget {
 class _IconActionState extends State<IconAction> {
   bool _hover = false;
 
+  /// 按下态（InkWell 的 highlight）：子级 Container 有底色，Material 墨水层
+  /// 被盖住，按下只剩微弱的系统 ripple——自绘控件必须自己给按下反馈。
+  bool _pressed = false;
+
+  /// 底色优先级：按下 > 选中 > hover > 透明。按下用 lineStrong 叠层（比 hover
+  /// 的 line 更深一档），选中时叠在 accentSoft 上保留强调色底；抬手即回到
+  /// 原优先级（**终态视觉不变**）。
+  Color _background(NonPalette p) {
+    if (_pressed) {
+      return Color.alphaBlend(
+        p.lineStrong,
+        widget.active ? p.accentSoft : Colors.transparent,
+      );
+    }
+    if (widget.active) return p.accentSoft;
+    // 与全局 hoverColor 同一令牌强度（theme.dart AppTheme.build）。
+    if (_hover) return p.line;
+    return Colors.transparent;
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -365,19 +385,18 @@ class _IconActionState extends State<IconAction> {
         onEnter: (_) => setState(() => _hover = true),
         onExit: (_) => setState(() => _hover = false),
         child: AnimatedContainer(
-          duration: NonMotion.fast,
+          // 动效只取 NonMotion 且尊重「减少动效」：时长归零时按下态立即生效，
+          // 终态仍与常规时长一致。
+          duration: context.nonMotion(NonMotion.fast),
           curve: NonMotion.curve,
           decoration: BoxDecoration(
-            color: widget.active
-                ? p.accentSoft
-                : _hover
-                    ? p.line // 与全局 hoverColor 同一令牌强度（theme.dart AppTheme.build）
-                    : Colors.transparent,
+            color: _background(p),
             borderRadius: BorderRadius.circular(8),
           ),
           child: InkWell(
             borderRadius: BorderRadius.circular(8),
             onTap: widget.onTap,
+            onHighlightChanged: (pressed) => setState(() => _pressed = pressed),
             child: SizedBox(
               width: hit,
               height: hit,
@@ -432,8 +451,12 @@ class SectionLabel extends StatelessWidget {
     return Row(
       children: [
         Expanded(
+          // 大字号（Dynamic Type 1.3 倍）下窄面板（252/348）里区块标题也必须
+          // 单行省略，不能换行把行高撑开。
           child: Text(
             text.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4),
           ),
         ),

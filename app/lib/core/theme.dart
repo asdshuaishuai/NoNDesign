@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+import 'dart:math' as math;
 
 import 'package:material_ui/material_ui.dart';
 
@@ -373,9 +374,32 @@ class AppTheme {
   }
 }
 
-/// 响应式字号缩放：手机 +10%、平板 +5%、桌面 1.0；与系统文字大小相乘并
-/// 钳在 [1.0, 1.3]。字号声明保持既有 8 档字阶不变，渲染期统一缩放——
-/// 新增文案仍按字阶表写，不为手机单独维护一套字号。
+/// 全局字号缩放因子的夹取范围（**唯一来源**）。
+///
+/// 系统 Dynamic Type / 浏览器字号可以远超 1.3；窄面板（左栏树行、检查器行、
+/// 命令面板行）的行高与省略号只按 [max] 设计，越过上限就必须在缩放层夹住，
+/// 而不是让每个行组件自己再算一遍——否则同一档字号在不同组件里被夹成不同值。
+abstract final class NonTextScale {
+  /// 下限：不跟随「调小字号」把正文压到 1 倍以下（与既有 1.0–1.3 约定一致）。
+  static const double min = 1.0;
+
+  /// 上限：1.3 倍是窄面板行不破版的验收上限。
+  static const double max = 1.3;
+}
+
+/// 把任意字号缩放因子夹进 [NonTextScale] 区间——全局缩放层的唯一实现。
+///
+/// NaN 视为「没有可用缩放信息」，回落到下限（[NonTextScale.min]），避免
+/// 非法浮点沿着 MediaQuery 往下传。
+double clampTextScale(double scale) {
+  if (scale.isNaN) return NonTextScale.min;
+  return scale.clamp(NonTextScale.min, NonTextScale.max).toDouble();
+}
+
+/// 响应式字号缩放：手机 +10%、平板 +5%、桌面 1.0；与系统文字大小相乘后经
+/// [clampTextScale] 夹在 [NonTextScale.min, NonTextScale.max]。字号声明保持
+/// 既有 8 档字阶不变，渲染期统一缩放——新增文案仍按字阶表写，不为手机单独
+/// 维护一套字号。
 double responsiveTextScale(Size size, TextScaler system) {
   final base = size.width < 600
       ? 1.10
@@ -383,7 +407,19 @@ double responsiveTextScale(Size size, TextScaler system) {
       ? 1.05
       : 1.0;
   final systemScale = system.scale(14) / 14;
-  return (systemScale * base).clamp(1.0, 1.3).toDouble();
+  return clampTextScale(systemScale * base);
+}
+
+/// 固定高度行/输入行的 Dynamic Type 行高：以 [base]（1.0 倍字号下的既有行高）
+/// 为基准，按当前**有效**字号倍率线性放大。
+///
+/// 用于树行、检查器数值行、取色行这类「行内只有一个单行文本 + 紧凑控件」的
+/// 窄行：行高固定会把 1.3 倍字号的文本压进盒子里（行内换行/裁切），把高度
+/// 直接放开又会改变 1.0 倍下既有密度。这里让行高跟着字号走——1.0 倍时与
+/// [base] 完全一致（视觉零变化），放大字号时才变高。
+double scaledRowHeight(BuildContext context, double base) {
+  final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+  return base * math.max(1.0, scale);
 }
 
 /// 把响应式 textScaler 注入子树（main.dart 与测试共用同一条路径）。

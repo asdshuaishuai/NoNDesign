@@ -134,6 +134,7 @@ class _ProjectPanel extends StatelessWidget {
                   Expanded(
                     child: Text(
                       '${flow.from} → ${flow.to}',
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: NonType.caption,
@@ -162,6 +163,7 @@ class _ProjectPanel extends StatelessWidget {
               ),
               child: Text(
                 (r['name'] ?? '').toString(),
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: NonType.caption, color: p.ink4),
               ),
@@ -245,6 +247,7 @@ class _BoardRow extends StatelessWidget {
                         Expanded(
                           child: Text(
                             board.name.isEmpty ? board.id : board.name,
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: NonType.body,
@@ -264,6 +267,8 @@ class _BoardRow extends StatelessWidget {
                     const SizedBox(height: NonSpace.xxs),
                     Text(
                       '${board.width.round()}×${board.height.round()} · ${board.nodes.length} 节点',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: NonType.micro,
                         fontFamily: 'Menlo',
@@ -352,7 +357,10 @@ class _LayerRow extends StatelessWidget {
       onTap: () => store.selectNode(node.id),
       borderRadius: BorderRadius.circular(NonRadius.sm),
       child: Container(
-        height: 27,
+        // 树行是「固定行高」的窄行：行高随有效字号放大（1.0 倍时仍是 27，
+        // 与既有密度完全一致；1.3 倍字号下行高 35.1，11→14.3 的图层名不再被
+        // 压进 27px 的盒子）。行内文本仍单行省略，绝不换行撑行。
+        height: scaledRowHeight(context, 27),
         margin: const EdgeInsets.only(bottom: 1),
         padding: EdgeInsets.only(
           left: NonSpace.xs + depth * NonSpace.md,
@@ -375,6 +383,7 @@ class _LayerRow extends StatelessWidget {
                 node.text.trim().isNotEmpty
                     ? node.text.trim()
                     : (node.name.isNotEmpty ? node.name : node.id),
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: NonType.caption,

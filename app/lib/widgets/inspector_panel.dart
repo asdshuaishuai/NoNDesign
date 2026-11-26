@@ -1161,7 +1161,9 @@ class _NumFieldState extends State<_NumField> {
     final p = context.palette;
     return Expanded(
       child: SizedBox(
-        height: 29,
+        // 数值行高度随有效字号缩放：1.0 倍时仍是 29（视觉不变），1.3 倍时
+        // 37.7，caption 11→14.3 的输入文本不会被固定高度压扁。
+        height: scaledRowHeight(context, 29),
         child: TextField(
           controller: _controller,
           enabled: widget.enabled,
@@ -1237,6 +1239,10 @@ class _ColorRowState extends State<_ColorRow> {
           width: 50,
           child: Text(
             widget.label,
+            // 50px 的定宽标签位：1.3 倍字号下「描边色」这类三字标签已接近
+            // 宽度上限，单行省略而不是撑破行。
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: NonType.caption, color: p.ink3),
           ),
         ),
@@ -1252,7 +1258,8 @@ class _ColorRowState extends State<_ColorRow> {
         const SizedBox(width: NonSpace.xs),
         Expanded(
           child: SizedBox(
-            height: 27,
+            // 取色行与数值行同一硬度：高度随字号缩放（1.0 倍时 27 不变）。
+            height: scaledRowHeight(context, 27),
             child: TextField(
               controller: _controller,
               style: TextStyle(
