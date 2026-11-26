@@ -68,7 +68,9 @@ class ToastHost extends StatelessWidget {
                             for (final toast in toasts)
                               Padding(
                                 key: ValueKey<int>(toast.id),
-                                padding: const EdgeInsets.only(bottom: NonSpace.sm),
+                                padding: const EdgeInsets.only(
+                                  bottom: NonSpace.sm,
+                                ),
                                 child: ToastEntrance(
                                   child: ToastCapsule(
                                     item: toast,
@@ -100,7 +102,12 @@ class ToastCapsule extends StatelessWidget {
   final bool blur;
   final VoidCallback? onDismiss;
 
-  const ToastCapsule({super.key, required this.item, this.blur = true, this.onDismiss});
+  const ToastCapsule({
+    super.key,
+    required this.item,
+    this.blur = true,
+    this.onDismiss,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -149,7 +156,11 @@ class ToastCapsule extends StatelessWidget {
                       const SizedBox(width: 6),
                       Text(
                         '×${item.repeatCount}',
-                        style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w700, color: p.ink4),
+                        style: TextStyle(
+                          fontSize: NonType.micro,
+                          fontWeight: FontWeight.w700,
+                          color: p.ink4,
+                        ),
                       ),
                     ],
                   ],
@@ -160,7 +171,11 @@ class ToastCapsule extends StatelessWidget {
                     item.detail!,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: NonType.caption, color: p.ink3, height: NonType.lineCaption),
+                    style: TextStyle(
+                      fontSize: NonType.caption,
+                      color: p.ink3,
+                      height: NonType.lineCaption,
+                    ),
                   ),
                 ],
               ],
@@ -213,18 +228,18 @@ class ToastCapsule extends StatelessWidget {
   }
 
   Color _levelColor(NonPalette p) => switch (item.level) {
-        ToastLevel.info => p.accent,
-        ToastLevel.success => p.success,
-        ToastLevel.warn => p.warn,
-        ToastLevel.error => p.danger,
-      };
+    ToastLevel.info => p.accent,
+    ToastLevel.success => p.success,
+    ToastLevel.warn => p.warn,
+    ToastLevel.error => p.danger,
+  };
 
   IconData get _levelIcon => switch (item.level) {
-        ToastLevel.info => Icons.info_outline,
-        ToastLevel.success => Icons.check_circle_outline,
-        ToastLevel.warn => Icons.warning_amber_rounded,
-        ToastLevel.error => Icons.error_outline,
-      };
+    ToastLevel.info => Icons.info_outline,
+    ToastLevel.success => Icons.check_circle_outline,
+    ToastLevel.warn => Icons.warning_amber_rounded,
+    ToastLevel.error => Icons.error_outline,
+  };
 }
 
 /// 可点关闭的小按钮（不用 InkWell：宿主可能挂在 Material 之外）。
@@ -261,11 +276,17 @@ class ToastEntrance extends StatelessWidget {
   Widget build(BuildContext context) {
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: 1),
-      duration: NonMotion.base,
+      // 减少动效（prefers-reduced-motion，WCAG 2.3.3）：时长经 NonMotionX 夹取，
+      // 归零后 TweenAnimationBuilder 首帧即到终态，不再产生持续动画帧；只改
+      // 时长不改终态（不透明、偏移 0 与正常动效播完一致）。
+      duration: context.nonMotion(NonMotion.base),
       curve: NonMotion.curve,
       builder: (context, t, child) => Opacity(
         opacity: t,
-        child: Transform.translate(offset: Offset(0, (1 - t) * -6), child: child),
+        child: Transform.translate(
+          offset: Offset(0, (1 - t) * -6),
+          child: child,
+        ),
       ),
       child: child,
     );
