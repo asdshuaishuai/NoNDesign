@@ -53,7 +53,9 @@ class _PanelHead extends StatelessWidget {
       key: ValueKey('panel-head-$title'),
       height: workspaceHeaderHeight,
       padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: p.line)),
+      ),
       child: Row(
         children: [
           // 区块标题统一 NonType.bodyStrong（标题 > 关键值 > 说明 的第一级）。
@@ -85,18 +87,24 @@ class _ProjectPanel extends StatelessWidget {
     // 每次 ~12.5Hz 通知都全量建行；builder 只建可视行（行 widget 自身
     // 已各自 watch，构造闭包廉价）。
     final items = <Widget Function()>[
-      for (final b in store.render.artboards) () => _BoardRow(board: b, active: b.id == store.activeBoard),
+      for (final b in store.render.artboards)
+        () => _BoardRow(board: b, active: b.id == store.activeBoard),
       if (store.render.artboards.isEmpty)
         () => Padding(
-              padding: const EdgeInsets.all(NonSpace.md),
-              child: Text(
-                  // 项目已打开但本机没有画布运行时：不是「空项目」，别让
-                  // 空画板冒充还没建过画板（审查 depython-1）。
-                  store.canvasPreviewUnavailable
-                      ? '项目已打开，画布需要连接桌面后才能预览。'
-                      : '还没有画板——让 NaN 生成，或点面板顶部 ＋ 新建。',
-                  style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.ink4)),
+          padding: const EdgeInsets.all(NonSpace.md),
+          child: Text(
+            // 项目已打开但本机没有画布运行时：不是「空项目」，别让
+            // 空画板冒充还没建过画板（审查 depython-1）。
+            store.canvasPreviewUnavailable
+                ? '项目已打开，画布需要连接桌面后才能预览。'
+                : '还没有画板——让 NaN 生成，或点面板顶部 ＋ 新建。',
+            style: TextStyle(
+              fontSize: NonType.caption,
+              height: 1.5,
+              color: p.ink4,
             ),
+          ),
+        ),
       if (board != null) ...[
         () => const SizedBox(height: NonSpace.lg),
         () => SectionLabel('图层 · ${board.nodes.length}'),
@@ -109,26 +117,34 @@ class _ProjectPanel extends StatelessWidget {
         () => const SizedBox(height: NonSpace.sm),
         for (final flow in store.render.flows.take(16))
           () => InkWell(
-                onTap: () {
-                  store.selectBoard(flow.from);
-                  store.selectNode(flow.nodeId);
-                },
-                borderRadius: BorderRadius.circular(NonRadius.sm),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: NonSpace.xs, horizontal: NonSpace.xs),
-                  child: Row(
-                    children: [
-                      Icon(Icons.link, size: 11, color: p.ink4),
-                      const SizedBox(width: NonSpace.xs),
-                      Expanded(
-                        child: Text('${flow.from} → ${flow.to}',
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
-                      ),
-                    ],
-                  ),
-                ),
+            onTap: () {
+              store.selectBoard(flow.from);
+              store.selectNode(flow.nodeId);
+            },
+            borderRadius: BorderRadius.circular(NonRadius.sm),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                vertical: NonSpace.xs,
+                horizontal: NonSpace.xs,
               ),
+              child: Row(
+                children: [
+                  Icon(Icons.link, size: 11, color: p.ink4),
+                  const SizedBox(width: NonSpace.xs),
+                  Expanded(
+                    child: Text(
+                      '${flow.from} → ${flow.to}',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: NonType.caption,
+                        color: p.ink3,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
       if (store.recent.isNotEmpty) ...[
         () => const SizedBox(height: NonSpace.lg),
@@ -136,31 +152,39 @@ class _ProjectPanel extends StatelessWidget {
         () => const SizedBox(height: NonSpace.xs),
         for (final r in store.recent.take(5))
           () => InkWell(
-                // 与 welcome 的最近项目列表同一入口：带路径直接打开
-                // （免对话框，需密码时 openProjectFlow 自行追问）。
-                onTap: () => openProjectFlow(context, r['path']?.toString() ?? ''),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: NonSpace.xs, horizontal: NonSpace.xs),
-                  child: Text((r['name'] ?? '').toString(),
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
-                ),
+            // 与 welcome 的最近项目列表同一入口：带路径直接打开
+            // （免对话框，需密码时 openProjectFlow 自行追问）。
+            onTap: () => openProjectFlow(context, r['path']?.toString() ?? ''),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                vertical: NonSpace.xs,
+                horizontal: NonSpace.xs,
               ),
+              child: Text(
+                (r['name'] ?? '').toString(),
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: NonType.caption, color: p.ink4),
+              ),
+            ),
+          ),
       ],
     ];
     return Column(
       children: [
-        _PanelHead('画板', actions: [
-          BoardTemplateMenu(
-            store: store,
-            offset: const Offset(0, 34),
-            child: SizedBox(
-              width: 26,
-              height: 26,
-              child: Icon(Icons.add, size: 17, color: p.ink3),
+        _PanelHead(
+          '画板',
+          actions: [
+            BoardTemplateMenu(
+              store: store,
+              offset: const Offset(0, 34),
+              child: SizedBox(
+                width: 26,
+                height: 26,
+                child: Icon(Icons.add, size: 17, color: p.ink3),
+              ),
             ),
-          ),
-        ]),
+          ],
+        ),
         Expanded(
           child: ListView.builder(
             // 面板内容 padding 统一 12（四档 8/10/11/12 → 一档；底部 16 余量并入）。
@@ -194,7 +218,9 @@ class _BoardRow extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: NonSpace.xxs),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(NonRadius.md),
-            border: Border.all(color: active ? p.lineStrong : Colors.transparent),
+            border: Border.all(
+              color: active ? p.lineStrong : Colors.transparent,
+            ),
           ),
           child: Row(
             children: [
@@ -217,16 +243,33 @@ class _BoardRow extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(board.name.isEmpty ? board.id : board.name,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w600, color: p.ink)),
+                          child: Text(
+                            board.name.isEmpty ? board.id : board.name,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: NonType.body,
+                              fontWeight: FontWeight.w600,
+                              color: p.ink,
+                            ),
+                          ),
                         ),
-                        if (store.render.entry == board.id) Pill(label: '入口', color: p.accent, background: p.accentSoft),
+                        if (store.render.entry == board.id)
+                          Pill(
+                            label: '入口',
+                            color: p.accent,
+                            background: p.accentSoft,
+                          ),
                       ],
                     ),
                     const SizedBox(height: NonSpace.xxs),
-                    Text('${board.width.round()}×${board.height.round()} · ${board.nodes.length} 节点',
-                        style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
+                    Text(
+                      '${board.width.round()}×${board.height.round()} · ${board.nodes.length} 节点',
+                      style: TextStyle(
+                        fontSize: NonType.micro,
+                        fontFamily: 'Menlo',
+                        color: p.ink4,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -235,17 +278,43 @@ class _BoardRow extends StatelessWidget {
                 padding: EdgeInsets.zero,
                 icon: Icon(Icons.more_horiz, size: 15, color: p.ink4),
                 color: p.panel,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(NonRadius.md), side: BorderSide(color: p.lineStrong)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(NonRadius.md),
+                  side: BorderSide(color: p.lineStrong),
+                ),
                 onSelected: (v) {
                   if (v == 'dup') store.duplicateBoard(board.id);
                   if (v == 'del') store.deleteBoard(board.id);
-                  if (v == 'responsive') _runResponsive(context, store, board.id);
+                  if (v == 'responsive') {
+                    _runResponsive(context, store, board.id);
+                  }
                 },
                 itemBuilder: (context) => [
-                  PopupMenuItem(value: 'dup', child: Text('复制画板', style: TextStyle(fontSize: NonType.body, color: p.ink2))),
-                  PopupMenuItem(value: 'responsive', child: Text('响应式适配', style: TextStyle(fontSize: NonType.body, color: p.ink2))),
+                  PopupMenuItem(
+                    value: 'dup',
+                    child: Text(
+                      '复制画板',
+                      style: TextStyle(fontSize: NonType.body, color: p.ink2),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'responsive',
+                    child: Text(
+                      '响应式适配',
+                      style: TextStyle(fontSize: NonType.body, color: p.ink2),
+                    ),
+                  ),
                   if (store.render.artboards.length > 1)
-                    PopupMenuItem(value: 'del', child: Text('删除画板', style: TextStyle(fontSize: NonType.body, color: p.danger))),
+                    PopupMenuItem(
+                      value: 'del',
+                      child: Text(
+                        '删除画板',
+                        style: TextStyle(
+                          fontSize: NonType.body,
+                          color: p.danger,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ],
@@ -265,9 +334,13 @@ class _LayerRow extends StatelessWidget {
   static final RegExp _iconText = RegExp(r'heading|body_text|link|kbd');
   static final RegExp _iconImage = RegExp(r'image|avatar|lightbox');
   static final RegExp _iconButton = RegExp(r'button|chip|tag|badge|fab');
-  static final RegExp _iconInput = RegExp(r'input|search|textarea|select|checkbox|switch|radio');
+  static final RegExp _iconInput = RegExp(
+    r'input|search|textarea|select|checkbox|switch|radio',
+  );
   static final RegExp _iconRule = RegExp(r'divider|progress|meter|slider');
-  static final RegExp _iconBar = RegExp(r'app_bar|navbar|bottom_nav|tab_bar|menu|pagination');
+  static final RegExp _iconBar = RegExp(
+    r'app_bar|navbar|bottom_nav|tab_bar|menu|pagination',
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -281,26 +354,44 @@ class _LayerRow extends StatelessWidget {
       child: Container(
         height: 27,
         margin: const EdgeInsets.only(bottom: 1),
-        padding: EdgeInsets.only(left: NonSpace.xs + depth * NonSpace.md, right: NonSpace.xs),
+        padding: EdgeInsets.only(
+          left: NonSpace.xs + depth * NonSpace.md,
+          right: NonSpace.xs,
+        ),
         decoration: BoxDecoration(
           color: active ? p.accentSoft : Colors.transparent,
           borderRadius: BorderRadius.circular(NonRadius.sm),
         ),
         child: Row(
           children: [
-            Icon(_nodeIcon(node.component), size: 12, color: active ? p.accent : p.ink4),
+            Icon(
+              _nodeIcon(node.component),
+              size: 12,
+              color: active ? p.accent : p.ink4,
+            ),
             const SizedBox(width: NonSpace.xs),
             Expanded(
               child: Text(
-                node.text.trim().isNotEmpty ? node.text.trim() : (node.name.isNotEmpty ? node.name : node.id),
+                node.text.trim().isNotEmpty
+                    ? node.text.trim()
+                    : (node.name.isNotEmpty ? node.name : node.id),
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: NonType.caption, color: active ? p.accent : p.ink2),
+                style: TextStyle(
+                  fontSize: NonType.caption,
+                  color: active ? p.accent : p.ink2,
+                ),
               ),
             ),
             IconButton(
               tooltip: node.style.visible ? '隐藏' : '显示',
-              onPressed: () => store.updateNode(node.id, {'visible': !node.style.visible}),
-              icon: Icon(node.style.visible ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 11),
+              onPressed: () =>
+                  store.updateNode(node.id, {'visible': !node.style.visible}),
+              icon: Icon(
+                node.style.visible
+                    ? Icons.visibility_outlined
+                    : Icons.visibility_off_outlined,
+                size: 11,
+              ),
               color: p.ink4,
               visualDensity: VisualDensity.compact,
               constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
@@ -312,7 +403,10 @@ class _LayerRow extends StatelessWidget {
               icon: const Icon(Icons.arrow_upward, size: NonSpace.md),
               color: p.ink4,
               visualDensity: VisualDensity.compact,
-              constraints: const BoxConstraints(minWidth: NonSpace.xl, minHeight: NonSpace.xl),
+              constraints: const BoxConstraints(
+                minWidth: NonSpace.xl,
+                minHeight: NonSpace.xl,
+              ),
               padding: EdgeInsets.zero,
             ),
             IconButton(
@@ -341,14 +435,37 @@ class _LayerRow extends StatelessWidget {
   }
 }
 
-class _DocsPanel extends StatelessWidget {
+class _DocsPanel extends StatefulWidget {
   const _DocsPanel();
+
+  @override
+  State<_DocsPanel> createState() => _DocsPanelState();
+}
+
+class _DocsPanelState extends State<_DocsPanel> {
+  static final RegExp _whitespace = RegExp(r'\s');
+
+  /// 文档字数 memo：PRD/UI 说明正文可达数千字，此前每次 build 都要做两遍
+  /// `replaceAll(RegExp(r'\s'), '')`（且正则每帧重新编译）。docs 整体替换，
+  /// 用字符串身份判新鲜度（未变化时是同一个 String 实例）。
+  String? _prdSource;
+  int _prdChars = 0;
+  String? _uiSource;
+  int _uiChars = 0;
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final p = context.palette;
     final docs = store.docs;
+    if (!identical(docs.prd, _prdSource)) {
+      _prdSource = docs.prd;
+      _prdChars = docs.prd.replaceAll(_whitespace, '').length;
+    }
+    if (!identical(docs.ui, _uiSource)) {
+      _uiSource = docs.ui;
+      _uiChars = docs.ui.replaceAll(_whitespace, '').length;
+    }
     return Column(
       children: [
         const _PanelHead('设计文档'),
@@ -356,14 +473,34 @@ class _DocsPanel extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.all(NonSpace.md),
             children: [
-              _docCard(context, Icons.description_outlined, '产品需求 PRD',
-                  docs.prd.trim().isEmpty ? '还没有生成——描述产品，NaN 会先写文档' : '${docs.prd.replaceAll(RegExp(r'\s'), '').length} 字 · 目标 / 流程 / 页面清单',
-                  true, 'prd'),
-              _docCard(context, Icons.layers_outlined, 'UI 说明',
-                  docs.ui.trim().isEmpty ? '可选：逐屏布局 / 交互 / 状态' : '${docs.ui.replaceAll(RegExp(r'\s'), '').length} 字 · 逐屏约束',
-                  false, 'ui'),
-              _docCard(context, Icons.palette_outlined, '设计规范',
-                  '配色 / 字体 / 间距 / 圆角 / 规则', true, 'spec'),
+              _docCard(
+                context,
+                Icons.description_outlined,
+                '产品需求 PRD',
+                docs.prd.trim().isEmpty
+                    ? '还没有生成——描述产品，NaN 会先写文档'
+                    : '$_prdChars 字 · 目标 / 流程 / 页面清单',
+                true,
+                'prd',
+              ),
+              _docCard(
+                context,
+                Icons.layers_outlined,
+                'UI 说明',
+                docs.ui.trim().isEmpty
+                    ? '可选：逐屏布局 / 交互 / 状态'
+                    : '$_uiChars 字 · 逐屏约束',
+                false,
+                'ui',
+              ),
+              _docCard(
+                context,
+                Icons.palette_outlined,
+                '设计规范',
+                '配色 / 字体 / 间距 / 圆角 / 规则',
+                true,
+                'spec',
+              ),
               const SizedBox(height: NonSpace.lg),
               // 静态概览卡：只留 panel2 填充与圆角——左栏本身已有外边框
               // （Container border right），再叠一层卡片边框就是「面板框 +
@@ -377,13 +514,33 @@ class _DocsPanel extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SectionLabel('概览', trailing: Pill(label: '${store.render.artboards.length} 屏', color: p.accent)),
+                    SectionLabel(
+                      '概览',
+                      trailing: Pill(
+                        label: '${store.render.artboards.length} 屏',
+                        color: p.accent,
+                      ),
+                    ),
                     const SizedBox(height: NonSpace.sm),
                     Row(
                       children: [
-                        _stat(context, '画板', store.render.artboards.length.toString()),
-                        _stat(context, '连线', store.render.flows.length.toString()),
-                        _stat(context, '节点', store.render.artboards.fold<int>(0, (n, b) => n + b.nodes.length).toString()),
+                        _stat(
+                          context,
+                          '画板',
+                          store.render.artboards.length.toString(),
+                        ),
+                        _stat(
+                          context,
+                          '连线',
+                          store.render.flows.length.toString(),
+                        ),
+                        _stat(
+                          context,
+                          '节点',
+                          store.render.artboards
+                              .fold<int>(0, (n, b) => n + b.nodes.length)
+                              .toString(),
+                        ),
                       ],
                     ),
                     _BenchmarkStrip(mbt: store.mbt),
@@ -415,8 +572,12 @@ class _DocsPanel extends StatelessWidget {
                               height: 24,
                               decoration: BoxDecoration(
                                 color: parseHex(entry.value),
-                                borderRadius: BorderRadius.circular(NonRadius.sm),
-                                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                                borderRadius: BorderRadius.circular(
+                                  NonRadius.sm,
+                                ),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.12),
+                                ),
                               ),
                             ),
                           ),
@@ -432,7 +593,14 @@ class _DocsPanel extends StatelessWidget {
     );
   }
 
-  Widget _docCard(BuildContext context, IconData icon, String title, String detail, bool active, String tab) {
+  Widget _docCard(
+    BuildContext context,
+    IconData icon,
+    String title,
+    String detail,
+    bool active,
+    String tab,
+  ) {
     final store = context.read<AppStore>();
     final p = context.palette;
     return InkWell(
@@ -454,7 +622,10 @@ class _DocsPanel extends StatelessWidget {
             Container(
               width: 28,
               height: 28,
-              decoration: BoxDecoration(color: p.panel3, borderRadius: BorderRadius.circular(NonRadius.md)),
+              decoration: BoxDecoration(
+                color: p.panel3,
+                borderRadius: BorderRadius.circular(NonRadius.md),
+              ),
               child: Icon(icon, size: 14, color: p.ink3),
             ),
             const SizedBox(width: NonSpace.sm),
@@ -464,17 +635,39 @@ class _DocsPanel extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Text(title, style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w600, color: p.ink)),
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: NonType.body,
+                          fontWeight: FontWeight.w600,
+                          color: p.ink,
+                        ),
+                      ),
                       if (active)
                         Padding(
                           padding: const EdgeInsets.only(left: NonSpace.xs),
-                          child: Container(width: 5, height: 5, decoration: BoxDecoration(color: p.success, shape: BoxShape.circle)),
+                          child: Container(
+                            width: 5,
+                            height: 5,
+                            decoration: BoxDecoration(
+                              color: p.success,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
                         ),
                     ],
                   ),
                   const SizedBox(height: NonSpace.xxs),
-                  Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: NonType.micro, height: 1.35, color: p.ink4)),
+                  Text(
+                    detail,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: NonType.micro,
+                      height: 1.35,
+                      color: p.ink4,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -490,13 +683,30 @@ class _DocsPanel extends StatelessWidget {
     return Expanded(
       child: Container(
         margin: const EdgeInsets.only(right: NonSpace.xs),
-        padding: const EdgeInsets.symmetric(vertical: NonSpace.xs, horizontal: NonSpace.sm),
-        decoration: BoxDecoration(color: p.panel3.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(NonRadius.md)),
+        padding: const EdgeInsets.symmetric(
+          vertical: NonSpace.xs,
+          horizontal: NonSpace.sm,
+        ),
+        decoration: BoxDecoration(
+          color: p.panel3.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(NonRadius.md),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(value, style: TextStyle(fontSize: NonType.bodyStrong, fontFamily: 'Menlo', fontWeight: FontWeight.w600, color: p.ink)),
-            Text(label, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: NonType.bodyStrong,
+                fontFamily: 'Menlo',
+                fontWeight: FontWeight.w600,
+                color: p.ink,
+              ),
+            ),
+            Text(
+              label,
+              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+            ),
           ],
         ),
       ),
@@ -545,212 +755,275 @@ class _SpecPanelState extends State<_SpecPanel> {
     final store = context.watch<AppStore>();
     final p = context.palette;
     final design = store.docs.design;
-    return Column(
-      children: [
-        _PanelHead('设计规范', actions: [
-          IconAction(
-            icon: Icons.colorize,
-            tooltip: '从画布提取设计规范',
-            size: 26,
-            onTap: store.activeBoard == null || _extracting ? null : _runExtract,
-          ),
-          IconAction(
-            icon: Icons.auto_fix_high,
-            tooltip: '把调色板写入画板配色',
-            size: 26,
-            onTap: () async {
-              var ok = 0;
-              const mapping = {
-                'primary': 'primary',
-                'background': 'background',
-                'surface': 'surface',
-                'text': 'text_primary',
-                'muted': 'text_secondary',
-                'danger': 'error',
-                'success': 'success',
-              };
-              for (final entry in mapping.entries) {
-                final color = design.palette[entry.key];
-                if (color != null && await store.setToken(entry.value, color)) ok += 1;
-              }
-              if (context.mounted) {
-                if (ok > 0) {
-                  store.toasts.success('已应用 $ok 个颜色到画板');
-                } else {
-                  store.toasts.info('画布颜色没有变化');
-                }
-              }
-            },
-          ),
-        ]),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.all(NonSpace.md),
+    // 规范面板是纵向长栈：调色板颜色行与规则行随设计文档增长（可 >10 行）。
+    // 用惰性列表，只构建视口内的行；闭包在 build 期捕获同一份 store/design 快照。
+    final items = <Widget Function()>[
+      () => const SectionLabel('调色板'),
+      () => const SizedBox(height: NonSpace.sm),
+      for (final entry in design.palette.entries)
+        () => Padding(
+          padding: const EdgeInsets.only(bottom: NonSpace.xs),
+          child: Row(
             children: [
-              const SectionLabel('调色板'),
-              const SizedBox(height: NonSpace.sm),
-              for (final entry in design.palette.entries)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: NonSpace.xs),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: parseHex(entry.value),
-                          borderRadius: BorderRadius.circular(NonRadius.sm),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-                        ),
-                      ),
-                      const SizedBox(width: NonSpace.sm),
-                      SizedBox(
-                        width: 70,
-                        child: Text(entry.key, style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
-                      ),
-                      Expanded(
-                        child: _CommitField(
-                          value: entry.value,
-                          monospace: true,
-                          onSubmit: (v) {
-                            final palette = Map<String, String>.from(design.palette)..[entry.key] = v;
-                            store.setDocs(
-                              design: DesignSpec(
-                                palette: palette,
-                                h1: design.h1,
-                                h2: design.h2,
-                                body: design.body,
-                                spacing: design.spacing,
-                                radiusSm: design.radiusSm,
-                                radiusMd: design.radiusMd,
-                                radiusLg: design.radiusLg,
-                                rules: design.rules,
-                                notes: design.notes,
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              if (_extracting) ...[
-                const SizedBox(height: NonSpace.md),
-                const SectionLabel('提取结果'),
-                const SizedBox(height: NonSpace.sm),
-                Text('正在从 ${store.activeBoard ?? '画板'} 取色…',
-                    style: TextStyle(fontSize: NonType.micro, height: 1.4, color: p.ink4)),
-              ],
-              if (_extract != null) ...[
-                const SizedBox(height: NonSpace.md),
-                SectionLabel(
-                  '提取结果 · ${_extractAb ?? ''}',
-                  trailing: IconAction(
-                    icon: Icons.close,
-                    tooltip: '收起',
-                    size: 20,
-                    onTap: () => setState(() {
-                      _extract = null;
-                      _extractAb = null;
-                    }),
-                  ),
-                ),
-                const SizedBox(height: NonSpace.sm),
-                ExtractCompareView(data: _extract!),
-              ],
-              const SizedBox(height: NonSpace.md),
-              SectionLabel('画板', trailing: Text(store.activeBoard ?? '—',
-                  style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4))),
-              const SizedBox(height: NonSpace.sm),
-              _PanelActionButton(
-                icon: Icons.devices_outlined,
-                label: '响应式适配',
-                enabled: store.activeBoard != null && !store.agentBusy,
-                onTap: _runResponsive,
-              ),
-              const SizedBox(height: NonSpace.md),
-              const SectionLabel('字体层级'),
-              const SizedBox(height: NonSpace.sm),
-              Row(
-                children: [
-                  for (final item in [('H1', design.h1), ('H2', design.h2), ('BODY', design.body)])
-                    Expanded(
-                      child: Container(
-                        margin: const EdgeInsets.only(right: NonSpace.xs),
-                        padding: const EdgeInsets.all(NonSpace.sm),
-                        decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(NonRadius.md)),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(item.$1, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
-                            _CommitField(
-                              value: item.$2.round().toString(),
-                              monospace: true,
-                              onSubmit: (v) {
-                                final n = double.tryParse(v) ?? item.$2;
-                                store.setDocs(
-                                  design: DesignSpec(
-                                    palette: design.palette,
-                                    h1: item.$1 == 'H1' ? n : design.h1,
-                                    h2: item.$1 == 'H2' ? n : design.h2,
-                                    body: item.$1 == 'BODY' ? n : design.body,
-                                    spacing: design.spacing,
-                                    radiusSm: design.radiusSm,
-                                    radiusMd: design.radiusMd,
-                                    radiusLg: design.radiusLg,
-                                    rules: design.rules,
-                                    notes: design.notes,
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: NonSpace.md),
-              const SectionLabel('间距 / 圆角'),
-              const SizedBox(height: NonSpace.sm),
-              Wrap(
-                spacing: NonSpace.xs,
-                runSpacing: NonSpace.xs,
-                children: [
-                  for (final s in design.spacing)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
-                      decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(NonRadius.sm)),
-                      child: Text(s.round().toString(), style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink3)),
-                    ),
-                ],
-              ),
-              const SizedBox(height: NonSpace.md),
-              const SectionLabel('规则'),
-              const SizedBox(height: NonSpace.sm),
-              for (final rule in design.rules)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: NonSpace.xs),
-                  child: Row(
-                    children: [
-                      Icon(Icons.check, size: 10, color: p.success),
-                      const SizedBox(width: NonSpace.xs),
-                      Expanded(child: Text(rule, style: TextStyle(fontSize: NonType.caption, height: 1.4, color: p.ink3))),
-                    ],
-                  ),
-                ),
-              const SizedBox(height: NonSpace.md),
               Container(
-                padding: const EdgeInsets.all(NonSpace.sm),
+                width: 24,
+                height: 24,
                 decoration: BoxDecoration(
-                  color: p.accentSoft.withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(NonRadius.md),
-                  border: Border.all(color: p.accent.withValues(alpha: 0.2)),
+                  color: parseHex(entry.value),
+                  borderRadius: BorderRadius.circular(NonRadius.sm),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.12),
+                  ),
                 ),
-                child: Text('每次生成都会带上这份规范，保持全局视觉一致。',
-                    style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink3)),
+              ),
+              const SizedBox(width: NonSpace.sm),
+              SizedBox(
+                width: 70,
+                child: Text(
+                  entry.key,
+                  style: TextStyle(fontSize: NonType.caption, color: p.ink3),
+                ),
+              ),
+              Expanded(
+                child: _CommitField(
+                  value: entry.value,
+                  monospace: true,
+                  onSubmit: (v) {
+                    final palette = Map<String, String>.from(design.palette)
+                      ..[entry.key] = v;
+                    store.setDocs(
+                      design: DesignSpec(
+                        palette: palette,
+                        h1: design.h1,
+                        h2: design.h2,
+                        body: design.body,
+                        spacing: design.spacing,
+                        radiusSm: design.radiusSm,
+                        radiusMd: design.radiusMd,
+                        radiusLg: design.radiusLg,
+                        rules: design.rules,
+                        notes: design.notes,
+                      ),
+                    );
+                  },
+                ),
               ),
             ],
+          ),
+        ),
+      if (_extracting) ...[
+        () => const SizedBox(height: NonSpace.md),
+        () => const SectionLabel('提取结果'),
+        () => const SizedBox(height: NonSpace.sm),
+        () => Text(
+          '正在从 ${store.activeBoard ?? '画板'} 取色…',
+          style: TextStyle(fontSize: NonType.micro, height: 1.4, color: p.ink4),
+        ),
+      ],
+      if (_extract != null) ...[
+        () => const SizedBox(height: NonSpace.md),
+        () => SectionLabel(
+          '提取结果 · ${_extractAb ?? ''}',
+          trailing: IconAction(
+            icon: Icons.close,
+            tooltip: '收起',
+            size: 20,
+            onTap: () => setState(() {
+              _extract = null;
+              _extractAb = null;
+            }),
+          ),
+        ),
+        () => const SizedBox(height: NonSpace.sm),
+        () => ExtractCompareView(data: _extract!),
+      ],
+      () => const SizedBox(height: NonSpace.md),
+      () => SectionLabel(
+        '画板',
+        trailing: Text(
+          store.activeBoard ?? '—',
+          style: TextStyle(
+            fontSize: NonType.micro,
+            fontFamily: 'Menlo',
+            color: p.ink4,
+          ),
+        ),
+      ),
+      () => const SizedBox(height: NonSpace.sm),
+      () => _PanelActionButton(
+        icon: Icons.devices_outlined,
+        label: '响应式适配',
+        enabled: store.activeBoard != null && !store.agentBusy,
+        onTap: _runResponsive,
+      ),
+      () => const SizedBox(height: NonSpace.md),
+      () => const SectionLabel('字体层级'),
+      () => const SizedBox(height: NonSpace.sm),
+      () => Row(
+        children: [
+          for (final item in [
+            ('H1', design.h1),
+            ('H2', design.h2),
+            ('BODY', design.body),
+          ])
+            Expanded(
+              child: Container(
+                margin: const EdgeInsets.only(right: NonSpace.xs),
+                padding: const EdgeInsets.all(NonSpace.sm),
+                decoration: BoxDecoration(
+                  color: p.panel2,
+                  borderRadius: BorderRadius.circular(NonRadius.md),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.$1,
+                      style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+                    ),
+                    _CommitField(
+                      value: item.$2.round().toString(),
+                      monospace: true,
+                      onSubmit: (v) {
+                        final n = double.tryParse(v) ?? item.$2;
+                        store.setDocs(
+                          design: DesignSpec(
+                            palette: design.palette,
+                            h1: item.$1 == 'H1' ? n : design.h1,
+                            h2: item.$1 == 'H2' ? n : design.h2,
+                            body: item.$1 == 'BODY' ? n : design.body,
+                            spacing: design.spacing,
+                            radiusSm: design.radiusSm,
+                            radiusMd: design.radiusMd,
+                            radiusLg: design.radiusLg,
+                            rules: design.rules,
+                            notes: design.notes,
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+      () => const SizedBox(height: NonSpace.md),
+      () => const SectionLabel('间距 / 圆角'),
+      () => const SizedBox(height: NonSpace.sm),
+      () => Wrap(
+        spacing: NonSpace.xs,
+        runSpacing: NonSpace.xs,
+        children: [
+          for (final s in design.spacing)
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: NonSpace.sm,
+                vertical: NonSpace.xs,
+              ),
+              decoration: BoxDecoration(
+                color: p.panel2,
+                borderRadius: BorderRadius.circular(NonRadius.sm),
+              ),
+              child: Text(
+                s.round().toString(),
+                style: TextStyle(
+                  fontSize: NonType.micro,
+                  fontFamily: 'Menlo',
+                  color: p.ink3,
+                ),
+              ),
+            ),
+        ],
+      ),
+      () => const SizedBox(height: NonSpace.md),
+      () => const SectionLabel('规则'),
+      () => const SizedBox(height: NonSpace.sm),
+      for (final rule in design.rules)
+        () => Padding(
+          padding: const EdgeInsets.only(bottom: NonSpace.xs),
+          child: Row(
+            children: [
+              Icon(Icons.check, size: 10, color: p.success),
+              const SizedBox(width: NonSpace.xs),
+              Expanded(
+                child: Text(
+                  rule,
+                  style: TextStyle(
+                    fontSize: NonType.caption,
+                    height: 1.4,
+                    color: p.ink3,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      () => const SizedBox(height: NonSpace.md),
+      () => Container(
+        padding: const EdgeInsets.all(NonSpace.sm),
+        decoration: BoxDecoration(
+          color: p.accentSoft.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(NonRadius.md),
+          border: Border.all(color: p.accent.withValues(alpha: 0.2)),
+        ),
+        child: Text(
+          '每次生成都会带上这份规范，保持全局视觉一致。',
+          style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink3),
+        ),
+      ),
+    ];
+    return Column(
+      children: [
+        _PanelHead(
+          '设计规范',
+          actions: [
+            IconAction(
+              icon: Icons.colorize,
+              tooltip: '从画布提取设计规范',
+              size: 26,
+              onTap: store.activeBoard == null || _extracting
+                  ? null
+                  : _runExtract,
+            ),
+            IconAction(
+              icon: Icons.auto_fix_high,
+              tooltip: '把调色板写入画板配色',
+              size: 26,
+              onTap: () async {
+                var ok = 0;
+                const mapping = {
+                  'primary': 'primary',
+                  'background': 'background',
+                  'surface': 'surface',
+                  'text': 'text_primary',
+                  'muted': 'text_secondary',
+                  'danger': 'error',
+                  'success': 'success',
+                };
+                for (final entry in mapping.entries) {
+                  final color = design.palette[entry.key];
+                  if (color != null &&
+                      await store.setToken(entry.value, color)) {
+                    ok += 1;
+                  }
+                }
+                if (context.mounted) {
+                  if (ok > 0) {
+                    store.toasts.success('已应用 $ok 个颜色到画板');
+                  } else {
+                    store.toasts.info('画布颜色没有变化');
+                  }
+                }
+              },
+            ),
+          ],
+        ),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(NonSpace.md),
+            itemCount: items.length,
+            itemBuilder: (context, i) => items[i](),
           ),
         ),
       ],
@@ -766,10 +1039,16 @@ class _HistoryPanel extends StatefulWidget {
 }
 
 class _HistoryPanelState extends State<_HistoryPanel> {
+  /// 版本行密度统计用的静态正则：此前每行每次 build 都现场编译两个 RegExp。
+  static final RegExp _artboardMarker = RegExp(r'<!-- moonviz:artboard');
+  static final RegExp _whitespace = RegExp(r'\s+');
+
   bool _engineMode = false;
   bool _engineBusy = false;
+
   /// 人类可读的结果句（面板正文）。
   String _engineSummary = '';
+
   /// 原始诊断（只出现在折叠的「技术详情」里，默认不展开）。
   String _engineDetail = '';
   String _initializedBoard = '';
@@ -838,71 +1117,117 @@ class _HistoryPanelState extends State<_HistoryPanel> {
     final p = context.palette;
     return Column(
       children: [
-        _PanelHead('历史', actions: [
-          IconAction(icon: Icons.undo, tooltip: '撤销 ${modCombo('⌘Z')}（本地快照）', size: 26, onTap: store.undo),
-          IconAction(icon: Icons.redo, tooltip: '重做 ${modCombo('⇧⌘Z')}（本地快照）', size: 26, onTap: store.redo),
-        ]),
+        _PanelHead(
+          '历史',
+          actions: [
+            IconAction(
+              icon: Icons.undo,
+              tooltip: '撤销 ${modCombo('⌘Z')}（本地快照）',
+              size: 26,
+              onTap: store.undo,
+            ),
+            IconAction(
+              icon: Icons.redo,
+              tooltip: '重做 ${modCombo('⇧⌘Z')}（本地快照）',
+              size: 26,
+              onTap: store.redo,
+            ),
+          ],
+        ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(NonSpace.sm, NonSpace.sm, NonSpace.sm, 0),
+          padding: const EdgeInsets.fromLTRB(
+            NonSpace.sm,
+            NonSpace.sm,
+            NonSpace.sm,
+            0,
+          ),
           child: Row(
             children: [
-              _seg(context, '本地快照', !_engineMode, () => setState(() => _engineMode = false)),
+              _seg(
+                context,
+                '本地快照',
+                !_engineMode,
+                () => setState(() => _engineMode = false),
+              ),
               const SizedBox(width: NonSpace.xs),
-              _seg(context, '版本记录', _engineMode, () => setState(() => _engineMode = true)),
+              _seg(
+                context,
+                '版本记录',
+                _engineMode,
+                () => setState(() => _engineMode = true),
+              ),
             ],
           ),
         ),
         if (!_engineMode)
           Expanded(
             child: ListView.builder(
-            padding: const EdgeInsets.all(NonSpace.md),
-            itemCount: store.history.length,
-            itemBuilder: (context, i) {
-              final index = store.history.length - 1 - i;
-              final active = index == store.historyIndex;
-              final snapshot = store.history[index];
-              final boards = RegExp(r'<!-- moonviz:artboard').allMatches(snapshot).length;
-              // 快照正文是源码（frontmatter/标记都是内部资料），界面只报体积，
-              // 不把前 40 字源码直接摊在版本行上。
-              final chars = snapshot.replaceAll(RegExp(r'\s+'), '').length;
-              return InkWell(
-                onTap: () => store.jumpHistory(index),
-                borderRadius: BorderRadius.circular(NonRadius.md),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: NonSpace.sm, horizontal: NonSpace.sm),
-                  margin: const EdgeInsets.only(bottom: NonSpace.xxs),
-                  decoration: BoxDecoration(
-                    color: active ? p.accentSoft : Colors.transparent,
-                    borderRadius: BorderRadius.circular(NonRadius.md),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 5,
-                        height: 5,
-                        decoration: BoxDecoration(color: active ? p.accent : p.ink4, shape: BoxShape.circle),
-                      ),
-                      const SizedBox(width: NonSpace.sm),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(active ? '当前版本' : '版本 ${index + 1}',
-                                style: TextStyle(fontSize: NonType.caption, fontWeight: FontWeight.w500, color: active ? p.accent : p.ink3)),
-                            Text('$boards 板 · $chars 字符',
+              padding: const EdgeInsets.all(NonSpace.md),
+              itemCount: store.history.length,
+              itemBuilder: (context, i) {
+                final index = store.history.length - 1 - i;
+                final active = index == store.historyIndex;
+                final snapshot = store.history[index];
+                final boards = _artboardMarker.allMatches(snapshot).length;
+                // 快照正文是源码（frontmatter/标记都是内部资料），界面只报体积，
+                // 不把前 40 字源码直接摊在版本行上。
+                final chars = snapshot.replaceAll(_whitespace, '').length;
+                return InkWell(
+                  onTap: () => store.jumpHistory(index),
+                  borderRadius: BorderRadius.circular(NonRadius.md),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: NonSpace.sm,
+                      horizontal: NonSpace.sm,
+                    ),
+                    margin: const EdgeInsets.only(bottom: NonSpace.xxs),
+                    decoration: BoxDecoration(
+                      color: active ? p.accentSoft : Colors.transparent,
+                      borderRadius: BorderRadius.circular(NonRadius.md),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 5,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: active ? p.accent : p.ink4,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: NonSpace.sm),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                active ? '当前版本' : '版本 ${index + 1}',
+                                style: TextStyle(
+                                  fontSize: NonType.caption,
+                                  fontWeight: FontWeight.w500,
+                                  color: active ? p.accent : p.ink3,
+                                ),
+                              ),
+                              Text(
+                                '$boards 板 · $chars 字符',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
-                          ],
+                                style: TextStyle(
+                                  fontSize: NonType.micro,
+                                  fontFamily: 'Menlo',
+                                  color: p.ink4,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              );
-            },
-          ),
-        )
+                );
+              },
+            ),
+          )
         else
           Expanded(
             child: Column(
@@ -924,8 +1249,13 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                     children: [
                       for (final (cmd, label) in _historyCommands)
                         ActionChip(
-                          label: Text(label,
-                              style: TextStyle(fontSize: NonType.micro, color: _engineBusy ? p.ink4 : p.ink2)),
+                          label: Text(
+                            label,
+                            style: TextStyle(
+                              fontSize: NonType.micro,
+                              color: _engineBusy ? p.ink4 : p.ink2,
+                            ),
+                          ),
                           onPressed: _engineBusy
                               ? null
                               : () async {
@@ -939,7 +1269,12 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                 const SizedBox(height: NonSpace.sm),
                 Expanded(
                   child: Container(
-                    margin: const EdgeInsets.fromLTRB(NonSpace.sm, 0, NonSpace.sm, NonSpace.sm),
+                    margin: const EdgeInsets.fromLTRB(
+                      NonSpace.sm,
+                      0,
+                      NonSpace.sm,
+                      NonSpace.sm,
+                    ),
                     padding: const EdgeInsets.all(NonSpace.sm),
                     decoration: BoxDecoration(
                       color: p.bgElevated,
@@ -954,9 +1289,14 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                             _engineSummary.isEmpty
                                 ? '选一个画板，点「开始记录」，之后每次「保存版本」都会留下一个可回看的版本。\n撤销、重做与对比也在这排按钮里。'
                                 : _engineSummary,
-                            style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink3),
+                            style: TextStyle(
+                              fontSize: NonType.micro,
+                              height: 1.5,
+                              color: p.ink3,
+                            ),
                           ),
-                          if (_engineDetail.isNotEmpty) _HistoryDetails(text: _engineDetail),
+                          if (_engineDetail.isNotEmpty)
+                            _HistoryDetails(text: _engineDetail),
                         ],
                       ),
                     ),
@@ -969,20 +1309,33 @@ class _HistoryPanelState extends State<_HistoryPanel> {
     );
   }
 
-  Widget _seg(BuildContext context, String label, bool active, VoidCallback onTap) {
+  Widget _seg(
+    BuildContext context,
+    String label,
+    bool active,
+    VoidCallback onTap,
+  ) {
     final p = context.palette;
     return InkWell(
       borderRadius: BorderRadius.circular(NonRadius.sm),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
+        padding: const EdgeInsets.symmetric(
+          horizontal: NonSpace.sm,
+          vertical: NonSpace.xs,
+        ),
         decoration: BoxDecoration(
           color: active ? p.accentSoft : Colors.transparent,
           borderRadius: BorderRadius.circular(NonRadius.sm),
         ),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: NonType.caption, fontWeight: FontWeight.w600, color: active ? p.accent : p.ink3)),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: NonType.caption,
+            fontWeight: FontWeight.w600,
+            color: active ? p.accent : p.ink3,
+          ),
+        ),
       ),
     );
   }
@@ -1002,16 +1355,30 @@ class _HistoryDetails extends StatelessWidget {
         tilePadding: EdgeInsets.zero,
         childrenPadding: const EdgeInsets.only(bottom: NonSpace.xs),
         dense: true,
-        title: Text('技术详情',
-            style: TextStyle(fontSize: NonType.micro, color: p.ink4, fontWeight: FontWeight.w600)),
+        title: Text(
+          '技术详情',
+          style: TextStyle(
+            fontSize: NonType.micro,
+            color: p.ink4,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         children: [
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(NonSpace.sm),
-            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(NonRadius.sm)),
+            decoration: BoxDecoration(
+              color: p.panel2,
+              borderRadius: BorderRadius.circular(NonRadius.sm),
+            ),
             child: SelectableText(
               text,
-              style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4, height: 1.4),
+              style: TextStyle(
+                fontSize: NonType.micro,
+                fontFamily: 'Menlo',
+                color: p.ink4,
+                height: 1.4,
+              ),
             ),
           ),
         ],
@@ -1024,14 +1391,20 @@ class _CommitField extends StatefulWidget {
   final String value;
   final bool monospace;
   final ValueChanged<String> onSubmit;
-  const _CommitField({required this.value, required this.onSubmit, this.monospace = false});
+  const _CommitField({
+    required this.value,
+    required this.onSubmit,
+    this.monospace = false,
+  });
 
   @override
   State<_CommitField> createState() => _CommitFieldState();
 }
 
 class _CommitFieldState extends State<_CommitField> {
-  late final TextEditingController _controller = TextEditingController(text: widget.value);
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.value,
+  );
 
   @override
   void didUpdateWidget(covariant _CommitField old) {
@@ -1054,9 +1427,16 @@ class _CommitFieldState extends State<_CommitField> {
       height: 28,
       child: TextField(
         controller: _controller,
-        style: TextStyle(fontSize: widget.monospace ? NonType.micro : NonType.body, fontFamily: widget.monospace ? 'Menlo' : null, color: p.ink2),
+        style: TextStyle(
+          fontSize: widget.monospace ? NonType.micro : NonType.body,
+          fontFamily: widget.monospace ? 'Menlo' : null,
+          color: p.ink2,
+        ),
         decoration: const InputDecoration(
-          contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
+          contentPadding: EdgeInsets.symmetric(
+            horizontal: NonSpace.sm,
+            vertical: NonSpace.xs,
+          ),
           isDense: true,
         ),
         onSubmitted: widget.onSubmit,
@@ -1069,7 +1449,11 @@ class _CommitFieldState extends State<_CommitField> {
 /// Board-row 「响应式适配」: generate responsive variants for [boardId] (engine
 /// op `responsive <ab>`). Uses the row's own id, not the active board — the
 /// popup is per-board. applyOp already toasts rejections; only confirm success.
-Future<void> _runResponsive(BuildContext context, AppStore store, String boardId) async {
+Future<void> _runResponsive(
+  BuildContext context,
+  AppStore store,
+  String boardId,
+) async {
   final ok = await store.applyOp('responsive $boardId');
   if (ok && context.mounted) {
     store.toasts.success('响应式适配完成', '$boardId 已生成平板与桌面版本');
@@ -1081,9 +1465,14 @@ Future<void> _runResponsive(BuildContext context, AppStore store, String boardId
 /// or null on failure. The failure is surfaced as a human sentence through the
 /// toast service (the raw error code stays in logs) so both hosts stay thin.
 /// Shared by the left spec panel and the docs spec page (docs_view.dart).
-Future<Map<String, dynamic>?> extractDesignData(BuildContext context, AppStore store, String ab) async {
+Future<Map<String, dynamic>?> extractDesignData(
+  BuildContext context,
+  AppStore store,
+  String ab,
+) async {
   final res = await store.extractDesignSystem(ab);
-  final hasData = res != null && (res['color_tokens'] is List || res['summary'] is Map);
+  final hasData =
+      res != null && (res['color_tokens'] is List || res['summary'] is Map);
   if (!hasData && context.mounted) {
     store.toasts.error(toolFailureMessage(res?['error']?.toString()));
   }
@@ -1098,46 +1487,99 @@ Future<Map<String, dynamic>?> extractDesignData(BuildContext context, AppStore s
 /// (primary/surface/on_primary…), duplicates possible with different values;
 /// display keeps every row, merge upserts in usage-descending order so the
 /// most-used value wins per name.
-class ExtractCompareView extends StatelessWidget {
+class ExtractCompareView extends StatefulWidget {
   final Map<String, dynamic> data;
   const ExtractCompareView({super.key, required this.data});
 
   static List<Map<String, dynamic>> tokensOf(Map<String, dynamic> data) {
     final raw = data['color_tokens'];
     if (raw is! List) return const [];
-    return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    return raw
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
   }
 
   static bool _sameValue(String? a, String? b) =>
-      a != null && b != null && a.trim().toUpperCase() == b.trim().toUpperCase();
+      a != null &&
+      b != null &&
+      a.trim().toUpperCase() == b.trim().toUpperCase();
+
+  @override
+  State<ExtractCompareView> createState() => _ExtractCompareViewState();
+}
+
+class _ExtractCompareViewState extends State<ExtractCompareView> {
+  /// 引擎颜色表 memo：`color_tokens` 每次 build 都会被 whereType + map 复制一遍
+  /// 并重新 sort（O(n log n) + 全量 Map 复制）。`data` 只在提取结果换时替换。
+  Map<String, dynamic>? _tokensSource;
+  List<Map<String, dynamic>> _tokens = const [];
+
+  /// 「与现规范不一致」计数依赖当前 design palette；按 (tokens, palette) 身份缓存。
+  List<Map<String, dynamic>>? _diffTokensSource;
+  Map<String, String>? _diffPaletteSource;
+  int _diffs = 0;
+
+  List<Map<String, dynamic>> _tokensOf() {
+    final data = widget.data;
+    if (identical(data, _tokensSource)) return _tokens;
+    final tokens = ExtractCompareView.tokensOf(data)..sort(_compareTokens);
+    _tokensSource = data;
+    return _tokens = tokens;
+  }
+
+  static int _compareTokens(Map<String, dynamic> a, Map<String, dynamic> b) {
+    final ua = a['usage'] is num ? (a['usage'] as num).toInt() : 0;
+    final ub = b['usage'] is num ? (b['usage'] as num).toInt() : 0;
+    final byUsage = ub.compareTo(ua);
+    if (byUsage != 0) return byUsage;
+    return (a['name'] ?? '').toString().compareTo((b['name'] ?? '').toString());
+  }
+
+  int _diffsOf(List<Map<String, dynamic>> tokens, DesignSpec design) {
+    final palette = design.palette;
+    if (identical(tokens, _diffTokensSource) &&
+        identical(palette, _diffPaletteSource)) {
+      return _diffs;
+    }
+    _diffTokensSource = tokens;
+    _diffPaletteSource = palette;
+    return _diffs = tokens
+        .where(
+          (t) => !ExtractCompareView._sameValue(
+            t['value']?.toString(),
+            palette[t['name']?.toString()],
+          ),
+        )
+        .length;
+  }
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final p = context.palette;
     final design = store.docs.design;
-    final tokens = tokensOf(data)
-      ..sort((a, b) {
-        final ua = a['usage'] is num ? (a['usage'] as num).toInt() : 0;
-        final ub = b['usage'] is num ? (b['usage'] as num).toInt() : 0;
-        final byUsage = ub.compareTo(ua);
-        if (byUsage != 0) return byUsage;
-        return (a['name'] ?? '').toString().compareTo((b['name'] ?? '').toString());
-      });
+    final tokens = _tokensOf();
+    final data = widget.data;
     final summary = data['summary'] is Map ? data['summary'] as Map : const {};
-    final diffs = tokens
-        .where((t) => !_sameValue(t['value']?.toString(), design.palette[t['name']?.toString()]))
-        .length;
+    final diffs = _diffsOf(tokens, design);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           '颜色 ${summary['total_colors'] ?? tokens.length} · 尺寸组 ${summary['total_sizes'] ?? '—'} · 节点 ${summary['total_nodes'] ?? '—'}',
-          style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4),
+          style: TextStyle(
+            fontSize: NonType.micro,
+            fontFamily: 'Menlo',
+            color: p.ink4,
+          ),
         ),
         const SizedBox(height: NonSpace.sm),
         if (tokens.isEmpty)
-          Text('这个画板没有可提取的颜色。', style: TextStyle(fontSize: NonType.caption, color: p.ink4))
+          Text(
+            '这个画板没有可提取的颜色。',
+            style: TextStyle(fontSize: NonType.caption, color: p.ink4),
+          )
         else
           for (final t in tokens) _tokenRow(context, design, t),
         if (tokens.isNotEmpty) ...[
@@ -1153,14 +1595,20 @@ class ExtractCompareView extends StatelessWidget {
     );
   }
 
-  Widget _tokenRow(BuildContext context, DesignSpec design, Map<String, dynamic> t) {
+  Widget _tokenRow(
+    BuildContext context,
+    DesignSpec design,
+    Map<String, dynamic> t,
+  ) {
     final p = context.palette;
     final name = t['name']?.toString() ?? '';
     final value = t['value']?.toString() ?? '';
     final usage = t['usage'] is num ? (t['usage'] as num).toInt() : null;
-    final confidence = t['confidence'] is num ? ((t['confidence'] as num) * 100).round() : null;
+    final confidence = t['confidence'] is num
+        ? ((t['confidence'] as num) * 100).round()
+        : null;
     final current = design.palette[name];
-    final same = _sameValue(value, current);
+    final same = ExtractCompareView._sameValue(value, current);
     return Padding(
       padding: const EdgeInsets.only(bottom: NonSpace.xs),
       child: Row(
@@ -1179,25 +1627,41 @@ class ExtractCompareView extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name.isEmpty ? '—' : name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: NonType.micro, color: p.ink3)),
-                Text(same ? value : '$value → ${current ?? '新增'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: same ? p.ink4 : p.ink2)),
+                Text(
+                  name.isEmpty ? '—' : name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: NonType.micro, color: p.ink3),
+                ),
+                Text(
+                  same ? value : '$value → ${current ?? '新增'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: NonType.micro,
+                    fontFamily: 'Menlo',
+                    color: same ? p.ink4 : p.ink2,
+                  ),
+                ),
               ],
             ),
           ),
-          Icon(same ? Icons.check : Icons.swap_horiz, size: 11, color: same ? p.success : p.accent),
+          Icon(
+            same ? Icons.check : Icons.swap_horiz,
+            size: 11,
+            color: same ? p.success : p.accent,
+          ),
           const SizedBox(width: NonSpace.sm),
           SizedBox(
             width: 56,
             child: Text(
               '${usage != null ? '×$usage' : ''}${confidence != null ? ' · $confidence%' : ''}',
               textAlign: TextAlign.right,
-              style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4),
+              style: TextStyle(
+                fontSize: NonType.micro,
+                fontFamily: 'Menlo',
+                color: p.ink4,
+              ),
             ),
           ),
         ],
@@ -1216,7 +1680,7 @@ class ExtractCompareView extends StatelessWidget {
       if (name.isEmpty || value.isEmpty) continue;
       final before = palette[name];
       palette[name] = value;
-      if (!_sameValue(before, value)) merged += 1;
+      if (!ExtractCompareView._sameValue(before, value)) merged += 1;
     }
     if (merged == 0) return;
     store.setDocs(
@@ -1243,7 +1707,12 @@ class _PanelActionButton extends StatelessWidget {
   final String label;
   final bool enabled;
   final VoidCallback? onTap;
-  const _PanelActionButton({required this.icon, required this.label, this.enabled = true, this.onTap});
+  const _PanelActionButton({
+    required this.icon,
+    required this.label,
+    this.enabled = true,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1261,8 +1730,14 @@ class _PanelActionButton extends StatelessWidget {
             children: [
               Icon(icon, size: 13, color: enabled ? p.ink2 : p.ink4),
               const SizedBox(width: NonSpace.sm),
-              Text(label,
-                  style: TextStyle(fontSize: NonType.caption, fontWeight: FontWeight.w500, color: enabled ? p.ink2 : p.ink4)),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: NonType.caption,
+                  fontWeight: FontWeight.w500,
+                  color: enabled ? p.ink2 : p.ink4,
+                ),
+              ),
             ],
           ),
         ),
@@ -1339,17 +1814,28 @@ class _BenchmarkStripState extends State<_BenchmarkStrip> {
         padding: const EdgeInsets.only(top: NonSpace.sm),
         child: Row(
           children: [
-            SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.2, color: p.ink4)),
+            SizedBox(
+              width: 10,
+              height: 10,
+              child: CircularProgressIndicator(strokeWidth: 1.2, color: p.ink4),
+            ),
             const SizedBox(width: NonSpace.sm),
-            Text('正在评分…', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
+            Text(
+              '正在评分…',
+              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+            ),
           ],
         ),
       );
     }
     if (data == null) return const SizedBox.shrink();
     final grade = data['grade']?.toString() ?? '';
-    final score = data['avg_score'] is num ? (data['avg_score'] as num).round() : null;
-    final nodes = data['total_nodes'] is num ? (data['total_nodes'] as num).toInt() : null;
+    final score = data['avg_score'] is num
+        ? (data['avg_score'] as num).round()
+        : null;
+    final nodes = data['total_nodes'] is num
+        ? (data['total_nodes'] as num).toInt()
+        : null;
     final color = switch (grade) {
       'A' || 'B' => p.success,
       'C' => p.warn,
@@ -1370,10 +1856,19 @@ class _BenchmarkStripState extends State<_BenchmarkStrip> {
               '${nodes ?? '—'} 节点 · ${_fmtBytes(data['total_memory'])}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4),
+              style: TextStyle(
+                fontSize: NonType.micro,
+                fontFamily: 'Menlo',
+                color: p.ink4,
+              ),
             ),
           ),
-          IconAction(icon: Icons.refresh, tooltip: '重新评分', size: 20, onTap: _fetch),
+          IconAction(
+            icon: Icons.refresh,
+            tooltip: '重新评分',
+            size: 20,
+            onTap: _fetch,
+          ),
         ],
       ),
     );

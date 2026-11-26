@@ -84,8 +84,8 @@ class PortfolioView extends StatefulWidget {
 EmbeddingIndex? _sharedShelfIndex;
 
 EmbeddingIndex defaultShelfIndex() => _sharedShelfIndex ??= EmbeddingIndex(
-      embedder: MediaPipeServiceEmbedder(MediaPipeService.shared),
-    );
+  embedder: MediaPipeServiceEmbedder(MediaPipeService.shared),
+);
 
 /// 固定分类签（顺序即展示顺序）。'prototype' 不是包类目——它是客户端聚合的
 /// 本地项目类目。
@@ -125,6 +125,20 @@ class _PortfolioViewState extends State<PortfolioView> {
 
   /// 语义检索命中的条目 id（`kind:ref`）；null = 走本地子串匹配。
   Set<String>? _hitIds;
+
+  // ---- build 期派生缓存 ----
+  // 每次 build 都对四个货架各 filter 一遍（搜索态下是 O(条目数 × 字段数) 的
+  // 字符串比较）；只有分类签 / 查询 / 命中集 / 数据列表变化时才需要重算。
+  // 数据列表在 _load/_runSearch 里都是整表替换，用身份相等即可判新鲜度。
+  List<(String, List<Map<String, dynamic>>)> _visibleRowsCache = const [];
+  bool _visibleRowsValid = false;
+  String _visibleRowsFilter = '';
+  String _visibleRowsQuery = '';
+  Set<String>? _visibleRowsHits;
+  List<Map<String, dynamic>> _visibleRowsHotapps = const [];
+  List<Map<String, dynamic>> _visibleRowsPrototypes = const [];
+  List<Map<String, dynamic>> _visibleRowsThree = const [];
+  List<Map<String, dynamic>> _visibleRowsVideos = const [];
 
   /// 降级提示（「语义检索不可用，已按关键词匹配」）；null = 无语义/无降级。
   String? _searchNote;
@@ -199,14 +213,16 @@ class _PortfolioViewState extends State<PortfolioView> {
             'title': project.name,
             'detail': project.blocked ? '这个场景还没完成' : '3D 场景',
             'path': _threeService!.projectDir(project.name).path,
-          }
+          },
       ];
     } catch (e) {
       debugPrint('[shelf] three scan failed: $e');
     }
 
     try {
-      final root = widget.videoRoot ?? Directory('${(await AppPaths.projectsRoot()).path}/videos');
+      final root =
+          widget.videoRoot ??
+          Directory('${(await AppPaths.projectsRoot()).path}/videos');
       videos = _scanVideos(root);
     } catch (e) {
       debugPrint('[shelf] video scan failed: $e');
@@ -233,7 +249,7 @@ class _PortfolioViewState extends State<PortfolioView> {
               'detail': entry.detail,
               'path': entry.path,
               'modified': entry.modified,
-            }
+            },
       ];
     } catch (e) {
       debugPrint('[shelf] video3d scan failed: $e');
@@ -259,7 +275,9 @@ class _PortfolioViewState extends State<PortfolioView> {
     if (!root.existsSync()) return const [];
     final files = <MapEntry<File, DateTime>>[];
     for (final entity in root.listSync(recursive: true, followLinks: false)) {
-      if (entity is! File || !entity.path.toLowerCase().endsWith('.mp4')) continue;
+      if (entity is! File || !entity.path.toLowerCase().endsWith('.mp4')) {
+        continue;
+      }
       try {
         files.add(MapEntry(entity, entity.statSync().modified));
       } catch (_) {}
@@ -274,7 +292,7 @@ class _PortfolioViewState extends State<PortfolioView> {
           'detail': '视频',
           'path': entry.key.path,
           'modified': entry.value.millisecondsSinceEpoch,
-        }
+        },
     ];
   }
 
@@ -306,7 +324,9 @@ class _PortfolioViewState extends State<PortfolioView> {
     void add(String? path, String? name) {
       final p = path?.trim() ?? '';
       if (p.isEmpty || !seen.add(p)) return;
-      final title = (name ?? '').trim().isNotEmpty ? name!.trim() : _baseName(p);
+      final title = (name ?? '').trim().isNotEmpty
+          ? name!.trim()
+          : _baseName(p);
       out.add({
         'kind': 'prototype',
         'ref': p,
@@ -319,7 +339,10 @@ class _PortfolioViewState extends State<PortfolioView> {
     final override = widget.projectEntries;
     if (override != null) {
       for (final entry in override) {
-        add(entry['path']?.toString() ?? entry['ref']?.toString(), entry['name']?.toString() ?? entry['title']?.toString());
+        add(
+          entry['path']?.toString() ?? entry['ref']?.toString(),
+          entry['name']?.toString() ?? entry['title']?.toString(),
+        );
       }
       return out;
     }
@@ -368,13 +391,15 @@ class _PortfolioViewState extends State<PortfolioView> {
         if (ref.isEmpty) continue;
         final title = '${item['title'] ?? ref}';
         final detail = '${item['detail'] ?? item['path'] ?? ''}';
-        docs.add(EmbeddingDoc(
-          id: _itemKey(item),
-          kind: kind,
-          title: title,
-          text: detail,
-          ref: ref,
-        ));
+        docs.add(
+          EmbeddingDoc(
+            id: _itemKey(item),
+            kind: kind,
+            title: title,
+            text: detail,
+            ref: ref,
+          ),
+        );
       }
     }
     return docs;
@@ -393,7 +418,10 @@ class _PortfolioViewState extends State<PortfolioView> {
       }
     });
     if (query.isEmpty) return;
-    _searchDebounce = Timer(const Duration(milliseconds: 180), () => _runSearch(query));
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 180),
+      () => _runSearch(query),
+    );
   }
 
   /// 检索：索引可用 → 向量 topK（命中只留这些卡片）；否则 → 本地子串。
@@ -427,7 +455,8 @@ class _PortfolioViewState extends State<PortfolioView> {
     }
   }
 
-  bool _localMatch(Map<String, dynamic> item, String query) => substringMatch(query, [
+  bool _localMatch(Map<String, dynamic> item, String query) =>
+      substringMatch(query, [
         '${item['title'] ?? ''}',
         '${item['detail'] ?? ''}',
         '${item['path'] ?? ''}',
@@ -445,6 +474,45 @@ class _PortfolioViewState extends State<PortfolioView> {
       return items.where((item) => ids.contains(_itemKey(item))).toList();
     }
     return items.where((item) => _localMatch(item, query)).toList();
+  }
+
+  /// 艺术架可见行（分类签 + 搜索过滤后的货架行，按 _shelfKinds 顺序）。
+  ///
+  /// 只在数据/筛选/查询/命中集变化时重算；build 里直接复用缓存的
+  /// `(kind, items)`——此前每次 build 都要对四个货架各自 filter 一次。
+  List<(String, List<Map<String, dynamic>>)> _visibleRows() {
+    final hotapps = _hotapps;
+    final prototypes = _prototypes;
+    final three = _three;
+    final videos = _videos;
+    final hits = _hitIds;
+    final filter = _filter;
+    final query = _query;
+    if (_visibleRowsValid &&
+        filter == _visibleRowsFilter &&
+        query == _visibleRowsQuery &&
+        identical(hits, _visibleRowsHits) &&
+        identical(hotapps, _visibleRowsHotapps) &&
+        identical(prototypes, _visibleRowsPrototypes) &&
+        identical(three, _visibleRowsThree) &&
+        identical(videos, _visibleRowsVideos)) {
+      return _visibleRowsCache;
+    }
+    final rows = <(String, List<Map<String, dynamic>>)>[];
+    for (final kind in _shelfKinds) {
+      if (filter != 'all' && filter != kind) continue;
+      final items = _visibleItems(kind);
+      if (items.isNotEmpty) rows.add((kind, items));
+    }
+    _visibleRowsValid = true;
+    _visibleRowsFilter = filter;
+    _visibleRowsQuery = query;
+    _visibleRowsHits = hits;
+    _visibleRowsHotapps = hotapps;
+    _visibleRowsPrototypes = prototypes;
+    _visibleRowsThree = three;
+    _visibleRowsVideos = videos;
+    return _visibleRowsCache = rows;
   }
 
   void _clearSearch() {
@@ -469,7 +537,10 @@ class _PortfolioViewState extends State<PortfolioView> {
     }
     // 各类产物走同一个切换口（工作台跟着项目走）：3D 视频条目与首页作品集卡
     // 同一条 openPortfolioEntry 路由（video3d → 3D 视频工作台）。
-    if (kind == 'hotapp' || kind == 'video' || kind == 'three' || kind == 'video3d') {
+    if (kind == 'hotapp' ||
+        kind == 'video' ||
+        kind == 'three' ||
+        kind == 'video3d') {
       openPortfolioEntry(
         store,
         PortfolioEntry(
@@ -549,14 +620,27 @@ class _PortfolioViewState extends State<PortfolioView> {
       builder: (ctx) => AlertDialog(
         backgroundColor: ctx.palette.panel,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('删除这个热应用？',
-            style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+        title: Text(
+          '删除这个热应用？',
+          style: TextStyle(
+            fontSize: NonType.subtitle,
+            fontWeight: FontWeight.w700,
+            color: ctx.palette.ink,
+          ),
+        ),
         content: Text(
           '会同时删除它在本机的数据，无法恢复：\n$title',
-          style: TextStyle(fontSize: NonType.bodyStrong, height: 1.5, color: ctx.palette.ink2),
+          style: TextStyle(
+            fontSize: NonType.bodyStrong,
+            height: 1.5,
+            color: ctx.palette.ink2,
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: ctx.palette.danger),
             onPressed: () => Navigator.pop(ctx, true),
@@ -589,14 +673,27 @@ class _PortfolioViewState extends State<PortfolioView> {
       builder: (ctx) => AlertDialog(
         backgroundColor: ctx.palette.panel,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('删除这个 3D 场景？',
-            style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+        title: Text(
+          '删除这个 3D 场景？',
+          style: TextStyle(
+            fontSize: NonType.subtitle,
+            fontWeight: FontWeight.w700,
+            color: ctx.palette.ink,
+          ),
+        ),
         content: Text(
           '会删除整个项目目录，无法恢复。',
-          style: TextStyle(fontSize: NonType.bodyStrong, height: 1.5, color: ctx.palette.ink2),
+          style: TextStyle(
+            fontSize: NonType.bodyStrong,
+            height: 1.5,
+            color: ctx.palette.ink2,
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: ctx.palette.danger),
             onPressed: () => Navigator.pop(ctx, true),
@@ -626,13 +723,11 @@ class _PortfolioViewState extends State<PortfolioView> {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final rows = <Widget>[];
-    for (final kind in _shelfKinds) {
-      if (_filter != 'all' && _filter != kind) continue;
-      final items = _visibleItems(kind);
-      if (items.isEmpty) continue;
-      rows.add(_shelfRow(p, kind, items));
-    }
+    // 行数据走 memo（见 [_visibleRows]），这里只把「行数据 → 行 Widget」包起来。
+    final visible = _visibleRows();
+    final rows = <Widget>[
+      for (final (kind, items) in visible) _shelfRow(p, kind, items),
+    ];
     final searching = _query.trim().isNotEmpty;
     return Column(
       children: [
@@ -653,78 +748,119 @@ class _PortfolioViewState extends State<PortfolioView> {
   Widget _header(NonPalette p) {
     return Container(
       decoration: BoxDecoration(
-          color: p.bgElevated, border: Border(bottom: BorderSide(color: p.line))),
-      child: Column(children: [
-        SizedBox(
-          height: 44,
-          child: Row(children: [
-            // 全屏视图的可见出口（无项目启动也能进来，必须有回头路）。
-            Padding(
-              padding: const EdgeInsets.only(left: NonSpace.xs),
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back, size: 18),
-                tooltip: '返回设计 ⌘1',
-                color: p.ink2,
-                visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                onPressed: () => store.setView('design'),
-              ),
-            ),
-            const SizedBox(width: NonSpace.xs),
-            Icon(Icons.collections_bookmark_outlined, size: 17, color: p.accent),
-            const SizedBox(width: NonSpace.sm),
-            Text('作品集', style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w700, color: p.ink)),
-            const Spacer(),
-            if (_busy)
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: SizedBox(
-                    width: 13,
-                    height: 13,
-                    child: CircularProgressIndicator(strokeWidth: 1.6, color: p.accent)),
-              ),
-            IconButton(
-              tooltip: '刷新',
-              onPressed: _busy ? null : () => _load(forcePortfolio: true),
-              icon: Icon(Icons.refresh, size: 17, color: p.ink3),
-              visualDensity: VisualDensity.compact,
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            ),
-          ]),
-        ),
-        SizedBox(
-          height: 36,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
-            child: Row(children: [
-              for (final (k, label) in _shelfTabs)
+        color: p.bgElevated,
+        border: Border(bottom: BorderSide(color: p.line)),
+      ),
+      child: Column(
+        children: [
+          SizedBox(
+            height: 44,
+            child: Row(
+              children: [
+                // 全屏视图的可见出口（无项目启动也能进来，必须有回头路）。
                 Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: InkWell(
-                    onTap: () => setState(() => _filter = k),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: _filter == k ? p.accentSoft : Colors.transparent,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: _filter == k ? p.accent : p.line),
-                      ),
-                      child: Text(label,
-                          style: TextStyle(
-                              fontSize: NonType.caption,
-                              fontWeight: _filter == k ? FontWeight.w600 : FontWeight.w500,
-                              color: _filter == k ? p.accent : p.ink3)),
+                  padding: const EdgeInsets.only(left: NonSpace.xs),
+                  child: IconButton(
+                    icon: const Icon(Icons.arrow_back, size: 18),
+                    tooltip: '返回设计 ⌘1',
+                    color: p.ink2,
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(
+                      minWidth: 36,
+                      minHeight: 36,
                     ),
+                    onPressed: () => store.setView('design'),
                   ),
                 ),
-            ]),
+                const SizedBox(width: NonSpace.xs),
+                Icon(
+                  Icons.collections_bookmark_outlined,
+                  size: 17,
+                  color: p.accent,
+                ),
+                const SizedBox(width: NonSpace.sm),
+                Text(
+                  '作品集',
+                  style: TextStyle(
+                    fontSize: NonType.bodyStrong,
+                    fontWeight: FontWeight.w700,
+                    color: p.ink,
+                  ),
+                ),
+                const Spacer(),
+                if (_busy)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: SizedBox(
+                      width: 13,
+                      height: 13,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.6,
+                        color: p.accent,
+                      ),
+                    ),
+                  ),
+                IconButton(
+                  tooltip: '刷新',
+                  onPressed: _busy ? null : () => _load(forcePortfolio: true),
+                  icon: Icon(Icons.refresh, size: 17, color: p.ink3),
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(
+                    minWidth: 36,
+                    minHeight: 36,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        _searchRow(p),
-        if (_searchNote != null) _searchNoteRow(p),
-      ]),
+          SizedBox(
+            height: 36,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
+              child: Row(
+                children: [
+                  for (final (k, label) in _shelfTabs)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: InkWell(
+                        onTap: () => setState(() => _filter = k),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _filter == k
+                                ? p.accentSoft
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _filter == k ? p.accent : p.line,
+                            ),
+                          ),
+                          child: Text(
+                            label,
+                            style: TextStyle(
+                              fontSize: NonType.caption,
+                              fontWeight: _filter == k
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
+                              color: _filter == k ? p.accent : p.ink3,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          _searchRow(p),
+          if (_searchNote != null) _searchNoteRow(p),
+        ],
+      ),
     );
   }
 
@@ -745,7 +881,10 @@ class _PortfolioViewState extends State<PortfolioView> {
             hintText: '搜索作品（语义 / 关键词）',
             hintStyle: TextStyle(fontSize: NonType.body, color: p.ink4),
             prefixIcon: Icon(Icons.search, size: 15, color: p.ink3),
-            prefixIconConstraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            prefixIconConstraints: const BoxConstraints(
+              minWidth: 30,
+              minHeight: 30,
+            ),
             suffixIcon: _query.isEmpty
                 ? null
                 : IconButton(
@@ -753,11 +892,17 @@ class _PortfolioViewState extends State<PortfolioView> {
                     tooltip: '清除搜索',
                     icon: Icon(Icons.close, size: 14, color: p.ink3),
                     visualDensity: VisualDensity.compact,
-                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                    constraints: const BoxConstraints(
+                      minWidth: 30,
+                      minHeight: 30,
+                    ),
                     padding: EdgeInsets.zero,
                     onPressed: _clearSearch,
                   ),
-            suffixIconConstraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            suffixIconConstraints: const BoxConstraints(
+              minWidth: 30,
+              minHeight: 30,
+            ),
             filled: true,
             fillColor: p.panel,
             contentPadding: const EdgeInsets.symmetric(vertical: NonSpace.sm),
@@ -781,143 +926,194 @@ class _PortfolioViewState extends State<PortfolioView> {
 
   /// 降级提示条（只在语义检索不可用时出现，避免噪音）。
   Widget _searchNoteRow(NonPalette p) => Container(
-        key: const ValueKey('shelf-search-note'),
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(14, 0, NonSpace.md, NonSpace.xs),
-        child: Row(children: [
-          Icon(Icons.info_outline, size: 12, color: p.ink4),
-          const SizedBox(width: 5),
-          Expanded(
-            child: Text(
-              _searchNote!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
-            ),
+    key: const ValueKey('shelf-search-note'),
+    width: double.infinity,
+    padding: const EdgeInsets.fromLTRB(14, 0, NonSpace.md, NonSpace.xs),
+    child: Row(
+      children: [
+        Icon(Icons.info_outline, size: 12, color: p.ink4),
+        const SizedBox(width: 5),
+        Expanded(
+          child: Text(
+            _searchNote!,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: NonType.micro, color: p.ink4),
           ),
-        ]),
-      );
+        ),
+      ],
+    ),
+  );
 
   /// 搜索无结果（与「还没有作品」区分开——用户刚输入了关键词）。
   Widget _noSearchResults(NonPalette p) => Center(
-        key: const ValueKey('shelf-search-empty'),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: NonSpace.xl),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.search_off, size: 38, color: p.ink4),
-            const SizedBox(height: 10),
-            Text('没有匹配的作品',
-                style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink2)),
-            const SizedBox(height: 6),
-            Text('换个关键词试试；模型未就绪时按标题/路径做关键词匹配。',
-                textAlign: TextAlign.center, style: TextStyle(fontSize: NonType.body, color: p.ink4)),
-          ]),
-        ),
-      );
+    key: const ValueKey('shelf-search-empty'),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: NonSpace.xl),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.search_off, size: 38, color: p.ink4),
+          const SizedBox(height: 10),
+          Text(
+            '没有匹配的作品',
+            style: TextStyle(
+              fontSize: NonType.subtitle,
+              fontWeight: FontWeight.w600,
+              color: p.ink2,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '换个关键词试试；模型未就绪时按标题/路径做关键词匹配。',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: NonType.body, color: p.ink4),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget _errorBar(NonPalette p) => Container(
-        key: const ValueKey('shelf-error'),
-        width: double.infinity,
-        color: p.danger.withValues(alpha: 0.12),
-        padding: const EdgeInsets.fromLTRB(NonSpace.md, NonSpace.xs, 6, NonSpace.xs),
-        child: Row(children: [
-          Icon(Icons.error_outline, size: 14, color: p.danger),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(_error!,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: NonType.caption, color: p.danger)),
+    key: const ValueKey('shelf-error'),
+    width: double.infinity,
+    color: p.danger.withValues(alpha: 0.12),
+    padding: const EdgeInsets.fromLTRB(
+      NonSpace.md,
+      NonSpace.xs,
+      6,
+      NonSpace.xs,
+    ),
+    child: Row(
+      children: [
+        Icon(Icons.error_outline, size: 14, color: p.danger),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            _error!,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: NonType.caption, color: p.danger),
           ),
-          TextButton(
-            onPressed: _busy ? null : () => _load(forcePortfolio: true),
-            style: TextButton.styleFrom(
-              minimumSize: const Size(0, 28),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-            ),
-            child: const Text('重试', style: TextStyle(fontSize: NonType.caption)),
+        ),
+        TextButton(
+          onPressed: _busy ? null : () => _load(forcePortfolio: true),
+          style: TextButton.styleFrom(
+            minimumSize: const Size(0, 28),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
           ),
-        ]),
-      );
+          child: const Text('重试', style: TextStyle(fontSize: NonType.caption)),
+        ),
+      ],
+    ),
+  );
 
   Widget _emptyState(NonPalette p) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: NonSpace.xl),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.collections_bookmark_outlined, size: 42, color: p.ink4),
-          const SizedBox(height: NonSpace.md),
-          Text('还没有作品',
-              style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink2)),
-          const SizedBox(height: 6),
-          Text(
-            '生成的热应用、3D 场景与视频会自动收进这里。',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: NonType.body, color: p.ink4),
-          ),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.collections_bookmark_outlined, size: 42, color: p.ink4),
+            const SizedBox(height: NonSpace.md),
+            Text(
+              '还没有作品',
+              style: TextStyle(
+                fontSize: NonType.subtitle,
+                fontWeight: FontWeight.w600,
+                color: p.ink2,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '生成的热应用、3D 场景与视频会自动收进这里。',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: NonType.body, color: p.ink4),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   /// 单行货架：标题 + 计数 + 横向卡片列表（行高 176 / 卡宽 260）。
-  Widget _shelfRow(NonPalette p, String kind, List<Map<String, dynamic>> items) {
+  Widget _shelfRow(
+    NonPalette p,
+    String kind,
+    List<Map<String, dynamic>> items,
+  ) {
     final hint = kind == 'prototype' ? '原型项目在「最近项目」里管理，不在这里删除。' : null;
     return Padding(
       padding: const EdgeInsets.only(top: 14),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: NonSpace.lg),
-          child: Row(children: [
-            Text(shelfKindLabel[kind] ?? kind,
-                style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w700, color: p.ink2)),
-            const SizedBox(width: 6),
-            Text('${items.length}', style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
-            if (hint != null) ...[
-              const SizedBox(width: NonSpace.sm),
-              Expanded(
-                child: Text(
-                  hint,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: NonType.micro, color: p.ink4),
-                ),
-              ),
-            ],
-          ]),
-        ),
-        const SizedBox(height: NonSpace.sm),
-        SizedBox(
-          height: 176,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
             padding: const EdgeInsets.symmetric(horizontal: NonSpace.lg),
-            itemCount: items.length,
-            separatorBuilder: (context, index) => const SizedBox(width: 10),
-            itemBuilder: (ctx, i) {
-              final it = items[i];
-              final path = it['path']?.toString() ?? '';
-              final isThree = it['kind'] == 'three';
-              return SizedBox(
-                width: 260,
-                child: ArtShelfCard(
-                  item: it,
-                  onOpen: () => _open(it),
-                  onCopyPath: () => _copyPath(path),
-                  onReveal:
-                      host.supportsRevealInFolder && path.isNotEmpty ? () => _reveal(path) : null,
-                  // 只有热应用由艺术架拥有（删除 = 删本地应用与数据）。
-                  // 原型/视频/3D 的移除语义不同：原型不给（行首明示），
-                  // 视频文件归用户自己，3D 走单独的「删除 3D 项目」。
-                  onRemove: it['kind'] == 'hotapp' ? () => _remove(it) : null,
-                  onDelete3d: isThree ? () => _deleteThree(it) : null,
+            child: Row(
+              children: [
+                Text(
+                  shelfKindLabel[kind] ?? kind,
+                  style: TextStyle(
+                    fontSize: NonType.body,
+                    fontWeight: FontWeight.w700,
+                    color: p.ink2,
+                  ),
                 ),
-              );
-            },
+                const SizedBox(width: 6),
+                Text(
+                  '${items.length}',
+                  style: TextStyle(fontSize: NonType.caption, color: p.ink4),
+                ),
+                if (hint != null) ...[
+                  const SizedBox(width: NonSpace.sm),
+                  Expanded(
+                    child: Text(
+                      hint,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
-        ),
-      ]),
+          const SizedBox(height: NonSpace.sm),
+          SizedBox(
+            height: 176,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: NonSpace.lg),
+              itemCount: items.length,
+              separatorBuilder: (context, index) => const SizedBox(width: 10),
+              itemBuilder: (ctx, i) {
+                final it = items[i];
+                final path = it['path']?.toString() ?? '';
+                final isThree = it['kind'] == 'three';
+                return SizedBox(
+                  width: 260,
+                  child: ArtShelfCard(
+                    item: it,
+                    onOpen: () => _open(it),
+                    onCopyPath: () => _copyPath(path),
+                    onReveal: host.supportsRevealInFolder && path.isNotEmpty
+                        ? () => _reveal(path)
+                        : null,
+                    // 只有热应用由艺术架拥有（删除 = 删本地应用与数据）。
+                    // 原型/视频/3D 的移除语义不同：原型不给（行首明示），
+                    // 视频文件归用户自己，3D 走单独的「删除 3D 项目」。
+                    onRemove: it['kind'] == 'hotapp' ? () => _remove(it) : null,
+                    onDelete3d: isThree ? () => _deleteThree(it) : null,
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -948,26 +1144,44 @@ class _PasswordDialogState extends State<_PasswordDialog> {
     return AlertDialog(
       backgroundColor: p.panel,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      title: Text('项目已加密',
-          style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w700, color: p.ink)),
+      title: Text(
+        '项目已加密',
+        style: TextStyle(
+          fontSize: NonType.subtitle,
+          fontWeight: FontWeight.w700,
+          color: p.ink,
+        ),
+      ),
       content: SizedBox(
         width: 360,
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('打开「${widget.name}」需要口令',
-              style: TextStyle(fontSize: NonType.bodyStrong, color: p.ink2)),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _ctl,
-            autofocus: true,
-            obscureText: true,
-            decoration: const InputDecoration(labelText: '口令'),
-            style: const TextStyle(fontSize: NonType.bodyStrong),
-          ),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '打开「${widget.name}」需要口令',
+              style: TextStyle(fontSize: NonType.bodyStrong, color: p.ink2),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _ctl,
+              autofocus: true,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: '口令'),
+              style: const TextStyle(fontSize: NonType.bodyStrong),
+            ),
+          ],
+        ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
-        FilledButton(onPressed: () => Navigator.pop(context, _ctl.text), child: const Text('打开')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _ctl.text),
+          child: const Text('打开'),
+        ),
       ],
     );
   }

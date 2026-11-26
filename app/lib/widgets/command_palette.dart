@@ -54,40 +54,33 @@ class _CommandPaletteState extends State<_CommandPalette> {
   List<_Action> _filtered = const [];
   final GlobalKey _selectedKey = GlobalKey();
 
+  /// 固定命令（文件/编辑/视图/画板/智能体/应用，19 项）只构造一次：它们
+  /// 不随 store 数据变化，此前每帧重建 19 个 _Action + 闭包纯属浪费。
+  /// 面板在 Navigator 子树内，store 单例/State context 生命周期与路由一致。
+  late final AppStore _store = context.read<AppStore>();
+  late final List<_Action> _baseActions = _createBaseActions();
+
+  /// 模板 / 最近项目动作组来自 store（打开面板期间可能刷新），只在列表
+  /// 身份变化时重建（store 里这两者是整表替换，不是原地增删）。
+  List<dynamic> _actionsTemplates = const [];
+  List<Map<String, dynamic>> _actionsRecent = const [];
+  List<_Action> _dynamicActions = const [];
+
+  /// 全量动作（固定 + 动态）与过滤结果缓存：只有查询变化或动作集变化才重算，
+  /// 其余重建（主题/hover/💾 状态等）直接复用。
+  List<_Action>? _allActions;
+  bool _filterDirty = true;
+
   @override
   void dispose() {
     _search.dispose();
     super.dispose();
   }
 
-  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
-    final key = event.logicalKey;
-    if (key != LogicalKeyboardKey.arrowDown && key != LogicalKeyboardKey.arrowUp) {
-      return KeyEventResult.ignored;
-    }
-    final items = _filtered;
-    if (items.isEmpty) return KeyEventResult.ignored;
-    setState(() {
-      // 循环移动：↓ 到底回第一项，↑ 到顶回最后一项。
-      _selected = key == LogicalKeyboardKey.arrowDown
-          ? (_selected + 1) % items.length
-          : (_selected - 1 + items.length) % items.length;
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ctx = _selectedKey.currentContext;
-      if (ctx != null && ctx.mounted) {
-        Scrollable.ensureVisible(ctx, alignment: 0.0, duration: NonMotion.fast, curve: NonMotion.curve);
-      }
-    });
-    return KeyEventResult.handled;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final store = context.watch<AppStore>();
-    final p = context.palette;
-    final actions = <_Action>[
+  /// 固定命令：面板首次构建时建一次（回调走 [_store] / [widget] / State context）。
+  List<_Action> _createBaseActions() {
+    final store = _store;
+    return [
       _Action('新建项目', '文件', Icons.add_box_outlined, modCombo('⌘N'), () {
         Navigator.pop(context);
         widget.onNewProject();
@@ -137,10 +130,16 @@ class _CommandPaletteState extends State<_CommandPalette> {
         store.setView('design');
         store.bumpFit();
       }),
-      _Action('自动修复当前画板', '画板', Icons.auto_fix_high_outlined, modCombo('⇧⌘F'), () {
-        Navigator.pop(context);
-        store.autoFix();
-      }),
+      _Action(
+        '自动修复当前画板',
+        '画板',
+        Icons.auto_fix_high_outlined,
+        modCombo('⇧⌘F'),
+        () {
+          Navigator.pop(context);
+          store.autoFix();
+        },
+      ),
       _Action('新建空白画板', '画板', Icons.crop_square, '', () {
         Navigator.pop(context);
         store.createBoard();
@@ -163,22 +162,98 @@ class _CommandPaletteState extends State<_CommandPalette> {
         Navigator.pop(context);
         widget.onShortcuts();
       }),
-      for (final t in store.templates.whereType<Map>().take(8))
-        _Action('新建模板：${t['name'] ?? t['id']}', '模板', Icons.layers_outlined, '', () {
-          Navigator.pop(context);
-          store.createBoard(templateId: t['id']?.toString(), name: t['id']?.toString());
-        }),
-      for (final r in store.recent.take(6))
+    ];
+  }
+
+  /// 模板（最多 8 项）+ 最近项目（最多 6 项）：来自 store 的有限量片段。
+  List<_Action> _createDynamicActions(
+    List<dynamic> templates,
+    List<Map<String, dynamic>> recent,
+  ) {
+    final store = _store;
+    return [
+      for (final t in templates.whereType<Map>().take(8))
+        _Action(
+          '新建模板：${t['name'] ?? t['id']}',
+          '模板',
+          Icons.layers_outlined,
+          '',
+          () {
+            Navigator.pop(context);
+            store.createBoard(
+              templateId: t['id']?.toString(),
+              name: t['id']?.toString(),
+            );
+          },
+        ),
+      for (final r in recent.take(6))
         _Action('打开：${r['name']}', '最近', Icons.folder_outlined, '', () {
           Navigator.pop(context);
           widget.onOpenPath(r['path']?.toString() ?? '');
         }),
     ];
-    final filtered = actions.where((a) {
-      if (_query.trim().isEmpty) return true;
-      return '${a.label} ${a.group}'.toLowerCase().contains(_query.toLowerCase());
-    }).toList();
-    _filtered = filtered;
+  }
+
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key != LogicalKeyboardKey.arrowDown &&
+        key != LogicalKeyboardKey.arrowUp) {
+      return KeyEventResult.ignored;
+    }
+    final items = _filtered;
+    if (items.isEmpty) return KeyEventResult.ignored;
+    setState(() {
+      // 循环移动：↓ 到底回第一项，↑ 到顶回最后一项。
+      _selected = key == LogicalKeyboardKey.arrowDown
+          ? (_selected + 1) % items.length
+          : (_selected - 1 + items.length) % items.length;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _selectedKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.0,
+          duration: NonMotion.fast,
+          curve: NonMotion.curve,
+        );
+      }
+    });
+    return KeyEventResult.handled;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.watch<AppStore>();
+    final p = context.palette;
+    // 固定命令只建一次；模板/最近项目组按 store 列表身份变化才重建。
+    final templates = store.templates;
+    final recent = store.recent;
+    if (!identical(templates, _actionsTemplates) ||
+        !identical(recent, _actionsRecent)) {
+      _actionsTemplates = templates;
+      _actionsRecent = recent;
+      _dynamicActions = _createDynamicActions(templates, recent);
+      _allActions = [..._baseActions, ..._dynamicActions];
+      _filterDirty = true;
+    }
+    _allActions ??= _baseActions;
+    if (_filterDirty) {
+      _filtered = _query.trim().isEmpty
+          ? _allActions!
+          : [
+              for (final a in _allActions!)
+                if ('${a.label} ${a.group}'.toLowerCase().contains(
+                  _query.toLowerCase(),
+                ))
+                  a,
+            ];
+      _filterDirty = false;
+    }
+    final filtered = _filtered;
     // _selected 经模运算恒 ≥0；上界防 actions 列表在打开期间缩短。
     final sel = filtered.isEmpty ? 0 : math.min(_selected, filtered.length - 1);
 
@@ -189,118 +264,186 @@ class _CommandPaletteState extends State<_CommandPalette> {
       skipTraversal: true,
       onKeyEvent: _handleKey,
       child: Dialog(
-      backgroundColor: p.panel,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.lineStrong)),
-      child: SizedBox(
-        width: 620,
-        height: 520,
-        child: Column(
-          children: [
-            Container(
-              height: 48,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
-              child: Row(
-                children: [
-                  Icon(Icons.search, size: 16, color: p.ink4),
-                  const SizedBox(width: NonSpace.sm),
-                  Expanded(
-                    child: TextField(
-                      controller: _search,
-                      autofocus: true,
-                      style: TextStyle(fontSize: NonType.bodyStrong, color: p.ink),
-                      decoration: InputDecoration(
-                        hintText: '搜索命令、模板、最近项目…',
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        filled: false,
-                        isDense: true,
-                        contentPadding: EdgeInsets.zero,
-                        hintStyle: TextStyle(fontSize: NonType.bodyStrong, color: p.ink4),
-                      ),
-                      onChanged: (v) => setState(() {
-                        _query = v;
-                        _selected = 0; // 过滤集变化，选中回到首行
-                      }),
-                      onSubmitted: (_) {
-                        if (filtered.isNotEmpty) filtered[sel].run();
-                      },
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                    decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
-                    child: Text('esc', style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.all(6),
-                itemCount: filtered.length,
-                itemBuilder: (context, i) {
-                  final action = filtered[i];
-                  final showGroup = i == 0 || filtered[i - 1].group != action.group;
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (showGroup)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(9, 6, 9, 3),
-                          child: Text(action.group.toUpperCase(),
-                              style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w700, letterSpacing: 1, color: p.ink4)),
-                        ),
-                      InkWell(
-                        key: i == sel ? _selectedKey : null, // 键盘导航后滚动到可见
-                        borderRadius: BorderRadius.circular(8),
-                        onTap: action.run,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            color: i == sel ? p.accentSoft : null, // 选中行底色
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(action.icon, size: 14, color: p.ink4),
-                              const SizedBox(width: NonSpace.sm),
-                              Expanded(child: Text(action.label, style: TextStyle(fontSize: NonType.body, color: p.ink2))),
-                              if (action.shortcut.isNotEmpty)
-                                Text(action.shortcut, style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
-              child: Row(
-                children: [
-                  // 手机窄屏（390）里两段说明并排会右溢：各自可收缩、省略号兜底。
-                  Expanded(
-                    child: Text('↑ ↓ 选择 · ↵ 执行',
-                        maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
-                  ),
-                  const SizedBox(width: NonSpace.sm),
-                  Flexible(
-                    child: Text('NaN Command',
-                        maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        backgroundColor: p.panel,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: p.lineStrong),
         ),
-      ),
+        child: SizedBox(
+          width: 620,
+          height: 520,
+          child: Column(
+            children: [
+              Container(
+                height: 48,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: p.line)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.search, size: 16, color: p.ink4),
+                    const SizedBox(width: NonSpace.sm),
+                    Expanded(
+                      child: TextField(
+                        controller: _search,
+                        autofocus: true,
+                        style: TextStyle(
+                          fontSize: NonType.bodyStrong,
+                          color: p.ink,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: '搜索命令、模板、最近项目…',
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          filled: false,
+                          isDense: true,
+                          contentPadding: EdgeInsets.zero,
+                          hintStyle: TextStyle(
+                            fontSize: NonType.bodyStrong,
+                            color: p.ink4,
+                          ),
+                        ),
+                        onChanged: (v) => setState(() {
+                          _query = v;
+                          _selected = 0; // 过滤集变化，选中回到首行
+                          _filterDirty = true; // 查询变了：下一帧只重算过滤表
+                        }),
+                        onSubmitted: (_) {
+                          if (filtered.isNotEmpty) filtered[sel].run();
+                        },
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: p.panel2,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'esc',
+                        style: TextStyle(
+                          fontSize: NonType.micro,
+                          fontFamily: 'Menlo',
+                          color: p.ink4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(6),
+                  itemCount: filtered.length,
+                  itemBuilder: (context, i) {
+                    final action = filtered[i];
+                    final showGroup =
+                        i == 0 || filtered[i - 1].group != action.group;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (showGroup)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(9, 6, 9, 3),
+                            child: Text(
+                              action.group.toUpperCase(),
+                              style: TextStyle(
+                                fontSize: NonType.micro,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1,
+                                color: p.ink4,
+                              ),
+                            ),
+                          ),
+                        InkWell(
+                          key: i == sel ? _selectedKey : null, // 键盘导航后滚动到可见
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: action.run,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              color: i == sel ? p.accentSoft : null, // 选中行底色
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(action.icon, size: 14, color: p.ink4),
+                                const SizedBox(width: NonSpace.sm),
+                                Expanded(
+                                  child: Text(
+                                    action.label,
+                                    style: TextStyle(
+                                      fontSize: NonType.body,
+                                      color: p.ink2,
+                                    ),
+                                  ),
+                                ),
+                                if (action.shortcut.isNotEmpty)
+                                  Text(
+                                    action.shortcut,
+                                    style: TextStyle(
+                                      fontSize: NonType.micro,
+                                      fontFamily: 'Menlo',
+                                      color: p.ink4,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: p.line)),
+                ),
+                child: Row(
+                  children: [
+                    // 手机窄屏（390）里两段说明并排会右溢：各自可收缩、省略号兜底。
+                    Expanded(
+                      child: Text(
+                        '↑ ↓ 选择 · ↵ 执行',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: NonType.micro,
+                          color: p.ink4,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: NonSpace.sm),
+                    Flexible(
+                      child: Text(
+                        'NaN Command',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: NonType.micro,
+                          color: p.ink4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

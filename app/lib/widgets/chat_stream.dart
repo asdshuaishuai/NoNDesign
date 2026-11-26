@@ -4,7 +4,9 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
+
 import 'markdown_theme.dart';
+
 import 'package:provider/provider.dart';
 
 import '../core/dart_agent.dart' show toolLabel;
@@ -62,11 +64,38 @@ class _ChatStreamViewState extends State<ChatStreamView> {
   final _scroll = ScrollController();
   int _lastCount = -1;
 
+  /// 最后一张 A2UI 交互卡的 memo。
+  ///
+  /// 此前每张 A2UI 卡在 build 里都 `chatMessages.where(...).toList()` 扫全表，
+  /// 消息 × 卡片 = O(n²)；改成每次 build 只从尾部找一次。chatMessages 只在
+  /// 末尾追加或整表替换（sublist/恢复），用「列表身份 + 长度」失效足够。
+  List<ChatMessage>? _a2uiScanList;
+  int _a2uiScanCount = -1;
+  ChatMessage? _lastA2ui;
+
   @override
   void dispose() {
     _input.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// 流里最后一张 A2UI 交互卡（只有它可点；历史卡禁用）。
+  ChatMessage? _lastA2uiOf(List<ChatMessage> messages) {
+    if (identical(messages, _a2uiScanList) &&
+        messages.length == _a2uiScanCount) {
+      return _lastA2ui;
+    }
+    ChatMessage? found;
+    for (var i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].kind == chatKindA2ui) {
+        found = messages[i];
+        break;
+      }
+    }
+    _a2uiScanList = messages;
+    _a2uiScanCount = messages.length;
+    return _lastA2ui = found;
   }
 
   void _send(AppStore store) {
@@ -122,6 +151,8 @@ class _ChatStreamViewState extends State<ChatStreamView> {
     final store = context.watch<AppStore>();
     final p = context.palette;
     final messages = store.chatMessages;
+    // 每次 build 只扫一次尾部，供所有卡片判定「是否最后一张答题卡」。
+    final lastA2ui = _lastA2uiOf(messages);
     _scheduleScrollToBottom(messages.length);
     return Scaffold(
       backgroundColor: p.bg,
@@ -132,7 +163,9 @@ class _ChatStreamViewState extends State<ChatStreamView> {
             // 移动适配（2026-11-19）：chat agent 跑起来后，实况预览直接
             // 长在聊天流的框里（genUI 形态的内嵌工作区卡）——不是画中画。
             // 只挂在聊天主面（桌面窄栏不放，桌面主面本身就是实况）。
-            if (!widget.railMode && store.agentBusy && store.previewRender != null)
+            if (!widget.railMode &&
+                store.agentBusy &&
+                store.previewRender != null)
               const ChatLivePreviewCard(),
             Expanded(
               child: messages.isEmpty
@@ -142,7 +175,13 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                       padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
                       itemCount: messages.length,
                       itemBuilder: (context, i) => _buildCard(
-                          context, store, messages[i], i, isLast: i == messages.length - 1),
+                        context,
+                        store,
+                        messages[i],
+                        i,
+                        isLast: i == messages.length - 1,
+                        lastA2ui: lastA2ui,
+                      ),
                     ),
             ),
             _composer(context, store, p),
@@ -156,7 +195,9 @@ class _ChatStreamViewState extends State<ChatStreamView> {
     return Container(
       height: widget.railMode ? 48 : 60,
       padding: EdgeInsets.symmetric(horizontal: widget.railMode ? 12 : 20),
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: p.line)),
+      ),
       child: Row(
         children: [
           NonLogo(size: widget.railMode ? 22 : 26),
@@ -166,9 +207,16 @@ class _ChatStreamViewState extends State<ChatStreamView> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('NaN',
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink)),
+                Text(
+                  'NaN',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: NonType.bodyStrong,
+                    fontWeight: FontWeight.w600,
+                    color: p.ink,
+                  ),
+                ),
                 if (!widget.railMode)
                   // 项目入口：项目名 + 未保存点 + 保存/另存/打开/新建。
                   // 聊天优先壳没有桌面 TitleBar/StatusBar，这里是手机上
@@ -184,19 +232,33 @@ class _ChatStreamViewState extends State<ChatStreamView> {
             OutlinedButton.icon(
               key: const ValueKey('chat-open-workspace'),
               style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 7,
+                ),
               ),
               onPressed: widget.onOpenWorkspace ?? store.openWorkspace,
-              icon: Icon(Icons.space_dashboard_outlined, size: 14, color: p.ink2),
-              label: Text('工作区', style: TextStyle(fontSize: NonType.caption, color: p.ink2)),
+              icon: Icon(
+                Icons.space_dashboard_outlined,
+                size: 14,
+                color: p.ink2,
+              ),
+              label: Text(
+                '工作区',
+                style: TextStyle(fontSize: NonType.caption, color: p.ink2),
+              ),
             ),
           ],
           const SizedBox(width: NonSpace.xs),
           IconAction(
-            icon: store.settings.theme == 'light' ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
+            icon: store.settings.theme == 'light'
+                ? Icons.dark_mode_outlined
+                : Icons.light_mode_outlined,
             tooltip: '切换主题',
             onTap: () async {
-              store.settings.theme = store.settings.theme == 'light' ? 'dark' : 'light';
+              store.settings.theme = store.settings.theme == 'light'
+                  ? 'dark'
+                  : 'light';
               await store.saveSettings();
             },
           ),
@@ -218,12 +280,25 @@ class _ChatStreamViewState extends State<ChatStreamView> {
         children: [
           Icon(Icons.auto_awesome, size: 30, color: p.accent),
           const SizedBox(height: NonSpace.md),
-          Text('从一句话开始',
-              style: TextStyle(fontSize: NonType.title, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3)),
+          Text(
+            '从一句话开始',
+            style: TextStyle(
+              fontSize: NonType.title,
+              fontWeight: FontWeight.w600,
+              color: p.ink,
+              letterSpacing: -0.3,
+            ),
+          ),
           const SizedBox(height: NonSpace.sm),
-          Text('描述要解决的问题与受众——NaN 先写设计文档，再生成可交互原型。',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: NonType.body, height: 1.6, color: p.ink3)),
+          Text(
+            '描述要解决的问题与受众——NaN 先写设计文档，再生成可交互原型。',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: NonType.body,
+              height: 1.6,
+              color: p.ink3,
+            ),
+          ),
           const SizedBox(height: NonSpace.lg),
           Wrap(
             spacing: 6,
@@ -235,13 +310,22 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                   borderRadius: BorderRadius.circular(8),
                   onTap: () => _input.text = e,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: p.panel2,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: p.line),
                     ),
-                    child: Text(e, style: TextStyle(fontSize: NonType.caption, color: p.ink2)),
+                    child: Text(
+                      e,
+                      style: TextStyle(
+                        fontSize: NonType.caption,
+                        color: p.ink2,
+                      ),
+                    ),
                   ),
                 ),
             ],
@@ -251,8 +335,14 @@ class _ChatStreamViewState extends State<ChatStreamView> {
     );
   }
 
-  Widget _buildCard(BuildContext context, AppStore store, ChatMessage m, int index,
-      {bool isLast = false}) {
+  Widget _buildCard(
+    BuildContext context,
+    AppStore store,
+    ChatMessage m,
+    int index, {
+    bool isLast = false,
+    ChatMessage? lastA2ui,
+  }) {
     switch (m.kind) {
       case chatKindUser:
         return _userBubble(m, context.palette);
@@ -261,7 +351,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
       case chatKindProgress:
         return _progressCard(store, m, context.palette);
       case chatKindA2ui:
-        return _a2uiCard(store, m, index, context.palette);
+        return _a2uiCard(store, m, index, context.palette, lastA2ui);
       case chatKindArtifact:
         return _artifactCard(store, m, context.palette);
       default:
@@ -286,13 +376,24 @@ class _ChatStreamViewState extends State<ChatStreamView> {
           ),
           border: Border.all(color: p.accent.withValues(alpha: 0.3)),
         ),
-        child: Text(m.text,
-            style: TextStyle(fontSize: NonType.bodyStrong, height: 1.55, color: p.ink)),
+        child: Text(
+          m.text,
+          style: TextStyle(
+            fontSize: NonType.bodyStrong,
+            height: 1.55,
+            color: p.ink,
+          ),
+        ),
       ),
     );
   }
 
-  Widget _assistantCard(AppStore store, ChatMessage m, NonPalette p, {bool isLast = false}) {
+  Widget _assistantCard(
+    AppStore store,
+    ChatMessage m,
+    NonPalette p, {
+    bool isLast = false,
+  }) {
     return _AssistantBlock(
       key: ValueKey('chat-assistant-${m.ts.microsecondsSinceEpoch}'),
       message: m,
@@ -312,7 +413,9 @@ class _ChatStreamViewState extends State<ChatStreamView> {
       decoration: BoxDecoration(
         color: p.panel,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: m.running ? p.accent.withValues(alpha: 0.35) : p.line),
+        border: Border.all(
+          color: m.running ? p.accent.withValues(alpha: 0.35) : p.line,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -323,14 +426,23 @@ class _ChatStreamViewState extends State<ChatStreamView> {
               Icon(Icons.auto_awesome, size: 13, color: p.accent),
               const SizedBox(width: 7),
               Expanded(
-                child: Text(m.text,
-                    style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink)),
+                child: Text(
+                  m.text,
+                  style: TextStyle(
+                    fontSize: NonType.bodyStrong,
+                    fontWeight: FontWeight.w600,
+                    color: p.ink,
+                  ),
+                ),
               ),
               if (m.running)
                 SizedBox(
                   width: 12,
                   height: 12,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: p.accent),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: p.accent,
+                  ),
                 )
               else
                 Icon(
@@ -349,25 +461,47 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                     s.running
                         ? Icons.hourglass_top_rounded
                         : s.ok
-                            ? Icons.check_rounded
-                            : Icons.close_rounded,
+                        ? Icons.check_rounded
+                        : Icons.close_rounded,
                     size: 12,
-                    color: s.running ? p.accent : s.ok ? p.success : p.danger,
+                    color: s.running
+                        ? p.accent
+                        : s.ok
+                        ? p.success
+                        : p.danger,
                   ),
                   const SizedBox(width: 6),
-                  Text(_stepLabel(s.label),
-                      style: TextStyle(fontSize: NonType.caption, fontWeight: FontWeight.w500, color: p.ink2)),
+                  Text(
+                    _stepLabel(s.label),
+                    style: TextStyle(
+                      fontSize: NonType.caption,
+                      fontWeight: FontWeight.w500,
+                      color: p.ink2,
+                    ),
+                  ),
                   if (s.detail != null && s.detail!.isNotEmpty) ...[
                     const SizedBox(width: 6),
                     Expanded(
-                      child: Text(s.detail!,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
+                      child: Text(
+                        s.detail!,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: NonType.micro,
+                          fontFamily: 'Menlo',
+                          color: p.ink4,
+                        ),
+                      ),
                     ),
                   ],
                   if (s.ms != null)
-                    Text('${s.ms}ms',
-                        style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
+                    Text(
+                      '${s.ms}ms',
+                      style: TextStyle(
+                        fontSize: NonType.micro,
+                        fontFamily: 'Menlo',
+                        color: p.ink4,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -378,8 +512,14 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: Text(m.detail!,
-                        style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.danger)),
+                    child: Text(
+                      m.detail!,
+                      style: TextStyle(
+                        fontSize: NonType.caption,
+                        height: 1.5,
+                        color: p.danger,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: NonSpace.sm),
                   // 一步失败后不必重新描述需求：原样再发一次「重试上一步」，
@@ -388,12 +528,18 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                     key: const ValueKey('chat-retry-step'),
                     style: TextButton.styleFrom(
                       foregroundColor: p.danger,
-                      padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xxs),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: NonSpace.sm,
+                        vertical: NonSpace.xxs,
+                      ),
                       minimumSize: const Size(0, 26),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                     onPressed: () => _sendText(store, '重试上一步'),
-                    child: const Text('重试', style: TextStyle(fontSize: NonType.caption)),
+                    child: const Text(
+                      '重试',
+                      style: TextStyle(fontSize: NonType.caption),
+                    ),
                   ),
                 ],
               ),
@@ -409,13 +555,19 @@ class _ChatStreamViewState extends State<ChatStreamView> {
   ///
   /// 历史答题卡（不是流里最后一张）禁点：旧卡的答案早已过期，可点只会把
   /// 过期选择重新当指令续跑（2026-11-20 用户反馈）。
-  Widget _a2uiCard(AppStore store, ChatMessage m, int index, NonPalette p) {
+  Widget _a2uiCard(
+    AppStore store,
+    ChatMessage m,
+    int index,
+    NonPalette p,
+    ChatMessage? lastA2ui,
+  ) {
     final messages = m.a2uiMessages ?? const [];
     // 只有「最后一张」答题卡可点（且不在 run 中）；历史卡答案早已过期。
-    final a2uiCards = store.chatMessages.where((x) => x.kind == chatKindA2ui).toList();
+    // 最后一张由 build 侧 memo 一次算出（不再每张卡各扫一遍全表）。
     // run 进行中仍可点最后一张（答案会入队，本轮结束自动续跑）；
     // 只有被新卡顶替的历史卡禁用。
-    final interactive = a2uiCards.isNotEmpty && identical(a2uiCards.last, m);
+    final interactive = lastA2ui != null && identical(lastA2ui, m);
     final card = _ChatA2uiCard(
       key: ValueKey('chat-a2ui-$index'),
       messages: messages,
@@ -429,7 +581,10 @@ class _ChatStreamViewState extends State<ChatStreamView> {
       margin: const EdgeInsets.only(right: 40, bottom: 10),
       child: interactive
           ? card
-          : AbsorbPointer(absorbing: true, child: Opacity(opacity: 0.55, child: card)),
+          : AbsorbPointer(
+              absorbing: true,
+              child: Opacity(opacity: 0.55, child: card),
+            ),
     );
   }
 
@@ -482,28 +637,49 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 1.5,
+                          ),
                           decoration: BoxDecoration(
                             color: p.accent.withValues(alpha: 0.14),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: Text(label,
-                              style: TextStyle(fontSize: NonType.micro, color: p.accent)),
+                          child: Text(
+                            label,
+                            style: TextStyle(
+                              fontSize: NonType.micro,
+                              color: p.accent,
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 6),
                         Expanded(
-                          child: Text(m.artifactName ?? '',
-                              maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink)),
+                          child: Text(
+                            m.artifactName ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: NonType.bodyStrong,
+                              fontWeight: FontWeight.w600,
+                              color: p.ink,
+                            ),
+                          ),
                         ),
                       ],
                     ),
                     if (m.text.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: NonSpace.xxs),
-                        child: Text(m.text,
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
+                        child: Text(
+                          m.text,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: NonType.micro,
+                            color: p.ink4,
+                          ),
+                        ),
                       ),
                   ],
                 ),
@@ -513,12 +689,18 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                 key: const ValueKey('chat-artifact-open'),
                 style: TextButton.styleFrom(
                   foregroundColor: p.accent,
-                  padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xxs),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: NonSpace.sm,
+                    vertical: NonSpace.xxs,
+                  ),
                   minimumSize: const Size(0, 28),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 onPressed: () => _openArtifact(store, m),
-                child: Text(openLabel, style: const TextStyle(fontSize: NonType.caption)),
+                child: Text(
+                  openLabel,
+                  style: const TextStyle(fontSize: NonType.caption),
+                ),
               ),
             ],
           ),
@@ -543,7 +725,9 @@ class _ChatStreamViewState extends State<ChatStreamView> {
   Widget _composer(BuildContext context, AppStore store, NonPalette p) {
     final busy = store.agentBusy;
     return Container(
-      decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: p.line)),
+      ),
       padding: const EdgeInsets.fromLTRB(18, 10, 18, NonSpace.md),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -556,10 +740,16 @@ class _ChatStreamViewState extends State<ChatStreamView> {
               maxLines: 5,
               textInputAction: TextInputAction.send,
               enabled: !busy,
-              style: TextStyle(fontSize: NonType.bodyStrong, height: 1.5, color: p.ink),
+              style: TextStyle(
+                fontSize: NonType.bodyStrong,
+                height: 1.5,
+                color: p.ink,
+              ),
               decoration: InputDecoration(
                 hintText: busy ? 'NaN 正在工作……' : '描述你要做的东西，回车发送',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
               onSubmitted: (_) => _send(store),
             ),
@@ -671,7 +861,10 @@ class ChatProjectMenu extends StatelessWidget {
                     key: const ValueKey('chat-project-dirty'),
                     width: 5,
                     height: 5,
-                    decoration: BoxDecoration(color: p.warn, shape: BoxShape.circle),
+                    decoration: BoxDecoration(
+                      color: p.warn,
+                      shape: BoxShape.circle,
+                    ),
                   ),
                 ),
               ),
@@ -682,7 +875,11 @@ class ChatProjectMenu extends StatelessWidget {
     );
   }
 
-  Future<void> _onSelected(BuildContext context, AppStore store, String value) async {
+  Future<void> _onSelected(
+    BuildContext context,
+    AppStore store,
+    String value,
+  ) async {
     switch (value) {
       case 'save':
         await store.saveProject();
@@ -735,7 +932,11 @@ class ChatProjectMenu extends StatelessWidget {
   }
 
   PopupMenuItem<String> _item(
-      BuildContext context, String value, IconData icon, String label) {
+    BuildContext context,
+    String value,
+    IconData icon,
+    String label,
+  ) {
     final p = context.palette;
     return PopupMenuItem<String>(
       value: value,
@@ -745,9 +946,11 @@ class ChatProjectMenu extends StatelessWidget {
           Icon(icon, size: 14, color: p.ink4),
           const SizedBox(width: NonSpace.sm),
           Expanded(
-            child: Text(label,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: NonType.body, color: p.ink2)),
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: NonType.body, color: p.ink2),
+            ),
           ),
         ],
       ),
@@ -759,8 +962,14 @@ class ChatProjectMenu extends StatelessWidget {
     return PopupMenuItem<String>(
       enabled: false,
       height: 24,
-      child: Text(label,
-          style: TextStyle(fontSize: NonType.micro, letterSpacing: 0.6, color: p.ink4)),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: NonType.micro,
+          letterSpacing: 0.6,
+          color: p.ink4,
+        ),
+      ),
     );
   }
 }
@@ -784,8 +993,9 @@ class _SaveAsDialog extends StatefulWidget {
 }
 
 class _SaveAsDialogState extends State<_SaveAsDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.initial);
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initial,
+  );
 
   @override
   void dispose() {
@@ -808,8 +1018,13 @@ class _SaveAsDialogState extends State<_SaveAsDialog> {
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: p.lineStrong),
       ),
-      title: const Text('另存为',
-          style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600)),
+      title: const Text(
+        '另存为',
+        style: TextStyle(
+          fontSize: NonType.subtitle,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
       content: SizedBox(
         width: 340,
         child: Column(
@@ -828,8 +1043,14 @@ class _SaveAsDialogState extends State<_SaveAsDialog> {
               ),
             ),
             const SizedBox(height: 10),
-            Text('会保存到应用内项目库，之后可在「打开项目」里重新找到。',
-                style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.ink4)),
+            Text(
+              '会保存到应用内项目库，之后可在「打开项目」里重新找到。',
+              style: TextStyle(
+                fontSize: NonType.caption,
+                height: 1.5,
+                color: p.ink4,
+              ),
+            ),
           ],
         ),
       ),
@@ -888,7 +1109,10 @@ class _AssistantBlockState extends State<_AssistantBlock> {
       onExit: (_) => setState(() => _hover = false),
       child: Container(
         margin: const EdgeInsets.only(right: 64, bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: NonSpace.xs, vertical: NonSpace.xxs),
+        padding: const EdgeInsets.symmetric(
+          horizontal: NonSpace.xs,
+          vertical: NonSpace.xxs,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -896,16 +1120,29 @@ class _AssistantBlockState extends State<_AssistantBlock> {
             MarkdownBody(
               data: widget.message.text,
               softLineBreak: true,
-              builders: {
-                'pre': _PreBuilder(),
-                'code': _InlineCodeBuilder(),
-              },
+              builders: {'pre': _PreBuilder(), 'code': _InlineCodeBuilder()},
               styleSheet: markdownStyleSheetOf(context).copyWith(
-                p: TextStyle(fontSize: NonType.bodyStrong, height: 1.6, color: p.ink2),
-                h1: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink),
-                h2: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink),
+                p: TextStyle(
+                  fontSize: NonType.bodyStrong,
+                  height: 1.6,
+                  color: p.ink2,
+                ),
+                h1: TextStyle(
+                  fontSize: NonType.subtitle,
+                  fontWeight: FontWeight.w600,
+                  color: p.ink,
+                ),
+                h2: TextStyle(
+                  fontSize: NonType.subtitle,
+                  fontWeight: FontWeight.w600,
+                  color: p.ink,
+                ),
                 code: TextStyle(
-                    fontSize: NonType.caption, fontFamily: 'Menlo', color: p.ink2, backgroundColor: p.panel2),
+                  fontSize: NonType.caption,
+                  fontFamily: 'Menlo',
+                  color: p.ink2,
+                  backgroundColor: p.panel2,
+                ),
                 codeblockDecoration: BoxDecoration(
                   color: p.panel2,
                   borderRadius: BorderRadius.circular(10),
@@ -943,7 +1180,12 @@ class _MiniAction extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _MiniAction({super.key, required this.icon, required this.label, required this.onTap});
+  const _MiniAction({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -958,7 +1200,10 @@ class _MiniAction extends StatelessWidget {
           children: [
             Icon(icon, size: 12, color: p.ink4),
             const SizedBox(width: NonSpace.xs),
-            Text(label, style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
+            Text(
+              label,
+              style: TextStyle(fontSize: NonType.caption, color: p.ink4),
+            ),
           ],
         ),
       ),
@@ -972,12 +1217,7 @@ class _SuggestionChips extends StatelessWidget {
 
   const _SuggestionChips({required this.onSend});
 
-  static const _suggestions = [
-    '继续完善细节',
-    '换一版布局看看',
-    '把这一页改成深色主题',
-    '补上空状态和错误态',
-  ];
+  static const _suggestions = ['继续完善细节', '换一版布局看看', '把这一页改成深色主题', '补上空状态和错误态'];
 
   @override
   Widget build(BuildContext context) {
@@ -998,7 +1238,10 @@ class _SuggestionChips extends StatelessWidget {
               // 渲染失败）。放在各自子树里既保住外部 find.byKey 契约，也合法。
               child: Container(
                 key: const ValueKey('chat-suggestion-chip'),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: p.panel.withValues(alpha: 0.6),
                   borderRadius: BorderRadius.circular(999),
@@ -1009,7 +1252,13 @@ class _SuggestionChips extends StatelessWidget {
                   children: [
                     Icon(Icons.auto_awesome, size: 11, color: p.accent),
                     const SizedBox(width: 5),
-                    Text(s, style: TextStyle(fontSize: NonType.caption, color: p.ink2)),
+                    Text(
+                      s,
+                      style: TextStyle(
+                        fontSize: NonType.caption,
+                        color: p.ink2,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1045,13 +1294,26 @@ class _CodeBlock extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            padding: const EdgeInsets.fromLTRB(10, NonSpace.xs, NonSpace.xs, NonSpace.xs),
-            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+            padding: const EdgeInsets.fromLTRB(
+              10,
+              NonSpace.xs,
+              NonSpace.xs,
+              NonSpace.xs,
+            ),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: p.line)),
+            ),
             child: Row(
               children: [
-                Text((language ?? '代码').toUpperCase(),
-                    style: TextStyle(
-                        fontSize: NonType.micro, letterSpacing: 0.6, fontWeight: FontWeight.w600, color: p.ink4)),
+                Text(
+                  (language ?? '代码').toUpperCase(),
+                  style: TextStyle(
+                    fontSize: NonType.micro,
+                    letterSpacing: 0.6,
+                    fontWeight: FontWeight.w600,
+                    color: p.ink4,
+                  ),
+                ),
                 const Spacer(),
                 InkWell(
                   key: const ValueKey('chat-copy-code'),
@@ -1061,12 +1323,24 @@ class _CodeBlock extends StatelessWidget {
                     ToastService.instance.success('已复制代码', null);
                   },
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.copy_rounded, size: 11, color: p.ink4),
-                      const SizedBox(width: NonSpace.xs),
-                      Text('复制', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
-                    ]),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 3,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.copy_rounded, size: 11, color: p.ink4),
+                        const SizedBox(width: NonSpace.xs),
+                        Text(
+                          '复制',
+                          style: TextStyle(
+                            fontSize: NonType.micro,
+                            color: p.ink4,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -1075,8 +1349,15 @@ class _CodeBlock extends StatelessWidget {
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.all(10),
-            child: Text(code,
-                style: TextStyle(fontSize: NonType.caption, height: 1.55, fontFamily: 'Menlo', color: p.ink2)),
+            child: Text(
+              code,
+              style: TextStyle(
+                fontSize: NonType.caption,
+                height: 1.55,
+                fontFamily: 'Menlo',
+                color: p.ink2,
+              ),
+            ),
           ),
         ],
       ),
@@ -1102,7 +1383,9 @@ class _PreBuilder extends MarkdownElementBuilder {
     for (final child in element.children ?? const <md.Node>[]) {
       if (child is md.Element) {
         final cls = child.attributes['class'] ?? '';
-        if (cls.startsWith('language-')) language = cls.substring('language-'.length);
+        if (cls.startsWith('language-')) {
+          language = cls.substring('language-'.length);
+        }
       }
     }
     return _CodeBlock(code: code, language: language);
@@ -1121,16 +1404,17 @@ class _InlineCodeBuilder extends MarkdownElementBuilder {
     final p = context.palette;
     final text = element.textContent;
     if (text.isEmpty) return null;
-    return Text(text,
-        style: TextStyle(
-          fontSize: NonType.caption,
-          fontFamily: 'Menlo',
-          color: p.ink2,
-          backgroundColor: p.panel2,
-        ));
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: NonType.caption,
+        fontFamily: 'Menlo',
+        color: p.ink2,
+        backgroundColor: p.panel2,
+      ),
+    );
   }
 }
-
 
 /// 答题卡的错误兜底：surface 渲染失败时不留空白——把问题正文以纯文本
 /// 显示出来（演示现场最怕点了没反应/白块）。offlineOnly 关掉网络资源，
@@ -1165,12 +1449,23 @@ class _ChatA2uiCardState extends State<_ChatA2uiCard> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: palette.line),
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(widget.fallbackText, style: TextStyle(fontSize: NonType.bodyStrong, color: palette.ink)),
-          const SizedBox(height: NonSpace.xs),
-          Text('选项卡片没有显示出来，可以在输入框直接回复你的选择。',
-              style: TextStyle(fontSize: NonType.caption, color: palette.ink4)),
-        ]),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.fallbackText,
+              style: TextStyle(
+                fontSize: NonType.bodyStrong,
+                color: palette.ink,
+              ),
+            ),
+            const SizedBox(height: NonSpace.xs),
+            Text(
+              '选项卡片没有显示出来，可以在输入框直接回复你的选择。',
+              style: TextStyle(fontSize: NonType.caption, color: palette.ink4),
+            ),
+          ],
+        ),
       );
     }
     return A2uiCard.messages(
