@@ -19,6 +19,8 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
 
@@ -32,6 +34,7 @@ import 'aqua.dart';
 import 'common.dart';
 import 'video3d_preview_surface.dart';
 import 'video_workbench_panels.dart';
+import 'workbench_views.dart';
 
 /// 跨实例打开通道（与 `threeLoadOnOpen` / `videoLoadOnOpen` 同模式）：
 /// [openVideo3dWorkspace] 写入项目名，工作台在 initState 消费后清空。
@@ -181,6 +184,19 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
   List<double> _shotFractions = const <double>[];
   String _previewError = '';
 
+  // ---- 四栏目（呈现效果 / 文档 / 规范 / 源码） --------------------------
+
+  /// 当前栏目。用户裁决 2026-11-27：所有工作台内容区固定四栏目；框架在
+  /// `widgets/workbench_views.dart`，本工作台只做数据装配，「呈现效果」=
+  /// 原有预览 + 检查器 + 镜头时间线（行为不变）。
+  WorkbenchColumn _column = WorkbenchColumn.present;
+
+  /// 文档栏数据（`docs.md` 优先，其次 `brief.md`；null = 没有文档）。
+  String? _docsMarkdown;
+
+  /// 源码栏数据（`scene3d.json` + `screenplay3d.json` 的只读文本树）。
+  List<WorkbenchSourceFile> _sourceFiles = const <WorkbenchSourceFile>[];
+
   /// initState 从 [video3dLoadOnOpen] 取到的开局项目名（只消费一次）。
   String? _pendingOpen;
 
@@ -258,6 +274,9 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       _failure = null;
       _timeline = null;
       _previewError = '';
+      // 切项目 = 切内容：旧项目的文档/源码不能带进新项目的栏目。
+      _docsMarkdown = null;
+      _sourceFiles = const <WorkbenchSourceFile>[];
     });
     Video3dProjectSnapshot snapshot;
     try {
@@ -267,6 +286,10 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       setState(() {
         _opening = false;
         _failure = failure;
+        // 坏项目：栏目条常显，但呈现效果的既有错误面要在眼前；其余栏目如实空。
+        _column = WorkbenchColumn.present;
+        _docsMarkdown = null;
+        _sourceFiles = const <WorkbenchSourceFile>[];
       });
       return;
     } catch (error) {
@@ -274,6 +297,9 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       setState(() {
         _opening = false;
         _failure = Video3dProjectFailure('io_error', '$error');
+        _column = WorkbenchColumn.present;
+        _docsMarkdown = null;
+        _sourceFiles = const <WorkbenchSourceFile>[];
       });
       return;
     }
@@ -331,6 +357,10 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     final List<double> shotFractions = timeline == null
         ? const <double>[]
         : video3dShotFractions(timeline);
+    // 四栏目数据与快照同一拍装配：文档/源码都在项目目录里，读一次缓存；
+    // 切栏目不再读盘，也不伪造内容。
+    final String? docs = _readDocs(snapshot.dir);
+    final List<WorkbenchSourceFile> sources = _readSourceFiles(snapshot);
     setState(() {
       _snapshot = snapshot;
       _timeline = timeline;
@@ -339,6 +369,8 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       _previewError = previewError;
       _opening = false;
       _failure = null;
+      _docsMarkdown = docs;
+      _sourceFiles = sources;
     });
     previous?.dispose();
     if (next != null) unawaited(next.start());
@@ -356,53 +388,178 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
         );
         final bool hasLeft = layout.left == PanelPolicy.docked;
         final bool hasRight = layout.right == PanelPolicy.docked;
-        final Widget body = Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            if (hasLeft)
-              SizedBox(
-                width: layout.leftWidth,
-                child: _Video3dProjectList(
-                  entries: _entries,
-                  selectedName: _name,
-                  loading: _loading,
-                  error: _listError,
-                  onOpen: (String name) => unawaited(_open(name)),
-                  onCreate: () => unawaited(_createProject()),
-                ),
-              ),
-            if (hasLeft) Container(width: 1, color: p.line),
-            Expanded(child: _centerPane(p)),
-            if (hasRight) Container(width: 1, color: p.line),
-            if (hasRight)
-              SizedBox(
-                width: layout.rightWidth,
-                child: _Video3dInspector(
-                  snapshot: _snapshot,
-                  timeline: _timeline,
-                  failure: _failure,
-                ),
-              ),
-          ],
-        );
+        // 四栏目（用户裁决 2026-11-27）：顶部固定栏目条 + 内容区。呈现效果 =
+        // 原有「项目列表 | 预览 | 检查器 + 底部镜头时间线」（行为不变）；
+        // 切到文档/规范/源码时不构建呈现面子树，也不触碰预览控制器
+        // （WebView 页面不会因此重新准备/重新加载）。
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             _header(p, layout),
-            Expanded(child: body),
-            if (layout.bottomBar)
-              _Video3dBottomBar(
-                height: layout.bottomBarHeight,
-                snapshot: _snapshot,
-                timeline: _timeline,
-                shotFractions: _shotFractions,
-                preview: _preview,
-                failure: _failure,
+            Expanded(
+              child: WorkbenchColumns(
+                column: _column,
+                onColumnChanged: _onColumnChanged,
+                data: _columnData(),
+                present: Builder(
+                  builder: (BuildContext context) => _presentPane(
+                    p,
+                    layout,
+                    hasLeft: hasLeft,
+                    hasRight: hasRight,
+                  ),
+                ),
               ),
+            ),
           ],
         );
       },
     );
+  }
+
+  /// 栏目切换：栏目条只改当前栏目，预览控制器/项目快照都不动。
+  void _onColumnChanged(WorkbenchColumn column) {
+    if (_column == column) return;
+    setState(() => _column = column);
+  }
+
+  /// 呈现效果栏目：原有预览主体（左项目 | 中预览 | 右检查器）+ 底部镜头时间线。
+  Widget _presentPane(
+    NonPalette p,
+    WorkbenchLayout layout, {
+    required bool hasLeft,
+    required bool hasRight,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (hasLeft)
+                SizedBox(
+                  width: layout.leftWidth,
+                  child: _Video3dProjectList(
+                    entries: _entries,
+                    selectedName: _name,
+                    loading: _loading,
+                    error: _listError,
+                    onOpen: (String name) => unawaited(_open(name)),
+                    onCreate: () => unawaited(_createProject()),
+                  ),
+                ),
+              if (hasLeft) Container(width: 1, color: p.line),
+              Expanded(child: _centerPane(p)),
+              if (hasRight) Container(width: 1, color: p.line),
+              if (hasRight)
+                SizedBox(
+                  width: layout.rightWidth,
+                  child: _Video3dInspector(
+                    snapshot: _snapshot,
+                    timeline: _timeline,
+                    failure: _failure,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (layout.bottomBar)
+          _Video3dBottomBar(
+            height: layout.bottomBarHeight,
+            snapshot: _snapshot,
+            timeline: _timeline,
+            shotFractions: _shotFractions,
+            preview: _preview,
+            failure: _failure,
+          ),
+      ],
+    );
+  }
+
+  // -- 四栏目数据装配 -------------------------------------------------------
+  //
+  // 只读装配：文档/规范/源码全部来自项目目录与磁盘快照；没有就返回 null /
+  // 空列表（栏目显示框架的可行动空态），绝不编造内容。
+
+  /// 四栏目数据袋：项目不在场/还没读到快照时全部为空（可行动空态）。
+  WorkbenchColumnData _columnData() {
+    final Video3dProjectSnapshot? snapshot = _snapshot;
+    if (snapshot == null) return const WorkbenchColumnData();
+    return WorkbenchColumnData(
+      docsMarkdown: _docsMarkdown,
+      // 规范栏：两份机器可读事实源按文件名并排展示（scene3d = 场景，
+      // screenplay3d = 镜头/时间），未知字段也原样保留。
+      specJson: <String, Object?>{
+        Video3dProjectStore.sceneFile: snapshot.sceneRaw,
+        Video3dProjectStore.screenplayFile: snapshot.screenplayRaw,
+      },
+      specSummary: _specSummaryOf(snapshot),
+      sourceFiles: _sourceFiles,
+    );
+  }
+
+  /// 规范栏顶部的一句人话：校验状态 + 节点/镜头/总帧。
+  String _specSummaryOf(Video3dProjectSnapshot snapshot) {
+    final int nodes =
+        snapshot.scene?.nodes.length ?? _listLength(snapshot.sceneRaw['nodes']);
+    final int shots =
+        snapshot.screenplay?.shots.length ??
+        _listLength(snapshot.screenplayRaw['shots']);
+    final int frames = _timeline?.totalFrames ?? 0;
+    final String verify = snapshot.verified
+        ? '校验通过'
+        : '校验未通过（${snapshot.verification.checks.length} 个问题）';
+    return '$verify · $nodes 节点 / $shots 镜头 / $frames 帧';
+  }
+
+  static int _listLength(Object? value) => value is List ? value.length : 0;
+
+  /// 项目内人读文档：`docs.md` 优先，其次 `brief.md`；空文件按没有文档。
+  String? _readDocs(String dir) {
+    for (final String name in const <String>['docs.md', 'brief.md']) {
+      final String? text = _readTextFile('$dir/$name');
+      if (text != null) return text;
+    }
+    return null;
+  }
+
+  /// 只读源码树：`scene3d.json` + `screenplay3d.json`（两份事实源，不含
+  /// artifacts/缓存等派生内容）。磁盘文本优先；读不出来退回已解码快照。
+  List<WorkbenchSourceFile> _readSourceFiles(Video3dProjectSnapshot snapshot) {
+    final List<WorkbenchSourceFile> files = <WorkbenchSourceFile>[];
+    for (final String name in const <String>[
+      Video3dProjectStore.sceneFile,
+      Video3dProjectStore.screenplayFile,
+    ]) {
+      final String? text = _readTextFile('${snapshot.dir}/$name');
+      if (text != null) {
+        files.add(WorkbenchSourceFile(path: name, content: text));
+        continue;
+      }
+      final Map<String, Object?> raw = name == Video3dProjectStore.sceneFile
+          ? snapshot.sceneRaw
+          : snapshot.screenplayRaw;
+      files.add(
+        WorkbenchSourceFile(
+          path: name,
+          content: const JsonEncoder.withIndent('  ').convert(raw),
+        ),
+      );
+    }
+    return files;
+  }
+
+  /// 读项目目录内一个文本文件；缺失/读失败/空白一律 null。
+  String? _readTextFile(String path) {
+    final File file = File(path);
+    if (!file.existsSync()) return null;
+    try {
+      final String text = file.readAsStringSync();
+      return text.trim().isEmpty ? null : text;
+    } on FileSystemException {
+      return null;
+    }
   }
 
   /// 浅色（Aqua）头部的工具圆钮：40×40 槽位（与既有 IconButton 实测同尺寸），

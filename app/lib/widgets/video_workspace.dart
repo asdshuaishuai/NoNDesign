@@ -26,6 +26,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
@@ -44,6 +45,7 @@ import 'video_animation_surface.dart';
 import 'video_clip_surface.dart';
 import 'video_workbench_panels.dart';
 import 'video_player_surface.dart';
+import 'workbench_views.dart';
 
 /// 视频工作区。
 ///
@@ -85,6 +87,13 @@ class VideoWorkspace extends StatefulWidget {
 /// 艺术架「打开」直载：切视图前设置**某个产物的 mp4 绝对路径**，本工作台
 /// initState 消费后清空（与 threeLoadOnOpen 同构的跨实例通道）。
 String? videoLoadOnOpen;
+
+/// 四栏目数据装配结果：随项目读盘一次读出，切栏目不再读盘。
+typedef _VideoProjectColumns = ({
+  String? docs,
+  List<WorkbenchSourceFile> sources,
+  Object? videoMeta,
+});
 
 class _VideoWorkspaceState extends State<VideoWorkspace> {
   int _sampleIdx = 0;
@@ -130,6 +139,23 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   bool _projectsLoading = true;
   String _projectsError = '';
 
+  // ---- 四栏目（呈现效果 / 文档 / 规范 / 源码） --------------------------
+
+  /// 当前栏目。用户裁决 2026-11-27：所有工作台内容区固定四栏目；框架在
+  /// `widgets/workbench_views.dart`，本工作台只做数据装配，「呈现效果」=
+  /// 原有导演台/预览面（行为不变）。
+  WorkbenchColumn _column = WorkbenchColumn.present;
+
+  /// 文档栏数据（`docs.md` 优先，其次 `brief.md`；null = 没有文档）。
+  String? _docsMarkdown;
+
+  /// 源码栏数据（项目目录里的 timeline/规范/元数据文件；只读文本树）。
+  List<WorkbenchSourceFile> _sourceFiles = const <WorkbenchSourceFile>[];
+
+  /// `video.json` 的原始对象（规范栏里与 spec.json 并排展示；读不出时用
+  /// 快照里的标题/片长/帧率兜底，不编造来源字段）。
+  Object? _videoMetaJson;
+
   /// store 监听快照：只有这些值真的变化才刷新/自动切换，避免 store 的高频
   /// notifyListeners 引起无谓读盘。
   AppStore? _appStore;
@@ -155,6 +181,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
 
   /// 测试注入的播放源：本工作台拥有其生命周期，切示例/离开模式时 dispose。
   VideoClipPlayback? _injectedClipPlayback;
+
+  /// 动效合成的播放位置（秒）：短片 WebView 归播放面所有，切走栏目会卸载
+  /// 播放面；回到呈现效果时按这个位置载入，不回到片头（也不假装还在播）。
+  double _clipResumeSeconds = 0;
 
   AppStore get store => context.read<AppStore>();
   VideoService get _service => widget.service ?? VideoService.instance;
@@ -318,6 +348,11 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       _projectBusy = true;
       _doc = null;
       _review = null;
+      // 切项目 = 切内容：四栏目回到呈现效果，旧项目的文档/源码不能带过来。
+      _column = WorkbenchColumn.present;
+      _docsMarkdown = null;
+      _sourceFiles = const <WorkbenchSourceFile>[];
+      _videoMetaJson = null;
     });
     unawaited(_loadProject(name, announce: announce, fromStore: fromStore));
     if (refresh) unawaited(_refreshProjects());
@@ -332,8 +367,14 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     try {
       final snapshot = await _projectStore.read(name);
       if (!mounted || _projectName != name) return;
+      // 四栏目数据与项目读盘同一拍装配：文档/源码/元数据都在项目目录里，
+      // 读一次缓存；切栏目不再读盘，也不伪造内容。
+      final _VideoProjectColumns columns = _readProjectColumns(snapshot);
       setState(() {
         _project = snapshot;
+        _docsMarkdown = columns.docs;
+        _sourceFiles = columns.sources;
+        _videoMetaJson = columns.videoMeta;
         _projectFailure = null;
         _projectBusy = false;
         _doc = snapshot.document;
@@ -366,6 +407,12 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       _projectFailure = failure;
       _projectBusy = false;
       _doc = null;
+      // 坏项目：栏目条常显，但呈现效果要露在用户眼前（错误面不是空态）；
+      // 其余栏目如实空态，不拿上一个项目的说明冒充这个项目。
+      _column = WorkbenchColumn.present;
+      _docsMarkdown = null;
+      _sourceFiles = const <WorkbenchSourceFile>[];
+      _videoMetaJson = null;
       _review = VideoReviewResult(
         ok: false,
         totalSeconds: 0,
@@ -395,6 +442,11 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     _project = null;
     _projectFailure = null;
     _projectBusy = false;
+    // 内容切走（示例/动效合成）：四栏目回到呈现效果，项目数据不能留在栏目里。
+    _column = WorkbenchColumn.present;
+    _docsMarkdown = null;
+    _sourceFiles = const <WorkbenchSourceFile>[];
+    _videoMetaJson = null;
   }
 
   /// 回退到内置示例（删除当前项目 / 读失败后用户选择示例时用）。
@@ -526,6 +578,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     final owned = _injectedClipPlayback;
     _injectedClipPlayback = null;
     _clipPlayback = null;
+    _clipResumeSeconds = 0;
     owned?.dispose();
   }
 
@@ -754,16 +807,158 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   @override
   Widget build(BuildContext context) {
     final artifact = _artifactPath;
+    // 产物播放（艺术架点开的既有 mp4）是「播既有产物」的直达入口，不是项目
+    // 创作面：没有文档/规范/源码可展示，保留原布局、不套四栏目，也不因切栏目
+    // 重建播放 WebView（那会打断正在看的成片）。
+    if (artifact != null) {
+      return Column(
+        children: [
+          _header(context, artifact: artifact),
+          Expanded(child: _artifactPane(context, artifact)),
+        ],
+      );
+    }
+    // 四栏目（用户裁决 2026-11-27）：顶部固定栏目条 + 内容区。呈现效果 =
+    // 原有导演台/播放面（行为不变）；切到文档/规范/源码时不构建呈现面子树，
+    // 也不触碰播放面控制器。
     return Column(
       children: [
-        _header(context, artifact: artifact),
+        _header(context, artifact: null),
         Expanded(
-          child: artifact != null
-              ? _artifactPane(context, artifact)
-              : _authoringBody(context),
+          child: WorkbenchColumns(
+            column: _column,
+            onColumnChanged: _onColumnChanged,
+            data: _columnData(),
+            present: Builder(
+              builder: (BuildContext context) => _authoringBody(context),
+            ),
+          ),
         ),
       ],
     );
+  }
+
+  /// 栏目切换：离开呈现效果时记下动效合成的播放位置，回来按它重新载入。
+  void _onColumnChanged(WorkbenchColumn column) {
+    if (_column == column) return;
+    setState(() {
+      if (column != WorkbenchColumn.present) {
+        final VideoClipPlayback? playback = _clipPlayback;
+        if (_clip != null && playback != null) {
+          _clipResumeSeconds = playback.t;
+        }
+        // 短片播放源归播放面所有；离开呈现效果会卸载播放面，这里先摘掉
+        // 运输条引用，回来由播放面重新回调（不等一个已被释放的播放源）。
+        _clipPlayback = null;
+      } else {
+        // 注入的播放源（测试/外托管）不随播放面销毁：回来直接接回运输条。
+        final VideoClipPlayback? injected = _injectedClipPlayback;
+        if (_clip != null && injected != null) _clipPlayback = injected;
+      }
+      _column = column;
+    });
+  }
+
+  /// 四栏目数据袋：只读装配；没有项目就是可行动空态，不伪造内容。
+  WorkbenchColumnData _columnData() {
+    final VideoProjectSnapshot? project = _project;
+    if (project == null) return const WorkbenchColumnData();
+    final Object meta =
+        _videoMetaJson ??
+        <String, Object?>{
+          'title': project.title,
+          'seconds': project.document.totalSeconds,
+          'fps': project.document.fps,
+        };
+    final Object? scenes = project.timeline['scenes'];
+    final int shots = scenes is List ? scenes.length : 0;
+    return WorkbenchColumnData(
+      docsMarkdown: _docsMarkdown,
+      // 规范栏：把项目里的机器可读事实源按文件名并排展示——video.json
+      // （元数据：标题/片长/帧率）与 timeline 指向的规范文件（剧本科普）。
+      specJson: <String, Object?>{
+        'video.json': meta,
+        _specFileName(project.timeline): project.spec,
+      },
+      specSummary:
+          '$shots 个镜头 · 时长 ${formatVideoTime(project.document.totalSeconds)} · '
+          '${project.document.fps} fps',
+      sourceFiles: _sourceFiles,
+    );
+  }
+
+  /// 规范文件名（与 [VideoProjectStore] 的解析规则一致：同目录普通文件名；
+  /// 坏引用退回 `spec.json`）。
+  static String _specFileName(Map<String, dynamic> timeline) {
+    final Object? ref = timeline['spec'];
+    if (ref is String) {
+      final String name = ref.trim();
+      if (name.isNotEmpty && !name.contains('/') && !name.contains('\\')) {
+        return name;
+      }
+    }
+    return 'spec.json';
+  }
+
+  /// 四栏目数据装配：文档/源码/元数据都在项目目录里，读盘一次缓存。
+  ///
+  /// 源码只收项目事实源（timeline.json / 规范文件 / video.json），不含
+  /// artifacts 与任何缓存；单个文件读不出来就不列（不显示半截伪造内容）。
+  _VideoProjectColumns _readProjectColumns(VideoProjectSnapshot project) {
+    final String dir = project.dir;
+    final String specName = _specFileName(project.timeline);
+    final List<WorkbenchSourceFile> sources = <WorkbenchSourceFile>[];
+    for (final String name in <String>[
+      'timeline.json',
+      specName,
+      'video.json',
+    ]) {
+      if (sources.any((WorkbenchSourceFile file) => file.path == name)) {
+        continue;
+      }
+      final String? text = _readProjectText('$dir/$name');
+      if (text != null) {
+        sources.add(WorkbenchSourceFile(path: name, content: text));
+      }
+    }
+    return (
+      docs: _readProjectDocs(dir),
+      sources: sources,
+      videoMeta: _readProjectJson('$dir/video.json'),
+    );
+  }
+
+  /// 项目内人读文档：`docs.md` 优先，其次 `brief.md`；空文件按没有文档。
+  String? _readProjectDocs(String dir) {
+    for (final String name in const <String>['docs.md', 'brief.md']) {
+      final String? text = _readProjectText('$dir/$name');
+      if (text != null) return text;
+    }
+    return null;
+  }
+
+  /// 读项目目录内一个文本文件；缺失/读失败/空白一律 null。
+  String? _readProjectText(String path) {
+    final File file = File(path);
+    if (!file.existsSync()) return null;
+    try {
+      final String text = file.readAsStringSync();
+      return text.trim().isEmpty ? null : text;
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  /// 读项目目录内一个 JSON 对象；缺失/坏格式/根不是对象一律 null。
+  Object? _readProjectJson(String path) {
+    final String? text = _readProjectText(path);
+    if (text == null) return null;
+    try {
+      final Object? decoded = jsonDecode(text);
+      return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 导演台镜头表：按文档实例缓存（时间线不变就不重新投影）。
@@ -931,6 +1126,9 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
               clip: clip,
               host: store.capabilities.platform,
               playback: _injectedClipPlayback,
+              // 从其它栏目切回呈现效果时按离开时的位置载入（不回到片头，
+              // 也不假装还在播——页面以暂停态打开）。
+              initialTime: _clipResumeSeconds > 0 ? _clipResumeSeconds : null,
               onPlaybackChanged: _onClipPlayback,
             ),
           ),
