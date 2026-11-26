@@ -506,6 +506,7 @@ class AquaSegmentedTabs extends StatelessWidget {
     required this.selectedIndex,
     required this.onSelected,
     this.icons,
+    this.itemKeys,
     this.height = 30,
     this.compact = false,
   });
@@ -514,6 +515,12 @@ class AquaSegmentedTabs extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onSelected;
   final List<IconData>? icons;
+
+  /// 每个页签的稳定 Key（可选）。调用方若原本对每个 tab 暴露了 Key
+  /// （如 `music-view-staff` / `three-view-front`），必须在这里透传，
+  /// 否则浅色（Aqua）分支会比深色分支少一层可测试/可自动化的契约。
+  final List<Key>? itemKeys;
+
   final double height;
   final bool compact;
 
@@ -545,12 +552,17 @@ class AquaSegmentedTabs extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             for (int i = 0; i < labels.length; i++)
-              _AquaTabButton(
-                label: labels[i],
-                icon: icons != null && i < icons!.length ? icons![i] : null,
-                selected: i == selectedIndex,
-                compact: compact,
-                onTap: () => onSelected(i),
+              KeyedSubtree(
+                key: itemKeys != null && i < itemKeys!.length
+                    ? itemKeys![i]
+                    : null,
+                child: _AquaTabButton(
+                  label: labels[i],
+                  icon: icons != null && i < icons!.length ? icons![i] : null,
+                  selected: i == selectedIndex,
+                  compact: compact,
+                  onTap: () => onSelected(i),
+                ),
               ),
           ],
         ),

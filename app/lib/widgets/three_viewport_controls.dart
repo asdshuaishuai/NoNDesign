@@ -13,6 +13,7 @@ library;
 import 'package:material_ui/material_ui.dart';
 
 import '../core/theme.dart';
+import 'aqua.dart';
 
 /// 视口视角预设；[id] 与预览页 `window.__non3d_view(preset)` 的入参一一对应。
 enum ThreeViewPreset {
@@ -61,6 +62,9 @@ class ThreeViewportControls extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final color = enabled ? p.ink2 : p.ink4;
+    // 浅色（Aqua）：浮层走白面 + 发丝线 + 软阴影；视角预设换成分段胶囊，
+    // 网格/重置换成白面圆钮。深色保持原 Material 浮层。
+    if (isAquaTheme(context)) return _buildAqua(p, color);
     return Material(
       key: const ValueKey('three-viewport-controls'),
       color: p.panel.withValues(alpha: 0.9),
@@ -107,6 +111,83 @@ class ThreeViewportControls extends StatelessWidget {
               active: false,
               tooltip: enabled ? '重置到初始视角' : disabledHint,
               onTap: onReset,
+            ),
+            const SizedBox(width: NonSpace.xs),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 浅色（Aqua）浮层：白面 + 发丝线 + 软阴影（静态，无动画）。
+  ///
+  /// 视角预设用 [AquaSegmentedTabs]（三个预设是命令按钮，没有持久选中项，
+  /// 所以 [AquaSegmentedTabs.selectedIndex] 传 -1；禁用时整体降透明并用
+  /// [disabledHint] 说明原因）；网格/重置用 [AquaToolIcon]，Key 挂在圆钮上。
+  Widget _buildAqua(NonPalette p, Color color) {
+    final Widget presets = Opacity(
+      opacity: enabled ? 1.0 : 0.45,
+      child: AquaSegmentedTabs(
+        labels: <String>[
+          for (final ThreeViewPreset preset in ThreeViewPreset.values)
+            preset.label,
+        ],
+        // per-tab Key 透传：浅色分支与深色分支保持同一套 Key 契约。
+        itemKeys: <Key>[
+          for (final ThreeViewPreset preset in ThreeViewPreset.values)
+            ValueKey('three-view-${preset.id}'),
+        ],
+        selectedIndex: -1,
+        height: 26,
+        compact: true,
+        onSelected: (int index) {
+          // 分段控件没有原生禁用态：这里挡回调，保证禁用时零行为。
+          if (!enabled) return;
+          onViewPreset(ThreeViewPreset.values[index]);
+        },
+      ),
+    );
+    return Container(
+      key: const ValueKey('three-viewport-controls'),
+      decoration: BoxDecoration(
+        color: p.panel,
+        borderRadius: BorderRadius.circular(NonRadius.md),
+        border: Border.all(color: p.line),
+        boxShadow: <BoxShadow>[
+          BoxShadow(color: p.line, blurRadius: 8, offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.xxs),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const SizedBox(width: NonSpace.xs),
+            Icon(Icons.open_with, size: 13, color: color),
+            const SizedBox(width: NonSpace.xs),
+            Text(
+              '视角',
+              style: TextStyle(fontSize: NonType.caption, color: color),
+            ),
+            const SizedBox(width: NonSpace.xxs),
+            if (enabled)
+              presets
+            else
+              Tooltip(message: disabledHint, child: presets),
+            _divider(p),
+            AquaToolIcon(
+              key: const ValueKey('three-view-grid'),
+              icon: gridVisible ? Icons.grid_on : Icons.grid_4x4_outlined,
+              tooltip: enabled ? (gridVisible ? '隐藏网格' : '显示网格') : disabledHint,
+              selected: gridVisible,
+              onTap: enabled ? () => onGridChanged(!gridVisible) : null,
+            ),
+            const SizedBox(width: NonSpace.xxs),
+            AquaToolIcon(
+              key: const ValueKey('three-view-reset'),
+              icon: Icons.refresh,
+              tooltip: enabled ? '重置到初始视角' : disabledHint,
+              onTap: enabled ? onReset : null,
             ),
             const SizedBox(width: NonSpace.xs),
           ],

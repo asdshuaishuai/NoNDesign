@@ -39,6 +39,7 @@ import '../core/toast_service.dart';
 import '../core/video_clip.dart';
 import '../core/video_project.dart';
 import '../core/video_service.dart';
+import 'aqua.dart';
 import 'video_animation_surface.dart';
 import 'video_clip_surface.dart';
 import 'video_workbench_panels.dart';
@@ -984,11 +985,23 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   /// 宽度不够时（手机），低频动作进 ⋯ 菜单；示例与对照状态始终可见。
   Widget _header(BuildContext context, {required String? artifact}) {
     final p = context.palette;
+    // 浅色（Aqua）：工具条白面 + 发丝线 + 深色软阴影（静态装饰，不影响布局测量）；
+    // 深色保持原底。
+    final bool aqua = isAquaTheme(context);
     return Container(
       height: 46,
       decoration: BoxDecoration(
-        color: p.bgElevated,
+        color: aqua ? p.panel : p.bgElevated,
         border: Border(bottom: BorderSide(color: p.line)),
+        boxShadow: aqua
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: p.line,
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
       // 窄屏（320 手机/画中画）工具条内容多：水平内边距压到 sm，
       // 保证 1.1x 字号缩放下也不横向溢出。
@@ -1000,17 +1013,36 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
           final showTitle = width >= 560;
           return Row(
             children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back, size: 18),
-                tooltip: '返回主页',
-                color: p.ink2,
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                // 视频是独立工作区：返回的是主页（模块入口），不是某个设计项目
-                // 的画布——工作区之间不互相挂靠。
-                onPressed: () => store.setView('home'),
-              ),
+              if (isAquaTheme(context))
+                // 浅色（Aqua）：裸 IconButton 换 AquaToolIcon 白面圆钮；槽位
+                // 固定 40（与 IconButton 实测同尺寸），工具条测量尺寸不变。
+                SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Center(
+                    child: AquaToolIcon(
+                      icon: Icons.arrow_back,
+                      tooltip: '返回主页',
+                      size: 28,
+                      onTap: () => store.setView('home'),
+                    ),
+                  ),
+                )
+              else
+                IconButton(
+                  icon: const Icon(Icons.arrow_back, size: 18),
+                  tooltip: '返回主页',
+                  color: p.ink2,
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                  // 视频是独立工作区：返回的是主页（模块入口），不是某个设计项目
+                  // 的画布——工作区之间不互相挂靠。
+                  onPressed: () => store.setView('home'),
+                ),
               if (artifact != null) ...[
                 const SizedBox(width: NonSpace.xxs),
                 Icon(Icons.movie_outlined, size: 17, color: p.accent),

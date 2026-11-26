@@ -1629,13 +1629,24 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     final showToggles =
         layout.left == PanelPolicy.docked || layout.right == PanelPolicy.docked;
     if (!showToggles) return const SizedBox.shrink();
+    // 浅色（Aqua）：工具条白面 + 发丝线 + 软阴影；深色保持原半透明底。
+    final bool aqua = isAquaTheme(context);
     return Container(
       key: const ValueKey('three-workbench-toolstrip'),
       height: 32,
       padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
       decoration: BoxDecoration(
-        color: p.bgElevated.withValues(alpha: 0.6),
+        color: aqua ? p.panel : p.bgElevated.withValues(alpha: 0.6),
         border: Border(bottom: BorderSide(color: p.line)),
+        boxShadow: aqua
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: p.line,
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
       child: Row(
         children: <Widget>[
@@ -1672,6 +1683,18 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     required VoidCallback onTap,
   }) {
     final p = context.palette;
+    // 浅色（Aqua）：工具条图标动作换白面圆钮（选中态 = 糖果凝胶），Key 挂在
+    // 圆钮上保留既有 key；文案移到 tooltip（与深色按钮同词）。深色仍用
+    // TextButton.icon（可见标签）。
+    if (isAquaTheme(context)) {
+      return AquaToolIcon(
+        key: key,
+        icon: icon,
+        tooltip: label,
+        selected: active,
+        onTap: onTap,
+      );
+    }
     return TextButton.icon(
       key: key,
       onPressed: onTap,
@@ -1844,9 +1867,21 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     required bool phone,
     required bool padPortrait,
   }) {
+    // 浅色（Aqua）：白面 + 发丝线 + 深色软阴影（静态，无动画）；深色保持原装饰。
+    final bool aqua = isAquaTheme(context);
     final decoration = BoxDecoration(
-      color: p.bgElevated,
+      color: aqua ? p.panel : p.bgElevated,
       border: Border(bottom: BorderSide(color: p.line)),
+      boxShadow: aqua
+          ? <BoxShadow>[
+              // 阴影色取调色板发丝线（不手抄 Aqua 蓝），只做极轻的窗口投影。
+              BoxShadow(
+                color: p.line,
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ]
+          : null,
     );
     if (phone) {
       return Container(
@@ -1940,14 +1975,29 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     );
   }
 
-  Widget _backButton(NonPalette p) => IconButton(
-    icon: const Icon(Icons.arrow_back, size: 18),
-    tooltip: '返回主页',
-    color: p.ink2,
-    visualDensity: VisualDensity.compact,
-    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-    onPressed: () => store.setView('home'),
-  );
+  Widget _backButton(NonPalette p) => isAquaTheme(context)
+      // 浅色（Aqua）：裸 IconButton 换成 AquaToolIcon 白面圆钮。槽位固定 40
+      // （与 IconButton 实测同宽/同高），确保工具条测量尺寸不变。
+      ? SizedBox(
+          width: 40,
+          height: 40,
+          child: Center(
+            child: AquaToolIcon(
+              icon: Icons.arrow_back,
+              tooltip: '返回主页',
+              size: 28,
+              onTap: () => store.setView('home'),
+            ),
+          ),
+        )
+      : IconButton(
+          icon: const Icon(Icons.arrow_back, size: 18),
+          tooltip: '返回主页',
+          color: p.ink2,
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          onPressed: () => store.setView('home'),
+        );
 
   List<Widget> _titleBits(NonPalette p, double maxWidth) => [
     const SizedBox(width: NonSpace.xs),
@@ -2072,19 +2122,63 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       ),
   ];
 
-  List<Widget> _faceActions(NonPalette p) => [
-    for (final face in const [
-      ('preview', '预览', Icons.visibility_outlined),
-      ('source', '源码', Icons.code_outlined),
-      ('spec', '规范', Icons.rule_outlined),
-    ])
-      _TopBtn(
-        icon: face.$3,
-        label: face.$2,
-        active: _face == face.$1,
-        onTap: _project == null ? null : () => setState(() => _face = face.$1),
-      ),
-  ];
+  List<Widget> _faceActions(NonPalette p) {
+    if (isAquaTheme(context)) {
+      // 浅色（Aqua）：内容面切换（预览/源码/规范）是真正的分段选择，用
+      // AquaSegmentedTabs；无项目时与旧按钮一致不可切换——分段控件没有原生
+      // 禁用态，这里降透明 + 挡回调（不新增动画）。
+      final bool faceEnabled = _project != null;
+      final int index = _face == 'source'
+          ? 1
+          : _face == 'spec'
+          ? 2
+          : 0;
+      return <Widget>[
+        Padding(
+          padding: const EdgeInsets.only(left: NonSpace.sm),
+          child: Opacity(
+            opacity: faceEnabled ? 1.0 : 0.45,
+            child: AquaSegmentedTabs(
+              labels: const <String>['预览', '源码', '规范'],
+              icons: const <IconData>[
+                Icons.visibility_outlined,
+                Icons.code_outlined,
+                Icons.rule_outlined,
+              ],
+              selectedIndex: index,
+              height: 30,
+              compact: true,
+              onSelected: (int selected) {
+                if (!faceEnabled) return;
+                setState(
+                  () => _face = const <String>[
+                    'preview',
+                    'source',
+                    'spec',
+                  ][selected],
+                );
+              },
+            ),
+          ),
+        ),
+      ];
+    }
+    return [
+      for (final face in const [
+        ('preview', '预览', Icons.visibility_outlined),
+        ('source', '源码', Icons.code_outlined),
+        ('spec', '规范', Icons.rule_outlined),
+      ])
+        _TopBtn(
+          icon: face.$3,
+          label: face.$2,
+          active: _face == face.$1,
+          onTap: _project == null
+              ? null
+              : () => setState(() => _face = face.$1),
+        ),
+    ];
+  }
 
   Widget _menuButton(
     BuildContext context,

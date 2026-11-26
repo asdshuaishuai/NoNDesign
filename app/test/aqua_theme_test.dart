@@ -191,6 +191,35 @@ void main() {
     expect(find.byType(AquaGelSurface), findsOneWidget);
   });
 
+  testWidgets('AquaSegmentedTabs 透传 per-tab Key（浅色分支的测试契约不丢）', (
+    WidgetTester tester,
+  ) async {
+    const List<Key> itemKeys = <Key>[
+      ValueKey('aqua-tab-present'),
+      ValueKey('aqua-tab-docs'),
+      ValueKey('aqua-tab-spec'),
+      ValueKey('aqua-tab-source'),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.build(dark: false),
+        home: Scaffold(
+          body: Center(
+            child: AquaSegmentedTabs(
+              labels: const <String>['呈现效果', '文档', '规范', '源码'],
+              selectedIndex: 0,
+              itemKeys: itemKeys,
+              onSelected: (int _) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    for (final Key k in itemKeys) {
+      expect(find.byKey(k), findsOneWidget, reason: '页签 Key 必须透传: $k');
+    }
+  });
+
   testWidgets('AquaToolIcon：可点/禁用/选中态', (WidgetTester tester) async {
     int taps = 0;
     await tester.pumpWidget(

@@ -28,6 +28,7 @@ import '../core/video3d/video3d_compile.dart';
 import '../core/video3d/video3d_contract.dart';
 import '../core/video3d/video3d_project.dart';
 import '../core/workbench_layout.dart';
+import 'aqua.dart';
 import 'common.dart';
 import 'video3d_preview_surface.dart';
 import 'video_workbench_panels.dart';
@@ -404,16 +405,49 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     );
   }
 
+  /// 浅色（Aqua）头部的工具圆钮：40×40 槽位（与既有 IconButton 实测同尺寸），
+  /// 内部 28px 白面圆钮。Key 挂在 [AquaToolIcon] 上以保留既有 Key。
+  Widget _aquaHeaderTool({
+    required Key key,
+    required IconData icon,
+    required String tooltip,
+    VoidCallback? onTap,
+  }) => SizedBox(
+    width: 40,
+    height: 40,
+    child: Center(
+      child: AquaToolIcon(
+        key: key,
+        icon: icon,
+        tooltip: tooltip,
+        size: 28,
+        onTap: onTap,
+      ),
+    ),
+  );
+
   Widget _header(NonPalette p, WorkbenchLayout layout) {
     final String title = _snapshot?.name ?? _name ?? '';
     final bool? verified = _snapshot?.verified;
+    // 浅色（Aqua）：工具条白面 + 发丝线 + 深色软阴影（静态，不参与布局测量）；
+    // 深色保持原底。
+    final bool aqua = isAquaTheme(context);
     return Container(
       key: const ValueKey('video3d-header'),
       height: 46,
       padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
       decoration: BoxDecoration(
-        color: p.bgElevated,
+        color: aqua ? p.panel : p.bgElevated,
         border: Border(bottom: BorderSide(color: p.line)),
+        boxShadow: aqua
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: p.line,
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
       child: Row(
         children: <Widget>[
@@ -493,22 +527,37 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
                 ),
               ),
             ),
-          IconButton(
-            key: const ValueKey('video3d-new-project-header'),
-            tooltip: '新建 3D 视频',
-            onPressed: () => unawaited(_createProject()),
-            iconSize: 16,
-            visualDensity: VisualDensity.compact,
-            icon: Icon(Icons.add, color: p.ink3),
-          ),
-          IconButton(
-            key: const ValueKey('video3d-refresh'),
-            tooltip: '刷新 3D 视频项目',
-            onPressed: _loading ? null : _refresh,
-            iconSize: 16,
-            visualDensity: VisualDensity.compact,
-            icon: Icon(Icons.refresh, color: p.ink3),
-          ),
+          if (isAquaTheme(context)) ...[
+            _aquaHeaderTool(
+              key: const ValueKey('video3d-new-project-header'),
+              icon: Icons.add,
+              tooltip: '新建 3D 视频',
+              onTap: () => unawaited(_createProject()),
+            ),
+            _aquaHeaderTool(
+              key: const ValueKey('video3d-refresh'),
+              icon: Icons.refresh,
+              tooltip: '刷新 3D 视频项目',
+              onTap: _loading ? null : _refresh,
+            ),
+          ] else ...[
+            IconButton(
+              key: const ValueKey('video3d-new-project-header'),
+              tooltip: '新建 3D 视频',
+              onPressed: () => unawaited(_createProject()),
+              iconSize: 16,
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.add, color: p.ink3),
+            ),
+            IconButton(
+              key: const ValueKey('video3d-refresh'),
+              tooltip: '刷新 3D 视频项目',
+              onPressed: _loading ? null : _refresh,
+              iconSize: 16,
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.refresh, color: p.ink3),
+            ),
+          ],
         ],
       ),
     );

@@ -21,6 +21,7 @@ import '../core/music/music_score.dart';
 import '../core/music/music_staff_edit.dart';
 import '../core/theme.dart';
 import '../core/workbench_layout.dart';
+import 'aqua.dart';
 import 'music_playback_surface.dart';
 import 'music_staff_view.dart';
 import 'music_workbench_panels.dart';
@@ -490,13 +491,25 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
 
   Widget _header(BuildContext context, NonPalette p) {
     final title = _snapshot?.score.title.trim() ?? '';
+    // 浅色（Aqua）：工具条白面 + 发丝线 + 深色软阴影（静态，不参与布局测量）；
+    // 深色保持原底。
+    final bool aqua = isAquaTheme(context);
     return Container(
       key: const ValueKey('music-header'),
       height: 46,
       padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
       decoration: BoxDecoration(
-        color: p.bgElevated,
+        color: aqua ? p.panel : p.bgElevated,
         border: Border(bottom: BorderSide(color: p.line)),
+        boxShadow: aqua
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: p.line,
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
       child: Row(
         children: <Widget>[
@@ -526,14 +539,31 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
               style: TextStyle(fontSize: NonType.micro, color: p.warn),
             ),
           const SizedBox(width: NonSpace.sm),
-          IconButton(
-            key: const ValueKey('music-refresh'),
-            tooltip: '刷新音乐项目',
-            onPressed: _loading ? null : _refresh,
-            iconSize: 16,
-            visualDensity: VisualDensity.compact,
-            icon: Icon(Icons.refresh, color: p.ink3),
-          ),
+          if (isAquaTheme(context))
+            // 浅色（Aqua）：裸 IconButton 换 AquaToolIcon；40×40 槽位与实测
+            // IconButton 同尺寸，行测量不变；Key 保留在圆钮上。
+            SizedBox(
+              width: 40,
+              height: 40,
+              child: Center(
+                child: AquaToolIcon(
+                  key: const ValueKey('music-refresh'),
+                  icon: Icons.refresh,
+                  tooltip: '刷新音乐项目',
+                  size: 28,
+                  onTap: _loading ? null : _refresh,
+                ),
+              ),
+            )
+          else
+            IconButton(
+              key: const ValueKey('music-refresh'),
+              tooltip: '刷新音乐项目',
+              onPressed: _loading ? null : _refresh,
+              iconSize: 16,
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.refresh, color: p.ink3),
+            ),
         ],
       ),
     );
@@ -658,6 +688,7 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   /// 切换只换显示，不改 snapshot、不重建播放面；两种视图都只读 `score.json`。
   Widget _scorePreview(MusicProjectSnapshot snapshot) {
     final p = context.palette;
+    final bool aqua = isAquaTheme(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -668,27 +699,52 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
           child: Row(
             key: const ValueKey('music-view-toggle'),
             children: <Widget>[
-              _MusicViewTab(
-                key: const ValueKey('music-view-staff'),
-                label: '五线谱',
-                icon: Icons.music_note_outlined,
-                selected: _staffView,
-                onTap: () {
-                  if (_staffView) return;
-                  setState(() => _staffView = true);
-                },
-              ),
-              const SizedBox(width: NonSpace.sm),
-              _MusicViewTab(
-                key: const ValueKey('music-view-roll'),
-                label: '钢琴卷帘',
-                icon: Icons.piano_outlined,
-                selected: !_staffView,
-                onTap: () {
-                  if (!_staffView) return;
-                  setState(() => _staffView = false);
-                },
-              ),
+              if (aqua)
+                // 浅色（Aqua）：分段切换用 AquaSegmentedTabs（选中项 = 糖果凝胶）。
+                // 高度 26 与旧切换条实测同高，切换条测量尺寸不变；点击同一项
+                // 仍是 no-op（与旧按钮的 guard 行为一致）。
+                AquaSegmentedTabs(
+                  labels: const <String>['五线谱', '钢琴卷帘'],
+                  icons: const <IconData>[
+                    Icons.music_note_outlined,
+                    Icons.piano_outlined,
+                  ],
+                  // per-tab Key 透传：浅色分支与深色分支保持同一套 Key 契约。
+                  itemKeys: const <Key>[
+                    ValueKey('music-view-staff'),
+                    ValueKey('music-view-roll'),
+                  ],
+                  selectedIndex: _staffView ? 0 : 1,
+                  height: 26,
+                  onSelected: (int index) {
+                    final bool staff = index == 0;
+                    if (staff == _staffView) return;
+                    setState(() => _staffView = staff);
+                  },
+                )
+              else ...[
+                _MusicViewTab(
+                  key: const ValueKey('music-view-staff'),
+                  label: '五线谱',
+                  icon: Icons.music_note_outlined,
+                  selected: _staffView,
+                  onTap: () {
+                    if (_staffView) return;
+                    setState(() => _staffView = true);
+                  },
+                ),
+                const SizedBox(width: NonSpace.sm),
+                _MusicViewTab(
+                  key: const ValueKey('music-view-roll'),
+                  label: '钢琴卷帘',
+                  icon: Icons.piano_outlined,
+                  selected: !_staffView,
+                  onTap: () {
+                    if (!_staffView) return;
+                    setState(() => _staffView = false);
+                  },
+                ),
+              ],
               const Spacer(),
               Flexible(
                 child: Text(
