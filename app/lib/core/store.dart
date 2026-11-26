@@ -1,4 +1,6 @@
 import 'dart:async';
+
+import 'inspect/check_field.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -272,6 +274,19 @@ class AppStore extends ChangeNotifier {
   RenderEnvelope? previewRender;
   String? activeBoard;
   String? selectedNode;
+
+  /// 当前工作台注册的「检查」控制器（选中元素 → 可编辑属性表）。
+  ///
+  /// 由工作台在挂载/选中变化时 `setCheckController(this)` 注册，卸载时置 null；
+  /// 右侧检查 tab 只读它，不持有项目事实源（写回仍由工作台负责）。
+  WorkbenchCheckController? checkController;
+
+  /// 注册/清空检查控制器（不 dispose——所有权在工作台）。
+  void setCheckController(WorkbenchCheckController? controller) {
+    if (checkController == controller) return;
+    checkController = controller;
+    notifyListeners();
+  }
   String? clipboardNodeId;
   List<String> selectedNodes = const [];
   String view = 'design';

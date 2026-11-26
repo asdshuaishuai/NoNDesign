@@ -21,6 +21,8 @@ import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/video_clip.dart';
 import '../core/video_samples.dart';
+import '../core/inspect/check_field.dart';
+import 'check_panel.dart';
 import 'common.dart';
 // Inspector / AgentPanel 是 right_panel.dart 的 part——只能经库入口导入。
 import 'right_panel.dart';
@@ -58,6 +60,18 @@ class WorkspaceInspector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
+    // 工作台注册了可编辑检查控制器时，检查 tab 直接渲染通用属性表
+    // （选中元素 → 属性 → 写回由工作台负责）；否则回落到各视图的只读摘要。
+    final WorkbenchCheckController? check = store.checkController;
+    if (check != null) {
+      return KeyedSubtree(
+        key: const ValueKey('workspace-inspector'),
+        child: KeyedSubtree(
+          key: const ValueKey('wi-check-panel'),
+          child: CheckPanel(controller: check),
+        ),
+      );
+    }
     final (String branchKey, Widget branch) = switch (store.view) {
       'plugin:three' => ('wi-three', const _ThreeInspector()),
       'plugin:video' => ('wi-video', const _VideoInspector()),
