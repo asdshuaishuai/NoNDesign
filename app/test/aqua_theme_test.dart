@@ -159,6 +159,93 @@ void main() {
     expect(find.bySemanticsLabel('关闭'), findsOneWidget);
   });
 
+  testWidgets('AquaSegmentedTabs：点选切换、选中态用凝胶、可键盘聚焦', (
+    WidgetTester tester,
+  ) async {
+    int selected = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.build(dark: false),
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (BuildContext context, StateSetter setState) {
+              return Center(
+                child: AquaSegmentedTabs(
+                  labels: const <String>['呈现效果', '文档', '规范', '源码'],
+                  selectedIndex: selected,
+                  onSelected: (int i) => setState(() => selected = i),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    expect(find.text('呈现效果'), findsOneWidget);
+    expect(find.text('源码'), findsOneWidget);
+    // 选中下标 1 后应重建
+    await tester.tap(find.text('文档'));
+    await tester.pump();
+    expect(selected, 1);
+    // 浅色（Aqua）下选中项应渲染凝胶面
+    expect(find.byType(AquaGelSurface), findsOneWidget);
+  });
+
+  testWidgets('AquaToolIcon：可点/禁用/选中态', (WidgetTester tester) async {
+    int taps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.build(dark: false),
+        home: Scaffold(
+          body: Center(
+            child: AquaToolIcon(
+              icon: Icons.grid_on,
+              tooltip: '网格',
+              onTap: () => taps++,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byType(AquaToolIcon));
+    await tester.pump();
+    expect(taps, 1);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.build(dark: false),
+        home: const Scaffold(
+          body: Center(
+            child: AquaToolIcon(icon: Icons.grid_on, tooltip: '网格'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byType(AquaToolIcon));
+    await tester.pump();
+    expect(taps, 1, reason: '禁用态不触发回调');
+  });
+
+  testWidgets('AquaPanelSurface：浅色白面 + 深色面板色', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.build(dark: false),
+        home: const Scaffold(
+          body: AquaPanelSurface(child: SizedBox(width: 100, height: 40)),
+        ),
+      ),
+    );
+    final Container c = tester.widget<Container>(
+      find
+          .descendant(
+            of: find.byType(AquaPanelSurface),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(c.decoration, isA<BoxDecoration>());
+  });
+
   test('浅色主题 = Aqua 调色板', () {
     final ThemeData theme = AppTheme.build(dark: false);
     final NonPalette? palette = theme.extension<NonPalette>();

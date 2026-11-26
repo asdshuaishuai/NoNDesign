@@ -494,3 +494,265 @@ abstract final class AquaMetrics {
     return (hi + 0.05) / (lo + 0.05);
   }
 }
+
+/// Aqua 分段胶囊页签（四栏目/工作台内切换用）。
+///
+/// 选中项 = 糖果凝胶（水蓝渐变 + 顶部高光）；未选中 = 白面 + 发丝线。
+/// 键盘可达：每个 tab 是 [InkWell] 且带 Semantics；焦点态用 2px 亮环。
+class AquaSegmentedTabs extends StatelessWidget {
+  const AquaSegmentedTabs({
+    super.key,
+    required this.labels,
+    required this.selectedIndex,
+    required this.onSelected,
+    this.icons,
+    this.height = 30,
+    this.compact = false,
+  });
+
+  final List<String> labels;
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+  final List<IconData>? icons;
+  final double height;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final NonPalette p = context.palette;
+    final bool aqua = isAquaTheme(context);
+    return Semantics(
+      container: true,
+      label: '栏目切换',
+      child: Container(
+        height: height,
+        padding: const EdgeInsets.all(NonSpace.xxs),
+        decoration: BoxDecoration(
+          color: aqua ? Colors.white : p.panel2,
+          borderRadius: BorderRadius.circular(NonRadius.lg),
+          border: Border.all(color: p.line),
+          boxShadow: aqua
+              ? const <BoxShadow>[
+                  BoxShadow(
+                    color: Color(0x1A123B7A),
+                    blurRadius: 4,
+                    offset: Offset(0, 1),
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            for (int i = 0; i < labels.length; i++)
+              _AquaTabButton(
+                label: labels[i],
+                icon: icons != null && i < icons!.length ? icons![i] : null,
+                selected: i == selectedIndex,
+                compact: compact,
+                onTap: () => onSelected(i),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AquaTabButton extends StatelessWidget {
+  const _AquaTabButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    required this.compact,
+    this.icon,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final bool compact;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final NonPalette p = context.palette;
+    final bool aqua = isAquaTheme(context);
+    final Widget body = Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? NonSpace.sm : NonSpace.md,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (icon != null) ...<Widget>[
+            Icon(
+              icon,
+              size: NonType.caption,
+              color: selected ? Colors.white : p.ink3,
+            ),
+            const SizedBox(width: NonSpace.xs),
+          ],
+          Text(
+            label,
+            style:
+                NonType.of(
+                  NonType.body,
+                  color: selected ? Colors.white : p.ink2,
+                  weight: selected ? FontWeight.w600 : FontWeight.w500,
+                ).copyWith(
+                  shadows: selected
+                      ? const <Shadow>[
+                          Shadow(
+                            color: Color(0x59001847),
+                            blurRadius: 1,
+                            offset: Offset(0, 1),
+                          ),
+                        ]
+                      : null,
+                ),
+          ),
+        ],
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(right: NonSpace.xxs),
+      child: Semantics(
+        selected: selected,
+        button: true,
+        label: label,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(NonRadius.md),
+          onTap: onTap,
+          child: selected && aqua
+              ? AquaGelSurface(
+                  radius: NonRadius.md,
+                  padding: EdgeInsets.zero,
+                  child: body,
+                )
+              : Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(NonRadius.md),
+                    color: selected ? p.accentSoft : Colors.transparent,
+                  ),
+                  child: body,
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Aqua 工具条圆钮：白面 + 发丝线 + 柔和内高光；hover/焦点可见，禁用降透明。
+///
+/// 用于工作台顶部工具条的高频动作（替代裸 `IconButton` 的默认观感）。
+class AquaToolIcon extends StatelessWidget {
+  const AquaToolIcon({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    this.onTap,
+    this.size = 28,
+    this.selected = false,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+  final double size;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final NonPalette p = context.palette;
+    final bool aqua = isAquaTheme(context);
+    final bool enabled = onTap != null;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: tooltip,
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(size / 2),
+          onTap: onTap,
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: selected
+                  ? (aqua ? null : p.accentSoft)
+                  : (aqua ? Colors.white : Colors.transparent),
+              gradient: selected && aqua
+                  ? const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: <Color>[
+                        NonPalette.aquaGelTop,
+                        NonPalette.aquaGelBottom,
+                      ],
+                    )
+                  : null,
+              border: aqua ? Border.all(color: p.line) : null,
+              boxShadow: aqua && enabled
+                  ? const <BoxShadow>[
+                      BoxShadow(
+                        color: Color(0x1A123B7A),
+                        blurRadius: 3,
+                        offset: Offset(0, 1),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Icon(
+              icon,
+              size: NonType.bodyStrong,
+              color: selected
+                  ? (aqua ? Colors.white : p.accent)
+                  : (enabled ? p.ink2 : p.ink4),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Aqua 白面面板：白底 + 发丝线 + 柔和外阴影（浅色主题）/ 现有面板色（深色）。
+class AquaPanelSurface extends StatelessWidget {
+  const AquaPanelSurface({
+    super.key,
+    required this.child,
+    this.radius = NonRadius.md,
+    this.padding = const EdgeInsets.all(NonSpace.md),
+  });
+
+  final Widget child;
+  final double radius;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final NonPalette p = context.palette;
+    final bool aqua = isAquaTheme(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: aqua ? Colors.white : p.panel,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: p.line),
+        boxShadow: aqua
+            ? const <BoxShadow>[
+                BoxShadow(
+                  color: Color(0x14123B7A),
+                  blurRadius: 8,
+                  offset: Offset(0, 2),
+                ),
+              ]
+            : null,
+      ),
+      child: Padding(padding: padding, child: child),
+    );
+  }
+}

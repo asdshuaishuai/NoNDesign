@@ -46,26 +46,30 @@ class NonPalette extends ThemeExtension<NonPalette> {
     required this.canvasDot,
   });
 
+  /// 深色主题（2026-11-26 活力化）：抬亮层级 + 提饱和强调色。
+  ///
+  /// 用户反馈"现在太暗"：整条明度阶整体上抬约 8–10 个 L 值，让层级靠明度而不是
+  /// 靠黑影；accent 从偏灰的 #7C8CFF 换成更饱和的 #5B8CFF，accent2 同步提亮。
   static const dark = NonPalette(
-    bg: Color(0xFF08090C),
-    bgElevated: Color(0xFF0C0E13),
-    panel: Color(0xFF11141B),
-    panel2: Color(0xFF171B24),
-    panel3: Color(0xFF1D222D),
-    line: Color(0x14FFFFFF),
-    lineStrong: Color(0x24FFFFFF),
-    ink: Color(0xFFECEEF5),
-    ink2: Color(0xFFA6ADBD),
-    ink3: Color(0xFF8A93A6),
-    ink4: Color(0xFF6B7383),
-    accent: Color(0xFF7C8CFF),
-    accent2: Color(0xFFB58CFF),
-    accentSoft: Color(0x247C8CFF),
-    success: Color(0xFF3DDC97),
-    warn: Color(0xFFFFB020),
-    danger: Color(0xFFFF5C7A),
-    canvas: Color(0xFF0A0B0F),
-    canvasDot: Color(0x0FFFFFFF),
+    bg: Color(0xFF0E1015),
+    bgElevated: Color(0xFF141821),
+    panel: Color(0xFF171B24),
+    panel2: Color(0xFF1D2230),
+    panel3: Color(0xFF252B3A),
+    line: Color(0x1FFFFFFF),
+    lineStrong: Color(0x33FFFFFF),
+    ink: Color(0xFFF0F2F8),
+    ink2: Color(0xFFB3BAC9),
+    ink3: Color(0xFF98A1B3),
+    ink4: Color(0xFF7C8698),
+    accent: Color(0xFF5B8CFF),
+    accent2: Color(0xFFC07BFF),
+    accentSoft: Color(0x2E5B8CFF),
+    success: Color(0xFF34D399),
+    warn: Color(0xFFFFB42D),
+    danger: Color(0xFFFF5F7E),
+    canvas: Color(0xFF0B0E13),
+    canvasDot: Color(0x14FFFFFF),
   );
 
   /// 浅色 = **Aqua**（早期 Mac OS X 设计语言的现代化移植）。
@@ -320,10 +324,12 @@ class AppTheme {
       ),
       // 右键菜单 / PopupMenuButton：统一深色浮层（画布右键、面板菜单共用）。
       popupMenuTheme: PopupMenuThemeData(
-        color: p.panel2,
+        // 用户裁决 2026-11-26：所有下拉列表收缩，不要过度宽泛。
+        // 宽度上限在各菜单构造处统一夹（见 common.dart 的 nonMenuWidthCap）。
+        color: dark ? p.panel2 : Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 14,
-        shadowColor: Colors.black.withValues(alpha: 0.45),
+        shadowColor: Colors.black.withValues(alpha: dark ? 0.45 : 0.18),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
           side: BorderSide(color: p.line.withValues(alpha: 0.6)),
