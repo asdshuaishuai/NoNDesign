@@ -36,6 +36,7 @@ import '../core/capability.dart';
 import '../core/inspect/check_field.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import '../core/workbench_docs.dart';
 import '../core/workbench_layout.dart';
 import '../core/toast_service.dart';
 import '../core/video_clip.dart';
@@ -161,6 +162,9 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
 
   /// 文档栏数据（`docs.md` 优先，其次 `brief.md`；null = 没有文档）。
   String? _docsMarkdown;
+
+  /// 文档生成中：真时文档栏按钮禁用/转圈；结束（成功或失败）都复位。
+  bool _docsGenerating = false;
 
   /// 源码栏数据（项目目录里的 timeline/规范/元数据文件；只读文本树）。
   List<WorkbenchSourceFile> _sourceFiles = const <WorkbenchSourceFile>[];
@@ -383,6 +387,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       // 切项目 = 切内容：四栏目回到呈现效果，旧项目的文档/源码不能带过来。
       _column = WorkbenchColumn.present;
       _docsMarkdown = null;
+      _docsGenerating = false;
       _sourceFiles = const <WorkbenchSourceFile>[];
       _videoMetaJson = null;
     });
@@ -447,6 +452,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       // 其余栏目如实空态，不拿上一个项目的说明冒充这个项目。
       _column = WorkbenchColumn.present;
       _docsMarkdown = null;
+      _docsGenerating = false;
       _sourceFiles = const <WorkbenchSourceFile>[];
       _videoMetaJson = null;
       _review = VideoReviewResult(
@@ -484,6 +490,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     // 内容切走（示例/动效合成）：四栏目回到呈现效果，项目数据不能留在栏目里。
     _column = WorkbenchColumn.present;
     _docsMarkdown = null;
+    _docsGenerating = false;
     _sourceFiles = const <WorkbenchSourceFile>[];
     _videoMetaJson = null;
   }
@@ -1022,6 +1029,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
             column: _column,
             onColumnChanged: _onColumnChanged,
             data: _columnData(),
+            // 文档栏目动作：按项目事实源确定性生成 docs.md；内置示例/产物/坏项目
+            // 没有磁盘事实源 → 不提供入口（null），生成中按钮禁用/转圈。
+            onGenerateDocs: _docsGenerateAction,
+            docsGenerating: _docsGenerating,
             present: Builder(
               builder: (BuildContext context) => _authoringBody(context),
             ),
@@ -1091,6 +1102,98 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       }
     }
     return 'spec.json';
+  }
+
+  // -- 生成文档（文档栏的「生成/重新生成」动作） ----------------------------
+  //
+  // 生成物 = 项目事实源的确定性投影（`core/workbench_docs.dart`，不调模型）：
+  // 视频的摘要 = 标题（video.json）/ 总时长与帧率 / 镜头表（时长 + 分镜说明）。
+  // 只读项目快照与磁盘，不写 timeline/spec/video.json；写盘失败不破坏既有文档。
+  // 只有生成项目有磁盘事实源；内置示例/动效合成/产物播放都没有可写的项目目录，
+  // 不提供入口（文档栏只给可行动空态）。
+
+  /// 「生成文档」动作：没有生成项目或坏项目（读不出快照）时为 null。
+  VoidCallback? get _docsGenerateAction {
+    if (_project == null || _projectName == null) return null;
+    return () => unawaited(_generateDocs());
+  }
+
+  /// 生成/重新生成文档：原子写 `docs.md`（overwrite: true）→ 同步重读刷新
+  /// 文档栏。生成中 [_docsGenerating] 为真（按钮禁用/转圈），无论成功失败都复位。
+  Future<void> _generateDocs() async {
+    if (_docsGenerating) return;
+    final VideoProjectSnapshot? project = _project;
+    final String? name = _projectName;
+    if (!mounted || project == null || name == null) return;
+    setState(() => _docsGenerating = true);
+    final Directory projectDir = Directory(project.dir);
+    String? docs;
+    bool failed = false;
+    try {
+      final File? written = await writeWorkbenchDoc(
+        projectDir: projectDir,
+        kind: 'video',
+        name: name,
+        title: project.title,
+        summary: _docsSummaryOf(project),
+        overwrite: true,
+      );
+      if (written == null) {
+        failed = true;
+      } else {
+        // 重读刚写出的 docs.md（与栏目同一读盘口径：同步读，widget 测试下
+        // 不需要额外等一次真实异步 IO）。
+        docs = _readProjectDocs(projectDir.path);
+        if (docs == null) failed = true;
+      }
+    } catch (_) {
+      failed = true;
+    }
+    if (!mounted) return;
+    setState(() {
+      _docsGenerating = false;
+      if (!failed && _projectName == name) _docsMarkdown = docs;
+    });
+    // 生成期间切了项目：这次结果只属于原项目，提示不能落到新项目上。
+    if (_projectName != name) return;
+    if (failed) {
+      _toasts.warn('文档没能写入，请重试');
+      return;
+    }
+    _toasts.success('文档已生成');
+  }
+
+  /// 文档生成器要的人话摘要（只读快照/磁盘事实源，字段按 workbench_docs 契约
+  /// 命名）。总时长/帧率取已校验文档（与播放面同一份编译结果）。
+  Map<String, Object?> _docsSummaryOf(VideoProjectSnapshot project) {
+    return <String, Object?>{
+      'title': project.title,
+      'totalSeconds': project.document.totalSeconds,
+      'fps': project.document.fps,
+      'shots': _docsShotsOf(project),
+    };
+  }
+
+  /// 镜头表：一幕一行。时长取时间线场景（结构化事实源）；文本取规范
+  /// `storyboard` 同序号的说明——幕数与说明数一致时才配对，避免张冠李戴；
+  /// 对不上/没有分镜说明时如实留空（生成器渲染「未记录」，不编造）。
+  List<Object?> _docsShotsOf(VideoProjectSnapshot project) {
+    final Object? scenes = project.timeline['scenes'];
+    if (scenes is! List) return const <Object?>[];
+    final Object? rawStoryboard = project.spec['storyboard'];
+    final List<Object?> storyboard = rawStoryboard is List
+        ? rawStoryboard.cast<Object?>()
+        : const <Object?>[];
+    final bool paired = storyboard.length == scenes.length;
+    return <Object?>[
+      for (int i = 0; i < scenes.length; i++)
+        <String, Object?>{
+          'duration': scenes[i] is Map ? (scenes[i] as Map)['duration'] : null,
+          'text': paired && storyboard[i] is Map
+              ? (storyboard[i] as Map)['note']
+              : null,
+        },
+    ];
   }
 
   /// 四栏目数据装配：文档/源码/元数据都在项目目录里，读盘一次缓存。

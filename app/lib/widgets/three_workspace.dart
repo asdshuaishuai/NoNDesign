@@ -37,6 +37,7 @@ import '../core/inspect/check_field.dart';
 import '../core/platform_capabilities.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import '../core/workbench_docs.dart';
 import '../core/workbench_layout.dart';
 import '../core/three_kits.dart';
 import '../core/three_lint.dart';
@@ -114,6 +115,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   WorkbenchColumn _column = WorkbenchColumn.present;
   // 栏目数据缓存：随项目快照一起刷新（不在 build 里读盘，切栏目不读盘）。
   String? _docsMarkdown;
+  // 文档生成中：真时文档栏按钮禁用/转圈；结束（成功或失败）都复位。
+  bool _docsGenerating = false;
   List<WorkbenchSourceFile> _sourceFiles = const <WorkbenchSourceFile>[];
   // UI-2 首批：3D 大纲选中项（只读检查器用；不写事实源）。
   String? _selectedOutlinerId;
@@ -351,6 +354,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       _gridVisible = false;
       _gridUnsupportedNotified = false;
       _docsMarkdown = null;
+      _docsGenerating = false;
       _sourceFiles = const <WorkbenchSourceFile>[];
       _selectedOutlinerId = null;
       // 项目边界复位规范编辑守卫：A 项目未保存的编辑不能带进 B；B 自己的
@@ -697,6 +701,92 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       return '第 $round 轮「$layer」 · 已阻塞 · 通过 $passed/$total';
     }
     return '第 $round 轮「$layer」 · 通过 $passed/$total';
+  }
+
+  // -- 生成文档（文档栏的「生成/重新生成」动作） ----------------------------
+  //
+  // 生成物 = 项目事实源的确定性投影（`core/workbench_docs.dart`，不调模型）：
+  // 3D 场景的摘要 = 组件清单 / 验收项 / 分层进度（当前层 + 各层状态）。
+  // 只读快照与磁盘，不改写规范/进度；写盘失败不破坏既有 docs.md。
+
+  /// 「生成文档」动作：无项目或坏项目（读不出快照）时为 null（不显示入口）。
+  VoidCallback? get _docsGenerateAction {
+    if (_snapshot == null || _project == null) return null;
+    return () => unawaited(_generateDocs());
+  }
+
+  /// 为当前项目原子写 `docs.md`（overwrite: true，可反复重新生成），成功后
+  /// 同步重读文档栏并提示；失败给人话提示并保留原文档。
+  Future<void> _generateDocs() async {
+    final ThreeProjectSnapshot? snapshot = _snapshot;
+    final String? project = _project;
+    if (!mounted || snapshot == null || project == null || _docsGenerating) {
+      return;
+    }
+    setState(() => _docsGenerating = true);
+    final Directory projectDir = Directory(snapshot.dir);
+    String? docs;
+    bool failed = false;
+    try {
+      final File? written = await writeWorkbenchDoc(
+        projectDir: projectDir,
+        kind: 'three',
+        name: snapshot.name,
+        title: _docsTitleOf(snapshot),
+        summary: _docsSummaryOf(snapshot),
+        overwrite: true,
+      );
+      if (written == null) {
+        failed = true;
+      } else {
+        // 重读刚写出的 docs.md（与栏目同一读盘口径：同步读，widget 测试下
+        // 不需要额外等一次真实异步 IO）。
+        docs = _readDocs(projectDir.path);
+        if (docs == null) failed = true;
+      }
+    } catch (_) {
+      failed = true;
+    }
+    if (!mounted) return;
+    setState(() {
+      _docsGenerating = false;
+      if (!failed && _project == project) _docsMarkdown = docs;
+    });
+    // 生成期间切了项目：这次结果只属于原项目，提示不能落到新项目上。
+    if (_project != project) return;
+    if (failed) {
+      _toasts.warn('文档没能写入，请重试');
+      return;
+    }
+    _toasts.success('文档已生成');
+  }
+
+  /// 文档标题：规范里的 `title` 优先，其次项目名（与检查器同一口径）。
+  String _docsTitleOf(ThreeProjectSnapshot snapshot) {
+    final Object? raw = snapshot.spec['title'];
+    if (raw is String) {
+      final String trimmed = raw.trim();
+      if (trimmed.isNotEmpty) return trimmed;
+    }
+    return snapshot.name;
+  }
+
+  /// 文档生成器要的人话摘要（只读快照/进度，字段按 workbench_docs 契约命名）。
+  Map<String, Object?> _docsSummaryOf(ThreeProjectSnapshot snapshot) {
+    final Map<String, dynamic> spec = snapshot.spec;
+    return <String, Object?>{
+      'title': _docsTitleOf(snapshot),
+      // 组件/验收项形状不对时按空列表，生成器会如实写「暂无」，不编造。
+      'components': spec['components'] is List
+          ? spec['components']
+          : const <Object?>[],
+      'acceptance': spec['acceptance'] is List
+          ? spec['acceptance']
+          : const <Object?>[],
+      // 进度原样给状态机权威（生成器只读 id/status/label/name 四个 key）。
+      'passes': snapshot.passes,
+      'current': snapshot.current,
+    };
   }
 
   /// 错误横幅 + 一条可读提示。相同错误去重（桥反馈每条都跟一次刷新，
@@ -1540,6 +1630,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       _loadError = '';
       _loadDetail = '';
       _docsMarkdown = null;
+      _docsGenerating = false;
       _sourceFiles = const <WorkbenchSourceFile>[];
       // 项目边界：旧项目的选中条目不能带进新项目。
       _selectedOutlinerId = null;
@@ -1614,6 +1705,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _lastError = '';
           _column = WorkbenchColumn.present;
           _docsMarkdown = null;
+          _docsGenerating = false;
           _sourceFiles = const <WorkbenchSourceFile>[];
           _selectedOutlinerId = null;
         });
@@ -1971,6 +2063,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
                   setState(() => _column = column);
                 },
                 data: _columnData(),
+                // 文档由项目事实源确定式生成（core/workbench_docs.dart）；无项目
+                // 或坏项目时不显示入口，生成中禁用并显示忙碌标签。
+                onGenerateDocs: _docsGenerateAction,
+                docsGenerating: _docsGenerating,
                 present: Builder(
                   builder: (BuildContext context) =>
                       _presentPane(context, p, layout: layout),
