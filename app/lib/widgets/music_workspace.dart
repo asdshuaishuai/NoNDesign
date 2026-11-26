@@ -6,9 +6,17 @@
 /// 出口；**播放面已接线**——有播放计划且校验
 /// 通过时把 [assembleMusicPlayer] 的页面接到 [MusicPlaybackSurface]，底部运输条
 /// 播放/暂停/停止 + 播放头；播放只读，绝不改 `score.json` 事实源。
+///
+/// 2026-11-27 四栏目（用户裁决：所有工作台统一 呈现效果/文档/规范/源码）：
+/// 内容区接入共享 `WorkbenchColumns`。「呈现效果」= 上面这套原有内容面
+/// （谱面/卷帘切换 + 演奏面 + 运输条 + 检查器），行为零改动；文档/规范/源码
+/// 由本工作台从项目目录与快照只读装配（与快照同一拍读盘，切栏目不重复读盘，
+/// 也不构建播放 WebView）。
 library;
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -25,6 +33,7 @@ import 'aqua.dart';
 import 'music_playback_surface.dart';
 import 'music_staff_view.dart';
 import 'music_workbench_panels.dart';
+import 'workbench_views.dart';
 
 /// 跨实例打开通道（与 `threeLoadOnOpen` / `videoLoadOnOpen` 同模式）：
 /// [openMusicWorkspace] 写入项目名，音乐工作台在 initState 消费后清空。
@@ -79,6 +88,17 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   ///
   /// 只影响本实例的显示，不写设置/项目、不改变编辑与播放语义；切项目保留选择。
   bool _staffView = true;
+
+  /// 内容区栏目（2026-11-27 用户裁决的共享四栏目 IA），默认「呈现效果」。
+  ///
+  /// 只换内容区视角：不写项目、不改变编辑与播放语义；切栏目不读盘、不重建
+  /// 播放面（栏目数据与 snapshot 同一拍装配，见 [_columnData]）。
+  WorkbenchColumn _column = WorkbenchColumn.present;
+
+  /// 四栏目数据缓存（只在项目快照变更时刷新一次，build 中绝不读盘）：
+  /// 项目人读文档（`docs.md` / `brief.md`）与只读源码文件树。
+  String? _docsMarkdown;
+  List<WorkbenchSourceFile> _sourceFiles = const <WorkbenchSourceFile>[];
 
   /// 当前播放面控制器；null = 没有可播放的编译产物（按钮禁用并说明原因）。
   MusicPlaybackController? _playback;
@@ -159,6 +179,9 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
       _selectedTrack = 0;
       _selectedEvent = null;
       _staffTapBusy = false;
+      // 项目边界：旧项目的文档/源码不能留在栏目里，等新快照同一拍刷新。
+      _docsMarkdown = null;
+      _sourceFiles = const <WorkbenchSourceFile>[];
     });
     try {
       final snapshot = await _store.read(name);
@@ -183,12 +206,19 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   ///
   /// 有播放计划且校验通过才创建控制器；否则运输条禁用播放并如实说明原因。
   /// 播放只读编译产物，不改 `score.json`。
+  ///
+  /// 四栏目数据在这里与快照同一拍装配：文档/源码来自项目目录，读一次即缓存，
+  /// 之后切栏目只换视图、不再读盘（也不伪造缺失的文档/源码）。
   void _bindSnapshot(MusicProjectSnapshot snapshot) {
     final MusicPlaybackController? next = _createPlayback(snapshot);
     final MusicPlaybackController? previous = _playback;
+    final String? docsMarkdown = _readDocs(snapshot.dir);
+    final List<WorkbenchSourceFile> sourceFiles = _readSourceFiles(snapshot);
     setState(() {
       _snapshot = snapshot;
       _playback = next;
+      _docsMarkdown = docsMarkdown;
+      _sourceFiles = sourceFiles;
     });
     previous?.dispose();
     if (next != null) unawaited(next.start());
@@ -199,6 +229,152 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     if (plan == null || !snapshot.validation.verified) return null;
     final factory = widget.playbackFactory ?? createDefaultMusicPlayback;
     return factory(snapshot.score, plan);
+  }
+
+  // -- 四栏目数据装配 -------------------------------------------------------
+  //
+  // 只读装配（用户裁决 2026-11-27）：文档/规范/源码全部来自项目目录与磁盘
+  // 快照，没有就返回 null/空列表（栏目显示框架的可行动空态），绝不编造内容；
+  // 而且只在快照刷新那一拍读盘，切栏目不重复读盘。
+
+  /// 文档栏目候选文件名（按优先级；空文件不算文档）。
+  static const List<String> _docFileNames = <String>['docs.md', 'brief.md'];
+
+  /// 源码结构里不该出现的目录/路径段（历史、产物、缓存等不属于源码）。
+  static const Set<String> _excludedSourceSegments = <String>{
+    'history',
+    'artifacts',
+    'artifact',
+    'cache',
+    'caches',
+    'build',
+    'node_modules',
+  };
+
+  /// 栏目数据袋：没有快照时只给文档与源码（通常为空），规范不伪造。
+  WorkbenchColumnData _columnData() {
+    final MusicProjectSnapshot? snapshot = _snapshot;
+    if (snapshot == null) {
+      return WorkbenchColumnData(
+        docsMarkdown: _docsMarkdown,
+        sourceFiles: _sourceFiles,
+      );
+    }
+    return WorkbenchColumnData(
+      docsMarkdown: _docsMarkdown,
+      // 规范 = 乐谱的机器可读形态（与 score.json 同一份事实源）。
+      specJson: snapshot.score.toJson(),
+      specSummary: _specSummaryOf(snapshot),
+      sourceFiles: _sourceFiles,
+    );
+  }
+
+  /// 规范栏顶部人话摘要：`校验通过 · N 轨道 / M 小节 / T BPM`；
+  /// 未通过则 `校验未通过 · X 处问题`（问题数取校验问题条数，不隐瞒）。
+  String _specSummaryOf(MusicProjectSnapshot snapshot) {
+    final MusicValidation validation = snapshot.validation;
+    if (!validation.verified) {
+      return '校验未通过 · ${validation.issues.length} 处问题';
+    }
+    final MusicScore score = snapshot.score;
+    return '校验通过 · ${score.tracks.length} 轨道 / '
+        '${score.measureCount} 小节 / ${score.tempo} BPM';
+  }
+
+  /// 项目内人读文档：`docs.md` 优先，其次 `brief.md`；空文件/读不出来按
+  /// 「还没有文档」处理（不把空白当成功）。
+  String? _readDocs(String dir) {
+    for (final String name in _docFileNames) {
+      final File file = File('$dir/$name');
+      if (!file.existsSync()) continue;
+      try {
+        final String text = file.readAsStringSync();
+        if (text.trim().isNotEmpty) return text;
+      } catch (_) {
+        // 读不出来就继续尝试下一个候选；都没有就显示空态。
+      }
+    }
+    return null;
+  }
+
+  /// 只读源码文件树：`score.json` 原文置顶（事实源文本；读不到就用内存快照
+  /// 的规范 JSON），再按真实相对路径列出项目目录里其余可读源码文件；历史/
+  /// 产物/缓存/隐藏项与文档文件不进源码结构。
+  List<WorkbenchSourceFile> _readSourceFiles(MusicProjectSnapshot snapshot) {
+    final String dir = snapshot.dir;
+    final List<WorkbenchSourceFile> files = <WorkbenchSourceFile>[];
+    // 1) score.json 原文优先：源码栏展示的是事实源文件本身，而不是再序列化。
+    String scoreText = '';
+    final File scoreFile = File('$dir/${MusicProjectStore.scoreFile}');
+    if (scoreFile.existsSync()) {
+      try {
+        scoreText = scoreFile.readAsStringSync();
+      } catch (_) {
+        scoreText = '';
+      }
+    }
+    if (scoreText.trim().isEmpty) {
+      scoreText = const JsonEncoder.withIndent('  ')
+          .convert(snapshot.score.toJson());
+    }
+    files.add(
+      WorkbenchSourceFile(
+        path: MusicProjectStore.scoreFile,
+        content: scoreText,
+      ),
+    );
+    // 2) 其余源码文件：递归扫描项目目录，按路径排序成树（只收可读文本）。
+    final List<String> rels = <String>[];
+    final Directory projectDir = Directory(dir);
+    if (projectDir.existsSync()) {
+      try {
+        for (final FileSystemEntity entity in projectDir.listSync(
+          recursive: true,
+          followLinks: false,
+        )) {
+          if (entity is! File) continue;
+          final String rel = _sourceRelativePath(dir, entity.path);
+          if (rel.isEmpty) continue;
+          final List<String> segments = rel.split('/');
+          if (segments.first == MusicProjectStore.scoreFile) continue;
+          if (_docFileNames.contains(segments.last)) continue; // 文档栏的内容
+          if (segments.any(_isExcludedSourceSegment)) continue;
+          rels.add(rel);
+        }
+      } catch (_) {
+        // 目录读不出来 → 只给 score.json，不伪造其它文件。
+      }
+    }
+    rels.sort();
+    for (final String rel in rels) {
+      try {
+        files.add(
+          WorkbenchSourceFile(
+            path: rel,
+            content: File('$dir/$rel').readAsStringSync(),
+          ),
+        );
+      } catch (_) {
+        // 单个文件读不出来（权限/编码）就不列它，不显示半截内容。
+      }
+    }
+    return files;
+  }
+
+  /// 项目根下的相对路径（统一 `/` 分隔，供源码树按目录层级缩进）。
+  static String _sourceRelativePath(String dir, String path) {
+    String rel = path;
+    if (rel.startsWith(dir)) rel = rel.substring(dir.length);
+    while (rel.startsWith('/') || rel.startsWith(r'\')) {
+      rel = rel.substring(1);
+    }
+    return rel.replaceAll(r'\', '/');
+  }
+
+  /// 源码结构里不该出现的路径段：历史/产物/缓存目录与隐藏项。
+  static bool _isExcludedSourceSegment(String segment) {
+    if (segment.startsWith('.')) return true;
+    return _excludedSourceSegments.contains(segment.toLowerCase());
   }
 
   @override
@@ -276,6 +452,10 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
       entries = _entries;
     }
     if (!mounted || _name != name) return;
+    // 四栏目数据随新快照一起刷新：`score.json` 原文变了，源码栏/规范栏要跟着
+    // 更新（文档不变也重读一次，保持「栏目数据 == 快照」这一条口径）。
+    final String? docsMarkdown = _readDocs(fresh.dir);
+    final List<WorkbenchSourceFile> sourceFiles = _readSourceFiles(fresh);
     // 保存后按新编译产物重建播放面（旧页对应旧乐谱，必须换掉）。
     final MusicPlaybackController? nextPlayback = _createPlayback(fresh);
     final MusicPlaybackController? previousPlayback = _playback;
@@ -284,6 +464,8 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
       _snapshot = fresh;
       _failure = null;
       _playback = nextPlayback;
+      _docsMarkdown = docsMarkdown;
+      _sourceFiles = sourceFiles;
       _status = MusicInspectorStatus(
         message: validation.verified
             ? '$successMessage · 乐谱校验通过'
@@ -415,77 +597,98 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
       children: <Widget>[
         _header(context, p),
         Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final layout = resolveWorkbenchLayout(
-                kind: WorkbenchKind.music,
-                width: constraints.maxWidth,
-                height: constraints.maxHeight,
-              );
-              final MusicScore? score = _snapshot?.score;
-              final bool hasLeft = layout.left == PanelPolicy.docked;
-              final bool hasRight = layout.right == PanelPolicy.docked;
-              final Widget center = _centerPane(context, p);
-              final Widget body = Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  if (hasLeft)
-                    SizedBox(
-                      width: layout.leftWidth,
-                      child: Column(
-                        children: <Widget>[
-                          MusicProjectList(
-                            entries: _entries,
-                            selectedName: _name,
-                            onOpen: _open,
-                            loading: _loading,
-                            error: _listError,
-                          ),
-                          if (score != null) ...<Widget>[
-                            Container(height: 1, color: p.line),
-                            Expanded(
-                              child: MusicTrackList(
-                                tracks: score.tracks,
-                                selectedIndex: _selectedTrack,
-                                onSelect: (index) =>
-                                    setState(() => _selectedTrack = index),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  if (hasLeft) Container(width: 1, color: p.line),
-                  Expanded(child: center),
-                  if (hasRight) Container(width: 1, color: p.line),
-                  if (hasRight)
-                    SizedBox(
-                      width: layout.rightWidth,
-                      child: MusicInspector(
-                        snapshot: _snapshot,
-                        selectedTrack: _selectedTrack,
-                        status: _status,
-                        onApply: _applyEdit,
-                      ),
-                    ),
-                ],
-              );
-              return Column(
-                children: <Widget>[
-                  Expanded(child: body),
-                  if (layout.bottomBar)
-                    MusicTransportBar(
-                      snapshot: _snapshot,
-                      playback: _playback,
-                      // 运输条高度来自音乐工作台规格（WorkbenchLayout）。
-                      height: layout.bottomBarHeight,
-                    ),
-                ],
-              );
+          // 四栏目框架（用户裁决 2026-11-27）：顶部栏目条常显，内容区按栏目
+          // 切换。「呈现效果」= 原有谱面/演奏面/运输条/检查器整套，用
+          // [Builder] 懒构建——切到文档/规范/源码时不构建它，因此不会重挂
+          // 播放 WebView、也不会重新 start 播放面；切回来只是重新挂同一份
+          // 播放控制器（该控制器在快照刷新时创建一次，不随栏目切换重建）。
+          child: WorkbenchColumns(
+            column: _column,
+            onColumnChanged: (WorkbenchColumn column) {
+              if (_column == column) return;
+              setState(() => _column = column);
             },
+            data: _columnData(),
+            present: Builder(
+              builder: (BuildContext context) => _presentPane(context, p),
+            ),
           ),
         ),
       ],
+    );
+  }
+
+  /// 呈现效果栏目：原有内容布局（左侧项目/轨道、中部谱面 + 演奏面、
+  /// 右侧检查器、底部运输条）。行为与四栏目改造前一致。
+  Widget _presentPane(BuildContext context, NonPalette p) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final layout = resolveWorkbenchLayout(
+          kind: WorkbenchKind.music,
+          width: constraints.maxWidth,
+          height: constraints.maxHeight,
+        );
+        final MusicScore? score = _snapshot?.score;
+        final bool hasLeft = layout.left == PanelPolicy.docked;
+        final bool hasRight = layout.right == PanelPolicy.docked;
+        final Widget center = _centerPane(context, p);
+        final Widget body = Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            if (hasLeft)
+              SizedBox(
+                width: layout.leftWidth,
+                child: Column(
+                  children: <Widget>[
+                    MusicProjectList(
+                      entries: _entries,
+                      selectedName: _name,
+                      onOpen: _open,
+                      loading: _loading,
+                      error: _listError,
+                    ),
+                    if (score != null) ...<Widget>[
+                      Container(height: 1, color: p.line),
+                      Expanded(
+                        child: MusicTrackList(
+                          tracks: score.tracks,
+                          selectedIndex: _selectedTrack,
+                          onSelect: (index) =>
+                              setState(() => _selectedTrack = index),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            if (hasLeft) Container(width: 1, color: p.line),
+            Expanded(child: center),
+            if (hasRight) Container(width: 1, color: p.line),
+            if (hasRight)
+              SizedBox(
+                width: layout.rightWidth,
+                child: MusicInspector(
+                  snapshot: _snapshot,
+                  selectedTrack: _selectedTrack,
+                  status: _status,
+                  onApply: _applyEdit,
+                ),
+              ),
+          ],
+        );
+        return Column(
+          children: <Widget>[
+            Expanded(child: body),
+            if (layout.bottomBar)
+              MusicTransportBar(
+                snapshot: _snapshot,
+                playback: _playback,
+                // 运输条高度来自音乐工作台规格（WorkbenchLayout）。
+                height: layout.bottomBarHeight,
+              ),
+          ],
+        );
+      },
     );
   }
 
