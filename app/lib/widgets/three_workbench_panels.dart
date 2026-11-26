@@ -127,6 +127,20 @@ const Set<String> _materialEditableKeys = <String>{
 };
 const Set<String> _cameraEditableKeys = <String>{'view'};
 
+/// 可编辑字段的人话标签（检查器表单、内容区只读摘要与通用检查器共用）。
+///
+/// 键是 legacy spec 的真实字段名；未知键原样返回（只读行不丢信息）。
+String threeInspectorFieldLabel(String key) => switch (key) {
+  'what' => '组件名称',
+  'size_scale' => '尺寸比例',
+  'material' => '材质',
+  'color_hex' => '材质颜色',
+  'roughness' => '粗糙度',
+  'metalness' => '金属感',
+  'view' => '视角',
+  _ => key,
+};
+
 /// `#RRGGBB` 颜色文本（检查器受控输入的唯一合法形状）。
 final RegExp _colorHexPattern = RegExp(r'^#[0-9a-fA-F]{6}$');
 
@@ -456,6 +470,7 @@ class ThreeNodeInspector extends StatefulWidget {
     this.sceneChars = 0,
     this.currentPass = '',
     this.onSaveEdit,
+    this.readOnly = false,
   });
 
   final ThreeOutlinerItem? item;
@@ -465,6 +480,11 @@ class ThreeNodeInspector extends StatefulWidget {
   /// 保存动作：只回传受控补丁；合并规范、写盘与刷新由工作台接线。
   /// 为 null 时视为只读预览（保存按钮禁用）。
   final ValueChanged<ThreeInspectorEdit>? onSaveEdit;
+
+  /// 只读摘要：宽屏下右侧共享窄栏的「检查」tab 才是唯一编辑入口，内容区
+  /// 这块降级为只读（同一属性不出现两处可编辑、避免状态不同步）。
+  /// 窄屏（内容区没有这块检查器、右栏走 sheet）保持默认 false 的可编辑面。
+  final bool readOnly;
 
   @override
   State<ThreeNodeInspector> createState() => _ThreeNodeInspectorState();
@@ -897,6 +917,57 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
     );
   }
 
+  /// 只读摘要（宽屏降级）：把可编辑字段按「标签 → 当前值」只读列出，并
+  /// 指向右栏「检查」tab（唯一编辑入口）。不渲染输入控件，避免和右栏同时
+  /// 编辑同一属性。
+  Widget _readOnlySummary(NonPalette p, ThreeOutlinerItem item) {
+    final Set<String> editable = _editableKeysOf(item.kind);
+    final List<MapEntry<String, Object?>> rows = <MapEntry<String, Object?>>[
+      for (final MapEntry<String, Object?> entry in item.data.entries)
+        if (editable.contains(entry.key)) entry,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        for (final MapEntry<String, Object?> entry in rows)
+          Padding(
+            padding: const EdgeInsets.only(bottom: NonSpace.xs),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SizedBox(
+                  width: 78,
+                  child: Text(
+                    threeInspectorFieldLabel(entry.key),
+                    style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    '${entry.value ?? ''}',
+                    style: TextStyle(
+                      fontSize: NonType.body,
+                      color: p.ink2,
+                      height: NonType.lineCaption,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: NonSpace.sm),
+        Text(
+          '在右侧「3D 检查」栏修改这些属性；这里只读展示当前值。',
+          style: TextStyle(
+            fontSize: NonType.caption,
+            height: NonType.lineBody,
+            color: p.ink4,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _actions(NonPalette p) {
     final bool editable =
         widget.item != null && widget.item!.kind != ThreeOutlinerKind.node;
@@ -988,6 +1059,9 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
                           color: p.ink4,
                         ),
                       ),
+                    ] else if (widget.readOnly) ...<Widget>[
+                      _readOnlySummary(p, item),
+                      _readOnlyRows(p, item),
                     ] else ...<Widget>[
                       _editableFields(p, item),
                       _readOnlyRows(p, item),

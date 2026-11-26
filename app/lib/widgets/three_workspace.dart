@@ -33,6 +33,7 @@ import 'package:provider/provider.dart';
 import 'package:webview_all/webview_all.dart';
 import 'package:webview_all_wkwebview/webview_all_wkwebview.dart';
 
+import '../core/inspect/check_field.dart';
 import '../core/platform_capabilities.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
@@ -116,6 +117,12 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   List<WorkbenchSourceFile> _sourceFiles = const <WorkbenchSourceFile>[];
   // UI-2 首批：3D 大纲选中项（只读检查器用；不写事实源）。
   String? _selectedOutlinerId;
+  // 通用检查器控制器（右侧「检查」tab）：大纲选中条目 → 可编辑属性表。
+  //
+  // 写回走本工作台既有保存链路（[_saveInspectorEdit] → [_saveSpec]）；控制器
+  // 不持有项目事实源、不直接写盘。生命周期：挂载后注册，卸载时清空
+  //（只清自己注册的那个，见 [_clearCheckControllerOnDispose]）。
+  late final _ThreeCheckController _checkController;
   // 大纲投影缓存：只在场景投影 / 规范快照对象变化时重算（run 转发的无关通知
   // 也会 build，不能每次都重新 copy 每条条目的 data map）。
   List<ThreeOutlinerItem>? _outlinerItemsCache;
@@ -220,6 +227,12 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       _wkRegistered = true;
     }
     _specCtl.addListener(() => _specDirty = true);
+    _checkController = _ThreeCheckController(
+      specOf: () => _snapshot?.spec,
+      materialIdsOf: _materialIdsOf,
+      save: _saveInspectorEdit,
+      onReject: _rejectCheckEdit,
+    );
     // 视图切换会 dispose 本工作台——优先消费作品集直载的项目名，其次从
     // 持久化项目名续接（跨会话亦然）。
     final pending = threeLoadOnOpen;
@@ -232,9 +245,12 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     store.addListener(_onStoreNotify);
     if (_lastAgentBusy) _ensureRunPoll();
     // 首帧后再落 store（initState 里 notifyListeners 会在构建期触发祖先重建）。
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _boot(pending: pending, saved: saved),
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // 检查控制器同样等到帧末再注册：setCheckController 会 notifyListeners。
+      store.setCheckController(_checkController);
+      _boot(pending: pending, saved: saved);
+    });
   }
 
   @override
@@ -248,6 +264,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     _autoRefreshDebounce?.cancel();
     _autoRefreshDebounce = null;
     _store.removeListener(_onStoreNotify);
+    // 清空检查控制器注册（只清自己的；控制器不 dispose——右侧面板可能还在
+    // 移除监听，ChangeNotifier dispose 后再 removeListener 会断言失败）。
+    _clearCheckControllerOnDispose();
     _specCtl.dispose();
     super.dispose();
   }
@@ -333,6 +352,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       _gridUnsupportedNotified = false;
       _docsMarkdown = null;
       _sourceFiles = const <WorkbenchSourceFile>[];
+      _selectedOutlinerId = null;
       // 项目边界复位规范编辑守卫：A 项目未保存的编辑不能带进 B；B 自己的
       // 未保存草稿要恢复（跨视图/跨 run 都不丢）。
       _specDirty = false;
@@ -341,6 +361,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _specDirty = true;
       }
     });
+    _selectCheck(null);
     await _reloadProjects();
     if (!mounted || token != _projectSeq) return;
     await _refresh();
@@ -528,6 +549,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _specDirty = false; // 文本赋值时 listener 已置位，恢复未脏
         }
       });
+      // 快照换了：大纲条目/规范值都可能变化，通用检查器重取属性表（选中
+      // 元素被外部刷新改值时，右栏不重取就是陈旧值）。
+      _checkController.notifySelectionChanged();
     } on ThreeFailure catch (failure) {
       _showError(
         threeFailureMessage(failure),
@@ -1517,6 +1541,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       _loadDetail = '';
       _docsMarkdown = null;
       _sourceFiles = const <WorkbenchSourceFile>[];
+      // 项目边界：旧项目的选中条目不能带进新项目。
+      _selectedOutlinerId = null;
       // 项目边界复位规范编辑守卫：A 项目未保存的编辑不能带进 B。
       _specDirty = false;
       if (draft != null && draft.isNotEmpty) {
@@ -1524,6 +1550,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _specDirty = true;
       }
     });
+    _selectCheck(null);
     _setStoreProject(choice);
     await _mountPreview();
     await _refresh();
@@ -1588,7 +1615,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _column = WorkbenchColumn.present;
           _docsMarkdown = null;
           _sourceFiles = const <WorkbenchSourceFile>[];
+          _selectedOutlinerId = null;
         });
+        _selectCheck(null);
         store.setThreeSpecDraft(name, null);
         _setStoreProject('');
         _clearError();
@@ -1607,17 +1636,20 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   }
 
   /// 规范手编回灌（先验形状，服务再过 components/acceptance 门）。
-  Future<void> _saveSpec() async {
+  ///
+  /// 返回是否真的落盘成功：检查器受控编辑与手编规范共用这一条链路，需要把
+  /// 结果回给 `update`（失败时调用方保持旧值，不把失败当成功）。
+  Future<bool> _saveSpec() async {
     _beginAction();
     final service = _service;
     final project = _project;
-    if (service == null || project == null) return;
+    if (service == null || project == null) return false;
     Map<String, dynamic> parsed;
     try {
       parsed = (jsonDecode(_specCtl.text) as Map).cast<String, dynamic>();
     } catch (_) {
       _toasts.error('规范格式不对', '请检查括号、引号与逗号。');
-      return;
+      return false;
     }
     try {
       final result = await service.saveSpec(project, parsed);
@@ -1628,23 +1660,27 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         result.unblocked ? '这一层已解锁，可以重新生成。' : '后续生成会使用新规范。',
       );
       await _refresh();
+      return true;
     } on ThreeFailure catch (failure) {
       _showError(
         threeFailureMessage(failure),
         failure.detail,
         key: '${failure.code}|${failure.detail}',
       );
+      return false;
     } catch (error) {
       _showError(threeFailureMessage(null), '$error');
+      return false;
     }
   }
 
   /// 检查器受控编辑 → 合并进当前规范 → 走同一条规范保存链路。
   ///
-  /// 面板只给「改哪个对象的哪些字段」，这里负责合并、再校验一遍并复用
-  /// [_saveSpec]（服务侧 components/acceptance 门 + 原子落盘 + 快照刷新）。
-  /// 任何一步失败都走 [_showError]：人话上屏、原始诊断进折叠的技术详情。
-  Future<void> _saveInspectorEdit(ThreeInspectorEdit edit) async {
+  /// 面板/通用检查器只给「改哪个对象的哪些字段」，这里负责合并、再校验一遍并
+  /// 复用 [_saveSpec]（服务侧 components/acceptance 门 + 原子落盘 + 快照刷新）。
+  /// 任何一步失败都走 [_showError]：人话上屏、原始诊断进折叠的技术详情；
+  /// 返回 false = 拒绝/失败（调用方不得把值当成已保存）。
+  Future<bool> _saveInspectorEdit(ThreeInspectorEdit edit) async {
     _beginAction();
     final service = _service;
     final project = _project;
@@ -1655,7 +1691,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         'service=$service project=$project snapshot=$snapshot',
         key: 'inspector|no_project',
       );
-      return;
+      return false;
     }
     final String? invalid = validateThreeInspectorEdit(edit);
     if (invalid != null) {
@@ -1664,7 +1700,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         'validate ${edit.kind.name}:${edit.id} ${jsonEncode(edit.fields)}',
         key: 'inspector|invalid|${edit.kind.name}|${edit.id}',
       );
-      return;
+      return false;
     }
     final spec = _inspectorBaseSpec();
     if (spec == null) {
@@ -1673,7 +1709,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         'spec draft is not a valid JSON object',
         key: 'inspector|draft_invalid',
       );
-      return;
+      return false;
     }
     final Map<String, dynamic>? merged;
     try {
@@ -1684,7 +1720,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         '$error',
         key: 'inspector|merge|$error',
       );
-      return;
+      return false;
     }
     if (merged == null) {
       _showError(
@@ -1692,13 +1728,13 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         'target ${edit.kind.name}:${edit.id} missing from current spec',
         key: 'inspector|missing|${edit.kind.name}|${edit.id}',
       );
-      return;
+      return false;
     }
     // 把合并后的规范灌回规范页文本，再走既有 [_saveSpec]：格式错误已不可能，
     // 剩下的是服务侧校验/落盘/刷新，与手编规范完全同一条路径。
     _specCtl.text = const JsonEncoder.withIndent('  ').convert(merged);
     _specDirty = true;
-    await _saveSpec();
+    return _saveSpec();
   }
 
   /// 检查器编辑的合并基底：未脏用最近快照；规范页有未保存草稿时优先草稿
@@ -2429,6 +2465,45 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     return items;
   }
 
+  /// 组件「材质」下拉的选项：当前规范里真实存在的材质 id（不凭空造）。
+  List<String> _materialIdsOf() {
+    final Object? materials = _snapshot?.spec['materials'];
+    if (materials is! List) return const <String>[];
+    return <String>[
+      for (final Object? item in materials)
+        if (item is Map && '${item['id'] ?? ''}'.trim().isNotEmpty)
+          '${item['id']}'.trim(),
+    ];
+  }
+
+  /// 检查器非法值的人话提示。字段边界仍由 `validateThreeInspectorEdit`
+  /// 负责（控制器只把失败翻译成一句可读提示），这里只上屏、不写盘。
+  void _rejectCheckEdit(String message) {
+    if (!mounted) return;
+    _showError(
+      message,
+      'validate three check edit',
+      key: 'three-check|invalid|$message',
+    );
+  }
+
+  /// 选中条目变化 → 通用检查器重取属性表。
+  void _selectCheck(ThreeOutlinerItem? item) {
+    _checkController.select(item);
+    _checkController.notifySelectionChanged();
+  }
+
+  /// 卸载时清空检查控制器注册。
+  ///
+  /// dispose 常发生在构建期（视图切换），notifyListeners 会标脏祖先，因此推到
+  /// 帧末；先判身份——别的工作台可能已经接管，不能把别人的控制器清掉。
+  void _clearCheckControllerOnDispose() {
+    final _ThreeCheckController controller = _checkController;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (store.checkController == controller) store.setCheckController(null);
+    });
+  }
+
   /// 呈现效果栏目：3D 专属建模工具条 + 原有预览面（四栏目框架只换外层，
   /// 预览/视口控件/大纲/检查器/空态/错误面的行为都不变）。
   Widget _presentPane(
@@ -2501,16 +2576,29 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     for (final item in outlinerItems) {
       if (item.id == _selectedOutlinerId) selected = item;
     }
+    // 选中条目静默同步进通用检查器（右栏「检查」tab 读它）。这里不 notify：
+    // 选中点击 / 快照刷新 / 项目切换 / 卸载各自显式通知，避免 build 期通知。
+    _checkController.select(selected);
     final Widget outliner = ThreeOutlinerPanel(
       items: outlinerItems,
       selectedId: selected?.id,
-      onSelect: (item) => setState(() => _selectedOutlinerId = item.id),
+      onSelect: (item) {
+        setState(() => _selectedOutlinerId = item.id);
+        _selectCheck(item);
+      },
     );
+    // 宽屏（右栏常驻）时右侧共享窄栏的「检查」tab 是唯一编辑入口；内容区这块
+    // 检查器降级为只读摘要，同一属性不会出现两处可编辑、状态也就不会不同步。
+    // 窄屏内容区本来不渲染这块检查器（右栏走 sheet），行为保持原样。
+    final bool contentInspectorReadOnly = layout.right == PanelPolicy.docked;
     final Widget inspector = ThreeNodeInspector(
       item: selected,
       sceneChars: _sceneJs.length,
       currentPass: '${_state?['current'] ?? ''}',
-      onSaveEdit: (edit) => unawaited(_saveInspectorEdit(edit)),
+      readOnly: contentInspectorReadOnly,
+      onSaveEdit: contentInspectorReadOnly
+          ? null
+          : (edit) => unawaited(_saveInspectorEdit(edit)),
     );
     if (layout.left == PanelPolicy.docked ||
         layout.right == PanelPolicy.docked) {
@@ -2531,6 +2619,269 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       );
     }
     return viewport;
+  }
+}
+
+/// 3D 工作台接入通用检查器：把大纲选中条目映射成一份 `CheckSheet`。
+///
+/// 关键事实：3D 现有的可编辑面是 legacy `three-spec.json` 的治理条目
+/// （组件 / 材质 / 相机），不是 v2 `scene.json` 的节点几何——所以这里只映射
+/// 那三类的真实可编辑键（与 `validateThreeInspectorEdit` 的白名单逐项对齐），
+/// 场景节点保持只读投影。
+///
+/// 写回**不在这里**：控制器只构造 [ThreeInspectorEdit]（只含改动的键）并先跑
+/// 既有 [`validateThreeInspectorEdit`]，再交给工作台既有保存链路
+/// （`_saveInspectorEdit` → `_saveSpec`：服务校验、原子落盘、快照刷新同一条路）。
+/// 控制器不持有项目事实源，也不直接写盘。
+class _ThreeCheckController extends WorkbenchCheckController {
+  _ThreeCheckController({
+    required this.specOf,
+    required this.materialIdsOf,
+    required this.save,
+    required this.onReject,
+  });
+
+  /// 当前项目的规范：每次取表都重新读（保存后快照刷新即看到新值），
+  /// 不在控制器里缓存事实源。null = 无项目/还没读到。
+  final Map<String, dynamic>? Function() specOf;
+
+  /// 当前规范里的材质 id（组件「材质」下拉的真实选项，不凭空造）。
+  final List<String> Function() materialIdsOf;
+
+  /// 工作台保存链路（返回是否真的落盘成功）。
+  final Future<bool> Function(ThreeInspectorEdit edit) save;
+
+  /// 非法值的人话提示（上屏/技术详情由工作台负责；控制器不写盘）。
+  final void Function(String message) onReject;
+
+  ThreeOutlinerItem? _item;
+
+  /// 选中条目变化。静默设置：通知时机由工作台掌握（见
+  /// `notifySelectionChanged`），避免在 build 里 notifyListeners。
+  void select(ThreeOutlinerItem? item) => _item = item;
+
+  /// 大纲 id 带 `component:`/`material:`/`node:` 前缀；检查器补丁只认裸 id。
+  static String _bareId(ThreeOutlinerItem item) {
+    for (final String prefix in const <String>[
+      'component:',
+      'material:',
+      'node:',
+    ]) {
+      if (item.id.startsWith(prefix)) {
+        return item.id.substring(prefix.length);
+      }
+    }
+    return item.id;
+  }
+
+  static Map<Object?, Object?>? _entryOf(Object? list, String id) {
+    if (list is! List) return null;
+    for (final Object? raw in list) {
+      if (raw is! Map) continue;
+      if ('${raw['id'] ?? ''}'.trim() == id) return raw;
+    }
+    return null;
+  }
+
+  static String _text(Object? value) => (value ?? '').toString();
+
+  static double? _number(Object? value) =>
+      value is num && value.isFinite ? value.toDouble() : null;
+
+  /// `#RRGGBB` → ARGB int（[CheckFieldKind.color] 的值形状）；坏值用中性灰
+  /// 占位而不是伪装成项目里的真实颜色。
+  static int _colorOf(Object? raw) {
+    final RegExpMatch? match =
+        RegExp(r'^#([0-9a-fA-F]{6})$').firstMatch(_text(raw).trim());
+    if (match == null) return 0xFF888888;
+    return 0xFF000000 | int.parse(match.group(1)!, radix: 16);
+  }
+
+  @override
+  CheckSheet? get sheet {
+    final ThreeOutlinerItem? item = _item;
+    if (item == null) return null;
+    final Map<String, dynamic>? spec = specOf();
+    if (spec == null || spec.isEmpty) return null;
+    final String id = _bareId(item);
+    switch (item.kind) {
+      case ThreeOutlinerKind.component:
+        final Map<Object?, Object?>? data = _entryOf(spec['components'], id);
+        // 规范里找不到目标 = 坏项目/对象已被移除：不给空表，直接回空态。
+        if (data == null) return null;
+        final List<String> materials = materialIdsOf();
+        final String material = _text(data['material']).trim();
+        // 标签先算到局部变量：检查器面板会扫描 `label:` 参数里的字符串字面量，
+        // 裸 snake_case 键名（size_scale 等）不能直接出现在可编辑参数里。
+        final String sizeScaleLabel = threeInspectorFieldLabel('size_scale');
+        return CheckSheet(
+          title: '组件「$id」',
+          kindLabel: '组件',
+          subtitle: '来自 three-spec.json',
+          fields: <CheckField>[
+            CheckField(
+              key: 'what',
+              label: threeInspectorFieldLabel('what'),
+              kind: CheckFieldKind.text,
+              value: _text(data['what']),
+              hint: '组件是什么',
+            ),
+            CheckField(
+              key: 'size_scale',
+              label: sizeScaleLabel,
+              kind: CheckFieldKind.number,
+              value: _number(data['size_scale']),
+              min: 0.01,
+              hint: '大于 0 的比例',
+            ),
+            CheckField(
+              key: 'material',
+              label: threeInspectorFieldLabel('material'),
+              kind: CheckFieldKind.select,
+              value: materials.contains(material) ? material : null,
+              options: materials,
+              hint: '材质 id，可留空',
+            ),
+          ],
+        );
+      case ThreeOutlinerKind.material:
+        final Map<Object?, Object?>? data = _entryOf(spec['materials'], id);
+        if (data == null) return null;
+        final String colorHexLabel = threeInspectorFieldLabel('color_hex');
+        return CheckSheet(
+          title: '材质「$id」',
+          kindLabel: '材质',
+          subtitle: '来自 three-spec.json',
+          fields: <CheckField>[
+            CheckField(
+              key: 'color_hex',
+              label: colorHexLabel,
+              kind: CheckFieldKind.color,
+              value: _colorOf(data['color_hex']),
+              hint: '#RRGGBB',
+            ),
+            CheckField(
+              key: 'roughness',
+              label: threeInspectorFieldLabel('roughness'),
+              kind: CheckFieldKind.number,
+              value: _number(data['roughness']),
+              min: 0,
+              max: 1,
+              hint: '0 到 1',
+            ),
+            CheckField(
+              key: 'metalness',
+              label: threeInspectorFieldLabel('metalness'),
+              kind: CheckFieldKind.number,
+              value: _number(data['metalness']),
+              min: 0,
+              max: 1,
+              hint: '0 到 1',
+            ),
+          ],
+        );
+      case ThreeOutlinerKind.camera:
+        final Object? rawCamera = spec['camera'];
+        if (rawCamera is! Map || rawCamera.isEmpty) return null;
+        return CheckSheet(
+          title: '相机',
+          kindLabel: '相机',
+          subtitle: '来自 three-spec.json',
+          fields: <CheckField>[
+            CheckField(
+              key: 'view',
+              label: threeInspectorFieldLabel('view'),
+              kind: CheckFieldKind.text,
+              value: _text(rawCamera['view']),
+              hint: '例如：略高处斜看',
+            ),
+          ],
+        );
+      case ThreeOutlinerKind.node:
+        // 场景节点（v2 scene.json）不在本批次的编辑面内：给只读表（不是
+        // 空态——用户确实选中了一个元素），并写明接入批次。
+        return CheckSheet(
+          title: '节点「$id」',
+          kindLabel: '节点',
+          subtitle: '来自 scene.json',
+          fields: const <CheckField>[
+            CheckField(
+              key: 'node_edit',
+              label: '编辑入口',
+              kind: CheckFieldKind.readOnly,
+              value: '场景节点属性编辑在场景编辑器批次接入；这里只读投影。',
+            ),
+          ],
+        );
+    }
+  }
+
+  @override
+  Future<bool> update(String key, Object? value) async {
+    final ThreeOutlinerItem? item = _item;
+    if (item == null) return false;
+    final ThreeOutlinerKind kind = item.kind;
+    if (kind == ThreeOutlinerKind.node) return false;
+    final String id = _bareId(item);
+    Object? normalized;
+    switch (kind) {
+      case ThreeOutlinerKind.component:
+        switch (key) {
+          case 'what':
+            if (value is! String) return false;
+            normalized = value.trim();
+          case 'size_scale':
+            if (value is! num || !value.isFinite) return false;
+            normalized = value.toDouble();
+          case 'material':
+            if (value is! String) return false;
+            normalized = value.trim();
+          default:
+            return false;
+        }
+      case ThreeOutlinerKind.material:
+        switch (key) {
+          case 'color_hex':
+            // 通用检查器的颜色控件给 ARGB int；也接受已经是 #RRGGBB 的文本。
+            if (value is int) {
+              normalized =
+                  '#${(value & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+            } else if (value is String) {
+              normalized = value.trim();
+            } else {
+              return false;
+            }
+          case 'roughness':
+          case 'metalness':
+            if (value is! num || !value.isFinite) return false;
+            normalized = value.toDouble();
+          default:
+            return false;
+        }
+      case ThreeOutlinerKind.camera:
+        if (key != 'view' || value is! String) return false;
+        normalized = value.trim();
+      case ThreeOutlinerKind.node:
+        return false;
+    }
+    // 只带改动的键（不把未动字段的默认值写回规范）→ 先跑既有校验，
+    // 非法值返回 false 且不进入保存链路（因此绝不落盘）。
+    final ThreeInspectorEdit edit = ThreeInspectorEdit(
+      kind: kind,
+      id: id,
+      fields: <String, Object?>{key: normalized},
+    );
+    final String? invalid = validateThreeInspectorEdit(edit);
+    if (invalid != null) {
+      onReject(invalid);
+      return false;
+    }
+    try {
+      return await save(edit);
+    } catch (_) {
+      // 保存链路自己会上屏人话与技术详情；这里只把结果收成 false。
+      return false;
+    }
   }
 }
 
