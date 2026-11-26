@@ -86,6 +86,14 @@ nan.pack/1 容器（复用 DDP2 的 zstd + CRC32 字节纪律）
 - 增补工作台入口卡（设计/3D/视频/音乐），与四栏目结构呼应；
 - 视觉跟随新主题（活力化 + Aqua）。
 
+## 6.5 实现落点（更新于 2026-11-27）
+
+- 四栏目框架已实现：`app/lib/widgets/workbench_views.dart`
+  （`WorkbenchColumns` / `WorkbenchColumnData` / `WorkbenchSourceFile`；栏目文案与稳定
+  Key 由 `WorkbenchColumnLabel` 统一出口；源码树只收源码文件）。
+- 3D 工作台作为第一个接入者（预览面作为「呈现效果」原样挂载，行为零改动）。
+- 容器层 `nan.pack/1` 在 `app/lib/core/workbench_pack.dart` 落地后再逐工作台迁移 store。
+
 ## 7. 施工顺序（每批独立可验证）
 
 1. **W1 主题波**：令牌提亮 + Aqua 材质组件扩展（凝胶页签/按钮组）+ 应用到外壳与
