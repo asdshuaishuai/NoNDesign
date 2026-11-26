@@ -130,6 +130,20 @@ plugins/             独立插件资产（视频制作说明）
   （横屏=桌面壳、竖屏=聊天优先壳），桌面无方向概念。唯一实现源是
   `app/lib/core/orientation.dart`；运行时门在 `main.dart`，每次度量变化（旋转 / 分屏 /
   折叠屏展开）都重钉方向，手机永远被压回竖屏。
+- **主题语言 = Aqua（用户裁决 2026-11-26）**：**浅色主题就是 Aqua**（早期 Mac OS X
+  设计语言的现代化移植），**不新增第三套主题**。材质语言固定为：细条纹（pinstripe）
+  窗口底 + 糖果凝胶（candy-gel）主按钮（不透明水蓝渐变 + 上半球高光 + 内发光 + 细边线，
+  **不是毛玻璃**）+ 红/黄/绿口香糖窗口控件 + 深色软阴影；凝胶上白字带轻微下投影，
+  且白字压最深凝胶色仍 ≥4.5:1；键盘焦点必须有可见环；默认按钮的呼吸光晕在
+  `MediaQuery.disableAnimationsOf` 为真时完全静止。实现只有一处：
+  `app/lib/widgets/aqua.dart`（`AquaPinstripes`/`AquaGelSurface`/`AquaGelButton`/
+  `AquaGumdrops`/`AquaWindowSurface`）与 `NonPalette.light` 的 Aqua 调色板。
+  **不要**在 widget 里手抄渐变/硬编码 Aqua 蓝；也不要引入模糊半透明面板冒充 Aqua。
+- **排版与间距令牌（2026-11-26）**：字号只能取 `NonType` 的 8 档
+  （micro 10 / caption 11 / body 12 / bodyStrong 13 / subtitle 15 / title 18 /
+  display 22 / hero 34），间距取 `NonSpace`（2/4/8/12/16/24/32），圆角取
+  `NonRadius`（6/10/14）。`app/test/design_tokens_test.dart` 是棘轮门：
+  `lib/widgets` 里裸 `fontSize:` 字面量总数只许下降不许上升，迁移一批就把上限调低。
 - **工作台切换 = 项目切换**（用户裁决 2026-11-19）：一个项目只对应它自己的工作台
   类型，项目内部不摆工作区切换条；右侧 NaN 窄栏只有 NaN / 检查两个 tab。
   切换入口是顶栏项目下拉（设计项目 / 3D 场景 / 热应用 / 视频 / 新建 / 打开 / 回主页），
