@@ -140,21 +140,32 @@ void main() {
     expect(find.text('生成当前层'), findsOneWidget);
   });
 
-  testWidgets('iPad 11 landscape keeps full action labels and split side pane', (tester) async {
+  testWidgets('iPad 11 landscape keeps full action labels and four columns', (tester) async {
     final store = _store()..settings.threeProjectName = 'saturn-demo';
     await _pumpAt(tester, const Scaffold(body: ThreeWorkspace()), const Size(1194, 834), store: store);
     expect(find.byKey(const ValueKey('three-header-landscape')), findsOneWidget);
     expect(find.byKey(const ValueKey('three-header-portrait')), findsNothing);
     expect(find.text('截图'), findsOneWidget);
-    expect(find.text('源码'), findsOneWidget);
     expect(find.byTooltip('3D 操作'), findsNothing);
 
-    await tester.tap(find.text('源码'));
+    // 用户裁决 2026-11-27：四栏目条固定存在，旧「源码」三面切换已被栏位取代。
+    expect(find.byKey(const ValueKey('workbench-columns-bar')), findsOneWidget);
+    expect(find.byKey(const ValueKey('workbench-column-source')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('workbench-column-source')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('three-body-split')), findsOneWidget);
+    // 这个用例不注入项目服务：源码栏目如实给真实文件树或可行动空态。
+    final bool hasTree = find.byKey(const ValueKey('workbench-source-body')).evaluate().isNotEmpty;
+    final bool hasEmpty = find.byKey(const ValueKey('workbench-source-empty')).evaluate().isNotEmpty;
+    expect(hasTree || hasEmpty, isTrue, reason: '源码栏目必须给出真实文件树或可行动空态');
+    expect(find.byKey(const ValueKey('three-body-three-pane')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('workbench-column-present')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('three-body-three-pane')), findsOneWidget);
   });
 
-  testWidgets('3D workspace uses one-row chrome + side pane on iPad landscape', (tester) async {
+  testWidgets('3D workspace uses one-row chrome + four columns on iPad landscape', (tester) async {
     final store = _store()..settings.threeProjectName = 'demo';
     await _pumpAt(tester, const Scaffold(body: ThreeWorkspace()), _tabletLandscape, store: store);
     expect(find.byKey(const ValueKey('three-header-landscape')), findsOneWidget);
@@ -162,12 +173,18 @@ void main() {
     expect(find.text('项目'), findsOneWidget);
     expect(find.text('生成当前层'), findsOneWidget);
 
-    // 横屏下源码/规范是预览侧栏，不是把预览整块替换掉。
-    await tester.tap(find.byTooltip('3D 操作'));
+    // 横屏下源码/规范是四栏目里的独立栏目，不再挤成预览侧栏。
+    expect(find.byKey(const ValueKey('workbench-columns-bar')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('workbench-column-source')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('源码（侧栏）'));
+    final bool hasTree = find.byKey(const ValueKey('workbench-source-body')).evaluate().isNotEmpty;
+    final bool hasEmpty = find.byKey(const ValueKey('workbench-source-empty')).evaluate().isNotEmpty;
+    expect(hasTree || hasEmpty, isTrue, reason: '源码栏目必须给出真实文件树或可行动空态');
+    expect(find.byKey(const ValueKey('three-body-three-pane')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('workbench-column-present')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('three-body-split')), findsOneWidget);
+    expect(find.byKey(const ValueKey('three-body-three-pane')), findsOneWidget);
   });
 
   testWidgets('settings dialog fits iPad portrait', (tester) async {

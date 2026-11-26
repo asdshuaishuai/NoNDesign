@@ -47,6 +47,7 @@ import 'common.dart';
 import 'workspace_artifact_card.dart';
 import 'three_viewport_controls.dart';
 import 'three_workbench_panels.dart';
+import 'workbench_views.dart';
 import 'workspace_progress.dart';
 
 /// 移动端内嵌 3D 预览的启用门。
@@ -106,8 +107,13 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
   // UI-2：3D 内容区姿态开关（大纲/检查器）；local-only，不写事实源。
   bool _showOutliner = true;
   bool _showInspector = true;
-  // 面板三态：预览 / 源码 / 规范（规范手编 = 先改规范再要代码）。
-  String _face = 'preview';
+  // 四栏目（呈现效果 / 文档 / 规范 / 源码）：用户裁决 2026-11-27 的工作台
+  // 信息架构。框架在 lib/widgets/workbench_views.dart；这里只做数据装配，
+  // 「呈现效果」= 原有预览面（行为不变）。
+  WorkbenchColumn _column = WorkbenchColumn.present;
+  // 栏目数据缓存：随项目快照一起刷新（不在 build 里读盘，切栏目不读盘）。
+  String? _docsMarkdown;
+  List<WorkbenchSourceFile> _sourceFiles = const <WorkbenchSourceFile>[];
   // UI-2 首批：3D 大纲选中项（只读检查器用；不写事实源）。
   String? _selectedOutlinerId;
   // 大纲投影缓存：只在场景投影 / 规范快照对象变化时重算（run 转发的无关通知
@@ -325,6 +331,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       _errorSource = '';
       _gridVisible = false;
       _gridUnsupportedNotified = false;
+      _docsMarkdown = null;
+      _sourceFiles = const <WorkbenchSourceFile>[];
       // 项目边界复位规范编辑守卫：A 项目未保存的编辑不能带进 B；B 自己的
       // 未保存草稿要恢复（跨视图/跨 run 都不丢）。
       _specDirty = false;
@@ -499,6 +507,10 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       final snapshot = await service.readProject(project);
       // 切项目后迟到的旧快照不得覆盖新项目（异步读盘与通知会交错）。
       if (!mounted || project != _project) return;
+      // 四栏目数据与快照同一拍刷新：文档/源码都在项目目录里，刷新时读一次，
+      // 切栏目不读盘（也不伪造文档/规范/源码）。
+      final String? docs = _readDocs(snapshot.dir);
+      final List<WorkbenchSourceFile> sources = _readSourceFiles(snapshot);
       setState(() {
         if (_errorSource == 'refresh') {
           _errorKey = '';
@@ -507,6 +519,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _errorSource = '';
         }
         _snapshot = snapshot;
+        _docsMarkdown = docs;
+        _sourceFiles = sources;
         unawaited(_loadWorkspaceProject());
         if (!_specDirty) {
           _specCtl.text = const JsonEncoder.withIndent('  ')
@@ -531,6 +545,134 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         notify: false,
       );
     }
+  }
+
+  // -- 四栏目数据装配 -------------------------------------------------------
+  //
+  // 只读装配：文档/规范/源码全部来自项目目录与磁盘快照，没有就返回 null /
+  // 空列表（栏目显示框架的可行动空态），绝不编造内容。
+
+  /// 项目内人读文档：`docs.md` 优先，其次 `brief.md`。
+  ///
+  /// 空文件或读不出来按「没有文档」处理（不把空白的「有文档」当成功）。
+  String? _readDocs(String dir) {
+    for (final String name in const <String>['docs.md', 'brief.md']) {
+      final File file = File('$dir/$name');
+      if (!file.existsSync()) continue;
+      try {
+        final String text = file.readAsStringSync();
+        if (text.trim().isNotEmpty) return text;
+      } on FileSystemException {
+        // 读不出来 → 继续尝试下一个候选；都没有就空态。
+      }
+    }
+    return null;
+  }
+
+  /// 只读源码文件树（只收源码，不含 build-state / history / artifacts）：
+  ///
+  ///  * v2/迁移项目：`src/` 下的 `.js` 事实源，按真实路径给；
+  ///  * 旧项目：项目根 `scene.js`（内容取磁盘快照，避免再读一遍盘）；
+  ///  * 规范文件 `three-spec.json` 作为同一个栏目里的可读文件（规范也是
+  ///    这个世界的事实源，源码栏只是只读呈现）。
+  List<WorkbenchSourceFile> _readSourceFiles(ThreeProjectSnapshot snapshot) {
+    final String dir = snapshot.dir;
+    final List<WorkbenchSourceFile> files = <WorkbenchSourceFile>[];
+    final String srcScenePath =
+        '${ThreeWorkspaceLayout.srcDir}/${ThreeWorkspaceLayout.legacySceneFile}';
+    bool hasSrcScene = false;
+    final Directory srcDir = Directory(
+      '$dir/${ThreeWorkspaceLayout.srcDir}',
+    );
+    if (srcDir.existsSync()) {
+      try {
+        final String prefix = '${srcDir.path}/';
+        final List<String> rels = <String>[
+          for (final File file
+              in srcDir.listSync(recursive: true).whereType<File>())
+            if (file.path.endsWith('.js'))
+              file.path.startsWith(prefix)
+                  ? file.path.substring(prefix.length)
+                  : file.path,
+        ]..sort();
+        for (final String rel in rels) {
+          final String path = '${ThreeWorkspaceLayout.srcDir}/$rel';
+          try {
+            files.add(
+              WorkbenchSourceFile(
+                path: path,
+                content: File('${srcDir.path}/$rel').readAsStringSync(),
+              ),
+            );
+          } on FileSystemException {
+            // 单个文件读不出来就不列它（不显示半截伪造内容）。
+          }
+          if (path == srcScenePath) hasSrcScene = true;
+        }
+      } on FileSystemException {
+        // 目录读不出来 → 退回旧项目路径 / 空态。
+      }
+    }
+    if (!hasSrcScene) {
+      final File legacyScene = File(
+        '$dir/${ThreeWorkspaceLayout.legacySceneFile}',
+      );
+      if (snapshot.sceneJs.isNotEmpty || legacyScene.existsSync()) {
+        files.add(
+          WorkbenchSourceFile(
+            path: ThreeWorkspaceLayout.legacySceneFile,
+            content: snapshot.sceneJs,
+          ),
+        );
+      }
+    }
+    final Map<String, dynamic> spec = snapshot.spec;
+    if (spec.isNotEmpty) {
+      files.add(
+        WorkbenchSourceFile(
+          path: ThreeWorkspaceLayout.legacySpecFile,
+          content: const JsonEncoder.withIndent('  ').convert(spec),
+        ),
+      );
+    }
+    return files;
+  }
+
+  /// 栏目数据袋：项目不在场/还没读到快照时全部为空（可行动空态）。
+  WorkbenchColumnData _columnData() {
+    final ThreeProjectSnapshot? snapshot = _snapshot;
+    if (snapshot == null) return const WorkbenchColumnData();
+    final Map<String, dynamic> spec = snapshot.spec;
+    return WorkbenchColumnData(
+      docsMarkdown: _docsMarkdown,
+      specJson: spec.isEmpty ? null : spec,
+      specSummary: _specSummaryOf(snapshot),
+      sourceFiles: _sourceFiles,
+    );
+  }
+
+  /// 规范栏顶部的一句人话：「第 N 轮 · 通过 A/B」。
+  ///
+  /// 轮次取当前层的修复轮（`attempts + 1`），通过数取已 `verified` 的层。
+  /// 没有进度（没有 passes）就返回 null——不替项目编造轮次。
+  String? _specSummaryOf(ThreeProjectSnapshot snapshot) {
+    final List<Map<String, dynamic>> passes = snapshot.passes;
+    if (passes.isEmpty) return null;
+    final int passed = passes
+        .where((Map<String, dynamic> pass) => '${pass['status']}' == 'verified')
+        .length;
+    final int total = passes.length;
+    final String current = snapshot.current;
+    if (current == 'done') {
+      return '全部 $total 层已完成 · 通过 $passed/$total';
+    }
+    if (current.isEmpty) return null;
+    final int round = _attemptsOf(passes, current) + 1;
+    final String layer = threePassLabel(current);
+    if (snapshot.blocked) {
+      return '第 $round 轮「$layer」 · 已阻塞 · 通过 $passed/$total';
+    }
+    return '第 $round 轮「$layer」 · 通过 $passed/$total';
   }
 
   /// 错误横幅 + 一条可读提示。相同错误去重（桥反馈每条都跟一次刷新，
@@ -1373,6 +1515,8 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       _snapshot = null;
       _loadError = '';
       _loadDetail = '';
+      _docsMarkdown = null;
+      _sourceFiles = const <WorkbenchSourceFile>[];
       // 项目边界复位规范编辑守卫：A 项目未保存的编辑不能带进 B。
       _specDirty = false;
       if (draft != null && draft.isNotEmpty) {
@@ -1441,7 +1585,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           _loadError = '';
           _loadDetail = '';
           _lastError = '';
-          _face = 'preview';
+          _column = WorkbenchColumn.present;
+          _docsMarkdown = null;
+          _sourceFiles = const <WorkbenchSourceFile>[];
         });
         store.setThreeSpecDraft(name, null);
         _setStoreProject('');
@@ -1743,7 +1889,6 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
               phone: phone,
               padPortrait: padPortrait,
             ),
-            _modelingToolstrip(p, layout: layout),
             // 执行过程面 / 结果面（v2 工具：迁移 → 计划校验 → 测量 → 确定性门）。
             if (store.threePipelineStages.isNotEmpty)
               WorkspaceProgress(
@@ -1778,7 +1923,24 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
                 palette: p,
                 onDismiss: _clearError,
               ),
-            Expanded(child: _body(context, p, width: width, layout: layout)),
+            // 四栏目框架（用户裁决 2026-11-27）：顶部固定栏目条 + 内容区。
+            // 呈现效果 = 原有预览面（工具条 + 视口/大纲/检查器/空态全在里面）；
+            // 切到文档/规范/源码时不构建预览面，也不触碰预览控制器（WebView
+            // 不会因此重新准备/重新加载）。
+            Expanded(
+              child: WorkbenchColumns(
+                column: _column,
+                onColumnChanged: (WorkbenchColumn column) {
+                  if (_column == column) return;
+                  setState(() => _column = column);
+                },
+                data: _columnData(),
+                present: Builder(
+                  builder: (BuildContext context) =>
+                      _presentPane(context, p, layout: layout),
+                ),
+              ),
+            ),
             if (_project != null)
               ThreeWorkbenchStatusBar(
                 currentPass: current,
@@ -1895,7 +2057,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
             ..._titleBits(p, 110),
             const Spacer(),
             if (_busy) ..._busyBits(p),
-            _menuButton(context, p, landscape: false),
+            _menuButton(context, p),
           ],
         ),
       );
@@ -1937,7 +2099,6 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
                 child: Row(
                   children: [
                     ..._primaryActions(p, includeAll: true),
-                    ..._faceActions(p),
                   ],
                 ),
               ),
@@ -1965,10 +2126,9 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
           if (_busy) ..._busyBits(p),
           if (all) ...[
             ..._primaryActions(p, includeAll: true),
-            ..._faceActions(p),
           ] else ...[
             ..._primaryActions(p, includeAll: false),
-            _menuButton(context, p, landscape: true),
+            _menuButton(context, p),
           ],
         ],
       ),
@@ -2122,69 +2282,7 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
       ),
   ];
 
-  List<Widget> _faceActions(NonPalette p) {
-    if (isAquaTheme(context)) {
-      // 浅色（Aqua）：内容面切换（预览/源码/规范）是真正的分段选择，用
-      // AquaSegmentedTabs；无项目时与旧按钮一致不可切换——分段控件没有原生
-      // 禁用态，这里降透明 + 挡回调（不新增动画）。
-      final bool faceEnabled = _project != null;
-      final int index = _face == 'source'
-          ? 1
-          : _face == 'spec'
-          ? 2
-          : 0;
-      return <Widget>[
-        Padding(
-          padding: const EdgeInsets.only(left: NonSpace.sm),
-          child: Opacity(
-            opacity: faceEnabled ? 1.0 : 0.45,
-            child: AquaSegmentedTabs(
-              labels: const <String>['预览', '源码', '规范'],
-              icons: const <IconData>[
-                Icons.visibility_outlined,
-                Icons.code_outlined,
-                Icons.rule_outlined,
-              ],
-              selectedIndex: index,
-              height: 30,
-              compact: true,
-              onSelected: (int selected) {
-                if (!faceEnabled) return;
-                setState(
-                  () => _face = const <String>[
-                    'preview',
-                    'source',
-                    'spec',
-                  ][selected],
-                );
-              },
-            ),
-          ),
-        ),
-      ];
-    }
-    return [
-      for (final face in const [
-        ('preview', '预览', Icons.visibility_outlined),
-        ('source', '源码', Icons.code_outlined),
-        ('spec', '规范', Icons.rule_outlined),
-      ])
-        _TopBtn(
-          icon: face.$3,
-          label: face.$2,
-          active: _face == face.$1,
-          onTap: _project == null
-              ? null
-              : () => setState(() => _face = face.$1),
-        ),
-    ];
-  }
-
-  Widget _menuButton(
-    BuildContext context,
-    NonPalette p, {
-    required bool landscape,
-  }) {
+  Widget _menuButton(BuildContext context, NonPalette p) {
     // 弹出菜单路径与 _TopBtn 路径共用同一 ready 判据（两条入口都要禁用）。
     final captureReady = _captureReady;
     return PopupMenuButton<String>(
@@ -2215,25 +2313,6 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         _menuItem(ctx, 'continue', Icons.check_rounded, '通过并继续'),
         _menuItem(ctx, 'reload', Icons.refresh, '刷新预览'),
         _menuItem(ctx, 'gallery', Icons.widgets_outlined, '组件画廊'),
-        const PopupMenuDivider(),
-        _menuItem(
-          ctx,
-          'face:preview',
-          Icons.visibility_outlined,
-          landscape ? '预览（全屏）' : '预览',
-        ),
-        _menuItem(
-          ctx,
-          'face:source',
-          Icons.code_outlined,
-          landscape ? '源码（侧栏）' : '源码',
-        ),
-        _menuItem(
-          ctx,
-          'face:spec',
-          Icons.rule_outlined,
-          landscape ? '规范（侧栏）' : '规范',
-        ),
       ],
     );
   }
@@ -2262,12 +2341,6 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
         if (_project != null) _mountPreview();
       case 'gallery':
         _openGalleryPicker();
-      case 'face:preview':
-      case 'face:source':
-      case 'face:spec':
-        if (_project != null) {
-          setState(() => _face = value.substring('face:'.length));
-        }
     }
   }
 
@@ -2356,10 +2429,27 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     return items;
   }
 
-  Widget _body(
+  /// 呈现效果栏目：3D 专属建模工具条 + 原有预览面（四栏目框架只换外层，
+  /// 预览/视口控件/大纲/检查器/空态/错误面的行为都不变）。
+  Widget _presentPane(
     BuildContext context,
     NonPalette p, {
-    required double width,
+    required WorkbenchLayout layout,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _modelingToolstrip(p, layout: layout),
+        Expanded(child: _presentBody(context, p, layout: layout)),
+      ],
+    );
+  }
+
+  /// 原有「呈现效果」主体（三面切换前的预览面）：无项目给空态、无内嵌执行
+  /// 面给能力说明、加载失败给可重试错误面；宽屏时是三栏「大纲 | 视口 | 检查器」。
+  Widget _presentBody(
+    BuildContext context,
+    NonPalette p, {
     required WorkbenchLayout layout,
   }) {
     if (_project == null) {
@@ -2398,100 +2488,49 @@ class _ThreeWorkspaceState extends State<ThreeWorkspace> {
     } else {
       preview = _webViewHost(_controller!);
     }
-    final side = switch (_face) {
-      'source' => SingleChildScrollView(
-        padding: const EdgeInsets.all(NonSpace.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 场景代码长度随 run 转发刷新可见（NaN 每完成一层都会改写
-            // 这份代码，用户能直接看到「有没有新东西进来」）。
-            if (_sceneJs.isNotEmpty)
-              Padding(
-                key: const ValueKey('three-scene-meta'),
-                padding: const EdgeInsets.only(bottom: NonSpace.sm),
-                child: Text(
-                  '场景代码 · ${_sceneJs.length} 字符',
-                  style: TextStyle(fontSize: NonType.caption, color: p.ink3),
-                ),
-              ),
-            SelectableText(
-              _sceneJs.isEmpty ? '还没有场景代码——点「生成当前层」开始' : _sceneJs,
-              style: TextStyle(
-                fontSize: NonType.body,
-                fontFamily: 'monospace',
-                color: p.ink2,
-                height: 1.5,
-              ),
-            ),
-          ],
-        ),
-      ),
-      'spec' => _SpecPane(controller: _specCtl, onSave: _saveSpec),
-      _ => null,
-    };
     // 3D 独立内容布局（UI-2 首批）：预览面在宽屏下是大纲 | 视口 | 检查器
     // 三栏，不再是设计画布的「预览 + 源码/规范侧栏」换皮。
-    if (_face == 'preview') {
-      // 宽屏：预览面上方叠一层视口控制浮层（视角预设 / 网格 / 重置）。
-      // 窄屏不显示——预览区本身放不下浮层，控件也没有工具栏位置。
-      final Widget viewport = _aquaStage(
-        context,
-        _withViewportControls(preview, layout),
-      );
-      final List<ThreeOutlinerItem> outlinerItems = _outlinerItems();
-      ThreeOutlinerItem? selected;
-      for (final item in outlinerItems) {
-        if (item.id == _selectedOutlinerId) selected = item;
-      }
-      final Widget outliner = ThreeOutlinerPanel(
-        items: outlinerItems,
-        selectedId: selected?.id,
-        onSelect: (item) => setState(() => _selectedOutlinerId = item.id),
-      );
-      final Widget inspector = ThreeNodeInspector(
-        item: selected,
-        sceneChars: _sceneJs.length,
-        currentPass: '${_state?['current'] ?? ''}',
-        onSaveEdit: (edit) => unawaited(_saveInspectorEdit(edit)),
-      );
-      if (layout.left == PanelPolicy.docked ||
-          layout.right == PanelPolicy.docked) {
-        return Row(
-          key: const ValueKey('three-body-three-pane'),
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            if (layout.left == PanelPolicy.docked && _showOutliner)
-              SizedBox(width: layout.leftWidth, child: outliner),
-            if (layout.left == PanelPolicy.docked && _showOutliner)
-              Container(width: 1, color: p.line),
-            Expanded(child: viewport),
-            if (layout.right == PanelPolicy.docked && _showInspector)
-              Container(width: 1, color: p.line),
-            if (layout.right == PanelPolicy.docked && _showInspector)
-              SizedBox(width: layout.rightWidth, child: inspector),
-          ],
-        );
-      }
-      return viewport;
+    // 宽屏：预览面上方叠一层视口控制浮层（视角预设 / 网格 / 重置）。
+    // 窄屏不显示——预览区本身放不下浮层，控件也没有工具栏位置。
+    final Widget viewport = _aquaStage(
+      context,
+      _withViewportControls(preview, layout),
+    );
+    final List<ThreeOutlinerItem> outlinerItems = _outlinerItems();
+    ThreeOutlinerItem? selected;
+    for (final item in outlinerItems) {
+      if (item.id == _selectedOutlinerId) selected = item;
     }
-    // 横屏/桌面：源码/规范是预览的侧栏，不把预览整块替换掉；
-    // 竖屏/手机：保持单面切换（宽度不足，并排会两张都不可读）。
-    // 侧栏阈值取 3D 规格的左栏常驻断点（与三栏主体同一份规格，不另写 900）。
-    final double sideSplitMinWidth =
-        workbenchLayoutSpecs[WorkbenchKind.three]!.leftDockMinWidth;
-    if (width >= sideSplitMinWidth && side != null) {
-      final sideWidth = (width * 0.36).clamp(320.0, 460.0).toDouble();
+    final Widget outliner = ThreeOutlinerPanel(
+      items: outlinerItems,
+      selectedId: selected?.id,
+      onSelect: (item) => setState(() => _selectedOutlinerId = item.id),
+    );
+    final Widget inspector = ThreeNodeInspector(
+      item: selected,
+      sceneChars: _sceneJs.length,
+      currentPass: '${_state?['current'] ?? ''}',
+      onSaveEdit: (edit) => unawaited(_saveInspectorEdit(edit)),
+    );
+    if (layout.left == PanelPolicy.docked ||
+        layout.right == PanelPolicy.docked) {
       return Row(
-        key: const ValueKey('three-body-split'),
-        children: [
-          Expanded(child: preview),
-          Container(width: 1, color: p.line),
-          SizedBox(width: sideWidth, child: side),
+        key: const ValueKey('three-body-three-pane'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (layout.left == PanelPolicy.docked && _showOutliner)
+            SizedBox(width: layout.leftWidth, child: outliner),
+          if (layout.left == PanelPolicy.docked && _showOutliner)
+            Container(width: 1, color: p.line),
+          Expanded(child: viewport),
+          if (layout.right == PanelPolicy.docked && _showInspector)
+            Container(width: 1, color: p.line),
+          if (layout.right == PanelPolicy.docked && _showInspector)
+            SizedBox(width: layout.rightWidth, child: inspector),
         ],
       );
     }
-    return side ?? preview;
+    return viewport;
   }
 }
 
@@ -3446,21 +3485,15 @@ class _PassChip extends StatelessWidget {
 }
 
 class _TopBtn extends StatelessWidget {
-  const _TopBtn({
-    required this.icon,
-    required this.label,
-    this.onTap,
-    this.active = false,
-  });
+  const _TopBtn({required this.icon, required this.label, this.onTap});
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
-  final bool active;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final color = onTap == null ? p.ink4 : (active ? p.accent : p.ink2);
+    final color = onTap == null ? p.ink4 : p.ink2;
     return Padding(
       padding: const EdgeInsets.only(left: NonSpace.sm),
       child: InkWell(
@@ -3468,12 +3501,6 @@ class _TopBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(NonRadius.md),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
-          decoration: active
-              ? BoxDecoration(
-                  color: p.accentSoft,
-                  borderRadius: BorderRadius.circular(NonRadius.sm),
-                )
-              : null,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -3484,67 +3511,6 @@ class _TopBtn extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// 规范手编面板：编辑场景规范 → 回灌（先改规范再要代码）。
-class _SpecPane extends StatelessWidget {
-  const _SpecPane({required this.controller, required this.onSave});
-  final TextEditingController controller;
-  final Future<void> Function() onSave;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(NonSpace.lg, NonSpace.md, NonSpace.lg, 0),
-          child: Row(
-            children: [
-              Text(
-                '项目规范',
-                style: TextStyle(
-                  fontSize: NonType.body,
-                  fontWeight: FontWeight.w700,
-                  color: p.ink2,
-                ),
-              ),
-              const Spacer(),
-              OutlinedButton.icon(
-                onPressed: () => onSave(),
-                icon: const Icon(Icons.save_outlined, size: 14),
-                label: const Text('保存规范', style: TextStyle(fontSize: NonType.body)),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.all(NonSpace.lg),
-            child: TextField(
-              controller: controller,
-              maxLines: null,
-              expands: true,
-              style: TextStyle(
-                fontSize: NonType.body,
-                fontFamily: 'monospace',
-                color: p.ink2,
-                height: 1.5,
-              ),
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: p.panel2,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(NonRadius.md),
-                  borderSide: BorderSide(color: p.line),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
