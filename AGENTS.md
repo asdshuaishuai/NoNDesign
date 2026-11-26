@@ -474,6 +474,11 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   `MusicPlaybackSurface`/`Video3dPreviewSurface`（真实控制器就绪 + 时钟推进/seekFrame
   同步）、**浮层遮挡**（Flutter 控件叠在真实 WebView 上仍可点击，且动作能驱动页面 JS）。
   **Windows WebView2 / iOS / Android 真机仍未复验**，仍按原登记待补。
+- **真机手动点击验证（2026-11-26）**：在真实 Linux 客户端（`flutter run -d linux` +
+  WebKitGTK + 引擎 webview 主路径）上用手动鼠标事件实测音乐工作台：五线谱↔钢琴卷帘切换
+  引起内容区 49.4% 像素变化；播放键点击引起运输条 0.93% 变化；运行中诊断确认
+  `verified=true`、播放计划 16 events / 61440 ticks / 4 measures。证据见
+  `docs/smoke/music-real-click-2026-11-26/`。像素只证明界面响应，音质仍需人耳。
 - **WebView 宿主裁剪纪律（2026-11-26 真机事故）**：`Container(decoration + clipBehavior)`
   生成的是 `ClipPath`（任意路径），`webview_all_linux`（WebKitGTK）无法把它映射到原生
   WebView Overlay，**会直接把 WebView 隐藏**——音频/JS 照常在跑，舞台却空白（真机集成
