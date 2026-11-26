@@ -26,6 +26,7 @@ typedef _ProjectBadgeKey = (
   String, // settings.threeProjectName
   String, // settings.hotappApp
   String, // musicProjectName
+  String, // video3dProjectName
   bool, // dirty
 );
 
@@ -74,8 +75,16 @@ class TitleBar extends StatelessWidget {
       case 'plugin:video':
         return ('视频', '视频工作台', '', Icons.movie_outlined);
       case 'plugin:video3d':
-        // 3D 视频项目由工作台自己的项目库切换；顶栏只标识工作台类型。
-        return ('3D 视频', '3D 视频工作台', '', Icons.movie_creation_outlined);
+        // 3D 视频项目由工作台自己的项目库切换；store 只在能观察到切换的入口
+        // （项目菜单 / 打包导入）记录当前项目名，有记录时显示它，让「打包当前
+        // 项目」的目标在顶栏可见。
+        final name = store.video3dProjectName.trim();
+        return (
+          '3D 视频',
+          name.isEmpty ? '3D 视频工作台' : name,
+          name,
+          Icons.movie_creation_outlined,
+        );
       case 'plugin:music':
         final name = store.musicProjectName.trim();
         return (
@@ -162,10 +171,13 @@ class TitleBar extends StatelessWidget {
                     return;
                   }
                   if (value.startsWith('switch:video3d:')) {
-                    openVideo3dWorkspace(
-                      store,
-                      value.substring('switch:video3d:'.length),
-                    );
+                    final name = value
+                        .substring('switch:video3d:'.length)
+                        .trim();
+                    // 记下「当前 3D 视频项目」：工作台内部切项目没有回写 store，
+                    // 从项目菜单点进来的这一跳是能观察到切换的入口。
+                    if (name.isNotEmpty) store.setVideo3dProjectName(name);
+                    openVideo3dWorkspace(store, name);
                     return;
                   }
                   switch (value) {
@@ -183,13 +195,26 @@ class TitleBar extends StatelessWidget {
                       await store.exportFigma();
                     case 'shortcuts':
                       onShortcuts();
+                    case 'export-pack':
+                      await store.exportWorkbenchPack();
+                    case 'import-pack':
+                      await store.importWorkbenchPack();
                     case 'home':
                       store.setView('home');
                     case 'video':
                       openVideoWorkspace(store);
                     case 'video3d':
+                      // 不带项目进 3D 视频工作台：工作台会自动打开列表首项，
+                      // store 此刻不知道是哪一个——清掉记录，宁可不给打包入口
+                      // 也不拿旧项目名打包错项目（工作台内部切换的接线是后续项）。
+                      if (store.view != 'plugin:video3d') {
+                        store.setVideo3dProjectName('');
+                      }
                       openVideo3dWorkspace(store);
                     case 'new-video3d':
+                      if (store.view != 'plugin:video3d') {
+                        store.setVideo3dProjectName('');
+                      }
                       newVideo3dProject(store);
                     case 'music':
                       openMusicWorkspace(store);
@@ -220,6 +245,14 @@ class TitleBar extends StatelessWidget {
                       .toList();
                   final designFace = !store.view.startsWith('plugin:');
                   final current = _activeProject(store);
+                  // 打包入口只对音乐 / 视频 / 3D 视频三个工作台开放（它们有
+                  // 单一容器的事实源）；导出还要求当前工作台确实打开了一个项目，
+                  // 否则禁用——不给「点了没反应」或「打包了别的项目」的可能。
+                  final String? packKind = store.packKindForView(store.view);
+                  final bool canImportPack = packKind != null;
+                  final bool canExportPack =
+                      packKind != null &&
+                      store.currentPackProjectName.isNotEmpty;
                   final recent = [
                     for (final r in store.recent.take(4))
                       if ((r['path'] ?? '').toString() !=
@@ -240,6 +273,24 @@ class TitleBar extends StatelessWidget {
                       Icons.folder_open_outlined,
                       '打开项目…',
                       modCombo('⌘O'),
+                    ),
+                    _menu(
+                      context,
+                      'export-pack',
+                      Icons.inventory_2_outlined,
+                      '打包当前项目…',
+                      '',
+                      key: const ValueKey('title-bar-export-pack'),
+                      enabled: canExportPack,
+                    ),
+                    _menu(
+                      context,
+                      'import-pack',
+                      Icons.unarchive_outlined,
+                      '导入打包项目…',
+                      '',
+                      key: const ValueKey('title-bar-import-pack'),
+                      enabled: canImportPack,
                     ),
                     if (designFace)
                       _menu(
@@ -385,6 +436,7 @@ class TitleBar extends StatelessWidget {
                     s.settings.threeProjectName,
                     s.settings.hotappApp,
                     s.musicProjectName,
+                    s.video3dProjectName,
                     s.dirty,
                   ),
                   builder: (context, _, child) {
@@ -729,11 +781,15 @@ class TitleBar extends StatelessWidget {
     String value,
     IconData icon,
     String label,
-    String shortcut,
-  ) {
+    String shortcut, {
+    Key? key,
+    bool enabled = true,
+  }) {
     final p = context.palette;
     return PopupMenuItem<String>(
+      key: key,
       value: value,
+      enabled: enabled,
       height: kNonMenuRowHeight,
       child: Row(
         children: [

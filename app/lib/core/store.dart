@@ -36,9 +36,14 @@ import 'remote/desktop_rpc_host.dart';
 import 'remote/rpc_methods.dart';
 import 'remote_desktop_client.dart';
 import 'hotapp_service.dart';
+import 'music/music_project.dart';
 import 'nonapp_library.dart';
 import 'portfolio_entries.dart';
 import 'toast_service.dart';
+import 'video3d/video3d_project.dart';
+import 'video_project.dart';
+import 'workbench_pack.dart';
+import 'workbench_pack_io.dart';
 
 /// Kept for the shell/full-screen hosts that still wire a ScaffoldMessenger.
 ///
@@ -1224,6 +1229,226 @@ class AppStore extends ChangeNotifier {
     if (musicProjectName == name) return;
     musicProjectName = name;
     notifyListeners();
+  }
+
+  /// 3D 视频工作台当前项目名（'' = 无）。
+  ///
+  /// 3D 视频工作台的项目切换目前发生在工作台自己的项目库列表里，还没有把
+  /// 选中项目写回 store；本字段只在**能观察到切换的入口**记录（顶栏项目菜单
+  /// 切到某个 3D 视频项目、导入打包项目后自动跟随），让「打包当前项目」有
+  /// 确定的打包目标。工作台内部列表切换的接线是后续项——没有记录时打包入口
+  /// 禁用，绝不猜一个项目去打包。
+  String video3dProjectName = '';
+
+  void setVideo3dProjectName(String name) {
+    if (video3dProjectName == name) return;
+    video3dProjectName = name;
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 工作台项目打包（nan.pack/1）
+  // ---------------------------------------------------------------------------
+  //
+  // 容器格式与目录桥在 `workbench_pack.dart` / `workbench_pack_io.dart`；
+  // 音乐 / 视频 / 3D 视频三个项目存储各自已有 `exportPack` / `importPack`
+  // （本文件只调用，不改它们的语义）。顶栏项目菜单的两个入口
+  // （`title-bar-export-pack` / `title-bar-import-pack`）与下面的方法配对。
+
+  /// 视图 → 打包 kind（`plugin:music` → `music`、`plugin:video` → `video`、
+  /// `plugin:video3d` → `video3d`）；其它视图返回 null = 没有打包入口。
+  ///
+  /// 返回值是 `nan.pack/1` 的稳定 wire 值（见 [WorkbenchPackKind]）。
+  String? packKindForView(String view) {
+    switch (view) {
+      case 'plugin:music':
+        return WorkbenchPackKind.music.wire;
+      case 'plugin:video':
+        return WorkbenchPackKind.video.wire;
+      case 'plugin:video3d':
+        return WorkbenchPackKind.video3d.wire;
+    }
+    return null;
+  }
+
+  /// 当前视图里「已打开项目」的名字（'' = 没有打开项目）。
+  ///
+  /// 打包入口启用条件与导出目标名的唯一来源：音乐/视频读各自持久化的当前
+  /// 项目名，3D 视频读 [video3dProjectName]。
+  String get currentPackProjectName => switch (packKindForView(view)) {
+    'music' => musicProjectName.trim(),
+    'video' => settings.videoProjectName.trim(),
+    'video3d' => video3dProjectName.trim(),
+    _ => '',
+  };
+
+  /// 测试注入：音乐 / 视频 / 3D 视频项目库。
+  ///
+  /// 生产为各自 `.instance`（指向真实项目根）；测试指向临时目录，不碰真实
+  /// 用户项目目录，也不依赖全局单例状态。
+  @visibleForTesting
+  MusicProjectStore? musicProjectsOverride;
+  @visibleForTesting
+  VideoProjectStore? videoProjectsOverride;
+  @visibleForTesting
+  Video3dProjectStore? video3dProjectsOverride;
+
+  /// 测试注入：打包文件的文件选择器（入参是按视图过滤的扩展名，例如
+  /// `.nmu`；返回所选路径，null = 用户取消）。
+  ///
+  /// 生产实现弹系统文件对话框；测试注入 fake，不弹真对话框。
+  @visibleForTesting
+  Future<String?> Function(String extension)? pickPackFileOverride;
+
+  MusicProjectStore get _musicProjects =>
+      musicProjectsOverride ?? MusicProjectStore.instance;
+  VideoProjectStore get _videoProjects =>
+      videoProjectsOverride ?? VideoProjectStore.instance;
+  Video3dProjectStore get _video3dProjects =>
+      video3dProjectsOverride ?? Video3dProjectStore.instance;
+
+  /// 把当前工作台项目打包成单一容器（`nan.pack/1`），原子写到项目根
+  /// （`<项目根>/<项目名><扩展名>`）。
+  ///
+  /// 返回写出的文件；当前视图没有打包入口、或当前工作台没有打开项目时
+  /// **不写盘**，只给人话提示并返回 null（绝不猜一个项目去打包）。失败统一
+  /// 走 [_toastError]：人话由 [_packFailureMessage] 按错误码映射，原始诊断
+  /// 只进控制台/折叠的技术详情。
+  Future<File?> exportWorkbenchPack() async {
+    final String? kind = packKindForView(view);
+    if (kind == null) {
+      _toastWarn('这个工作台暂时没有打包入口');
+      return null;
+    }
+    final String name = currentPackProjectName;
+    if (name.isEmpty) {
+      _toastWarn(_packNoProjectMessage(kind));
+      return null;
+    }
+    try {
+      final File file = switch (kind) {
+        'music' => await _musicProjects.exportPack(name),
+        'video' => await _videoProjects.exportPack(name),
+        _ => await _video3dProjects.exportPack(name),
+      };
+      _toastSuccess('已打包：${_packFileName(file.path)}');
+      return file;
+    } catch (error) {
+      _toastError(_packFailureMessage(error, importing: false), error);
+      return null;
+    }
+  }
+
+  /// 从打包文件导入一个项目到当前工作台的项目库。
+  ///
+  /// 扩展名按当前视图的 kind 过滤（`.nmu` / `.nvdo` / `.n3v`），文件选择走
+  /// [_pickPackFile]（测试注入 fake，不弹真对话框）。成功后刷新作品集
+  /// （顶栏项目菜单/首页卡片与工作台同源），把当前项目跟随到导入项，并
+  /// toast「已导入：<项目名>」。用户取消返回 false 且不提示；失败按错误码给
+  /// 人话（例如同名项目已存在），原始诊断只进折叠的技术详情。
+  Future<bool> importWorkbenchPack() async {
+    final String? kind = packKindForView(view);
+    if (kind == null) {
+      _toastWarn('这个工作台暂时没有打包入口');
+      return false;
+    }
+    String? picked;
+    try {
+      picked = await _pickPackFile(packExtensionFor(kind));
+    } catch (error) {
+      _toastError('没能打开选择文件的窗口，请重试', error);
+      return false;
+    }
+    if (picked == null || picked.trim().isEmpty) return false; // 用户取消：不报错
+    final File file = File(picked.trim());
+    try {
+      // 导入目标目录名以容器内 `name` 为准（三个 store 的 importPack 同一条
+      // 规则）；先读一遍只为了「已导入：<name>」提示与当前项目跟随，kind /
+      // 坏包 / 目标已存在的判定仍由对应 store 的 importPack 负责。
+      final WorkbenchPack pack = await WorkbenchPack.readFrom(file);
+      switch (kind) {
+        case 'music':
+          await _musicProjects.importPack(file);
+          setMusicProjectName(pack.name);
+        case 'video':
+          await _videoProjects.importPack(file);
+          setVideoProjectName(pack.name);
+        default:
+          await _video3dProjects.importPack(file);
+          setVideo3dProjectName(pack.name);
+      }
+      await refreshPortfolio(force: true);
+      _toastSuccess('已导入：${pack.name}');
+      return true;
+    } catch (error) {
+      _toastError(_packFailureMessage(error, importing: true), error);
+      return false;
+    }
+  }
+
+  /// 打包文件选择器：生产弹系统对话框（按 [extension] 过滤），测试注入覆盖。
+  Future<String?> _pickPackFile(String extension) async {
+    final override = pickPackFileOverride;
+    if (override != null) return override(extension);
+    final XTypeGroup group = XTypeGroup(
+      label: 'NaN 项目包',
+      extensions: <String>[extension.replaceFirst('.', '')],
+    );
+    final XFile? file = await openFile(acceptedTypeGroups: <XTypeGroup>[group]);
+    return file?.path;
+  }
+
+  /// 打包文件的人话文件名（toast 用；界面里不摆完整路径）。
+  static String _packFileName(String path) {
+    final segments = path
+        .replaceAll('\\', '/')
+        .split('/')
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    return segments.isEmpty ? path : segments.last;
+  }
+
+  /// 「当前工作台没有打开项目」时的人话（下一步是先在对应工作台打开项目）。
+  static String _packNoProjectMessage(String kind) {
+    switch (kind) {
+      case 'music':
+        return '先在音乐工作台打开一个项目，再打包';
+      case 'video':
+        return '先在视频工作台打开一个项目，再打包';
+      default:
+        return '先在 3D 视频工作台打开一个项目，再打包';
+    }
+  }
+
+  /// 打包器 / 三个项目库的失败码 → 用户可见的一句话；原始诊断由调用方送进
+  /// `_toastError` 的 technical 位（只进日志/折叠的「技术详情」）。
+  static String _packFailureMessage(Object? error, {required bool importing}) {
+    if (error is MusicProjectFailure) return musicProjectFailureMessage(error);
+    if (error is VideoProjectFailure) return videoProjectFailureMessage(error);
+    if (error is Video3dProjectFailure) {
+      return video3dProjectFailureMessage(error);
+    }
+    if (error is WorkbenchPackFailure) {
+      switch (error.code) {
+        case WorkbenchPackIoFailureCode.targetExists:
+          return '同名项目已存在，请先改名或删除后再导入';
+        case WorkbenchPackIoFailureCode.kindMismatch:
+          return '这个打包文件属于别的工作台，换对应工作台再导入';
+        case WorkbenchPackIoFailureCode.noFiles:
+          return '这个打包文件里没有项目内容，没法导入';
+        case WorkbenchPackFailureCode.versionUnsupported:
+          return '这个打包文件版本太新，暂时读不了';
+        case WorkbenchPackFailureCode.tooLarge:
+          return importing ? '这个打包文件太大，暂时读不了' : '项目内容太大，暂时打不了包';
+        case WorkbenchPackFailureCode.ioFailed:
+          return '项目文件没能写入或读取，请重试';
+        case WorkbenchPackFailureCode.unknownKind:
+          return '这个打包文件不属于任何工作台，没法导入';
+        default:
+          return importing ? '这个打包文件不完整或已损坏，没法导入' : '项目内容里有没法打包的东西，请检查后再试';
+      }
+    }
+    return importing ? '导入没有完成，请重试' : '打包没有完成，请重试';
   }
 
   /// 3D 规范手编草稿（按项目名）：未保存的编辑跨视图保留。
