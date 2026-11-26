@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import 'aqua.dart';
 import 'common.dart';
 import 'workspace_open.dart';
 
@@ -13,6 +14,20 @@ import 'workspace_open.dart';
 /// 实测溢出 1.5–61px（批次：桌面壳层）。880 是命令条真正放得下的宽度：
 /// 低于它时空出中部，只留搜索图标；高于它时命令条文案仍可收缩省略。
 const double kTitleBarNarrowWidth = 880;
+
+/// 深色主题标题栏高度（浅色 = Aqua，高度取 [AquaMetrics.titleBarHeight]）。
+const double _kTitleBarHeightDark = 52;
+
+/// 项目徽章 [Selector] 的选择值：这些字段变了才重建徽章，agent 运行期
+/// 的逐条事件（usage / 时间线）不再重建整条标题栏。
+typedef _ProjectBadgeKey = (
+  String, // view
+  String, // projectName
+  String, // settings.threeProjectName
+  String, // settings.hotappApp
+  String, // musicProjectName
+  bool, // dirty
+);
 
 class TitleBar extends StatelessWidget {
   final VoidCallback onCommand;
@@ -76,31 +91,40 @@ class TitleBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final store = context.watch<AppStore>();
+    // 只读、不订阅：整条顶栏不再随 store.notify 全量重建（agent 运行期
+    // 逐条事件是这条路径上最热的来源）。真正需要跟随 store 的四处——项目
+    // 徽章、忙碌芯片、模型胶囊、窄栏/主题图标——各自用 Selector 收窄。
+    final store = context.read<AppStore>();
     final p = context.palette;
-    final model = store.model;
+    final bool aqua = isAquaTheme(context);
+    final double height = aqua
+        ? AquaMetrics.titleBarHeight
+        : _kTitleBarHeightDark;
     return LayoutBuilder(
       builder: (context, constraints) {
         // 窄断点按整条顶栏宽度判定（命令条在 880 以下放不下，见常量注释）。
         final narrow = constraints.maxWidth < kTitleBarNarrowWidth;
-        return Container(
-          height: 52,
-          decoration: BoxDecoration(
-            color: p.bgElevated.withValues(alpha: 0.94),
-            border: Border(bottom: BorderSide(color: p.line)),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+        final content = Padding(
+          padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
           child: Row(
             children: [
+              // 浅色 = Aqua：左侧红/黄/绿口香糖窗口控件。本期只作材质装饰，
+              // 不新增窗口行为（执行 `ExcludeSemantics`：不给读屏报假按钮）。
+              if (aqua) ...[
+                const ExcludeSemantics(
+                  child: AquaGumdrops(size: AquaMetrics.gumdropSize),
+                ),
+                const SizedBox(width: NonSpace.sm),
+              ],
               const NonLogo(size: 24),
-              const SizedBox(width: 8),
+              const SizedBox(width: NonSpace.sm),
               PopupMenuButton<String>(
                 key: const ValueKey('title-bar-project-menu'),
                 tooltip: '项目与工作台',
                 offset: const Offset(0, 38),
                 color: p.panel,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(NonRadius.md),
                   side: BorderSide(color: p.lineStrong),
                 ),
                 // 每次展开都刷一次目录（刚做出来的 3D 场景/热应用要能立刻出现在
@@ -352,47 +376,61 @@ class TitleBar extends StatelessWidget {
                     ),
                   ];
                 },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 6,
+                child: Selector<AppStore, _ProjectBadgeKey>(
+                  selector: (context, s) => (
+                    s.view,
+                    s.projectName,
+                    s.settings.threeProjectName,
+                    s.settings.hotappApp,
+                    s.musicProjectName,
+                    s.dirty,
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // 标识当前项目类型：同一个位置既显示「现在在哪个项目」，
-                      // 也是唯一的切换口（工作台类型由项目决定）。
-                      Icon(_activeProject(store).$4, size: 14, color: p.ink4),
-                      const SizedBox(width: 6),
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: narrow ? 96 : 210,
-                        ),
-                        child: Text(
-                          _activeProject(store).$2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: p.ink,
-                          ),
-                        ),
+                  builder: (context, _, child) {
+                    final store = context.read<AppStore>();
+                    final active = _activeProject(store);
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: NonSpace.xs,
+                        vertical: 6,
                       ),
-                      if (store.dirty && !store.view.startsWith('plugin:'))
-                        Padding(
-                          padding: const EdgeInsets.only(left: 5),
-                          child: Container(
-                            width: 5,
-                            height: 5,
-                            decoration: BoxDecoration(
-                              color: p.warn,
-                              shape: BoxShape.circle,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // 标识当前项目类型：同一个位置既显示「现在在哪个项目」，
+                          // 也是唯一的切换口（工作台类型由项目决定）。
+                          Icon(active.$4, size: 14, color: p.ink4),
+                          const SizedBox(width: 6),
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: narrow ? 96 : 210,
+                            ),
+                            child: Text(
+                              active.$2,
+                              overflow: TextOverflow.ellipsis,
+                              style: NonType.of(
+                                NonType.bodyStrong,
+                                color: p.ink,
+                                weight: FontWeight.w600,
+                              ),
                             ),
                           ),
-                        ),
-                      Icon(Icons.expand_more, size: 15, color: p.ink4),
-                    ],
-                  ),
+                          if (store.dirty && !store.view.startsWith('plugin:'))
+                            Padding(
+                              padding: const EdgeInsets.only(left: 5),
+                              child: Container(
+                                width: 5,
+                                height: 5,
+                                decoration: BoxDecoration(
+                                  color: p.warn,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ),
+                          Icon(Icons.expand_more, size: 15, color: p.ink4),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ),
               const Spacer(),
@@ -407,41 +445,48 @@ class TitleBar extends StatelessWidget {
                 Expanded(
                   flex: 4,
                   child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 440),
-                      child: Material(
-                        key: const ValueKey('title-bar-command-bar'),
-                        color: p.panel2.withValues(alpha: 0.65),
-                        borderRadius: BorderRadius.circular(10),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(10),
-                          onTap: onCommand,
-                          child: Container(
-                            height: 31,
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: p.line),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(Icons.search, size: 14, color: p.ink4),
-                                const SizedBox(width: 7),
-                                // 文案可收缩省略：宽度不够时截断而不是把整条命令条撑出。
-                                Expanded(
-                                  child: Text(
-                                    '问 NaN，或运行一个命令…',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: p.ink3,
+                    // 命令条是静态片（只响应点按），单独隔离重绘。
+                    child: RepaintBoundary(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 440),
+                        child: Material(
+                          key: const ValueKey('title-bar-command-bar'),
+                          color: p.panel2.withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(NonRadius.md),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(NonRadius.md),
+                            onTap: onCommand,
+                            child: Container(
+                              height: 31,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: NonSpace.sm,
+                              ),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(
+                                  NonRadius.md,
+                                ),
+                                border: Border.all(color: p.line),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.search, size: 14, color: p.ink4),
+                                  const SizedBox(width: 7),
+                                  // 文案可收缩省略：宽度不够时截断而不是把整条命令条撑出。
+                                  Expanded(
+                                    child: Text(
+                                      '问 NaN，或运行一个命令…',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: NonType.of(
+                                        NonType.body,
+                                        color: p.ink3,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(width: 6),
-                                _Kbd(modCombo('⌘K')),
-                              ],
+                                  const SizedBox(width: 6),
+                                  _Kbd(modCombo('⌘K')),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -450,160 +495,186 @@ class TitleBar extends StatelessWidget {
                   ),
                 ),
               const Spacer(),
-              if (store.agentBusy)
-                Container(
-                  margin: const EdgeInsets.only(right: 6),
-                  padding: const EdgeInsets.only(
-                    left: 8,
-                    right: 2,
-                    top: 2,
-                    bottom: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: p.accentSoft,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 10,
-                        height: 10,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 1.6,
-                          color: p.accent,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      if (!narrow)
-                        Text(
-                          store.agentPhase == 'planning'
-                              ? '规划中'
-                              : store.agentPhase == 'building'
-                              ? '构建中'
-                              : store.agentPhase == 'refining'
-                              ? '调整中'
-                              : '停止中',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
+              // 忙碌芯片：只在 agentBusy/agentPhase 变化时重建这一小块。
+              Selector<AppStore, (bool, String)>(
+                selector: (context, s) => (s.agentBusy, s.agentPhase),
+                builder: (context, state, child) {
+                  if (!state.$1) return const SizedBox.shrink();
+                  final store = context.read<AppStore>();
+                  return Container(
+                    margin: const EdgeInsets.only(right: 6),
+                    padding: const EdgeInsets.only(
+                      left: NonSpace.sm,
+                      right: NonSpace.xxs,
+                      top: NonSpace.xxs,
+                      bottom: NonSpace.xxs,
+                    ),
+                    decoration: BoxDecoration(
+                      color: p.accentSoft,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 10,
+                          height: 10,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.6,
                             color: p.accent,
                           ),
                         ),
-                      IconButton(
-                        tooltip: '停止',
-                        onPressed: () => store.cancelAgent(),
-                        icon: Icon(
-                          Icons.stop_rounded,
-                          size: 14,
-                          color: p.accent,
+                        const SizedBox(width: 5),
+                        if (!narrow)
+                          Text(
+                            state.$2 == 'planning'
+                                ? '规划中'
+                                : state.$2 == 'building'
+                                ? '构建中'
+                                : state.$2 == 'refining'
+                                ? '调整中'
+                                : '停止中',
+                            style: NonType.of(
+                              NonType.caption,
+                              color: p.accent,
+                              weight: FontWeight.w600,
+                            ),
+                          ),
+                        IconButton(
+                          tooltip: '停止',
+                          onPressed: () => store.cancelAgent(),
+                          icon: Icon(
+                            Icons.stop_rounded,
+                            size: 14,
+                            color: p.accent,
+                          ),
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(
+                            minWidth: 26,
+                            minHeight: 24,
+                          ),
                         ),
-                        visualDensity: VisualDensity.compact,
-                        constraints: const BoxConstraints(
-                          minWidth: 26,
-                          minHeight: 24,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              // 模型胶囊：菜单项在展开时现读 store（永远是最新清单）。
               PopupMenuButton<String>(
                 tooltip: '模型',
                 offset: const Offset(0, 38),
                 color: p.panel,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(NonRadius.md),
                   side: BorderSide(color: p.lineStrong),
                 ),
                 onSelected: (v) {
                   if (v == 'settings') onSettings();
                 },
-                itemBuilder: (context) => [
-                  PopupMenuItem<String>(
-                    enabled: false,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          model?.name ?? '未选择模型',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: p.ink,
-                          ),
-                        ),
-                        Text(
-                          '${model?.providerName ?? ''} · ${model?.id ?? ''}',
-                          style: TextStyle(fontSize: 10, color: p.ink4),
-                        ),
-                        Text(
-                          '上下文 ${formatTokens(model?.context)}',
-                          style: TextStyle(fontSize: 10, color: p.ink4),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuDivider(),
-                  _menu(context, 'settings', Icons.tune, '模型与密钥…', ''),
-                ],
-                child: Padding(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: narrow ? 3 : 6,
-                    vertical: 6,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.auto_awesome, size: 12, color: p.accent),
-                      if (!narrow) ...[
-                        const SizedBox(width: 4),
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 150),
-                          child: Text(
-                            model?.name ?? '选择模型',
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: p.ink2,
-                              fontWeight: FontWeight.w500,
+                itemBuilder: (context) {
+                  final model = store.model;
+                  return [
+                    PopupMenuItem<String>(
+                      enabled: false,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            model?.name ?? '未选择模型',
+                            style: NonType.of(
+                              NonType.body,
+                              color: p.ink,
+                              weight: FontWeight.w600,
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          formatTokens(model?.context),
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontFamily: 'Menlo',
-                            color: p.ink4,
+                          Text(
+                            '${model?.providerName ?? ''} · ${model?.id ?? ''}',
+                            style: NonType.of(NonType.micro, color: p.ink4),
                           ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              IconAction(
-                key: const ValueKey('title-bar-rail-toggle'),
-                icon: Icons.bolt_outlined,
-                tooltip: 'NaN 面板',
-                active: store.rightTab == 'agent',
-                onTap: () => store.setRightTab(
-                  store.rightTab == 'agent' ? 'inspect' : 'agent',
-                ),
-              ),
-              IconAction(
-                key: const ValueKey('title-bar-theme'),
-                icon: store.settings.theme == 'light'
-                    ? Icons.dark_mode_outlined
-                    : Icons.light_mode_outlined,
-                tooltip: '切换主题',
-                onTap: () async {
-                  store.settings.theme = store.settings.theme == 'light'
-                      ? 'dark'
-                      : 'light';
-                  await store.saveSettings();
+                          Text(
+                            '上下文 ${formatTokens(model?.context)}',
+                            style: NonType.of(NonType.micro, color: p.ink4),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuDivider(),
+                    _menu(context, 'settings', Icons.tune, '模型与密钥…', ''),
+                  ];
                 },
+                child: Selector<AppStore, (String?, String?, int?)>(
+                  selector: (context, s) =>
+                      (s.model?.name, s.model?.providerName, s.model?.context),
+                  builder: (context, state, child) {
+                    final model = context.read<AppStore>().model;
+                    return Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: narrow ? 3 : 6,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.auto_awesome, size: 12, color: p.accent),
+                          if (!narrow) ...[
+                            const SizedBox(width: NonSpace.xs),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 150),
+                              child: Text(
+                                model?.name ?? '选择模型',
+                                overflow: TextOverflow.ellipsis,
+                                style: NonType.of(
+                                  NonType.caption,
+                                  color: p.ink2,
+                                  weight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: NonSpace.xs),
+                            Text(
+                              formatTokens(model?.context),
+                              style: NonType.of(
+                                NonType.micro,
+                                color: p.ink4,
+                                // 数字对齐用等宽字体（字体族不是颜色令牌）。
+                              ).copyWith(fontFamily: 'Menlo'),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+              Selector<AppStore, bool>(
+                selector: (context, s) => s.rightTab == 'agent',
+                builder: (context, active, child) => IconAction(
+                  key: const ValueKey('title-bar-rail-toggle'),
+                  icon: Icons.bolt_outlined,
+                  tooltip: 'NaN 面板',
+                  active: active,
+                  onTap: () {
+                    final store = context.read<AppStore>();
+                    store.setRightTab(
+                      store.rightTab == 'agent' ? 'inspect' : 'agent',
+                    );
+                  },
+                ),
+              ),
+              Selector<AppStore, bool>(
+                selector: (context, s) => s.settings.theme == 'light',
+                builder: (context, light, child) => IconAction(
+                  key: const ValueKey('title-bar-theme'),
+                  icon: light
+                      ? Icons.dark_mode_outlined
+                      : Icons.light_mode_outlined,
+                  tooltip: '切换主题',
+                  onTap: () async {
+                    final store = context.read<AppStore>();
+                    store.settings.theme = light ? 'dark' : 'light';
+                    await store.saveSettings();
+                  },
+                ),
               ),
               IconAction(
                 key: const ValueKey('title-bar-settings'),
@@ -614,6 +685,20 @@ class TitleBar extends StatelessWidget {
             ],
           ),
         );
+        // 浅色 = Aqua：窗口标题栏是细条纹面（pinstripe）+ palette 取色；
+        // 深色主题保持原来的半透明底。两种分支的几何完全一致（同一内边距）。
+        final Widget bar = Container(
+          height: height,
+          decoration: BoxDecoration(
+            color: aqua ? p.bgElevated : p.bgElevated.withValues(alpha: 0.94),
+            border: Border(bottom: BorderSide(color: p.line)),
+          ),
+          child: aqua
+              ? AquaPinstripes(stripeColor: p.line, child: content)
+              : content,
+        );
+        // 静态头部隔离重绘：内容层动画/滚动不会把标题栏一起重画。
+        return RepaintBoundary(child: bar);
       },
     );
   }
@@ -637,22 +722,21 @@ class TitleBar extends StatelessWidget {
         child: Row(
           children: [
             Icon(icon, size: 14, color: p.ink4),
-            const SizedBox(width: 8),
+            const SizedBox(width: NonSpace.sm),
             Expanded(
               child: Text(
                 label,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, color: p.ink2),
+                style: NonType.of(NonType.body, color: p.ink2),
               ),
             ),
             if (shortcut.isNotEmpty)
               Text(
                 shortcut,
-                style: TextStyle(
-                  fontSize: 10,
-                  fontFamily: 'Menlo',
+                style: NonType.of(
+                  NonType.micro,
                   color: p.ink4,
-                ),
+                ).copyWith(fontFamily: 'Menlo'),
               ),
           ],
         ),
@@ -670,7 +754,7 @@ class TitleBar extends StatelessWidget {
         width: _menuWidth,
         child: Text(
           label,
-          style: TextStyle(fontSize: 10, letterSpacing: 0.6, color: p.ink4),
+          style: NonType.of(NonType.micro, color: p.ink4, letterSpacing: 0.6),
         ),
       ),
     );
@@ -684,7 +768,10 @@ class _Kbd extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 5,
+        vertical: NonSpace.xxs,
+      ),
       decoration: BoxDecoration(
         color: p.panel2,
         borderRadius: BorderRadius.circular(4),
@@ -692,7 +779,10 @@ class _Kbd extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink3),
+        style: NonType.of(
+          NonType.micro,
+          color: p.ink3,
+        ).copyWith(fontFamily: 'Menlo'),
       ),
     );
   }

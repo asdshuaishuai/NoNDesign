@@ -12,6 +12,7 @@ import '../core/platform_capabilities.dart';
 import '../core/remote_desktop_client.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import 'aqua.dart';
 import 'common.dart';
 import 'mediapipe_model_card.dart';
 
@@ -176,7 +177,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final store = context.watch<AppStore>();
+    // 只读：弹窗骨架/头部/导航不随 store.notify 重建；真正依赖 store 的内容区
+    // 用 ListenableBuilder 收窄——agent 运行期逐条事件不再重建整个设置面板。
+    final store = context.read<AppStore>();
     final p = context.palette;
     final size = MediaQuery.sizeOf(context);
     // 三档布局：手机/矮窗全屏 + 顶部导航；iPad 竖屏全屏但内容限宽；
@@ -216,34 +219,39 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       if (!mobile) ('acp', Icons.hub_outlined, '外部智能体'),
       ('about', Icons.info_outline, '关于'),
     ];
-    final content = Padding(
-      padding: EdgeInsets.all(phone ? 14 : (padPortrait ? 20 : 18)),
-      child: switch (_tab) {
-        'appearance' => _appearance(context, store),
-        'agent' => _agent(context, store),
-        'acp' => mobile ? _models(context, store) : _acp(context, store),
-        'about' => _about(context, store),
-        _ => _models(context, store),
-      },
-    );
-    final topNav = Container(
-      key: const ValueKey('settings-topnav'),
-      width: double.infinity,
-      height: phone ? 46 : 50,
-      decoration: BoxDecoration(
-        color: p.panel2.withValues(alpha: 0.3),
-        border: Border(bottom: BorderSide(color: p.line)),
+    final content = ListenableBuilder(
+      listenable: store,
+      builder: (context, _) => Padding(
+        padding: EdgeInsets.all(phone ? 14 : (padPortrait ? 20 : 18)),
+        child: switch (_tab) {
+          'appearance' => _appearance(context, store),
+          'agent' => _agent(context, store),
+          'acp' => mobile ? _models(context, store) : _acp(context, store),
+          'about' => _about(context, store),
+          _ => _models(context, store),
+        },
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Row(children: [
-          for (final item in navItems) _nav(context, item.$1, item.$2, item.$3, compact: true),
-        ]),
+    );
+    final topNav = RepaintBoundary(
+      child: Container(
+        key: const ValueKey('settings-topnav'),
+        width: double.infinity,
+        height: phone ? 46 : 50,
+        decoration: BoxDecoration(
+          color: p.panel2.withValues(alpha: 0.3),
+          border: Border(bottom: BorderSide(color: p.line)),
+        ),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
+          child: Row(children: [
+            for (final item in navItems) _nav(context, item.$1, item.$2, item.$3, compact: true),
+          ]),
+        ),
       ),
     );
     return Dialog(
-      insetPadding: fullScreen ? EdgeInsets.zero : const EdgeInsets.all(24),
+      insetPadding: fullScreen ? EdgeInsets.zero : const EdgeInsets.all(NonSpace.xl),
       backgroundColor: p.panel,
       shape: fullScreen
           ? const RoundedRectangleBorder()
@@ -255,29 +263,31 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         child: SafeArea(
           child: Column(
             children: [
-              Container(
-                height: 54,
-                padding: EdgeInsets.symmetric(horizontal: phone ? 14 : 18),
-                decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
-                child: Row(
-                  children: [
-                    Text('设置', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
-                    if (!phone) ...[
-                      const SizedBox(width: 8),
-                      Text('模型与端点、智能体、外观设置', style: TextStyle(fontSize: 11, color: p.ink3)),
+              RepaintBoundary(
+                child: Container(
+                  height: 54,
+                  padding: EdgeInsets.symmetric(horizontal: phone ? 14 : 18),
+                  decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+                  child: Row(
+                    children: [
+                      Text('设置', style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink)),
+                      if (!phone) ...[
+                        const SizedBox(width: NonSpace.sm),
+                        Text('模型与端点、智能体、外观设置', style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
+                      ],
+                      const Spacer(),
+                      // 触屏（iPad/手机）关闭按钮命中区 44：视觉尺寸不变，
+                      // IconAction 的 InkWell 盒子按 hitSize 放大（review
+                      // settings-1；桌面临界值是 26）。
+                      IconAction(
+                        icon: Icons.close,
+                        tooltip: '关闭',
+                        size: 26,
+                        hitSize: mobile ? 44 : null,
+                        onTap: () => Navigator.pop(context),
+                      ),
                     ],
-                    const Spacer(),
-                    // 触屏（iPad/手机）关闭按钮命中区 44：视觉尺寸不变，
-                    // IconAction 的 InkWell 盒子按 hitSize 放大（review
-                    // settings-1；桌面临界值是 26）。
-                    IconAction(
-                      icon: Icons.close,
-                      tooltip: '关闭',
-                      size: 26,
-                      hitSize: mobile ? 44 : null,
-                      onTap: () => Navigator.pop(context),
-                    ),
-                  ],
+                  ),
                 ),
               ),
               if (fullScreen) topNav,
@@ -292,18 +302,20 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       )
                     : Row(
                         children: [
-                          Container(
-                            key: const ValueKey('settings-rail'),
-                            width: railWidth,
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: p.panel2.withValues(alpha: 0.3),
-                              border: Border(right: BorderSide(color: p.line)),
-                            ),
-                            child: Column(
-                              children: [
-                                for (final item in navItems) _nav(context, item.$1, item.$2, item.$3),
-                              ],
+                          RepaintBoundary(
+                            child: Container(
+                              key: const ValueKey('settings-rail'),
+                              width: railWidth,
+                              padding: const EdgeInsets.all(NonSpace.sm),
+                              decoration: BoxDecoration(
+                                color: p.panel2.withValues(alpha: 0.3),
+                                border: Border(right: BorderSide(color: p.line)),
+                              ),
+                              child: Column(
+                                children: [
+                                  for (final item in navItems) _nav(context, item.$1, item.$2, item.$3),
+                                ],
+                              ),
                             ),
                           ),
                           Expanded(child: content),
@@ -330,7 +342,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       onTap: () => setState(() => _tab = id),
       child: Container(
         height: touch ? 44 : (compact ? 32 : 34),
-        margin: compact ? const EdgeInsets.only(right: 4) : const EdgeInsets.only(bottom: 2),
+        margin: compact ? const EdgeInsets.only(right: NonSpace.xs) : const EdgeInsets.only(bottom: NonSpace.xxs),
         padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 9),
         decoration: BoxDecoration(
           color: active ? p.panel : Colors.transparent,
@@ -342,7 +354,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             const SizedBox(width: 7),
             Text(label,
                 maxLines: 1,
-                style: TextStyle(fontSize: 12, color: active ? p.ink : p.ink3)),
+                style: TextStyle(fontSize: NonType.body, color: active ? p.ink : p.ink3)),
           ],
         ),
       ),
@@ -377,7 +389,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 controller: _baseController,
                 readOnly: !_customEndpoint && !_isCustomProvider(store),
                 style: TextStyle(
-                    fontSize: 11,
+                    fontSize: NonType.caption,
                     fontFamily: 'Menlo',
                     color:
                         (_customEndpoint || _isCustomProvider(store)) ? p.ink : p.ink2),
@@ -417,12 +429,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                         _customEndpoint
                             ? '自定义端点已生效（兼容网关 / 中转）；点 🔄 恢复内置端点'
                             : '端点为内置只读；打开自定义端点可接入兼容网关 / 中转',
-                        style: TextStyle(fontSize: 11, color: p.ink3),
+                        style: TextStyle(fontSize: NonType.caption, color: p.ink3),
                       ),
                     ),
                     Text('自定义端点',
-                        style: TextStyle(fontSize: 11, color: p.ink3)),
-                    const SizedBox(width: 4),
+                        style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
+                    const SizedBox(width: NonSpace.xs),
                     Switch.adaptive(
                       key: const ValueKey('settings-endpoint-custom'),
                       value: _customEndpoint,
@@ -434,22 +446,22 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 ),
               ] else
                 Text('自定义服务商：端点与模型 ID 均自由填写',
-                    style: TextStyle(fontSize: 11, color: p.ink3)),
+                    style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
             ],
           )),
           if (_customEndpoint)
             Padding(
-              padding: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.only(top: NonSpace.xs),
               child: Text(
                 '自定义端点请自行保证与所选模型的服务协议兼容。',
-                style: TextStyle(fontSize: 11, height: 1.4, color: p.ink4),
+                style: TextStyle(fontSize: NonType.caption, height: 1.4, color: p.ink4),
               ),
             ),
-          const SizedBox(height: 12),
+          const SizedBox(height: NonSpace.md),
           _labeled(context, 'API Key（只存本机）', TextField(
             controller: _keyController,
             obscureText: false,
-            style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink2),
+            style: TextStyle(fontSize: NonType.caption, fontFamily: 'Menlo', color: p.ink2),
             decoration: const InputDecoration(hintText: 'sk-…'),
             onSubmitted: (v) async {
               store.settings.apiKey = v.trim();
@@ -462,7 +474,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           )),
           const SizedBox(height: 14),
           MediaPipeModelCard(service: widget.mediaPipeService),
-          const SizedBox(height: 12),
+          const SizedBox(height: NonSpace.md),
           if (store.model != null)
             Container(
               padding: const EdgeInsets.all(10),
@@ -480,15 +492,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       Expanded(
                         child: Text(store.model!.name,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
+                            style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w600, color: p.ink)),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: NonSpace.sm),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Text('思考等级', style: TextStyle(fontSize: 10, color: p.ink3)),
+                      Text('思考等级', style: TextStyle(fontSize: NonType.micro, color: p.ink3)),
                       const SizedBox(width: 6),
                       for (final level in _levels(store.model!))
                         Padding(
@@ -506,17 +518,17 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                               ),
                               child: Text(level,
                                   style: TextStyle(
-                                      fontSize: 10,
+                                      fontSize: NonType.micro,
                                       color: store.settings.thinkingLevel == level ? Colors.white : p.ink3)),
                             ),
                           ),
                         ),
                       const Spacer(),
                       Text('${formatTokens(store.model!.context)} 上下文',
-                          style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                          style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
                       const SizedBox(width: 10),
-                      Text('步数', style: TextStyle(fontSize: 10, color: p.ink3)),
-                      const SizedBox(width: 4),
+                      Text('步数', style: TextStyle(fontSize: NonType.micro, color: p.ink3)),
+                      const SizedBox(width: NonSpace.xs),
                       // 与保存按钮/chips 同高 24：TextFormField 默认非 dense
                       // 的最小高度 + 聚焦 2px 粗描边会高出一截（用户截图实证）
                       // ——实体容器自绘聚焦态，三件套视觉统一。
@@ -536,13 +548,13 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                         ),
                         child: store.settings.unlimitedSteps
                             ? Text('∞',
-                                style: TextStyle(fontSize: 12, fontFamily: 'Menlo', color: p.ink2))
+                                style: TextStyle(fontSize: NonType.body, fontFamily: 'Menlo', color: p.ink2))
                             : TextField(
                                 controller: _stepsController,
                                 focusNode: _stepsFocus,
                                 textAlign: TextAlign.center,
                                 textAlignVertical: TextAlignVertical.center,
-                                style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink),
+                                style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink),
                                 decoration: const InputDecoration(
                                   isCollapsed: true,
                                   border: InputBorder.none,
@@ -560,42 +572,74 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       const SizedBox(width: 6),
                       // 显式保存（用户点名「不然感觉没生效」）：点击提交
                       // 输入框当前值，✓ 反馈 1.4s。
-                      InkWell(
-                        borderRadius: BorderRadius.circular(6),
-                        onTap: _saveSteps,
-                        child: Container(
-                          height: 24,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          decoration: BoxDecoration(
-                            color: _stepsSavedFlash
-                                ? p.success.withValues(alpha: 0.16)
-                                : p.panel3,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
+                      //
+                      // 浅色 = Aqua：这是设置面板**唯一的主 CTA**，换成糖果
+                      // 凝胶按钮；呼吸光晕（pulse）只给它，别的控件都不呼吸。
+                      // 深色主题保持原来的紧凑按钮（几何/配色都不变）。
+                      if (isAquaTheme(context))
+                        AquaGelButton(
+                          label: _stepsSavedFlash ? '已保存' : '保存',
+                          icon: _stepsSavedFlash
+                              ? Icons.check
+                              : Icons.save_outlined,
+                          dense: true,
+                          pulse: true,
+                          onPressed: _saveSteps,
+                        )
+                      else
+                        InkWell(
+                          borderRadius: BorderRadius.circular(6),
+                          onTap: _saveSteps,
+                          child: Container(
+                            height: 24,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: NonSpace.sm,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _stepsSavedFlash
+                                  ? p.success.withValues(alpha: 0.16)
+                                  : p.panel3,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
                                 color: _stepsSavedFlash
                                     ? p.success.withValues(alpha: 0.5)
-                                    : p.line),
-                          ),
-                          child: Row(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(_stepsSavedFlash ? Icons.check : Icons.save_outlined,
-                                size: 11,
-                                color: _stepsSavedFlash ? p.success : p.ink3),
-                            const SizedBox(width: 3),
-                            Text(_stepsSavedFlash ? '已保存' : '保存',
-                                style: TextStyle(
-                                    fontSize: 10,
+                                    : p.line,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _stepsSavedFlash
+                                      ? Icons.check
+                                      : Icons.save_outlined,
+                                  size: 11,
+                                  color: _stepsSavedFlash
+                                      ? p.success
+                                      : p.ink3,
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  _stepsSavedFlash ? '已保存' : '保存',
+                                  style: TextStyle(
+                                    fontSize: NonType.micro,
                                     fontWeight: FontWeight.w600,
-                                    color: _stepsSavedFlash ? p.success : p.ink2)),
-                          ]),
+                                    color: _stepsSavedFlash
+                                        ? p.success
+                                        : p.ink2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
                     ],
                   ),
                   if (store.model!.protocol != 'openai')
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Text('该服务商为非 OpenAI 兼容协议，当前不可用；请选择 OpenAI 兼容端点。',
-                          style: TextStyle(fontSize: 10, color: p.warn)),
+                          style: TextStyle(fontSize: NonType.micro, color: p.warn)),
                     ),
                 ],
               ),
@@ -615,12 +659,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           DropdownMenuItem(
             value: id,
             child: Text(store.registry.provider(id)?['name']?.toString() ?? id,
-                style: const TextStyle(fontSize: 12)),
+                style: const TextStyle(fontSize: NonType.body)),
           ),
         // 显式「自定义」选项：选它 = 端点 / 模型 ID / Key 全自由填写。
         const DropdownMenuItem(
           value: _customProviderId,
-          child: Text('自定义', style: TextStyle(fontSize: 12)),
+          child: Text('自定义', style: TextStyle(fontSize: NonType.body)),
         ),
       ],
       onChanged: (id) async {
@@ -671,10 +715,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       key: ValueKey(keyName),
       controller: _customModelController,
       style: TextStyle(
-          fontSize: mobile ? 15 : 12, fontFamily: 'Menlo', color: p.ink),
+          fontSize: mobile ? NonType.subtitle : NonType.body, fontFamily: 'Menlo', color: p.ink),
       decoration: InputDecoration(
         hintText: '模型 ID（如 deepseek-chat / gpt-4o…）',
-        hintStyle: TextStyle(fontSize: mobile ? 13 : 11, color: p.ink4),
+        hintStyle: TextStyle(fontSize: mobile ? NonType.bodyStrong : NonType.caption, color: p.ink4),
         isDense: true,
         contentPadding: EdgeInsets.symmetric(
             horizontal: mobile ? 14 : 10, vertical: mobile ? 16 : 10),
@@ -732,17 +776,17 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   Text(name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: mobile ? 15 : 12, color: p.ink)),
+                      style: TextStyle(fontSize: mobile ? NonType.subtitle : NonType.body, color: p.ink)),
                   const SizedBox(height: 1),
                   Text(meta,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: mobile ? 12 : 10, color: p.ink4)),
+                      style: TextStyle(fontSize: mobile ? NonType.body : NonType.micro, color: p.ink4)),
                 ],
               ),
             ),
             Text('选择',
-                style: TextStyle(fontSize: mobile ? 13 : 10, color: p.accent)),
+                style: TextStyle(fontSize: mobile ? NonType.bodyStrong : NonType.micro, color: p.accent)),
             Icon(Icons.chevron_right, size: mobile ? 20 : 14, color: p.ink4),
           ],
         ),
@@ -795,27 +839,27 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       children: [
                         Expanded(
                           child: Text('选择模型',
-                              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.ink)),
+                              style: TextStyle(fontSize: NonType.title, fontWeight: FontWeight.w700, color: p.ink)),
                         ),
-                        Text(providerName, style: TextStyle(fontSize: 12, color: p.ink4)),
+                        Text(providerName, style: TextStyle(fontSize: NonType.body, color: p.ink4)),
                       ],
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: NonSpace.lg),
                     child: Row(
                       children: [
                         Expanded(
                           child: TextField(
                             key: const ValueKey('model-picker-search'),
                             onChanged: (v) => setSheet(() => _query = v),
-                            style: TextStyle(fontSize: 13, color: p.ink),
+                            style: TextStyle(fontSize: NonType.bodyStrong, color: p.ink),
                             decoration: InputDecoration(
                               hintText: '搜索模型…',
                               isDense: true,
                               prefixIcon: const Icon(Icons.search, size: 16),
                               contentPadding:
-                                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                  const EdgeInsets.symmetric(horizontal: NonSpace.md, vertical: NonSpace.md),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
                                 borderSide: BorderSide(color: p.line),
@@ -823,7 +867,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: NonSpace.sm),
                         OutlinedButton.icon(
                           key: const ValueKey('model-picker-refresh'),
                           onPressed: () async {
@@ -831,18 +875,18 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                             if (ctx.mounted) setSheet(() {});
                           },
                           icon: const Icon(Icons.refresh, size: 14),
-                          label: const Text('更新清单', style: TextStyle(fontSize: 12)),
+                          label: const Text('更新清单', style: TextStyle(fontSize: NonType.body)),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: NonSpace.sm),
                   Expanded(
                     child: models.isEmpty
                         ? Center(
                             child: Text(
                               store.registry.providerIds.isEmpty ? '模型清单还没有加载，点上方更新重试' : '没有找到匹配的模型',
-                              style: TextStyle(fontSize: 13, color: p.ink4),
+                              style: TextStyle(fontSize: NonType.bodyStrong, color: p.ink4),
                             ),
                           )
                         : ListView.builder(
@@ -859,7 +903,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                                 child: Container(
                                   padding:
                                       const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                  margin: const EdgeInsets.only(bottom: 4),
+                                  margin: const EdgeInsets.only(bottom: NonSpace.xs),
                                   decoration: BoxDecoration(
                                     color: active ? p.accentSoft : Colors.transparent,
                                     borderRadius: BorderRadius.circular(10),
@@ -883,7 +927,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                                                     maxLines: 1,
                                                     overflow: TextOverflow.ellipsis,
                                                     style: TextStyle(
-                                                        fontSize: 14,
+                                                        fontSize: NonType.subtitle,
                                                         fontWeight: FontWeight.w500,
                                                         color: p.ink)),
                                               ),
@@ -892,16 +936,16 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                                                 Pill(label: '可操作', color: p.success),
                                               ],
                                               if (m.reasoning) ...[
-                                                const SizedBox(width: 4),
+                                                const SizedBox(width: NonSpace.xs),
                                                 Pill(label: '会思考', color: p.accent),
                                               ],
                                             ]),
-                                            const SizedBox(height: 2),
+                                            const SizedBox(height: NonSpace.xxs),
                                             Text('${m.id} · ${formatTokens(m.context)} 上下文',
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
                                                 style: TextStyle(
-                                                    fontSize: 11,
+                                                    fontSize: NonType.caption,
                                                     fontFamily: 'Menlo',
                                                     color: p.ink4)),
                                           ],
@@ -918,18 +962,18 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   // 未收录），输入 ID 直接生效——与自定义端点同一开放度。
                   Padding(
                     key: const ValueKey('model-picker-custom'),
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    padding: const EdgeInsets.fromLTRB(NonSpace.lg, 0, NonSpace.lg, NonSpace.md),
                     child: Row(
                       children: [
                         Expanded(
                           child: TextField(
                             controller: _customModelController,
-                            style: TextStyle(fontSize: 13, color: p.ink),
+                            style: TextStyle(fontSize: NonType.bodyStrong, color: p.ink),
                             decoration: InputDecoration(
                               hintText: '自定义模型 ID…',
                               isDense: true,
                               contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 12),
+                                  horizontal: NonSpace.md, vertical: NonSpace.md),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
                                 borderSide: BorderSide(color: p.line),
@@ -937,12 +981,24 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        FilledButton(
-                          onPressed: () =>
-                              _useCustomModel(ctx, store, setSheet),
-                          child: const Text('使用', style: TextStyle(fontSize: 12)),
-                        ),
+                        const SizedBox(width: NonSpace.sm),
+                        // 浅色 = Aqua：确认主按钮用糖果凝胶（无 pulse——设置面板
+                        // 唯一的呼吸光晕留给「保存」主 CTA）；深色保持 M3 主按钮。
+                        if (isAquaTheme(context))
+                          AquaGelButton(
+                            label: '使用',
+                            onPressed: () =>
+                                _useCustomModel(ctx, store, setSheet),
+                          )
+                        else
+                          FilledButton(
+                            onPressed: () =>
+                                _useCustomModel(ctx, store, setSheet),
+                            child: const Text(
+                              '使用',
+                              style: TextStyle(fontSize: NonType.body),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -1012,20 +1068,24 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SectionLabel('主题'),
-          const SizedBox(height: 8),
+          const SizedBox(height: NonSpace.sm),
           Row(
             children: [
-              for (final item in [('dark', '深色', Icons.dark_mode_outlined), ('light', '浅色', Icons.light_mode_outlined)])
+              // 用户裁决 2026-11-26：浅色主题就是 Aqua，不再单独命名浅色。
+              for (final item in [('dark', '深色', Icons.dark_mode_outlined), ('light', '浅色（Aqua）', Icons.light_mode_outlined)])
                 Expanded(
                   child: InkWell(
                     borderRadius: BorderRadius.circular(10),
                     onTap: () async {
                       store.settings.theme = item.$1;
                       await store.saveSettings();
+                      // 主题切换会换掉整套 palette：骨架/头部不 watch store，
+                      // 这里显式重建一次，避免半新半旧的配色。
+                      if (mounted) setState(() {});
                     },
                     child: Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(right: NonSpace.sm),
+                      padding: const EdgeInsets.all(NonSpace.md),
                       decoration: BoxDecoration(
                         color: store.settings.theme == item.$1 ? p.accentSoft : p.panel2.withValues(alpha: 0.45),
                         borderRadius: BorderRadius.circular(10),
@@ -1034,8 +1094,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       child: Row(
                         children: [
                           Icon(item.$3, size: 16, color: store.settings.theme == item.$1 ? p.accent : p.ink3),
-                          const SizedBox(width: 8),
-                          Text(item.$2, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: p.ink)),
+                          const SizedBox(width: NonSpace.sm),
+                          Text(item.$2, style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w500, color: p.ink)),
                         ],
                       ),
                     ),
@@ -1046,7 +1106,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           if (chatFirst) ...[
             const SizedBox(height: 18),
             const SectionLabel('主面'),
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             Row(
               children: [
                 for (final item in [(true, '聊天流', Icons.forum_outlined), (false, '经典 Welcome', Icons.home_outlined)])
@@ -1059,8 +1119,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                         await store.saveSettings();
                       },
                       child: Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(right: NonSpace.sm),
+                        padding: const EdgeInsets.all(NonSpace.md),
                         decoration: BoxDecoration(
                           color: store.settings.chatStreamHome == item.$1 ? p.accentSoft : p.panel2.withValues(alpha: 0.45),
                           borderRadius: BorderRadius.circular(10),
@@ -1069,8 +1129,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                         child: Row(
                           children: [
                             Icon(item.$3, size: 16, color: store.settings.chatStreamHome == item.$1 ? p.accent : p.ink3),
-                            const SizedBox(width: 8),
-                            Text(item.$2, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: p.ink)),
+                            const SizedBox(width: NonSpace.sm),
+                            Text(item.$2, style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w500, color: p.ink)),
                           ],
                         ),
                       ),
@@ -1083,12 +1143,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               store.settings.chatStreamHome
                   ? '聊天流是默认主面；点顶栏「工作区」打开设计视图，按 Esc 回到聊天流。'
                   : '启动停留在经典 Welcome；点顶栏「聊天流」进入聊天流。',
-              style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, height: 1.4, color: p.ink4),
             ),
           ],
           const SizedBox(height: 18),
           const SectionLabel('快捷键'),
-          const SizedBox(height: 8),
+          const SizedBox(height: NonSpace.sm),
           for (final row in [
             ('命令面板', modCombo('⌘K')),
             ('保存', modCombo('⌘S')),
@@ -1101,17 +1161,17 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(
                 children: [
-                  Expanded(child: Text(row.$1, style: TextStyle(fontSize: 12, color: p.ink3))),
-                  Text(row.$2, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                  Expanded(child: Text(row.$1, style: TextStyle(fontSize: NonType.body, color: p.ink3))),
+                  Text(row.$2, style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
                 ],
               ),
             ),
           const SizedBox(height: 18),
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(NonSpace.md),
             decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(10)),
             child: Text('界面语言：简体中文 · 后续接入英文与更多语言。',
-                style: TextStyle(fontSize: 11, color: p.ink3)),
+                style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
           ),
         ],
       ),
@@ -1150,13 +1210,13 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(fontSize: mobile ? 12 : 10, color: p.ink3)),
-          const SizedBox(height: 4),
+          Text(label, style: TextStyle(fontSize: mobile ? NonType.body : NonType.micro, color: p.ink3)),
+          const SizedBox(height: NonSpace.xs),
           TextField(
             key: ValueKey(keyName),
             controller: controller,
             obscureText: obscure,
-            style: TextStyle(fontSize: mobile ? 14 : 11, fontFamily: 'Menlo', color: p.ink),
+            style: TextStyle(fontSize: mobile ? NonType.subtitle : NonType.caption, fontFamily: 'Menlo', color: p.ink),
             decoration: decoration,
           ),
         ],
@@ -1165,7 +1225,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
     final children = <Widget>[
       Text('选择助手在哪里执行：内置在本机完成；也可以连接另一台电脑上开启的连接，本机只负责显示与编辑。',
-          style: TextStyle(fontSize: mobile ? 12 : 10, height: 1.5, color: p.ink4)),
+          style: TextStyle(fontSize: mobile ? NonType.body : NonType.micro, height: 1.5, color: p.ink4)),
       const SizedBox(height: 10),
       _runtimeOption(
         context,
@@ -1175,7 +1235,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         title: '内置',
         note: '默认。在本机执行，画布改动仍经设计校验。',
         trailing: Text(store.engineReady ? '本机引擎就绪' : '本机运行',
-            style: TextStyle(fontSize: 10, color: p.success)),
+            style: TextStyle(fontSize: NonType.micro, color: p.success)),
         onTap: () async {
           if (!remote) return;
           store.settings.agentRuntime = agentRuntimeLocal;
@@ -1203,7 +1263,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         },
       ),
       if (remote) ...[
-        const SizedBox(height: 12),
+        const SizedBox(height: NonSpace.md),
         if (mobile) ...[
           field(
             keyName: 'settings-m-remote-url',
@@ -1242,7 +1302,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           ),
         const SizedBox(height: 6),
         Text('连接码是桌面端显示的一次性码，必须填写；地址与连接码只保存在本机。',
-            style: TextStyle(fontSize: mobile ? 11 : 9, height: 1.4, color: p.ink4)),
+            style: TextStyle(fontSize: mobile ? NonType.caption : NonType.micro, height: 1.4, color: p.ink4)),
         const SizedBox(height: 10),
         Row(
           children: [
@@ -1252,7 +1312,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 key: ValueKey(mobile ? 'settings-m-remote-test' : 'settings-remote-test'),
                 onPressed: _remoteTesting ? null : () => _probeRemote(store),
                 icon: const Icon(Icons.cable, size: 14),
-                label: Text('检测连接', style: TextStyle(fontSize: mobile ? 13 : 11)),
+                label: Text('检测连接', style: TextStyle(fontSize: mobile ? NonType.bodyStrong : NonType.caption)),
               ),
             ),
             const SizedBox(width: 10),
@@ -1263,7 +1323,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 child: CircularProgressIndicator(strokeWidth: 1.8),
               ),
               const SizedBox(width: 6),
-              Text('正在检测…', style: TextStyle(fontSize: mobile ? 12 : 10, color: p.ink3)),
+              Text('正在检测…', style: TextStyle(fontSize: mobile ? NonType.body : NonType.micro, color: p.ink3)),
             ] else if (_remoteMessage != null) ...[
               Icon(_remoteConnected ? Icons.check_circle : Icons.error_outline,
                   size: 14, color: _remoteConnected ? p.success : p.warn),
@@ -1273,7 +1333,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        fontSize: mobile ? 12 : 10,
+                        fontSize: mobile ? NonType.body : NonType.micro,
                         color: _remoteConnected ? p.success : p.warn)),
               ),
             ],
@@ -1282,7 +1342,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         if (store.settings.serverUrl.isNotEmpty ||
             store.remote != null ||
             _remoteConnected) ...[
-          const SizedBox(height: 4),
+          const SizedBox(height: NonSpace.xs),
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
@@ -1301,14 +1361,14 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       store.toasts.info('已断开桌面连接');
                     },
               icon: const Icon(Icons.link_off, size: 14),
-              label: Text('断开桌面', style: TextStyle(fontSize: mobile ? 13 : 11)),
+              label: Text('断开桌面', style: TextStyle(fontSize: mobile ? NonType.bodyStrong : NonType.caption)),
             ),
           ),
         ],
       ],
       // 桌面端同时可以充当「连接桌面」宿主：手机/iPad 连到这台电脑。
       if (canHost) ...[
-        const SizedBox(height: 12),
+        const SizedBox(height: NonSpace.md),
         _desktopHostCard(context, store, mobile: mobile),
       ],
     ];
@@ -1320,7 +1380,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           children: children);
     }
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(NonSpace.md),
       decoration: BoxDecoration(
         color: p.panel2.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(10),
@@ -1347,12 +1407,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label, style: TextStyle(fontSize: mobile ? 11 : 9, color: p.ink4)),
-              const SizedBox(height: 2),
+              Text(label, style: TextStyle(fontSize: mobile ? NonType.caption : NonType.micro, color: p.ink4)),
+              const SizedBox(height: NonSpace.xxs),
               SelectableText(
                 value,
                 style: TextStyle(
-                  fontSize: mobile ? 13 : 11,
+                  fontSize: mobile ? NonType.bodyStrong : NonType.caption,
                   fontFamily: 'Menlo',
                   height: 1.4,
                   color: color ?? p.ink,
@@ -1364,7 +1424,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
     return Container(
       key: ValueKey(mobile ? 'settings-m-desktop-host' : 'settings-desktop-host'),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(NonSpace.md),
       decoration: BoxDecoration(
         color: p.panel3.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(10),
@@ -1376,16 +1436,16 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           Row(
             children: [
               Icon(Icons.phone_iphone, size: 16, color: running ? p.success : p.ink3),
-              const SizedBox(width: 8),
+              const SizedBox(width: NonSpace.sm),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('局域网远程',
-                        style: TextStyle(fontSize: mobile ? 14 : 12, fontWeight: FontWeight.w600, color: p.ink)),
-                    const SizedBox(height: 2),
+                        style: TextStyle(fontSize: mobile ? NonType.subtitle : NonType.body, fontWeight: FontWeight.w600, color: p.ink)),
+                    const SizedBox(height: NonSpace.xxs),
                     Text('开启后，同一局域网内的手机 / iPad 直连本机执行任务；本机不对公网开放。',
-                        style: TextStyle(fontSize: mobile ? 11 : 9, height: 1.4, color: p.ink4)),
+                        style: TextStyle(fontSize: mobile ? NonType.caption : NonType.micro, height: 1.4, color: p.ink4)),
                   ],
                 ),
               ),
@@ -1406,24 +1466,24 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           ),
           if (busy)
             Padding(
-              padding: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.only(top: NonSpace.sm),
               child: Row(
                 children: [
                   const SizedBox(
-                    width: 12,
-                    height: 12,
+                    width: NonSpace.md,
+                    height: NonSpace.md,
                     child: CircularProgressIndicator(strokeWidth: 1.8),
                   ),
                   const SizedBox(width: 6),
-                  Text('正在启动…', style: TextStyle(fontSize: mobile ? 12 : 10, color: p.ink3)),
+                  Text('正在启动…', style: TextStyle(fontSize: mobile ? NonType.body : NonType.micro, color: p.ink3)),
                 ],
               ),
             )
           else if (store.desktopHostError != null)
             Padding(
-              padding: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.only(top: NonSpace.sm),
               child: Text('连接没有启动成功，请稍后再试。',
-                  style: TextStyle(fontSize: mobile ? 11 : 9, color: p.warn)),
+                  style: TextStyle(fontSize: mobile ? NonType.caption : NonType.micro, color: p.warn)),
             )
           else if (running && status != null) ...[
             const SizedBox(height: 10),
@@ -1441,12 +1501,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             ],
             if (status.lanEnabled) ...[
               Text(status.warning,
-                  style: TextStyle(fontSize: mobile ? 11 : 9, height: 1.4, color: p.warn)),
+                  style: TextStyle(fontSize: mobile ? NonType.caption : NonType.micro, height: 1.4, color: p.warn)),
               const SizedBox(height: 6),
             ],
             Wrap(
-              spacing: 8,
-              runSpacing: 4,
+              spacing: NonSpace.sm,
+              runSpacing: NonSpace.xs,
               children: [
                 OutlinedButton.icon(
                   key: ValueKey(mobile ? 'settings-m-desktop-host-copy' : 'settings-desktop-host-copy'),
@@ -1458,7 +1518,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     store.toasts.info('已复制地址与连接码');
                   },
                   icon: const Icon(Icons.copy_all_outlined, size: 14),
-                  label: Text('复制地址与连接码', style: TextStyle(fontSize: mobile ? 12 : 10)),
+                  label: Text('复制地址与连接码', style: TextStyle(fontSize: mobile ? NonType.body : NonType.micro)),
                 ),
                 TextButton.icon(
                   key: ValueKey(mobile ? 'settings-m-desktop-host-rotate' : 'settings-desktop-host-rotate'),
@@ -1467,16 +1527,16 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     setState(() {});
                   },
                   icon: const Icon(Icons.autorenew, size: 14),
-                  label: Text('换一个连接码', style: TextStyle(fontSize: mobile ? 12 : 10)),
+                  label: Text('换一个连接码', style: TextStyle(fontSize: mobile ? NonType.body : NonType.micro)),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: NonSpace.xs),
             Row(
               children: [
                 Expanded(
                   child: Text('允许局域网访问（同一 Wi-Fi 下的手机可连接）',
-                      style: TextStyle(fontSize: mobile ? 11 : 9, height: 1.4, color: p.ink3)),
+                      style: TextStyle(fontSize: mobile ? NonType.caption : NonType.micro, height: 1.4, color: p.ink3)),
                 ),
                 Switch.adaptive(
                   key: ValueKey(mobile ? 'settings-m-desktop-host-lan' : 'settings-desktop-host-lan'),
@@ -1525,20 +1585,20 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 size: 18, color: selected ? p.accent : p.ink4),
             const SizedBox(width: 9),
             Icon(icon, size: 16, color: selected ? p.accent : p.ink3),
-            const SizedBox(width: 8),
+            const SizedBox(width: NonSpace.sm),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title,
                       style: TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600, color: p.ink)),
+                          fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink)),
                   const SizedBox(height: 1),
-                  Text(note, style: TextStyle(fontSize: 11, height: 1.4, color: p.ink3)),
+                  Text(note, style: TextStyle(fontSize: NonType.caption, height: 1.4, color: p.ink3)),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: NonSpace.sm),
             trailing,
           ],
         ),
@@ -1611,9 +1671,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SectionLabel('运行方式'),
-          const SizedBox(height: 8),
+          const SizedBox(height: NonSpace.sm),
           _runtimeCard(context, store),
-          const SizedBox(height: 16),
+          const SizedBox(height: NonSpace.lg),
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(12)),
@@ -1624,14 +1684,14 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   children: [
                     Icon(Icons.layers, size: 14, color: p.accent),
                     const SizedBox(width: 5),
-                    Text('上下文与缓存', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
+                    Text('上下文与缓存', style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w600, color: p.ink)),
                     const SizedBox(width: 6),
                     Pill(label: '自动管理', color: p.accent),
                   ],
                 ),
                 const SizedBox(height: 6),
                 Text('项目说明与工具说明会优先复用；新的改动只追加到最新结果，不重写历史。',
-                    style: TextStyle(fontSize: 11, height: 1.5, color: p.ink3)),
+                    style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.ink3)),
                 const SizedBox(height: 10),
                 Row(
                   children: [
@@ -1651,7 +1711,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               Expanded(child: _labeled(context, '最大步数', TextFormField(
                 initialValue: store.settings.maxSteps.toString(),
                 enabled: !store.settings.unlimitedSteps,
-                style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink),
+                style: TextStyle(fontSize: NonType.caption, fontFamily: 'Menlo', color: p.ink),
                 onChanged: (v) async {
                   final n = int.tryParse(v);
                   if (n == null) return;
@@ -1667,7 +1727,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               Expanded(child: _labeled(context, '项目位置', TextFormField(
                 initialValue: store.projectPath ?? store.projectName,
                 readOnly: true,
-                style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink3),
+                style: TextStyle(fontSize: NonType.caption, fontFamily: 'Menlo', color: p.ink3),
               ))),
             ],
           ),
@@ -1676,10 +1736,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             children: [
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('无限步骤', style: TextStyle(fontSize: 12, color: p.ink)),
-                  const SizedBox(height: 2),
+                  Text('无限步骤', style: TextStyle(fontSize: NonType.body, color: p.ink)),
+                  const SizedBox(height: NonSpace.xxs),
                   Text('不设步数上限，长任务可以一直执行；仍可随时停止。',
-                      style: TextStyle(fontSize: 11, height: 1.4, color: p.ink3)),
+                      style: TextStyle(fontSize: NonType.caption, height: 1.4, color: p.ink3)),
                 ]),
               ),
               const SizedBox(width: 10),
@@ -1698,7 +1758,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             children: [
               Expanded(
                 child: Text('删除本项目的对话记忆；画布与文档不受影响。',
-                    style: TextStyle(fontSize: 11, color: p.ink3)),
+                    style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
               ),
               OutlinedButton.icon(
                 onPressed: () => store.clearAgentSession(),
@@ -1709,12 +1769,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           ),
           const SizedBox(height: 18),
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(NonSpace.md),
             decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(10)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('上下文管理', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
+                Text('上下文管理', style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w600, color: p.ink)),
                 const SizedBox(height: 6),
                 for (final line in [
                   '工具结果去掉整份源码，只保留摘要与最新状态',
@@ -1724,7 +1784,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 ])
                   Padding(
                     padding: const EdgeInsets.only(bottom: 3),
-                    child: Text('· $line', style: TextStyle(fontSize: 10, height: 1.45, color: p.ink3)),
+                    child: Text('· $line', style: TextStyle(fontSize: NonType.micro, height: 1.45, color: p.ink3)),
                   ),
               ],
             ),
@@ -1743,8 +1803,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(value, style: TextStyle(fontSize: 13, fontFamily: 'Menlo', fontWeight: FontWeight.w600, color: p.ink)),
-            Text(label, style: TextStyle(fontSize: 10, color: p.ink4)),
+            Text(value, style: TextStyle(fontSize: NonType.bodyStrong, fontFamily: 'Menlo', fontWeight: FontWeight.w600, color: p.ink)),
+            Text(label, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
           ],
         ),
       ),
@@ -1763,15 +1823,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('NaN', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
-                Text('AI-native product design studio', style: TextStyle(fontSize: 11, color: p.ink3)),
+                Text('NaN', style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink)),
+                Text('AI-native product design studio', style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
               ],
             ),
             const Spacer(),
             Pill(label: 'v0.1', color: p.accent),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: NonSpace.lg),
         for (final row in [
           ('应用版本', '0.1 · 本地优先'),
           ('设计引擎', store.api == null ? '未就绪' : '就绪'),
@@ -1782,17 +1842,17 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             padding: const EdgeInsets.only(bottom: 7),
             child: Row(
               children: [
-                SizedBox(width: 72, child: Text(row.$1, style: TextStyle(fontSize: 11, color: p.ink4))),
-                Expanded(child: Text(row.$2, style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink2))),
+                SizedBox(width: 72, child: Text(row.$1, style: TextStyle(fontSize: NonType.caption, color: p.ink4))),
+                Expanded(child: Text(row.$2, style: TextStyle(fontSize: NonType.caption, fontFamily: 'Menlo', color: p.ink2))),
               ],
             ),
           ),
-        const SizedBox(height: 12),
+        const SizedBox(height: NonSpace.md),
         Text('每个项目是一份加密项目文件；你与内置智能体的每次修改都经设计校验后写回同一份文档。',
-            style: TextStyle(fontSize: 11, height: 1.55, color: p.ink3)),
+            style: TextStyle(fontSize: NonType.caption, height: 1.55, color: p.ink3)),
         const Spacer(),
         Text('模型清单来自内置快照；上下文与缓存策略在本机确定性执行。',
-            style: TextStyle(fontSize: 10, color: p.ink4)),
+            style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
       ],
     );
   }
@@ -1801,12 +1861,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final p = context.palette;
     return ListView(
       children: [
-        Text('外部智能体', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
-        const SizedBox(height: 4),
+        Text('外部智能体', style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink)),
+        const SizedBox(height: NonSpace.xs),
         Text('自动检测本机已安装、支持通用协作协议的外部智能体（Claude Code / Codex / Kimi / Gemini / Qwen 等）。'
             '选中后右侧输入框的消息将发给该智能体，流式回显进时间线；内置智能体保持可用。',
-            style: TextStyle(fontSize: 11, height: 1.5, color: p.ink3)),
-        const SizedBox(height: 12),
+            style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.ink3)),
+        const SizedBox(height: NonSpace.md),
         if (_acpError != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
@@ -1819,10 +1879,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               ),
               child: Row(
                 children: [
-                  Expanded(child: Text(_acpError!, style: TextStyle(fontSize: 11, color: p.warn))),
+                  Expanded(child: Text(_acpError!, style: TextStyle(fontSize: NonType.caption, color: p.warn))),
                   TextButton(
                     onPressed: _loadAcpAgents,
-                    child: const Text('重试', style: TextStyle(fontSize: 11)),
+                    child: const Text('重试', style: TextStyle(fontSize: NonType.caption)),
                   ),
                 ],
               ),
@@ -1843,7 +1903,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         const SizedBox(height: 10),
         Text('检测基于本机已安装的智能体；部分适配器需要先全局安装。'
             '权限请求自动放行并记录在时间线；文件读写限制在工作区目录内。',
-            style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4)),
+            style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink4)),
       ],
     );
   }
@@ -1878,7 +1938,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 size: 14,
                 color: selectable ? (selected ? p.accent : p.ink4) : p.ink4.withValues(alpha: 0.5),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: NonSpace.sm),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1888,7 +1948,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                         child: Text(name,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                                fontSize: 12,
+                                fontSize: NonType.body,
                                 fontWeight: FontWeight.w500,
                                 color: selectable ? p.ink : p.ink4)),
                       ),
@@ -1898,18 +1958,18 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                           decoration: BoxDecoration(color: p.panel3, borderRadius: BorderRadius.circular(4)),
                           child: Text('即将接入',
-                              style: TextStyle(fontSize: 10, color: p.ink4)),
+                              style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                         ),
                       ],
                     ]),
-                    const SizedBox(height: 2),
-                    Text(note, style: TextStyle(fontSize: 10, color: selectable ? p.ink3 : p.ink4)),
+                    const SizedBox(height: NonSpace.xxs),
+                    Text(note, style: TextStyle(fontSize: NonType.micro, color: selectable ? p.ink3 : p.ink4)),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: NonSpace.sm),
               Text(detail,
-                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                  style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
             ],
           ),
         ),
@@ -1941,52 +2001,58 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       child: SafeArea(
         child: Column(
           children: [
-            Container(
-              height: 60,
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
-              child: Row(
-                children: [
-                  if (section != null)
+            RepaintBoundary(
+              child: Container(
+                height: 60,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+                child: Row(
+                  children: [
+                    if (section != null)
+                      SizedBox(
+                        width: 44,
+                        height: 44,
+                        child: IconButton(
+                          key: const ValueKey('settings-mobile-back'),
+                          tooltip: '返回',
+                          onPressed: () => setState(() => _mobileSection = null),
+                          icon: Icon(Icons.arrow_back, size: 22, color: p.ink2),
+                        ),
+                      )
+                    else
+                      const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        section == null ? '设置' : (titles[section] ?? '设置'),
+                        style: TextStyle(
+                          fontSize: section == null ? NonType.display : NonType.title,
+                          fontWeight: FontWeight.w700,
+                          color: p.ink,
+                        ),
+                      ),
+                    ),
                     SizedBox(
                       width: 44,
                       height: 44,
                       child: IconButton(
-                        key: const ValueKey('settings-mobile-back'),
-                        tooltip: '返回',
-                        onPressed: () => setState(() => _mobileSection = null),
-                        icon: Icon(Icons.arrow_back, size: 22, color: p.ink2),
-                      ),
-                    )
-                  else
-                    const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      section == null ? '设置' : (titles[section] ?? '设置'),
-                      style: TextStyle(
-                        fontSize: section == null ? 22 : 18,
-                        fontWeight: FontWeight.w700,
-                        color: p.ink,
+                        key: const ValueKey('settings-mobile-close'),
+                        tooltip: '关闭',
+                        onPressed: () => Navigator.pop(context),
+                        icon: Icon(Icons.close, size: 22, color: p.ink3),
                       ),
                     ),
-                  ),
-                  SizedBox(
-                    width: 44,
-                    height: 44,
-                    child: IconButton(
-                      key: const ValueKey('settings-mobile-close'),
-                      tooltip: '关闭',
-                      onPressed: () => Navigator.pop(context),
-                      icon: Icon(Icons.close, size: 22, color: p.ink3),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
+            // 内容区跟随 store（弹窗骨架/头部是静态的，不随每次 notify 重建）。
             Expanded(
-              child: section == null
-                  ? _mobileRoot(context, store)
-                  : _mobileDetail(context, store, section),
+              child: ListenableBuilder(
+                listenable: store,
+                builder: (context, _) => section == null
+                    ? _mobileRoot(context, store)
+                    : _mobileDetail(context, store, section),
+              ),
             ),
           ],
         ),
@@ -2001,7 +2067,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final modelName = store.model?.name ?? store.settings.modelId;
     return ListView(
       key: const ValueKey('settings-mobile-root'),
-      padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
+      padding: EdgeInsets.fromLTRB(NonSpace.lg, NonSpace.lg, NonSpace.lg, NonSpace.xxl + MediaQuery.viewInsetsOf(context).bottom),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       children: [
         _mSectionTile(context,
@@ -2032,7 +2098,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             onTap: () => setState(() => _mobileSection = 'about')),
         const SizedBox(height: 10),
         Text('设置即时生效并保存在本机；模型清单来自内置快照，可随时更新。',
-            style: TextStyle(fontSize: 12, height: 1.5, color: p.ink4)),
+            style: TextStyle(fontSize: NonType.body, height: 1.5, color: p.ink4)),
       ],
     );
   }
@@ -2066,17 +2132,17 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 decoration: BoxDecoration(color: p.accentSoft, borderRadius: BorderRadius.circular(10)),
                 child: Icon(icon, size: 19, color: p.accent),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: NonSpace.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
-                    const SizedBox(height: 2),
+                    Text(title, style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink)),
+                    const SizedBox(height: NonSpace.xxs),
                     Text(subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: p.ink4)),
+                        style: TextStyle(fontSize: NonType.body, color: p.ink4)),
                   ],
                 ),
               ),
@@ -2105,7 +2171,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         : (provider?['name'] ?? store.settings.providerId).toString();
     return ListView(
       key: const ValueKey('settings-m-detail-models'),
-      padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
+      padding: EdgeInsets.fromLTRB(NonSpace.lg, NonSpace.lg, NonSpace.lg, NonSpace.xxl + MediaQuery.viewInsetsOf(context).bottom),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       children: [
         _mCard(context, title: '服务商', children: [
@@ -2127,10 +2193,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(providerName, style: TextStyle(fontSize: 15, color: p.ink)),
+                        Text(providerName, style: TextStyle(fontSize: NonType.subtitle, color: p.ink)),
                         if (store.registry.providerIds.isEmpty)
                           Text('模型清单未加载，点此重试',
-                              style: TextStyle(fontSize: 12, color: p.warn)),
+                              style: TextStyle(fontSize: NonType.body, color: p.warn)),
                       ],
                     ),
                   ),
@@ -2157,7 +2223,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             controller: _baseController,
             readOnly: !_customEndpoint && !_isCustomProvider(store),
             style: TextStyle(
-                fontSize: 13,
+                fontSize: NonType.bodyStrong,
                 fontFamily: 'Menlo',
                 color: (_customEndpoint || _isCustomProvider(store)) ? p.ink : p.ink2),
             decoration: _mDecoration(context,
@@ -2179,7 +2245,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               children: [
                 Expanded(
                   child: Text('自定义端点',
-                      style: TextStyle(fontSize: 12, color: p.ink2)),
+                      style: TextStyle(fontSize: NonType.body, color: p.ink2)),
                 ),
                 Switch.adaptive(
                   key: const ValueKey('settings-m-endpoint-custom'),
@@ -2196,7 +2262,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             key: const ValueKey('settings-m-apikey'),
             controller: _keyController,
             obscureText: !_keyVisible,
-            style: TextStyle(fontSize: 13, fontFamily: 'Menlo', color: p.ink),
+            style: TextStyle(fontSize: NonType.bodyStrong, fontFamily: 'Menlo', color: p.ink),
             autocorrect: false,
             enableSuggestions: false,
             decoration: _mDecoration(context,
@@ -2226,8 +2292,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               helper: '当前模型：${store.model!.name} · ${formatTokens(store.model!.context)} 上下文',
               children: [
                 Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                  spacing: NonSpace.sm,
+                  runSpacing: NonSpace.sm,
                   children: [
                     for (final level in _levels(store.model!))
                       InkWell(
@@ -2241,7 +2307,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                         child: Container(
                           // 移动端最小触控目标 44（review settings-3：此前 34）。
                           height: 44,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
                             color: store.settings.thinkingLevel == level ? p.accent : p.panel3,
@@ -2249,7 +2315,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                           ),
                           child: Text(level,
                               style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: NonType.bodyStrong,
                                   color: store.settings.thinkingLevel == level
                                       ? Colors.white
                                       : p.ink3)),
@@ -2274,19 +2340,19 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         heightFactor: 0.7,
         child: SafeArea(
           child: ListView(
-            padding: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.only(bottom: NonSpace.lg),
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
                 child: Text('选择服务商',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.ink)),
+                    style: TextStyle(fontSize: NonType.title, fontWeight: FontWeight.w700, color: p.ink)),
               ),
               if (ids.isEmpty)
                 ListTile(
                   minVerticalPadding: 14,
-                  title: Text('模型清单未加载', style: TextStyle(fontSize: 15, color: p.ink3)),
+                  title: Text('模型清单未加载', style: TextStyle(fontSize: NonType.subtitle, color: p.ink3)),
                   subtitle: Text('点按重新加载内置模型清单',
-                      style: TextStyle(fontSize: 12, color: p.ink4)),
+                      style: TextStyle(fontSize: NonType.body, color: p.ink4)),
                   onTap: () async {
                     await store.refreshModels();
                     if (ctx.mounted) Navigator.pop(ctx);
@@ -2298,9 +2364,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   key: ValueKey('settings-m-provider-$id'),
                   minVerticalPadding: 14,
                   title: Text(store.registry.provider(id)?['name']?.toString() ?? id,
-                      style: TextStyle(fontSize: 15, color: p.ink)),
+                      style: TextStyle(fontSize: NonType.subtitle, color: p.ink)),
                   subtitle: Text(id,
-                      style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink4)),
+                      style: TextStyle(fontSize: NonType.caption, fontFamily: 'Menlo', color: p.ink4)),
                   trailing: id == store.settings.providerId
                       ? Icon(Icons.check, size: 20, color: p.accent)
                       : null,
@@ -2310,9 +2376,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               ListTile(
                 key: const ValueKey('settings-m-provider-custom'),
                 minVerticalPadding: 14,
-                title: Text('自定义', style: TextStyle(fontSize: 15, color: p.ink)),
+                title: Text('自定义', style: TextStyle(fontSize: NonType.subtitle, color: p.ink)),
                 subtitle: Text(_customProviderId,
-                    style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink4)),
+                    style: TextStyle(fontSize: NonType.caption, fontFamily: 'Menlo', color: p.ink4)),
                 trailing: store.settings.providerId == _customProviderId
                     ? Icon(Icons.check, size: 20, color: p.accent)
                     : null,
@@ -2361,7 +2427,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final p = context.palette;
     return ListView(
       key: const ValueKey('settings-m-detail-appearance'),
-      padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
+      padding: EdgeInsets.fromLTRB(NonSpace.lg, NonSpace.lg, NonSpace.lg, NonSpace.xxl + MediaQuery.viewInsetsOf(context).bottom),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       children: [
         _mCard(context, title: '主题', children: [
@@ -2406,8 +2472,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             helper: '当前：简体中文。移动端输入由系统键盘接管，多语言界面后续接入。', children: [
           Row(children: [
             Icon(Icons.translate, size: 18, color: p.ink3),
-            const SizedBox(width: 8),
-            Text('简体中文', style: TextStyle(fontSize: 15, color: p.ink)),
+            const SizedBox(width: NonSpace.sm),
+            Text('简体中文', style: TextStyle(fontSize: NonType.subtitle, color: p.ink)),
           ]),
         ]),
       ],
@@ -2421,7 +2487,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         : 0;
     return ListView(
       key: const ValueKey('settings-m-detail-agent'),
-      padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
+      padding: EdgeInsets.fromLTRB(NonSpace.lg, NonSpace.lg, NonSpace.lg, NonSpace.xxl + MediaQuery.viewInsetsOf(context).bottom),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       children: [
         _runtimeCard(context, store, mobile: true),
@@ -2440,7 +2506,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   controller: _stepsController,
                   enabled: !store.settings.unlimitedSteps,
                   keyboardType: TextInputType.number,
-                  style: TextStyle(fontSize: 15, fontFamily: 'Menlo', color: p.ink),
+                  style: TextStyle(fontSize: NonType.subtitle, fontFamily: 'Menlo', color: p.ink),
                   decoration: _mDecoration(context, hint: '300'),
                   onChanged: (v) async {
                     final n = int.tryParse(v);
@@ -2460,21 +2526,21 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       size: 16, color: _stepsSavedFlash ? p.success : p.ink3),
                   label: Text(_stepsSavedFlash ? '已保存' : '保存',
                       style: TextStyle(
-                          fontSize: 13,
+                          fontSize: NonType.bodyStrong,
                           fontWeight: FontWeight.w600,
                           color: _stepsSavedFlash ? p.success : p.ink2)),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: NonSpace.md),
           Row(children: [
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('无限步骤', style: TextStyle(fontSize: 15, color: p.ink)),
-                const SizedBox(height: 2),
+                Text('无限步骤', style: TextStyle(fontSize: NonType.subtitle, color: p.ink)),
+                const SizedBox(height: NonSpace.xxs),
                 Text('不设步数上限，长任务可以一直执行；仍可随时停止。',
-                    style: TextStyle(fontSize: 12, height: 1.4, color: p.ink3)),
+                    style: TextStyle(fontSize: NonType.body, height: 1.4, color: p.ink3)),
               ]),
             ),
             const SizedBox(width: 10),
@@ -2487,15 +2553,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               },
             ),
           ]),
-          const SizedBox(height: 12),
+          const SizedBox(height: NonSpace.md),
           Row(children: [
-            Text('项目位置', style: TextStyle(fontSize: 13, color: p.ink3)),
+            Text('项目位置', style: TextStyle(fontSize: NonType.bodyStrong, color: p.ink3)),
             const SizedBox(width: 10),
             Expanded(
               child: Text(store.projectPath ?? store.projectName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, fontFamily: 'Menlo', color: p.ink4)),
+                  style: TextStyle(fontSize: NonType.body, fontFamily: 'Menlo', color: p.ink4)),
             ),
           ]),
         ]),
@@ -2506,7 +2572,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             child: OutlinedButton.icon(
               onPressed: () => store.clearAgentSession(),
               icon: const Icon(Icons.delete_outline, size: 18),
-              label: const Text('清空会话', style: TextStyle(fontSize: 14)),
+              label: const Text('清空会话', style: TextStyle(fontSize: NonType.subtitle)),
             ),
           ),
         ]),
@@ -2519,7 +2585,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           ])
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
-              child: Text('· $line', style: TextStyle(fontSize: 12, height: 1.5, color: p.ink3)),
+              child: Text('· $line', style: TextStyle(fontSize: NonType.body, height: 1.5, color: p.ink3)),
             ),
         ]),
       ],
@@ -2530,7 +2596,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final p = context.palette;
     return Expanded(
       child: Container(
-        margin: EdgeInsets.only(right: last ? 0 : 8),
+        margin: EdgeInsets.only(right: last ? 0 : NonSpace.sm),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
           color: p.bgElevated.withValues(alpha: 0.5),
@@ -2544,9 +2610,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    fontSize: 15, fontFamily: 'Menlo', fontWeight: FontWeight.w600, color: p.ink)),
-            const SizedBox(height: 2),
-            Text(label, style: TextStyle(fontSize: 11, color: p.ink4)),
+                    fontSize: NonType.subtitle, fontFamily: 'Menlo', fontWeight: FontWeight.w600, color: p.ink)),
+            const SizedBox(height: NonSpace.xxs),
+            Text(label, style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
           ],
         ),
       ),
@@ -2557,10 +2623,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final p = context.palette;
     return ListView(
       key: const ValueKey('settings-m-detail-about'),
-      padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + MediaQuery.viewInsetsOf(context).bottom),
+      padding: EdgeInsets.fromLTRB(NonSpace.lg, NonSpace.lg, NonSpace.lg, NonSpace.xxl + MediaQuery.viewInsetsOf(context).bottom),
       children: [
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(NonSpace.lg),
           decoration: BoxDecoration(
             color: p.panel2.withValues(alpha: 0.4),
             borderRadius: BorderRadius.circular(14),
@@ -2569,15 +2635,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           child: Row(
             children: [
               const NonLogo(size: 44),
-              const SizedBox(width: 12),
+              const SizedBox(width: NonSpace.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('NaN',
-                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.ink)),
+                        style: TextStyle(fontSize: NonType.title, fontWeight: FontWeight.w700, color: p.ink)),
                     Text('AI-native product design studio',
-                        style: TextStyle(fontSize: 12, color: p.ink3)),
+                        style: TextStyle(fontSize: NonType.body, color: p.ink3)),
                   ],
                 ),
               ),
@@ -2600,10 +2666,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 children: [
                   SizedBox(
                       width: 92,
-                      child: Text(row.$1, style: TextStyle(fontSize: 13, color: p.ink4))),
+                      child: Text(row.$1, style: TextStyle(fontSize: NonType.bodyStrong, color: p.ink4))),
                   Expanded(
                     child: Text(row.$2,
-                        style: TextStyle(fontSize: 13, fontFamily: 'Menlo', color: p.ink2)),
+                        style: TextStyle(fontSize: NonType.bodyStrong, fontFamily: 'Menlo', color: p.ink2)),
                   ),
                 ],
               ),
@@ -2611,7 +2677,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ]),
         _mCard(context, title: '唯一事实源', children: [
           Text('每个项目是一份加密项目文件；你与内置智能体的每次修改都经设计校验后写回同一份文档。',
-              style: TextStyle(fontSize: 13, height: 1.6, color: p.ink3)),
+              style: TextStyle(fontSize: NonType.bodyStrong, height: 1.6, color: p.ink3)),
         ]),
       ],
     );
@@ -2631,12 +2697,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink2)),
+          Text(title, style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink2)),
           const SizedBox(height: 10),
           ...children,
           if (helper != null) ...[
-            const SizedBox(height: 8),
-            Text(helper, style: TextStyle(fontSize: 12, height: 1.5, color: p.ink4)),
+            const SizedBox(height: NonSpace.sm),
+            Text(helper, style: TextStyle(fontSize: NonType.body, height: 1.5, color: p.ink4)),
           ],
         ],
       ),
@@ -2651,7 +2717,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     );
     return InputDecoration(
       hintText: hint,
-      hintStyle: TextStyle(fontSize: 13, color: p.ink4),
+      hintStyle: TextStyle(fontSize: NonType.bodyStrong, color: p.ink4),
       isDense: true,
       filled: true,
       fillColor: p.panel3.withValues(alpha: 0.55),
@@ -2677,7 +2743,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       onTap: onTap,
       child: Container(
         constraints: const BoxConstraints(minHeight: 52),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.md, vertical: NonSpace.sm),
         margin: const EdgeInsets.only(bottom: 6),
         decoration: BoxDecoration(
           color: selected ? p.accentSoft : Colors.transparent,
@@ -2693,9 +2759,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label, style: TextStyle(fontSize: 15, color: p.ink)),
+                  Text(label, style: TextStyle(fontSize: NonType.subtitle, color: p.ink)),
                   if (note != null)
-                    Text(note, style: TextStyle(fontSize: 12, color: p.ink4)),
+                    Text(note, style: TextStyle(fontSize: NonType.body, color: p.ink4)),
                 ],
               ),
             ),
@@ -2710,8 +2776,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(fontSize: 10, color: p.ink3)),
-        const SizedBox(height: 4),
+        Text(label, style: TextStyle(fontSize: NonType.micro, color: p.ink3)),
+        const SizedBox(height: NonSpace.xs),
         child,
       ],
     );
