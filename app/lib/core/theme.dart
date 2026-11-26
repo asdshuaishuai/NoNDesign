@@ -164,7 +164,8 @@ class NonPalette extends ThemeExtension<NonPalette> {
 }
 
 extension NonThemeX on BuildContext {
-  NonPalette get palette => Theme.of(this).extension<NonPalette>() ?? NonPalette.dark;
+  NonPalette get palette =>
+      Theme.of(this).extension<NonPalette>() ?? NonPalette.dark;
 }
 
 /// 统一动效语言：所有动画时长/曲线只从这里取，不要散落裸 Duration。
@@ -186,7 +187,9 @@ class AppTheme {
 
   static ThemeData _build({bool dark = true}) {
     final p = dark ? NonPalette.dark : NonPalette.light;
-    final base = dark ? ThemeData.dark(useMaterial3: true) : ThemeData.light(useMaterial3: true);
+    final base = dark
+        ? ThemeData.dark(useMaterial3: true)
+        : ThemeData.light(useMaterial3: true);
     return base.copyWith(
       scaffoldBackgroundColor: p.bg,
       canvasColor: p.bg,
@@ -204,13 +207,31 @@ class AppTheme {
         onSurface: p.ink,
       ),
       splashFactory: InkRipple.splashFactory,
-      textTheme: _withPlatformFont(base.textTheme.apply(bodyColor: p.ink, displayColor: p.ink).copyWith(
-        bodyMedium: TextStyle(fontSize: 13, color: p.ink2, height: 1.45),
-        bodySmall: TextStyle(fontSize: 11, color: p.ink3, height: 1.4),
-        titleMedium: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink),
-        titleLarge: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3),
-        headlineMedium: TextStyle(fontSize: 34, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -1),
-      )),
+      textTheme: _withPlatformFont(
+        base.textTheme
+            .apply(bodyColor: p.ink, displayColor: p.ink)
+            .copyWith(
+              bodyMedium: TextStyle(fontSize: 13, color: p.ink2, height: 1.45),
+              bodySmall: TextStyle(fontSize: 11, color: p.ink3, height: 1.4),
+              titleMedium: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: p.ink,
+              ),
+              titleLarge: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: p.ink,
+                letterSpacing: -0.3,
+              ),
+              headlineMedium: TextStyle(
+                fontSize: 34,
+                fontWeight: FontWeight.w600,
+                color: p.ink,
+                letterSpacing: -1,
+              ),
+            ),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
         filled: true,
@@ -261,7 +282,10 @@ class AppTheme {
         style: IconButton.styleFrom(foregroundColor: p.ink3),
       ),
       tooltipTheme: TooltipThemeData(
-        decoration: BoxDecoration(color: p.panel3, borderRadius: BorderRadius.circular(6)),
+        decoration: BoxDecoration(
+          color: p.panel3,
+          borderRadius: BorderRadius.circular(6),
+        ),
         textStyle: TextStyle(color: p.ink, fontSize: 11),
         waitDuration: const Duration(milliseconds: 500),
       ),
@@ -281,15 +305,25 @@ class AppTheme {
         surfaceTintColor: Colors.transparent,
         elevation: 14,
         shadowColor: Colors.black.withValues(alpha: 0.45),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: p.line.withValues(alpha: 0.6))),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: p.line.withValues(alpha: 0.6)),
+        ),
         textStyle: TextStyle(fontSize: 12, color: p.ink2),
         menuPadding: const EdgeInsets.symmetric(vertical: 4),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: p.panel,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.line.withValues(alpha: 0.7))),
-        titleTextStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: p.line.withValues(alpha: 0.7)),
+        ),
+        titleTextStyle: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: p.ink,
+        ),
         contentTextStyle: TextStyle(fontSize: 12, color: p.ink2),
       ),
       extensions: [p],
@@ -301,7 +335,11 @@ class AppTheme {
 /// 钳在 [1.0, 1.3]。字号声明保持既有 8 档字阶不变，渲染期统一缩放——
 /// 新增文案仍按字阶表写，不为手机单独维护一套字号。
 double responsiveTextScale(Size size, TextScaler system) {
-  final base = size.width < 600 ? 1.10 : size.width < 1024 ? 1.05 : 1.0;
+  final base = size.width < 600
+      ? 1.10
+      : size.width < 1024
+      ? 1.05
+      : 1.0;
   final systemScale = system.scale(14) / 14;
   return (systemScale * base).clamp(1.0, 1.3).toDouble();
 }
@@ -310,11 +348,14 @@ double responsiveTextScale(Size size, TextScaler system) {
 Widget withResponsiveTextScale(BuildContext context, Widget child) {
   final mq = MediaQuery.of(context);
   return MediaQuery(
-    data: mq.copyWith(textScaler: TextScaler.linear(responsiveTextScale(mq.size, mq.textScaler))),
+    data: mq.copyWith(
+      textScaler: TextScaler.linear(
+        responsiveTextScale(mq.size, mq.textScaler),
+      ),
+    ),
     child: child,
   );
 }
-
 
 /// 平台字体解析（Windows 中文观感优化，2026-11-19）：
 ///
@@ -328,20 +369,20 @@ List<String> get platformFontFallback => Platform.isWindows
     : const <String>[];
 
 TextStyle get platformDefaultTextStyle => TextStyle(
-      fontFamily: platformPrimaryFont,
-      fontFamilyFallback: platformFontFallback,
-    );
+  fontFamily: platformPrimaryFont,
+  fontFamilyFallback: platformFontFallback,
+);
 
 TextTheme _withPlatformFont(TextTheme theme) {
   if (!Platform.isWindows) return theme;
   TextStyle map(TextStyle style) => style.copyWith(
-        fontFamily: style.fontFamily ?? 'Segoe UI',
-        fontFamilyFallback: <String>[
-          'Microsoft YaHei UI',
-          'Microsoft YaHei',
-          ...?style.fontFamilyFallback,
-        ],
-      );
+    fontFamily: style.fontFamily ?? 'Segoe UI',
+    fontFamilyFallback: <String>[
+      'Microsoft YaHei UI',
+      'Microsoft YaHei',
+      ...?style.fontFamilyFallback,
+    ],
+  );
   return TextTheme(
     displayLarge: map(theme.displayLarge ?? const TextStyle()),
     displayMedium: map(theme.displayMedium ?? const TextStyle()),
@@ -359,4 +400,94 @@ TextTheme _withPlatformFont(TextTheme theme) {
     labelMedium: map(theme.labelMedium ?? const TextStyle()),
     labelSmall: map(theme.labelSmall ?? const TextStyle()),
   );
+}
+
+/// 排版尺度（**唯一来源**）：widget 里不要再写裸 `fontSize`/行高/字重。
+///
+/// 现状背景（2026-11-26 盘点）：`lib/` 里曾有 884 处硬编码 `fontSize`，横跨
+/// 10/10.5/11/11.5/12/12.5/13/14/15/16/17/18/22/34 等 16 个档位，导致同一层级
+/// 的标签在不同工作台里看起来「大小不一致」。收敛为下面 8 个档位，新增档位前先
+/// 在这里讨论。
+abstract final class NonType {
+  /// 单位/角标（e.g. 「BPM」「秒」）。
+  static const double micro = 10;
+
+  /// 次要说明、工具条提示。
+  static const double caption = 11;
+
+  /// 列表正文、面板键值。
+  static const double body = 12;
+
+  /// 强调正文、面板区块标题、表单标签。
+  static const double bodyStrong = 13;
+
+  /// 卡片标题、次级页面标题。
+  static const double subtitle = 15;
+
+  /// 区块大标题。
+  static const double title = 18;
+
+  /// 页面标题、空态主标题。
+  static const double display = 22;
+
+  /// 首屏主标题（仅欢迎页/作品集主视觉使用）。
+  static const double hero = 34;
+
+  /// 正文行高（多行文本统一 1.45，避免逐处手写）。
+  static const double lineBody = 1.45;
+
+  /// 说明文字行高。
+  static const double lineCaption = 1.4;
+
+  /// 常用样式快捷出口。`size` 必须取自本类常量，禁止字面量。
+  static TextStyle of(
+    double size, {
+    Color? color,
+    FontWeight? weight,
+    double? height,
+    double? letterSpacing,
+  }) => TextStyle(
+    fontSize: size,
+    color: color,
+    fontWeight: weight,
+    height: height,
+    letterSpacing: letterSpacing,
+  );
+}
+
+/// 间距尺度（**唯一来源**）：面板内边距、区块间隔、控件间隙统一用这套刻度，
+/// 不再出现 3/5/6/7/9/10/11 之类的随手值。
+abstract final class NonSpace {
+  /// 2 — 图标与文字之间的最小缝。
+  static const double xxs = 2;
+
+  /// 4 — 紧凑控件内部间距。
+  static const double xs = 4;
+
+  /// 8 — 常规间隙。
+  static const double sm = 8;
+
+  /// 12 — 面板内边距/块间距。
+  static const double md = 12;
+
+  /// 16 — 区块之间。
+  static const double lg = 16;
+
+  /// 24 — 大区块/空态留白。
+  static const double xl = 24;
+
+  /// 32 — 页面级留白。
+  static const double xxl = 32;
+}
+
+/// 圆角尺度（唯一来源）。
+abstract final class NonRadius {
+  /// 6 — 小控件（标签、输入内层）。
+  static const double sm = 6;
+
+  /// 10 — 面板/卡片。
+  static const double md = 10;
+
+  /// 14 — 大卡片/悬浮面。
+  static const double lg = 14;
 }
