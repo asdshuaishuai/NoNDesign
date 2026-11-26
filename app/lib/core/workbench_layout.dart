@@ -8,7 +8,7 @@
 library;
 
 /// 工作台种类（与项目类型/视图一一对应）。
-enum WorkbenchKind { design, three, video, music }
+enum WorkbenchKind { design, three, video, video3d, music }
 
 /// 侧栏呈现策略。`sheet` 表示折叠成底部面板入口（由外壳的窄条/手机形态承接）。
 enum PanelPolicy { hidden, docked, sheet }
@@ -112,6 +112,19 @@ const Map<WorkbenchKind, WorkbenchLayoutSpec> workbenchLayoutSpecs =
         leftWidth: 280,
         rightWidth: 320,
         bottomBar: true,
+        // 常规视频的播放面必须铺满主区：时间线只占 92（镜头条 + 运输条两行）。
+        bottomBarHeight: 92,
+      ),
+      // 3D 视频复用视频的三栏语义，但镜头条更高（镜头比例条 + 运输条 + 状态行），
+      // 因此单独给规格，而不是让常规视频跟着一起变矮。
+      WorkbenchKind.video3d: WorkbenchLayoutSpec(
+        kind: WorkbenchKind.video3d,
+        phoneMaxWidth: 760,
+        leftDockMinWidth: 980,
+        rightDockMinWidth: 1024,
+        leftWidth: 280,
+        rightWidth: 320,
+        bottomBar: true,
         bottomBarHeight: 148,
       ),
       WorkbenchKind.music: WorkbenchLayoutSpec(
@@ -179,7 +192,7 @@ WorkbenchLayout resolveWorkbenchLayout({
 WorkbenchKind? workbenchKindForView(String view) => switch (view) {
   'plugin:three' => WorkbenchKind.three,
   'plugin:video' => WorkbenchKind.video,
-  'plugin:video3d' => WorkbenchKind.video,
+  'plugin:video3d' => WorkbenchKind.video3d,
   'plugin:music' => WorkbenchKind.music,
   'plugin:hotapp' => null, // 热应用暂不改布局
   _ => WorkbenchKind.design,

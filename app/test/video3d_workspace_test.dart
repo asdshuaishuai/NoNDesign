@@ -360,10 +360,10 @@ void main() {
       );
     });
 
-    test('视图映射：plugin:video3d 沿用视频导演台内容区规格（不新增第五份规格）', () {
-      expect(workbenchKindForView('plugin:video3d'), WorkbenchKind.video);
+    test('视图映射：plugin:video3d 用独立规格（复用视频三栏语义、镜头条更高）', () {
+      expect(workbenchKindForView('plugin:video3d'), WorkbenchKind.video3d);
       final WorkbenchLayout layout = resolveWorkbenchLayout(
-        kind: WorkbenchKind.video,
+        kind: WorkbenchKind.video3d,
         width: 1200,
         height: 800,
       );
@@ -371,7 +371,12 @@ void main() {
       expect(layout.right, PanelPolicy.docked);
       expect(layout.bottomBar, isTrue);
       expect(layout.bottomBarHeight, 148);
-      expect(workbenchLayoutSpecs, hasLength(4), reason: '既有四工作台规格不动');
+      // 常规视频的播放面要铺满主区，时间线只占 92。
+      expect(
+        workbenchLayoutSpecs[WorkbenchKind.video]!.bottomBarHeight,
+        92,
+      );
+      expect(workbenchLayoutSpecs, hasLength(5));
     });
 
     test('openVideo3dWorkspace：name 通道 + 视图；不传 name 清掉通道', () {

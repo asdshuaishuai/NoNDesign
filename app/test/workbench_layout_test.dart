@@ -3,17 +3,30 @@ import 'package:nondesign/core/workbench_layout.dart';
 
 void main() {
   group('workbench layout spec', () {
-    test('四工作台规格彼此独立（断点/宽度/底栏不共用）', () {
+    test('每个工作台规格彼此独立（断点/宽度/底栏不共用）', () {
       final specs = workbenchLayoutSpecs;
       expect(specs.keys, containsAll(WorkbenchKind.values));
-      final widths = specs.values.map((s) => s.leftWidth).toSet();
+      // 3D 视频是独立规格（镜头条更高），但刻意复用视频的左右栏宽度。
+      final widths = <double>{
+        specs[WorkbenchKind.design]!.leftWidth,
+        specs[WorkbenchKind.three]!.leftWidth,
+        specs[WorkbenchKind.video]!.leftWidth,
+        specs[WorkbenchKind.music]!.leftWidth,
+      };
+      expect(widths.length, 4, reason: '四个内容面左栏宽度各不相同');
       expect(
-        widths.length,
-        WorkbenchKind.values.length,
-        reason: '每个工作台左栏宽度应独立',
+        specs[WorkbenchKind.video3d]!.leftWidth,
+        specs[WorkbenchKind.video]!.leftWidth,
+        reason: '3D 视频复用视频三栏语义',
+      );
+      expect(
+        specs[WorkbenchKind.video3d]!.bottomBarHeight,
+        greaterThan(specs[WorkbenchKind.video]!.bottomBarHeight),
+        reason: '3D 视频镜头条比常规视频时间线更高',
       );
       expect(specs[WorkbenchKind.three]!.bottomBar, isTrue);
       expect(specs[WorkbenchKind.video]!.bottomBar, isTrue);
+      expect(specs[WorkbenchKind.video3d]!.bottomBar, isTrue);
       expect(specs[WorkbenchKind.music]!.bottomBar, isTrue);
       // 设计面仍是画布优先：不新增内容底栏（状态栏由共享外壳提供）。
       expect(specs[WorkbenchKind.design]!.bottomBar, isFalse);
