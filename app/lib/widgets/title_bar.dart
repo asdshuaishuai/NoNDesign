@@ -127,6 +127,8 @@ class TitleBar extends StatelessWidget {
                   borderRadius: BorderRadius.circular(NonRadius.md),
                   side: BorderSide(color: p.lineStrong),
                 ),
+                // 菜单宽度统一走 nonMenuWidthCap（≤280 / 窄屏 屏宽-24）。
+                constraints: BoxConstraints(maxWidth: nonMenuWidthCap(context)),
                 // 每次展开都刷一次目录（刚做出来的 3D 场景/热应用要能立刻出现在
                 // 项目切换列表里）。
                 onOpened: () {
@@ -568,6 +570,8 @@ class TitleBar extends StatelessWidget {
                   borderRadius: BorderRadius.circular(NonRadius.md),
                   side: BorderSide(color: p.lineStrong),
                 ),
+                // 与项目下拉同一宽度上限（长模型名/服务商名不撑宽菜单）。
+                constraints: BoxConstraints(maxWidth: nonMenuWidthCap(context)),
                 onSelected: (v) {
                   if (v == 'settings') onSettings();
                 },
@@ -579,17 +583,30 @@ class TitleBar extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            model?.name ?? '未选择模型',
-                            style: NonType.of(
-                              NonType.body,
-                              color: p.ink,
-                              weight: FontWeight.w600,
+                          // 模型名/服务商名可能很长：单行省略 + 悬停 Tooltip，
+                          // 不再把菜单撑到宽度上限之外。
+                          Tooltip(
+                            message: model?.name ?? '未选择模型',
+                            child: Text(
+                              model?.name ?? '未选择模型',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: NonType.of(
+                                NonType.body,
+                                color: p.ink,
+                                weight: FontWeight.w600,
+                              ),
                             ),
                           ),
-                          Text(
-                            '${model?.providerName ?? ''} · ${model?.id ?? ''}',
-                            style: NonType.of(NonType.micro, color: p.ink4),
+                          Tooltip(
+                            message:
+                                '${model?.providerName ?? ''} · ${model?.id ?? ''}',
+                            child: Text(
+                              '${model?.providerName ?? ''} · ${model?.id ?? ''}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: NonType.of(NonType.micro, color: p.ink4),
+                            ),
                           ),
                           Text(
                             '上下文 ${formatTokens(model?.context)}',
@@ -703,9 +720,10 @@ class TitleBar extends StatelessWidget {
     );
   }
 
-  /// 菜单统一宽度（弹层宽度 = 最宽项）：固定 236，避免长文件名把菜单撑爆。
-  static const double _menuWidth = 236;
-
+  /// 菜单行：宽度不再写死（此前固定 236 内容宽 + 行内边距 + PopupMenu 的
+  /// 56px 步进，把整份菜单顶到 280 上限、只剩大片空白）：改为按内容 intrinsic
+  /// 收缩、由弹层 constraints 的 [nonMenuWidthCap] 封顶；长文案（项目名等）
+  /// 省略 + 悬停 Tooltip 看全文，而不是把菜单撑宽。行高统一 32。
   PopupMenuItem<String> _menu(
     BuildContext context,
     String value,
@@ -716,46 +734,46 @@ class TitleBar extends StatelessWidget {
     final p = context.palette;
     return PopupMenuItem<String>(
       value: value,
-      height: 34,
-      child: SizedBox(
-        width: _menuWidth,
-        child: Row(
-          children: [
-            Icon(icon, size: 14, color: p.ink4),
-            const SizedBox(width: NonSpace.sm),
-            Expanded(
+      height: kNonMenuRowHeight,
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: p.ink4),
+          const SizedBox(width: NonSpace.sm),
+          Expanded(
+            child: Tooltip(
+              message: label,
               child: Text(
                 label,
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: NonType.of(NonType.body, color: p.ink2),
               ),
             ),
-            if (shortcut.isNotEmpty)
-              Text(
-                shortcut,
-                style: NonType.of(
-                  NonType.micro,
-                  color: p.ink4,
-                ).copyWith(fontFamily: 'Menlo'),
-              ),
+          ),
+          if (shortcut.isNotEmpty) ...[
+            const SizedBox(width: NonSpace.sm),
+            Text(
+              shortcut,
+              style: NonType.of(
+                NonType.micro,
+                color: p.ink4,
+              ).copyWith(fontFamily: 'Menlo'),
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
 
-  /// 分节标签（不可交互）。
+  /// 分节标签（不可交互）：字号 11（NonType.caption），行高 24。
   PopupMenuItem<String> _sectionLabel(BuildContext context, String label) {
     final p = context.palette;
     return PopupMenuItem<String>(
       enabled: false,
       height: 24,
-      child: SizedBox(
-        width: _menuWidth,
-        child: Text(
-          label,
-          style: NonType.of(NonType.micro, color: p.ink4, letterSpacing: 0.6),
-        ),
+      child: Text(
+        label,
+        style: NonType.of(NonType.caption, color: p.ink4, letterSpacing: 0.6),
       ),
     );
   }

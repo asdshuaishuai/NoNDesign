@@ -124,6 +124,32 @@ Future<T?> showNonDialog<T>({
   );
 }
 
+/// 菜单/下拉的统一宽度上限（用户裁决 2026-11-26：所有下拉收缩，不要过度
+/// 宽泛）：桌面 280，窄屏取 屏宽 - 24（左右各留 12 的屏边距）。所有自绘菜单
+/// （PopupMenuButton / showMenu）与 M3 DropdownMenu 都走这里夹宽度；超长文本
+/// 一律省略（悬停 Tooltip 看全文），而不是把菜单撑宽。
+const double kNonMenuWidthCap = 280;
+
+/// 菜单项紧凑行高：M3 菜单默认 48/56px 是触控下限，桌面菜单统一收到 32。
+const double kNonMenuRowHeight = 32;
+
+double nonMenuWidthCap(BuildContext context, {double max = kNonMenuWidthCap}) {
+  final screenWidth = MediaQuery.sizeOf(context).width;
+  return math.min(max, math.max(0, screenWidth - 24));
+}
+
+/// 菜单行 label：intrinsic 宽度夹在 [maxWidth] 内（长文案不撑宽菜单/输入框），
+/// 布局时按实际宽度省略，悬停 Tooltip 仍可看全文。
+Widget _nonMenuEntryLabel(String label, TextStyle style, double maxWidth) {
+  return ConstrainedBox(
+    constraints: BoxConstraints(maxWidth: maxWidth),
+    child: Tooltip(
+      message: label,
+      child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+    ),
+  );
+}
+
 /// 统一下拉（inspector/settings 全部 DropdownButtonFormField 走这里）：
 /// 菜单配色/圆角/最大高度/箭头一处定义，调用方只管 value/items/onChanged/decoration。
 DropdownMenu<T> nonSelect<T>(
@@ -137,6 +163,11 @@ DropdownMenu<T> nonSelect<T>(
   bool enabled = true,
 }) {
   final p = context.palette;
+  final double menuCap = nonMenuWidthCap(context);
+  // 菜单项文本的可用宽度 = 菜单面板上限去掉菜单行两侧的水平内边距
+  // （DropdownMenuEntry.style 的 padding 是 NonSpace.md）。label 的 intrinsic
+  // 宽度也夹住：否则长文案既撑宽菜单，也把下拉输入框本身拉宽。
+  final double labelCap = math.max(0, menuCap - NonSpace.md * 2);
   // M3 DropdownMenu：菜单行是 MenuItemButton，行高可经 entry style 收敛到
   // 32px——经典 DropdownButton 有运行时断言 itemHeight >= 48（2026-11-14
   // 红屏实证），无法做紧凑菜单。
@@ -145,11 +176,16 @@ DropdownMenu<T> nonSelect<T>(
       DropdownMenuEntry<T>(
         value: it.value as T,
         label: it.child is Text ? ((it.child as Text).data ?? '') : '',
+        // 超长文本省略 + 悬停 Tooltip（而不是撑宽菜单/下拉框）：ConstrainedBox
+        // 夹住 label 的 intrinsic 宽度，Text 再按实际布局宽度省略。
+        labelWidget: it.child is Text && ((it.child as Text).data ?? '').isNotEmpty
+            ? _nonMenuEntryLabel(((it.child as Text).data)!, TextStyle(fontSize: NonType.body, color: p.ink2), labelCap)
+            : null,
         style: MenuItemButton.styleFrom(
           // 高度对必须规范化：fromWidth 的隐含高度是 Infinity，
           // 与 maximumSize 高 32 组成 min>max 即崩溃。
           minimumSize: const Size(64, 0),
-          maximumSize: const Size.fromHeight(32),
+          maximumSize: const Size.fromHeight(kNonMenuRowHeight),
           padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
           foregroundColor: p.ink2,
           textStyle: TextStyle(fontSize: NonType.body, color: p.ink2),
@@ -175,7 +211,9 @@ DropdownMenu<T> nonSelect<T>(
         side: BorderSide(color: p.line.withValues(alpha: 0.6)),
       )),
       padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: NonSpace.xs)),
-      maximumSize: const WidgetStatePropertyAll(Size(double.infinity, 300)),
+      // 宽度上限统一走 nonMenuWidthCap（此前是 Infinity：菜单会被最长文案
+      // 撑到整窗宽）。高度仍 300。
+      maximumSize: WidgetStatePropertyAll(Size(menuCap, 300)),
     ),
     inputDecorationTheme: InputDecorationTheme(
       isDense: true,
@@ -212,6 +250,9 @@ class BoardTemplateMenu extends StatelessWidget {
       tooltip: '新建画板',
       offset: offset,
       color: p.panel,
+      // 弹层宽度与全站下拉统一夹取（PopupMenu 自带 280 上限，这里再按屏宽
+      // 收到 nonMenuWidthCap，窄屏不会贴边撑满）。
+      constraints: BoxConstraints(maxWidth: nonMenuWidthCap(context)),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: p.lineStrong)),
       onSelected: (value) {
         if (value == '__blank__') {
@@ -223,7 +264,7 @@ class BoardTemplateMenu extends StatelessWidget {
       itemBuilder: (context) => [
         PopupMenuItem<String>(
           value: '__blank__',
-          height: 34,
+          height: kNonMenuRowHeight,
           child: SizedBox(
             width: _width,
             child: Row(children: [
@@ -256,9 +297,14 @@ class BoardTemplateMenu extends StatelessWidget {
                     child: Row(
                       children: [
                         Expanded(
-                          child: Text((t['name'] ?? id).toString(),
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: NonType.body, color: p.ink2)),
+                          // 模板名可能很长：省略而不是撑宽弹层；悬停看全文。
+                          child: Tooltip(
+                            message: (t['name'] ?? id).toString(),
+                            child: Text((t['name'] ?? id).toString(),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: NonType.body, color: p.ink2)),
+                          ),
                         ),
                         const SizedBox(width: NonSpace.sm),
                         Text(id, style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
