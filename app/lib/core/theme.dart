@@ -68,27 +68,46 @@ class NonPalette extends ThemeExtension<NonPalette> {
     canvasDot: Color(0x0FFFFFFF),
   );
 
+  /// 浅色 = **Aqua**（早期 Mac OS X 设计语言的现代化移植）。
+  ///
+  /// 用户裁决（2026-11-26）：不新增第三套主题，Aqua 就是浅色主题。
+  /// 材质语言：细条纹（pinstripe）窗口底 + 糖果凝胶（candy-gel）控件 +
+  /// 深色软阴影；文字在凝胶上用白色 + subtle down-shadow 保证 4.5:1 对比。
+  /// 具体凝胶/条纹/口香糖按钮的实现见 `widgets/aqua.dart`。
   static const light = NonPalette(
-    bg: Color(0xFFF3F4F7),
-    bgElevated: Color(0xFFECEEF3),
+    // 条纹窗口底：Aqua 的底色是浅灰，条纹由 AquaPinstripes 叠加。
+    bg: Color(0xFFECECEF),
+    bgElevated: Color(0xFFF6F6F8),
     panel: Color(0xFFFFFFFF),
-    panel2: Color(0xFFF7F8FA),
-    panel3: Color(0xFFEEF0F4),
-    line: Color(0x1410141E),
-    lineStrong: Color(0x2410141E),
-    ink: Color(0xFF12141A),
-    ink2: Color(0xFF525A6A),
-    ink3: Color(0xFF6B7383),
-    ink4: Color(0xFF83899B),
-    accent: Color(0xFF4F5DFF),
-    accent2: Color(0xFF8B5CF6),
-    accentSoft: Color(0x1A4F5DFF),
-    success: Color(0xFF0F9D6B),
-    warn: Color(0xFFB45309),
-    danger: Color(0xFFDC2650),
-    canvas: Color(0xFFE9EBF0),
-    canvasDot: Color(0x1710141E),
+    panel2: Color(0xFFF3F4F7),
+    panel3: Color(0xFFE6E8EE),
+    line: Color(0x1A0F172A),
+    lineStrong: Color(0x330F172A),
+    ink: Color(0xFF1B1D24),
+    ink2: Color(0xFF475063),
+    ink3: Color(0xFF68718A),
+    ink4: Color(0xFF8B93A8),
+    // Aqua 的经典水系蓝：凝胶渐变由它派生（#5F9FF5 → #1862D8）。
+    accent: Color(0xFF1862D8),
+    accent2: Color(0xFF6E5AE0),
+    accentSoft: Color(0x1F1862D8),
+    success: Color(0xFF1C8F5A),
+    warn: Color(0xFFB4700C),
+    danger: Color(0xFFC42B3E),
+    canvas: Color(0xFFF4F5F8),
+    canvasDot: Color(0x140F172A),
   );
+
+  /// Aqua 凝胶高光/渐变端点（浅色主题专用；深色主题不使用）。
+  /// 顶部高光偏白蓝，底部收敛到经典 Aqua 蓝。
+  static const Color aquaGelTop = Color(0xFF9CC6FF);
+  static const Color aquaGelBottom = Color(0xFF1862D8);
+  static const Color aquaGelHighlight = Color(0xCCFFFFFF);
+
+  /// 窗口控制「口香糖」三色（红/黄/绿），带玻璃球质感。
+  static const Color aquaGumdropClose = Color(0xFFFF5F57);
+  static const Color aquaGumdropMinimize = Color(0xFFFFBD2E);
+  static const Color aquaGumdropZoom = Color(0xFF28C840);
 
   @override
   NonPalette copyWith({
