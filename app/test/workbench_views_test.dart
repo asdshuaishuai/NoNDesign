@@ -34,6 +34,8 @@ void main() {
     required WorkbenchColumnData data,
     ThemeData? theme,
     Size size = const Size(1280, 800),
+    VoidCallback? onGenerateDocs,
+    bool docsGenerating = false,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -49,6 +51,8 @@ void main() {
             column: column,
             onColumnChanged: onChanged,
             data: data,
+            onGenerateDocs: onGenerateDocs,
+            docsGenerating: docsGenerating,
             present: const Center(
               child: SizedBox(
                 key: ValueKey('fake-present'),
@@ -169,6 +173,72 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('还没有源码'), findsOneWidget);
+  });
+
+  testWidgets('文档栏目：有生成动作时空态给按钮，无动作时不给', (
+    WidgetTester tester,
+  ) async {
+    int generated = 0;
+    await pumpColumns(
+      tester,
+      column: WorkbenchColumn.docs,
+      onChanged: (WorkbenchColumn _) {},
+      data: const WorkbenchColumnData(),
+      onGenerateDocs: () => generated++,
+    );
+    expect(
+      find.byKey(const ValueKey('workbench-docs-generate')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('workbench-docs-generate')));
+    await tester.pump();
+    expect(generated, 1);
+
+    await pumpColumns(
+      tester,
+      column: WorkbenchColumn.docs,
+      onChanged: (WorkbenchColumn _) {},
+      data: const WorkbenchColumnData(),
+    );
+    expect(
+      find.byKey(const ValueKey('workbench-docs-generate')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('文档栏目：已有文档时给「重新生成」，生成中不重复触发', (
+    WidgetTester tester,
+  ) async {
+    int regenerated = 0;
+    await pumpColumns(
+      tester,
+      column: WorkbenchColumn.docs,
+      onChanged: (WorkbenchColumn _) {},
+      data: fullData(),
+      onGenerateDocs: () => regenerated++,
+    );
+    expect(
+      find.byKey(const ValueKey('workbench-docs-regenerate')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('workbench-docs-regenerate')));
+    await tester.pump();
+    expect(regenerated, 1);
+
+    await pumpColumns(
+      tester,
+      column: WorkbenchColumn.docs,
+      onChanged: (WorkbenchColumn _) {},
+      data: fullData(),
+      onGenerateDocs: () => regenerated++,
+      docsGenerating: true,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('workbench-docs-regenerate')),
+      warnIfMissed: false,
+    );
+    await tester.pump();
+    expect(regenerated, 1, reason: '生成中不应重复触发');
   });
 
   testWidgets('浅色（Aqua）下栏目条用白面且不溢出（1280 与 900）', (WidgetTester tester) async {

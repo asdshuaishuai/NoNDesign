@@ -83,6 +83,8 @@ class WorkbenchColumns extends StatelessWidget {
     required this.data,
     required this.present,
     this.headerActions,
+    this.onGenerateDocs,
+    this.docsGenerating = false,
   });
 
   final WorkbenchColumn column;
@@ -92,6 +94,15 @@ class WorkbenchColumns extends StatelessWidget {
 
   /// 栏目条右侧附加动作（如刷新/新建），可空。
   final List<Widget>? headerActions;
+
+  /// 「生成文档」动作：为 null 时不显示入口（项目未就绪/无事实源）。
+  ///
+  /// 文档由项目事实源确定式生成（见 `core/workbench_docs.dart`），不调模型；
+  /// 生成后各工作台自行刷新 [data]。
+  final VoidCallback? onGenerateDocs;
+
+  /// 生成中（按钮显示转圈并禁用，避免连点）。
+  final bool docsGenerating;
 
   @override
   Widget build(BuildContext context) {
@@ -137,6 +148,8 @@ class WorkbenchColumns extends StatelessWidget {
             WorkbenchColumn.present => present,
             WorkbenchColumn.docs => WorkbenchDocsPanel(
               markdown: data.docsMarkdown,
+              onGenerate: onGenerateDocs,
+              generating: docsGenerating,
             ),
             WorkbenchColumn.spec => WorkbenchSpecPanel(
               json: data.specJson,
@@ -154,9 +167,20 @@ class WorkbenchColumns extends StatelessWidget {
 
 /// 文档栏：只读渲染 markdown 子集（标题/列表/代码块/段落）。
 class WorkbenchDocsPanel extends StatelessWidget {
-  const WorkbenchDocsPanel({super.key, required this.markdown});
+  const WorkbenchDocsPanel({
+    super.key,
+    required this.markdown,
+    this.onGenerate,
+    this.generating = false,
+  });
 
   final String? markdown;
+
+  /// 「生成文档」动作（null = 不提供入口）。
+  final VoidCallback? onGenerate;
+
+  /// 生成中（禁用按钮）。
+  final bool generating;
 
   @override
   Widget build(BuildContext context) {
@@ -167,12 +191,48 @@ class WorkbenchDocsPanel extends StatelessWidget {
         key: const ValueKey('workbench-docs-empty'),
         icon: Icons.article_outlined,
         title: '还没有文档',
-        note: '让 NaN 先写需求/设计文档；文档与项目一起保存。',
+        note: '文档由项目事实源确定式生成，不需要调用模型；生成后可随时重新生成。',
+        action: onGenerate == null
+            ? null
+            : _DocActionButton(
+                key: const ValueKey('workbench-docs-generate'),
+                generating: generating,
+                onTap: onGenerate!,
+              ),
       );
     }
+    final Widget? action = onGenerate == null
+        ? null
+        : _DocActionButton(
+            key: const ValueKey('workbench-docs-regenerate'),
+            generating: generating,
+            onTap: onGenerate!,
+            label: '重新生成文档',
+          );
     final List<String> lines = text.split('\n');
-    return ListView.builder(
+    return Column(
       key: const ValueKey('workbench-docs-body'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (action != null)
+          Container(
+            padding: const EdgeInsets.fromLTRB(
+              NonSpace.xl,
+              NonSpace.sm,
+              NonSpace.xl,
+              0,
+            ),
+            alignment: Alignment.centerRight,
+            child: action,
+          ),
+        Expanded(child: _docLines(context, p, lines)),
+      ],
+    );
+  }
+
+  Widget _docLines(BuildContext context, NonPalette p, List<String> lines) {
+    return ListView.builder(
+      key: const ValueKey('workbench-docs-lines'),
       padding: const EdgeInsets.fromLTRB(
         NonSpace.xl,
         NonSpace.lg,
@@ -481,11 +541,15 @@ class _EmptyColumn extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.note,
+    this.action,
   });
 
   final IconData icon;
   final String title;
   final String note;
+
+  /// 空态下的可行动按钮（如「生成文档」）。
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -516,9 +580,37 @@ class _EmptyColumn extends StatelessWidget {
                 height: NonType.lineBody,
               ),
             ),
+            if (action != null) ...<Widget>[
+              const SizedBox(height: NonSpace.md),
+              action!,
+            ],
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 文档栏的小动作按钮（生成/重新生成）。与主 CTA 同一凝胶材质语言。
+class _DocActionButton extends StatelessWidget {
+  const _DocActionButton({
+    super.key,
+    required this.generating,
+    required this.onTap,
+    this.label = '生成文档',
+  });
+
+  final bool generating;
+  final VoidCallback onTap;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return AquaGelButton(
+      label: generating ? '$label…' : label,
+      icon: generating ? null : Icons.auto_awesome,
+      dense: true,
+      onPressed: generating ? null : onTap,
     );
   }
 }
