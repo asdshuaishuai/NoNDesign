@@ -32,6 +32,7 @@ import '../core/theme.dart';
 import '../core/video3d/video3d_compile.dart';
 import '../core/video3d/video3d_contract.dart';
 import '../core/video3d/video3d_project.dart';
+import '../core/workbench_docs.dart';
 import '../core/workbench_layout.dart';
 import 'aqua.dart';
 import 'common.dart';
@@ -218,6 +219,10 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
   /// 文档栏数据（`docs.md` 优先，其次 `brief.md`；null = 没有文档）。
   String? _docsMarkdown;
 
+  /// 文档生成中：栏目里的「生成/重新生成」按钮禁用并显示忙碌标签，避免连点
+  /// 重复写盘；生成结束（成功或失败）一律复位。
+  bool _docsGenerating = false;
+
   /// 源码栏数据（`scene3d.json` + `screenplay3d.json` 的只读文本树）。
   List<WorkbenchSourceFile> _sourceFiles = const <WorkbenchSourceFile>[];
 
@@ -346,6 +351,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
       _selectedShotIndex = null;
       // 切项目 = 切内容：旧项目的文档/源码不能带进新项目的栏目。
       _docsMarkdown = null;
+      _docsGenerating = false;
       _sourceFiles = const <WorkbenchSourceFile>[];
     });
     _checkController.notifySelectionChanged();
@@ -570,6 +576,10 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
                 column: _column,
                 onColumnChanged: _onColumnChanged,
                 data: _columnData(),
+                // 文档由项目事实源确定式生成（core/workbench_docs.dart）；无项目
+                // 或坏项目时不显示入口，生成中禁用并显示忙碌标签。
+                onGenerateDocs: _generateDocsAction,
+                docsGenerating: _docsGenerating,
                 present: Builder(
                   builder: (BuildContext context) => _presentPane(
                     p,
@@ -688,6 +698,110 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
   }
 
   static int _listLength(Object? value) => value is List ? value.length : 0;
+
+  // -- 生成文档（文档栏的「生成/重新生成」动作） ----------------------------
+  //
+  // 生成物是项目事实源的确定性投影（`core/workbench_docs.dart`，不调模型）：
+  // 3D 视频的摘要 = 节点数 / 镜头表（时长 + 相机）/ 总帧数 / 校验状态。
+  // 只读快照与磁盘，不写项目事实源；写盘失败不破坏既有 docs.md。
+
+  /// 「生成文档」动作：无项目或坏项目（读不出来）时为 null（不显示入口）。
+  VoidCallback? get _generateDocsAction {
+    if (_snapshot == null || _failure != null) return null;
+    return () => unawaited(_generateDocs());
+  }
+
+  /// 为当前项目原子写 `docs.md`（overwrite: true，可反复重新生成），成功后重读
+  /// 文档栏并提示；失败给人话提示并保留原文档。
+  Future<void> _generateDocs() async {
+    final Video3dProjectSnapshot? snapshot = _snapshot;
+    if (!mounted || snapshot == null || _docsGenerating) return;
+    final String name = snapshot.name;
+    setState(() => _docsGenerating = true);
+    bool wrote = false;
+    try {
+      final File? file = await writeWorkbenchDoc(
+        projectDir: Directory(snapshot.dir),
+        kind: 'video3d',
+        name: name,
+        title: _docsTitleOf(snapshot),
+        summary: _docsSummaryOf(snapshot),
+        overwrite: true,
+      );
+      wrote = file != null;
+    } on FileSystemException {
+      wrote = false;
+    } catch (_) {
+      wrote = false;
+    }
+    // 项目已切走：这次生成不能落到新项目的文档栏上（生成中已由 _open 复位）。
+    if (!mounted || _name != name) return;
+    setState(() {
+      _docsGenerating = false;
+      if (wrote) _docsMarkdown = _readDocs(snapshot.dir);
+    });
+    if (wrote) {
+      _appStore?.toasts.success('文档已生成');
+    } else {
+      _appStore?.toasts.warn('文档没能写入，请重试');
+    }
+  }
+
+  /// 文档标题：场景文档里的 `title` 优先，其次项目名（与检查器同一口径）。
+  String _docsTitleOf(Video3dProjectSnapshot snapshot) {
+    final Object? raw = snapshot.sceneRaw['title'];
+    if (raw is String) {
+      final String trimmed = raw.trim();
+      if (trimmed.isNotEmpty) return trimmed;
+    }
+    return snapshot.name;
+  }
+
+  /// 文档生成器要的人话摘要（只读快照/帧表，字段按 workbench_docs 契约命名）。
+  Map<String, Object?> _docsSummaryOf(Video3dProjectSnapshot snapshot) {
+    return <String, Object?>{
+      'nodes':
+          snapshot.scene?.nodes.length ??
+          _listLength(snapshot.sceneRaw['nodes']),
+      'shots': _docsShotsOf(snapshot),
+      // 总帧数取真实帧表长度；未通过校验/编译不了时如实记 0。
+      'totalFrames': _timeline?.totalFrames ?? 0,
+      'verified': snapshot.verified,
+    };
+  }
+
+  /// 镜头表：时长 + 相机（移动镜头保留 from/to）；已解析模型优先，原始字段兜底。
+  List<Object?> _docsShotsOf(Video3dProjectSnapshot snapshot) {
+    final Video3dScreenplay? screenplay = snapshot.screenplay;
+    if (screenplay != null) {
+      return <Object?>[
+        for (final Video3dShot shot in screenplay.shots)
+          <String, Object?>{
+            'duration': shot.duration,
+            'camera': _docsCameraOf(shot.camera),
+          },
+      ];
+    }
+    final Object? rawShots = snapshot.screenplayRaw['shots'];
+    if (rawShots is! List) return const <Object?>[];
+    return <Object?>[
+      for (final Object? raw in rawShots)
+        if (raw is Map)
+          <String, Object?>{
+            'duration': raw['duration'],
+            'camera': raw['camera'],
+          },
+    ];
+  }
+
+  /// 镜头相机的文档字段：与 `screenplay3d.json` 的 `camera` 形状一致。
+  Map<String, Object?> _docsCameraOf(Video3dShotCamera camera) {
+    return <String, Object?>{
+      if (camera.id != null) 'id': camera.id,
+      if (camera.hasMove)
+        'move': <String, Object?>{'from': camera.moveFrom, 'to': camera.moveTo},
+    };
+  }
 
   /// 项目内人读文档：`docs.md` 优先，其次 `brief.md`；空文件按没有文档。
   String? _readDocs(String dir) {

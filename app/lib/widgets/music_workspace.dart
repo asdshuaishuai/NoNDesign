@@ -32,6 +32,7 @@ import '../core/music/music_score.dart';
 import '../core/music/music_staff_edit.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import '../core/workbench_docs.dart';
 import '../core/workbench_layout.dart';
 import 'aqua.dart';
 import 'music_playback_surface.dart';
@@ -115,6 +116,9 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   /// 项目人读文档（`docs.md` / `brief.md`）与只读源码文件树。
   String? _docsMarkdown;
   List<WorkbenchSourceFile> _sourceFiles = const <WorkbenchSourceFile>[];
+
+  /// 「生成文档」是否在跑：文档栏目按钮转圈并禁用，避免连点。
+  bool _docsGenerating = false;
 
   /// 当前播放面控制器；null = 没有可播放的编译产物（按钮禁用并说明原因）。
   MusicPlaybackController? _playback;
@@ -242,6 +246,8 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
       // 项目边界：旧项目的文档/源码不能留在栏目里，等新快照同一拍刷新。
       _docsMarkdown = null;
       _sourceFiles = const <WorkbenchSourceFile>[];
+      // 切项目时上一次生成还没回来：新项目的按钮不能被旧任务一直禁用。
+      _docsGenerating = false;
     });
     try {
       final snapshot = await _store.read(name);
@@ -343,6 +349,94 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     final MusicScore score = snapshot.score;
     return '校验通过 · ${score.tracks.length} 轨道 / '
         '${score.measureCount} 小节 / ${score.tempo} BPM';
+  }
+
+  // -- 文档生成（文档栏目的可行动作） ----------------------------------------
+  //
+  // 生成物 = 项目事实源确定性拼出的 `docs.md`（见 `core/workbench_docs.dart`），
+  // 不调模型、不写 `score.json`；成功后重读并刷新文档栏，失败如实提示，不伪造
+  // 成功。无项目/坏项目（读不到快照）不提供入口。
+
+  /// 「生成文档」动作：项目没有读到快照（无项目/坏项目）时返回 null
+  /// （文档栏目显示不能行动的空态，不出现按钮）。
+  VoidCallback? get _docsGenerateAction {
+    if (_snapshot == null || _name == null) return null;
+    return () => unawaited(_generateDocs());
+  }
+
+  /// 从快照组装文档摘要（只放 `core/workbench_docs.dart` 约定的显式 key）。
+  ///
+  /// 轨道用 Map 而不是 `MusicTrack` 对象：生成器只按显式 key 读
+  /// `name/instrument/volume/measures`，其余字段不参与输出（保证同一输入
+  /// 两次生成字节相同）。`measures` 传真实小节数组，生成器按长度渲染。
+  Map<String, Object?> _docsSummaryOf(MusicProjectSnapshot snapshot) {
+    final MusicScore score = snapshot.score;
+    final MusicValidation validation = snapshot.validation;
+    return <String, Object?>{
+      'title': score.title,
+      'tempo': score.tempo,
+      'timeSig': score.timeSig,
+      'keySig': score.keySig,
+      'tracks': <Map<String, Object?>>[
+        for (final MusicTrack track in score.tracks)
+          <String, Object?>{
+            'name': track.name,
+            'instrument': track.instrument,
+            'volume': track.volume,
+            'measures': track.measures,
+          },
+      ],
+      'verified': validation.verified,
+      'checks': <String>[
+        for (final MusicIssue issue in validation.issues) issue.message,
+      ],
+    };
+  }
+
+  /// 生成/重新生成文档：写 `docs.md`（覆盖旧生成物）→ 重读刷新文档栏。
+  ///
+  /// 生成中 [_docsGenerating] 为真（按钮禁用/转圈）；无论成功失败都复位。
+  /// 生成期间切了项目：结果只落到原项目，不污染新项目的栏目。
+  Future<void> _generateDocs() async {
+    if (_docsGenerating) return;
+    final MusicProjectSnapshot? snapshot = _snapshot;
+    final String? name = _name;
+    if (!mounted || snapshot == null || name == null) return;
+    setState(() => _docsGenerating = true);
+    final Directory projectDir = Directory(snapshot.dir);
+    String? docs;
+    bool failed = false;
+    try {
+      final File? written = await writeWorkbenchDoc(
+        projectDir: projectDir,
+        kind: 'music',
+        name: name,
+        title: snapshot.score.title,
+        summary: _docsSummaryOf(snapshot),
+        overwrite: true,
+      );
+      if (written == null) {
+        failed = true;
+      } else {
+        // 重读刚写出的 docs.md（与栏目同一读盘口径：同步读，不在测试/UI 线程
+        // 里额外等一次真实 IO）。
+        docs = _readDocs(projectDir.path);
+        if (docs == null) failed = true;
+      }
+    } catch (_) {
+      failed = true;
+    }
+    if (!mounted) return;
+    setState(() {
+      _docsGenerating = false;
+      if (!failed && _name == name) _docsMarkdown = docs;
+    });
+    if (_name != name) return;
+    if (failed) {
+      _appStore?.toasts.warn('文档没能写入，请重试');
+      return;
+    }
+    _appStore?.toasts.success('文档已生成');
   }
 
   /// 项目内人读文档：`docs.md` 优先，其次 `brief.md`；空文件/读不出来按
@@ -706,6 +800,10 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
               setState(() => _column = column);
             },
             data: _columnData(),
+            // 文档栏目动作：按项目事实源确定性生成 docs.md；无项目/坏项目不提供
+            // 入口（null），生成中按钮禁用/转圈。
+            onGenerateDocs: _docsGenerateAction,
+            docsGenerating: _docsGenerating,
             present: Builder(
               builder: (BuildContext context) => _presentPane(context, p),
             ),
