@@ -107,7 +107,7 @@ class ChatRail extends StatelessWidget {
     final tabs = railTabsForView(context.watch<AppStore>().view);
     return Container(
       height: 44,
-      padding: const EdgeInsets.only(left: 8, right: 2),
+      padding: const EdgeInsets.only(left: NonSpace.sm, right: NonSpace.xxs),
       decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
       child: Row(
         children: [
@@ -134,8 +134,8 @@ class ChatRail extends StatelessWidget {
       onTap: () => onTab(id),
       child: Container(
         height: 28,
-        margin: const EdgeInsets.only(right: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        margin: const EdgeInsets.only(right: NonSpace.xxs),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
         decoration: BoxDecoration(
           color: active ? p.panel2 : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
@@ -143,11 +143,11 @@ class ChatRail extends StatelessWidget {
         child: Row(
           children: [
             Icon(icon, size: 12, color: active ? p.accent : p.ink4),
-            const SizedBox(width: 4),
+            const SizedBox(width: NonSpace.xs),
             Text(
               label,
               style: TextStyle(
-                fontSize: 11.5,
+                fontSize: NonType.body,
                 fontWeight: FontWeight.w600,
                 color: active ? p.ink : p.ink3,
               ),
@@ -194,7 +194,7 @@ class ChatRailStrip extends StatelessWidget {
           const SizedBox(height: 6),
           for (final entry in tabs)
             Padding(
-              padding: const EdgeInsets.only(bottom: 2),
+              padding: const EdgeInsets.only(bottom: NonSpace.xxs),
               child: IconAction(
                 key: ValueKey('desktop-rail-strip-${entry.$1}'),
                 icon: entry.$2,

@@ -168,7 +168,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
               children: [
                 Text('NaN',
                     maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
+                    style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink)),
                 if (!widget.railMode)
                   // 项目入口：项目名 + 未保存点 + 保存/另存/打开/新建。
                   // 聊天优先壳没有桌面 TitleBar/StatusBar，这里是手机上
@@ -188,10 +188,10 @@ class _ChatStreamViewState extends State<ChatStreamView> {
               ),
               onPressed: widget.onOpenWorkspace ?? store.openWorkspace,
               icon: Icon(Icons.space_dashboard_outlined, size: 14, color: p.ink2),
-              label: Text('工作区', style: TextStyle(fontSize: 11, color: p.ink2)),
+              label: Text('工作区', style: TextStyle(fontSize: NonType.caption, color: p.ink2)),
             ),
           ],
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           IconAction(
             icon: store.settings.theme == 'light' ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
             tooltip: '切换主题',
@@ -217,14 +217,14 @@ class _ChatStreamViewState extends State<ChatStreamView> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.auto_awesome, size: 30, color: p.accent),
-          const SizedBox(height: 12),
+          const SizedBox(height: NonSpace.md),
           Text('从一句话开始',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3)),
-          const SizedBox(height: 8),
+              style: TextStyle(fontSize: NonType.title, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.3)),
+          const SizedBox(height: NonSpace.sm),
           Text('描述要解决的问题与受众——NaN 先写设计文档，再生成可交互原型。',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, height: 1.6, color: p.ink3)),
-          const SizedBox(height: 16),
+              style: TextStyle(fontSize: NonType.body, height: 1.6, color: p.ink3)),
+          const SizedBox(height: NonSpace.lg),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -241,7 +241,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: p.line),
                     ),
-                    child: Text(e, style: TextStyle(fontSize: 11, color: p.ink2)),
+                    child: Text(e, style: TextStyle(fontSize: NonType.caption, color: p.ink2)),
                   ),
                 ),
             ],
@@ -287,7 +287,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
           border: Border.all(color: p.accent.withValues(alpha: 0.3)),
         ),
         child: Text(m.text,
-            style: TextStyle(fontSize: 12.5, height: 1.55, color: p.ink)),
+            style: TextStyle(fontSize: NonType.bodyStrong, height: 1.55, color: p.ink)),
       ),
     );
   }
@@ -324,7 +324,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
               const SizedBox(width: 7),
               Expanded(
                 child: Text(m.text,
-                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.ink)),
+                    style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink)),
               ),
               if (m.running)
                 SizedBox(
@@ -356,18 +356,18 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                   ),
                   const SizedBox(width: 6),
                   Text(_stepLabel(s.label),
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: p.ink2)),
+                      style: TextStyle(fontSize: NonType.caption, fontWeight: FontWeight.w500, color: p.ink2)),
                   if (s.detail != null && s.detail!.isNotEmpty) ...[
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(s.detail!,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                          style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
                     ),
                   ],
                   if (s.ms != null)
                     Text('${s.ms}ms',
-                        style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                        style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
                 ],
               ),
             ),
@@ -379,21 +379,21 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                 children: [
                   Expanded(
                     child: Text(m.detail!,
-                        style: TextStyle(fontSize: 11, height: 1.5, color: p.danger)),
+                        style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.danger)),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: NonSpace.sm),
                   // 一步失败后不必重新描述需求：原样再发一次「重试上一步」，
                   // 由同一条 store.sendChat 路径续跑（与建议 chip 同出口）。
                   TextButton(
                     key: const ValueKey('chat-retry-step'),
                     style: TextButton.styleFrom(
                       foregroundColor: p.danger,
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xxs),
                       minimumSize: const Size(0, 26),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                     onPressed: () => _sendText(store, '重试上一步'),
-                    child: const Text('重试', style: TextStyle(fontSize: 11)),
+                    child: const Text('重试', style: TextStyle(fontSize: NonType.caption)),
                   ),
                 ],
               ),
@@ -456,7 +456,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
         borderRadius: BorderRadius.circular(12),
         onTap: () => _openArtifact(store, m),
         child: Container(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(NonSpace.md),
           constraints: const BoxConstraints(maxWidth: 620),
           decoration: BoxDecoration(
             color: p.panel.withValues(alpha: 0.7),
@@ -488,37 +488,37 @@ class _ChatStreamViewState extends State<ChatStreamView> {
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(label,
-                              style: TextStyle(fontSize: 10, color: p.accent)),
+                              style: TextStyle(fontSize: NonType.micro, color: p.accent)),
                         ),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(m.artifactName ?? '',
                               maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.ink)),
+                              style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink)),
                         ),
                       ],
                     ),
                     if (m.text.isNotEmpty)
                       Padding(
-                        padding: const EdgeInsets.only(top: 2),
+                        padding: const EdgeInsets.only(top: NonSpace.xxs),
                         child: Text(m.text,
                             maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 10, color: p.ink4)),
+                            style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                       ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: NonSpace.sm),
               TextButton(
                 key: const ValueKey('chat-artifact-open'),
                 style: TextButton.styleFrom(
                   foregroundColor: p.accent,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xxs),
                   minimumSize: const Size(0, 28),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 onPressed: () => _openArtifact(store, m),
-                child: Text(openLabel, style: const TextStyle(fontSize: 11)),
+                child: Text(openLabel, style: const TextStyle(fontSize: NonType.caption)),
               ),
             ],
           ),
@@ -544,7 +544,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
     final busy = store.agentBusy;
     return Container(
       decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
-      padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, NonSpace.md),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
@@ -556,7 +556,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
               maxLines: 5,
               textInputAction: TextInputAction.send,
               enabled: !busy,
-              style: TextStyle(fontSize: 13, height: 1.5, color: p.ink),
+              style: TextStyle(fontSize: NonType.bodyStrong, height: 1.5, color: p.ink),
               decoration: InputDecoration(
                 hintText: busy ? 'NaN 正在工作……' : '描述你要做的东西，回车发送',
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -564,7 +564,7 @@ class _ChatStreamViewState extends State<ChatStreamView> {
               onSubmitted: (_) => _send(store),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: NonSpace.sm),
           if (busy)
             IconButton(
               key: const ValueKey('chat-stop-button'),
@@ -659,12 +659,12 @@ class ChatProjectMenu extends StatelessWidget {
                 name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 10.5, color: p.ink2),
+                style: TextStyle(fontSize: NonType.caption, color: p.ink2),
               ),
             ),
             if (store.dirty)
               Padding(
-                padding: const EdgeInsets.only(left: 4),
+                padding: const EdgeInsets.only(left: NonSpace.xs),
                 child: Tooltip(
                   message: '有未保存的改动',
                   child: Container(
@@ -743,11 +743,11 @@ class ChatProjectMenu extends StatelessWidget {
       child: Row(
         children: [
           Icon(icon, size: 14, color: p.ink4),
-          const SizedBox(width: 8),
+          const SizedBox(width: NonSpace.sm),
           Expanded(
             child: Text(label,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, color: p.ink2)),
+                style: TextStyle(fontSize: NonType.body, color: p.ink2)),
           ),
         ],
       ),
@@ -760,7 +760,7 @@ class ChatProjectMenu extends StatelessWidget {
       enabled: false,
       height: 24,
       child: Text(label,
-          style: TextStyle(fontSize: 10, letterSpacing: 0.6, color: p.ink4)),
+          style: TextStyle(fontSize: NonType.micro, letterSpacing: 0.6, color: p.ink4)),
     );
   }
 }
@@ -809,7 +809,7 @@ class _SaveAsDialogState extends State<_SaveAsDialog> {
         side: BorderSide(color: p.lineStrong),
       ),
       title: const Text('另存为',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600)),
       content: SizedBox(
         width: 340,
         child: Column(
@@ -829,7 +829,7 @@ class _SaveAsDialogState extends State<_SaveAsDialog> {
             ),
             const SizedBox(height: 10),
             Text('会保存到应用内项目库，之后可在「打开项目」里重新找到。',
-                style: TextStyle(fontSize: 10.5, height: 1.5, color: p.ink4)),
+                style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.ink4)),
           ],
         ),
       ),
@@ -888,7 +888,7 @@ class _AssistantBlockState extends State<_AssistantBlock> {
       onExit: (_) => setState(() => _hover = false),
       child: Container(
         margin: const EdgeInsets.only(right: 64, bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.xs, vertical: NonSpace.xxs),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -901,11 +901,11 @@ class _AssistantBlockState extends State<_AssistantBlock> {
                 'code': _InlineCodeBuilder(),
               },
               styleSheet: markdownStyleSheetOf(context).copyWith(
-                p: TextStyle(fontSize: 12.5, height: 1.6, color: p.ink2),
-                h1: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: p.ink),
-                h2: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: p.ink),
+                p: TextStyle(fontSize: NonType.bodyStrong, height: 1.6, color: p.ink2),
+                h1: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink),
+                h2: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink),
                 code: TextStyle(
-                    fontSize: 11, fontFamily: 'Menlo', color: p.ink2, backgroundColor: p.panel2),
+                    fontSize: NonType.caption, fontFamily: 'Menlo', color: p.ink2, backgroundColor: p.panel2),
                 codeblockDecoration: BoxDecoration(
                   color: p.panel2,
                   borderRadius: BorderRadius.circular(10),
@@ -915,7 +915,7 @@ class _AssistantBlockState extends State<_AssistantBlock> {
             ),
             if (_hover)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: NonSpace.xs),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -957,8 +957,8 @@ class _MiniAction extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 12, color: p.ink4),
-            const SizedBox(width: 4),
-            Text(label, style: TextStyle(fontSize: 10.5, color: p.ink4)),
+            const SizedBox(width: NonSpace.xs),
+            Text(label, style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
           ],
         ),
       ),
@@ -983,7 +983,7 @@ class _SuggestionChips extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Padding(
-      padding: const EdgeInsets.only(top: 6, bottom: 2),
+      padding: const EdgeInsets.only(top: 6, bottom: NonSpace.xxs),
       child: Wrap(
         spacing: 6,
         runSpacing: 6,
@@ -1009,7 +1009,7 @@ class _SuggestionChips extends StatelessWidget {
                   children: [
                     Icon(Icons.auto_awesome, size: 11, color: p.accent),
                     const SizedBox(width: 5),
-                    Text(s, style: TextStyle(fontSize: 11, color: p.ink2)),
+                    Text(s, style: TextStyle(fontSize: NonType.caption, color: p.ink2)),
                   ],
                 ),
               ),
@@ -1035,7 +1035,7 @@ class _CodeBlock extends StatelessWidget {
       // 会直接抛 Duplicate keys（整条消息渲染失败）。
       key: ValueKey('chat-code-block-${code.hashCode}'),
       width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 4),
+      margin: const EdgeInsets.symmetric(vertical: NonSpace.xs),
       decoration: BoxDecoration(
         color: p.panel2,
         borderRadius: BorderRadius.circular(10),
@@ -1045,13 +1045,13 @@ class _CodeBlock extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            padding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
+            padding: const EdgeInsets.fromLTRB(10, NonSpace.xs, NonSpace.xs, NonSpace.xs),
             decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
             child: Row(
               children: [
                 Text((language ?? '代码').toUpperCase(),
                     style: TextStyle(
-                        fontSize: 9.5, letterSpacing: 0.6, fontWeight: FontWeight.w600, color: p.ink4)),
+                        fontSize: NonType.micro, letterSpacing: 0.6, fontWeight: FontWeight.w600, color: p.ink4)),
                 const Spacer(),
                 InkWell(
                   key: const ValueKey('chat-copy-code'),
@@ -1064,8 +1064,8 @@ class _CodeBlock extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                       Icon(Icons.copy_rounded, size: 11, color: p.ink4),
-                      const SizedBox(width: 4),
-                      Text('复制', style: TextStyle(fontSize: 10, color: p.ink4)),
+                      const SizedBox(width: NonSpace.xs),
+                      Text('复制', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                     ]),
                   ),
                 ),
@@ -1076,7 +1076,7 @@ class _CodeBlock extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.all(10),
             child: Text(code,
-                style: TextStyle(fontSize: 11, height: 1.55, fontFamily: 'Menlo', color: p.ink2)),
+                style: TextStyle(fontSize: NonType.caption, height: 1.55, fontFamily: 'Menlo', color: p.ink2)),
           ),
         ],
       ),
@@ -1123,7 +1123,7 @@ class _InlineCodeBuilder extends MarkdownElementBuilder {
     if (text.isEmpty) return null;
     return Text(text,
         style: TextStyle(
-          fontSize: 11,
+          fontSize: NonType.caption,
           fontFamily: 'Menlo',
           color: p.ink2,
           backgroundColor: p.panel2,
@@ -1159,17 +1159,17 @@ class _ChatA2uiCardState extends State<_ChatA2uiCard> {
     if (_failed) {
       final palette = context.palette;
       return Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(NonSpace.md),
         decoration: BoxDecoration(
           color: palette.panel,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: palette.line),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(widget.fallbackText, style: TextStyle(fontSize: 12.5, color: palette.ink)),
-          const SizedBox(height: 4),
+          Text(widget.fallbackText, style: TextStyle(fontSize: NonType.bodyStrong, color: palette.ink)),
+          const SizedBox(height: NonSpace.xs),
           Text('选项卡片没有显示出来，可以在输入框直接回复你的选择。',
-              style: TextStyle(fontSize: 11, color: palette.ink4)),
+              style: TextStyle(fontSize: NonType.caption, color: palette.ink4)),
         ]),
       );
     }

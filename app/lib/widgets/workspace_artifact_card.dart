@@ -72,7 +72,7 @@ class WorkspaceArtifactCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: NonType.bodyStrong,
                     fontWeight: FontWeight.w700,
                     color: p.ink,
                   ),
@@ -89,12 +89,12 @@ class WorkspaceArtifactCard extends StatelessWidget {
             ],
           ),
           if (summary.trim().isNotEmpty) ...<Widget>[
-            const SizedBox(height: 4),
+            const SizedBox(height: NonSpace.xs),
             Text(
               summary,
               style: TextStyle(
-                fontSize: 12,
-                height: 1.45,
+                fontSize: NonType.body,
+                height: NonType.lineBody,
                 color: ok ? p.ink2 : p.warn,
               ),
             ),
@@ -117,14 +117,14 @@ class WorkspaceArtifactCard extends StatelessWidget {
                     ),
                     child: Text(
                       metric,
-                      style: TextStyle(fontSize: 11, color: p.ink3),
+                      style: TextStyle(fontSize: NonType.caption, color: p.ink3),
                     ),
                   ),
               ],
             ),
           ],
           if (detail != null && detail!.trim().isNotEmpty) ...<Widget>[
-            const SizedBox(height: 4),
+            const SizedBox(height: NonSpace.xs),
             Material(
               type: MaterialType.transparency,
               child: ExpansionTile(
@@ -133,16 +133,16 @@ class WorkspaceArtifactCard extends StatelessWidget {
                 childrenPadding: EdgeInsets.zero,
                 title: Text(
                   '技术详情',
-                  style: TextStyle(fontSize: 11, color: p.ink4),
+                  style: TextStyle(fontSize: NonType.caption, color: p.ink4),
                 ),
                 children: <Widget>[
-                  Text(detail!, style: TextStyle(fontSize: 11, color: p.ink4)),
+                  Text(detail!, style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
                 ],
               ),
             ),
           ],
           if (onPrimary != null || onOpen != null) ...<Widget>[
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: <Widget>[
@@ -152,7 +152,7 @@ class WorkspaceArtifactCard extends StatelessWidget {
                     onPressed: onOpen,
                     child: Text(
                       openLabel ?? '打开',
-                      style: const TextStyle(fontSize: 12),
+                      style: const TextStyle(fontSize: NonType.body),
                     ),
                   ),
                 if (primaryLabel != null && onPrimary != null)
@@ -161,7 +161,7 @@ class WorkspaceArtifactCard extends StatelessWidget {
                     onPressed: onPrimary,
                     style: FilledButton.styleFrom(
                       visualDensity: VisualDensity.compact,
-                      textStyle: const TextStyle(fontSize: 12),
+                      textStyle: const TextStyle(fontSize: NonType.body),
                     ),
                     child: Text(primaryLabel!),
                   ),

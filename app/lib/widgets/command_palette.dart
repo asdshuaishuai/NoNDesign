@@ -203,12 +203,12 @@ class _CommandPaletteState extends State<_CommandPalette> {
               child: Row(
                 children: [
                   Icon(Icons.search, size: 16, color: p.ink4),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: NonSpace.sm),
                   Expanded(
                     child: TextField(
                       controller: _search,
                       autofocus: true,
-                      style: TextStyle(fontSize: 13, color: p.ink),
+                      style: TextStyle(fontSize: NonType.bodyStrong, color: p.ink),
                       decoration: InputDecoration(
                         hintText: '搜索命令、模板、最近项目…',
                         border: InputBorder.none,
@@ -217,7 +217,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
                         filled: false,
                         isDense: true,
                         contentPadding: EdgeInsets.zero,
-                        hintStyle: TextStyle(fontSize: 13, color: p.ink4),
+                        hintStyle: TextStyle(fontSize: NonType.bodyStrong, color: p.ink4),
                       ),
                       onChanged: (v) => setState(() {
                         _query = v;
@@ -231,7 +231,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                     decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
-                    child: Text('esc', style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                    child: Text('esc', style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
                   ),
                 ],
               ),
@@ -250,7 +250,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
                         Padding(
                           padding: const EdgeInsets.fromLTRB(9, 6, 9, 3),
                           child: Text(action.group.toUpperCase(),
-                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1, color: p.ink4)),
+                              style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w700, letterSpacing: 1, color: p.ink4)),
                         ),
                       InkWell(
                         key: i == sel ? _selectedKey : null, // 键盘导航后滚动到可见
@@ -265,10 +265,10 @@ class _CommandPaletteState extends State<_CommandPalette> {
                           child: Row(
                             children: [
                               Icon(action.icon, size: 14, color: p.ink4),
-                              const SizedBox(width: 8),
-                              Expanded(child: Text(action.label, style: TextStyle(fontSize: 12, color: p.ink2))),
+                              const SizedBox(width: NonSpace.sm),
+                              Expanded(child: Text(action.label, style: TextStyle(fontSize: NonType.body, color: p.ink2))),
                               if (action.shortcut.isNotEmpty)
-                                Text(action.shortcut, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                                Text(action.shortcut, style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
                             ],
                           ),
                         ),
@@ -287,13 +287,13 @@ class _CommandPaletteState extends State<_CommandPalette> {
                   Expanded(
                     child: Text('↑ ↓ 选择 · ↵ 执行',
                         maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 10, color: p.ink4)),
+                        style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: NonSpace.sm),
                   Flexible(
                     child: Text('NaN Command',
                         maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 10, color: p.ink4)),
+                        style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                   ),
                 ],
               ),

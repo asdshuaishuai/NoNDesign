@@ -109,9 +109,9 @@ class _DocsViewState extends State<DocsView> {
             return Row(
               children: [
                 _tab(context, store, 'prd', Icons.description_outlined, '产品需求', store.docs.prd.isNotEmpty, compact: narrow),
-                const SizedBox(width: 2),
+                const SizedBox(width: NonSpace.xxs),
                 _tab(context, store, 'ui', Icons.layers_outlined, 'UI 说明', store.docs.ui.isNotEmpty, compact: narrow),
-                const SizedBox(width: 2),
+                const SizedBox(width: NonSpace.xxs),
                 _tab(context, store, 'spec', Icons.palette_outlined, '设计规范', true, compact: narrow),
                 const Spacer(),
                 if (store.agentBusy) ...[
@@ -119,7 +119,7 @@ class _DocsViewState extends State<DocsView> {
                   if (!narrow) ...[
                     const SizedBox(width: 6),
                     Text(store.agentPhase == 'planning' ? 'NaN 正在写文档…' : 'NaN 正在工作…',
-                        style: TextStyle(fontSize: 10, color: p.accent)),
+                        style: TextStyle(fontSize: NonType.micro, color: p.accent)),
                     const SizedBox(width: 10),
                   ],
                 ],
@@ -147,7 +147,7 @@ class _DocsViewState extends State<DocsView> {
                           },
                     child: const Row(mainAxisSize: MainAxisSize.min, children: [
                       Icon(Icons.auto_awesome, size: 12),
-                      SizedBox(width: 4),
+                      SizedBox(width: NonSpace.xs),
                       Text('生成原型'),
                     ]),
                   ),
@@ -184,7 +184,7 @@ class _DocsViewState extends State<DocsView> {
           children: [
             Icon(icon, size: 12, color: active ? p.accent : p.ink4),
             SizedBox(width: compact ? 4 : 5),
-            Text(label, style: TextStyle(fontSize: compact ? 11 : 12, fontWeight: FontWeight.w500, color: active ? p.ink : p.ink3)),
+            Text(label, style: TextStyle(fontSize: compact ? NonType.caption : NonType.body, fontWeight: FontWeight.w500, color: active ? p.ink : p.ink3)),
             if (done)
               Padding(
                 padding: const EdgeInsets.only(left: 5),
@@ -213,15 +213,15 @@ class _DocsViewState extends State<DocsView> {
               ),
               child: Icon(kind == 'prd' ? Icons.description_outlined : Icons.layers_outlined, color: Colors.white, size: 20),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: NonSpace.md),
             Text(kind == 'prd' ? '先定义产品，再画界面' : '逐屏写清 UI 约束',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: p.ink)),
+                style: TextStyle(fontSize: NonType.title, fontWeight: FontWeight.w600, color: p.ink)),
             const SizedBox(height: 5),
             Text('描述目标用户、核心流程和页面范围。NaN 会写成可施工的${kind == 'prd' ? ' PRD' : ' UI 说明'}。',
-                textAlign: TextAlign.center, style: TextStyle(fontSize: 12, height: 1.55, color: p.ink3)),
+                textAlign: TextAlign.center, style: TextStyle(fontSize: NonType.body, height: 1.55, color: p.ink3)),
             const SizedBox(height: 18),
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(NonSpace.sm),
               decoration: BoxDecoration(
                 color: p.panel2.withValues(alpha: 0.6),
                 borderRadius: BorderRadius.circular(12),
@@ -233,19 +233,19 @@ class _DocsViewState extends State<DocsView> {
                     controller: _brief,
                     minLines: 3,
                     maxLines: 5,
-                    style: TextStyle(fontSize: 13, height: 1.5, color: p.ink),
+                    style: TextStyle(fontSize: NonType.bodyStrong, height: 1.5, color: p.ink),
                     decoration: const InputDecoration(
                       hintText: '例如：一个面向独立设计师的项目管理工具，核心是项目列表、任务看板、成员与通知设置。',
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
                       filled: false,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: 6),
                     ),
                   ),
                   Row(
                     children: [
-                      Text('${modCombo('⌘↵')} 生成', style: TextStyle(fontSize: 10, color: p.ink4)),
+                      Text('${modCombo('⌘↵')} 生成', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                       const Spacer(),
                       FilledButton(
                         style: FilledButton.styleFrom(backgroundColor: p.accent, foregroundColor: Colors.white),
@@ -253,7 +253,7 @@ class _DocsViewState extends State<DocsView> {
                           final brief = _brief.text.trim();
                           if (brief.isNotEmpty) store.runPlan(brief);
                         },
-                        child: const Text('让 NaN 撰写', style: TextStyle(fontSize: 12)),
+                        child: const Text('让 NaN 撰写', style: TextStyle(fontSize: NonType.body)),
                       ),
                     ],
                   ),
@@ -271,7 +271,7 @@ class _DocsViewState extends State<DocsView> {
     return Column(
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: NonSpace.sm),
           child: LayoutBuilder(builder: (context, constraints) {
             // 窄屏：Pill + 字数 + 预览/编辑 + 「让 NaN 完善」曾右溢 246px。
             // 窄屏下切换与完善按钮改图标态（带 tooltip），正文区不受挤压。
@@ -279,15 +279,15 @@ class _DocsViewState extends State<DocsView> {
             return Row(
               children: [
                 Pill(label: kind == 'prd' ? 'PRD' : 'UI SPEC', color: p.accent, background: p.accentSoft),
-                const SizedBox(width: 8),
-                Text(_charCountOf(source), style: TextStyle(fontSize: 10, color: p.ink4)),
+                const SizedBox(width: NonSpace.sm),
+                Text(_charCountOf(source), style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                 const Spacer(),
                 _toggle(context, _preview, '预览', Icons.visibility_outlined, () => setState(() => _preview = true),
                     compact: narrow),
-                const SizedBox(width: 2),
+                const SizedBox(width: NonSpace.xxs),
                 _toggle(context, !_preview, '编辑', Icons.edit_outlined, () => setState(() => _preview = false),
                     compact: narrow),
-                const SizedBox(width: 8),
+                const SizedBox(width: NonSpace.sm),
                 if (narrow)
                   IconButton(
                     tooltip: '让 NaN 完善',
@@ -306,7 +306,7 @@ class _DocsViewState extends State<DocsView> {
                             '请基于当前文档继续完善 ${kind == 'prd' ? 'PRD' : 'UI 说明'}。保留已有有效内容，补全缺失的边界、状态与验收标准。'),
                     child: const Row(mainAxisSize: MainAxisSize.min, children: [
                       Icon(Icons.auto_fix_high, size: 12),
-                      SizedBox(width: 4),
+                      SizedBox(width: NonSpace.xs),
                       Text('让 NaN 完善'),
                     ]),
                   ),
@@ -316,7 +316,7 @@ class _DocsViewState extends State<DocsView> {
         ),
         Expanded(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(28, 8, 28, 32),
+            padding: const EdgeInsets.fromLTRB(28, NonSpace.sm, 28, NonSpace.xxl),
             // PLAN 运行中的流式直播：write_doc 正文边写边推进（doc_delta 累积
             // 到 store.liveDocText），自动切渲染视图（原版同语义）；doc_written
             // 全量到达后清缓冲回落编辑态。
@@ -332,10 +332,10 @@ class _DocsViewState extends State<DocsView> {
                     child: MarkdownBody(
                       data: store.liveDocText,
                       styleSheet: markdownStyleSheetOf(context).copyWith(
-                        p: TextStyle(fontSize: 13, height: 1.7, color: p.ink2),
-                        h1: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: p.ink),
-                        h2: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink),
-                        h3: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink),
+                        p: TextStyle(fontSize: NonType.bodyStrong, height: 1.7, color: p.ink2),
+                        h1: TextStyle(fontSize: NonType.display, fontWeight: FontWeight.w600, color: p.ink),
+                        h2: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink),
+                        h3: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink),
                       ),
                     ),
                   )
@@ -351,10 +351,10 @@ class _DocsViewState extends State<DocsView> {
                     child: MarkdownBody(
                       data: source,
                       styleSheet: markdownStyleSheetOf(context).copyWith(
-                        p: TextStyle(fontSize: 13, height: 1.7, color: p.ink2),
-                        h1: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: p.ink),
-                        h2: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink),
-                        h3: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink),
+                        p: TextStyle(fontSize: NonType.bodyStrong, height: 1.7, color: p.ink2),
+                        h1: TextStyle(fontSize: NonType.display, fontWeight: FontWeight.w600, color: p.ink),
+                        h2: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink),
+                        h3: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink),
                       ),
                     ),
                   )
@@ -362,7 +362,7 @@ class _DocsViewState extends State<DocsView> {
                     controller: _editor,
                     minLines: 20,
                     maxLines: null,
-                    style: TextStyle(fontSize: 13, height: 1.7, fontFamily: 'Menlo', color: p.ink2),
+                    style: TextStyle(fontSize: NonType.bodyStrong, height: 1.7, fontFamily: 'Menlo', color: p.ink2),
                     decoration: InputDecoration(
                       filled: true,
                       fillColor: p.panel.withValues(alpha: 0.5),
@@ -388,11 +388,11 @@ class _DocsViewState extends State<DocsView> {
                   child: Text('Markdown · 随项目文件一起保存，换设备打开也不丢',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 10, color: p.ink4)),
+                      style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                 ),
                 if (!narrow) ...[
-                  const SizedBox(width: 8),
-                  Text('${modCombo('⌘↵')} 生成原型', style: TextStyle(fontSize: 10, color: p.ink4)),
+                  const SizedBox(width: NonSpace.sm),
+                  Text('${modCombo('⌘↵')} 生成原型', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                 ],
               ],
             );
@@ -409,7 +409,7 @@ class _DocsViewState extends State<DocsView> {
       borderRadius: BorderRadius.circular(6),
       onTap: onTap,
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 7, vertical: 4),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 7, vertical: NonSpace.xs),
         decoration: BoxDecoration(
           color: active ? p.panel3 : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
@@ -419,7 +419,7 @@ class _DocsViewState extends State<DocsView> {
             Icon(icon, size: 11, color: active ? p.ink2 : p.ink4),
             if (!compact) ...[
               const SizedBox(width: 3),
-              Text(label, style: TextStyle(fontSize: 11, color: active ? p.ink2 : p.ink4)),
+              Text(label, style: TextStyle(fontSize: NonType.caption, color: active ? p.ink2 : p.ink4)),
             ],
           ],
         ),
@@ -473,7 +473,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
           // 窄屏让按钮换行，宽屏保持原来的「标题左、按钮右」布局。
           LayoutBuilder(builder: (context, constraints) {
             final title = Text('设计规范',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.4));
+                style: TextStyle(fontSize: NonType.display, fontWeight: FontWeight.w600, color: p.ink, letterSpacing: -0.4));
             final badge = Pill(label: 'DESIGN.md', color: p.accent, background: p.accentSoft);
             final extract = OutlinedButton.icon(
               onPressed: store.activeBoard == null || _extracting ? null : _runExtract,
@@ -489,19 +489,19 @@ class _SpecPreviewState extends State<_SpecPreview> {
             );
             if (constraints.maxWidth < 700) {
               return Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: NonSpace.sm,
+                runSpacing: NonSpace.sm,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [title, badge, extract, edit],
               );
             }
             return Row(
-              children: [title, const SizedBox(width: 8), badge, const Spacer(), extract, const SizedBox(width: 8), edit],
+              children: [title, const SizedBox(width: NonSpace.sm), badge, const Spacer(), extract, const SizedBox(width: NonSpace.sm), edit],
             );
           }),
-          const SizedBox(height: 4),
+          const SizedBox(height: NonSpace.xs),
           Text('配色、字体、间距与圆角从这份规范派生，约束每一块画板。',
-              style: TextStyle(fontSize: 12, color: p.ink3)),
+              style: TextStyle(fontSize: NonType.body, color: p.ink3)),
           const SizedBox(height: 22),
           _twoUp(
             context,
@@ -521,9 +521,9 @@ class _SpecPreviewState extends State<_SpecPreview> {
             children: [
               for (final rule in design.rules)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
                   decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
-                  child: Text(rule, style: TextStyle(fontSize: 11, color: p.ink2)),
+                  child: Text(rule, style: TextStyle(fontSize: NonType.caption, color: p.ink2)),
                 ),
             ],
           )),
@@ -536,7 +536,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
                   children: [
                     Expanded(
                       child: Text('从画板 ${_extractAb ?? ''} 提取的颜色使用统计，可与现规范对照。',
-                          style: TextStyle(fontSize: 11, color: p.ink3)),
+                          style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
                     ),
                     IconAction(
                       icon: Icons.close,
@@ -548,14 +548,14 @@ class _SpecPreviewState extends State<_SpecPreview> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: NonSpace.sm),
                 ExtractCompareView(data: _extract!),
               ],
             )),
           ],
           const SizedBox(height: 18),
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(NonSpace.md),
             decoration: BoxDecoration(
               color: p.accentSoft.withValues(alpha: 0.45),
               borderRadius: BorderRadius.circular(12),
@@ -564,9 +564,9 @@ class _SpecPreviewState extends State<_SpecPreview> {
             child: Row(
               children: [
                 Icon(Icons.auto_awesome, size: 14, color: p.accent),
-                const SizedBox(width: 8),
+                const SizedBox(width: NonSpace.sm),
                 Expanded(child: Text('每次生成都会带上这份规范，保持全局视觉一致。',
-                    style: TextStyle(fontSize: 11, color: p.ink3))),
+                    style: TextStyle(fontSize: NonType.caption, color: p.ink3))),
               ],
             ),
           ),
@@ -595,7 +595,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
   Widget _card(BuildContext context, String title, Widget child) {
     final p = context.palette;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(NonSpace.lg),
       decoration: BoxDecoration(
         color: p.panel.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(12),
@@ -604,8 +604,8 @@ class _SpecPreviewState extends State<_SpecPreview> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
-          const SizedBox(height: 12),
+          Text(title, style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
+          const SizedBox(height: NonSpace.md),
           child,
         ],
       ),
@@ -632,9 +632,9 @@ class _SpecPreviewState extends State<_SpecPreview> {
                     border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(entry.key, style: TextStyle(fontSize: 10, color: p.ink3)),
-                Text(entry.value, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                const SizedBox(height: NonSpace.xs),
+                Text(entry.key, style: TextStyle(fontSize: NonType.micro, color: p.ink3)),
+                Text(entry.value, style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
               ],
             ),
           ),
@@ -653,7 +653,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
             style: TextStyle(fontSize: design.body, color: p.ink2, height: 1.6)),
         const SizedBox(height: 6),
         Text('H1 ${design.h1.round()} · H2 ${design.h2.round()} · BODY ${design.body.round()}',
-            style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+            style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
       ],
     );
   }
@@ -678,7 +678,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
                   decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(4)),
                 ),
                 const SizedBox(height: 3),
-                Text(s.round().toString(), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                Text(s.round().toString(), style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
               ],
             ),
           ),
@@ -692,7 +692,7 @@ class _SpecPreviewState extends State<_SpecPreview> {
       children: [
         for (final item in [('sm', design.radiusSm), ('md', design.radiusMd), ('lg', design.radiusLg)])
           Padding(
-            padding: const EdgeInsets.only(right: 12),
+            padding: const EdgeInsets.only(right: NonSpace.md),
             child: Column(
               children: [
                 Container(
@@ -704,8 +704,8 @@ class _SpecPreviewState extends State<_SpecPreview> {
                     border: Border.all(color: p.lineStrong),
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text('${item.$1} · ${item.$2.round()}', style: TextStyle(fontSize: 10, color: p.ink4)),
+                const SizedBox(height: NonSpace.xs),
+                Text('${item.$1} · ${item.$2.round()}', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
               ],
             ),
           ),

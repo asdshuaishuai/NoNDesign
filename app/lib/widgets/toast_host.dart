@@ -68,7 +68,7 @@ class ToastHost extends StatelessWidget {
                             for (final toast in toasts)
                               Padding(
                                 key: ValueKey<int>(toast.id),
-                                padding: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.only(bottom: NonSpace.sm),
                                 child: ToastEntrance(
                                   child: ToastCapsule(
                                     item: toast,
@@ -123,7 +123,7 @@ class ToastCapsule extends StatelessWidget {
             ),
             child: Icon(_levelIcon, size: 13, color: levelColor),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: NonSpace.sm),
           Flexible(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -138,7 +138,7 @@ class ToastCapsule extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: NonType.body,
                           fontWeight: FontWeight.w600,
                           color: p.ink,
                           height: 1.35,
@@ -149,18 +149,18 @@ class ToastCapsule extends StatelessWidget {
                       const SizedBox(width: 6),
                       Text(
                         '×${item.repeatCount}',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: p.ink4),
+                        style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w700, color: p.ink4),
                       ),
                     ],
                   ],
                 ),
                 if (item.detail != null) ...[
-                  const SizedBox(height: 2),
+                  const SizedBox(height: NonSpace.xxs),
                   Text(
                     item.detail!,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: p.ink3, height: 1.4),
+                    style: TextStyle(fontSize: NonType.caption, color: p.ink3, height: NonType.lineCaption),
                   ),
                 ],
               ],

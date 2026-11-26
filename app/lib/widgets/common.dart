@@ -150,9 +150,9 @@ DropdownMenu<T> nonSelect<T>(
           // 与 maximumSize 高 32 组成 min>max 即崩溃。
           minimumSize: const Size(64, 0),
           maximumSize: const Size.fromHeight(32),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
           foregroundColor: p.ink2,
-          textStyle: TextStyle(fontSize: 12, color: p.ink2),
+          textStyle: TextStyle(fontSize: NonType.body, color: p.ink2),
         ),
       ),
   ];
@@ -164,7 +164,7 @@ DropdownMenu<T> nonSelect<T>(
     enableSearch: false,
     trailingIcon: Icon(Icons.expand_more, size: 14, color: p.ink4),
     selectedTrailingIcon: Icon(Icons.expand_more, size: 14, color: p.ink4),
-    textStyle: TextStyle(fontSize: 12, color: p.ink2),
+    textStyle: TextStyle(fontSize: NonType.body, color: p.ink2),
     menuStyle: MenuStyle(
       backgroundColor: WidgetStatePropertyAll(p.panel2),
       surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
@@ -174,7 +174,7 @@ DropdownMenu<T> nonSelect<T>(
         borderRadius: BorderRadius.circular(10),
         side: BorderSide(color: p.line.withValues(alpha: 0.6)),
       )),
-      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 4)),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: NonSpace.xs)),
       maximumSize: const WidgetStatePropertyAll(Size(double.infinity, 300)),
     ),
     inputDecorationTheme: InputDecorationTheme(
@@ -182,7 +182,7 @@ DropdownMenu<T> nonSelect<T>(
       filled: true,
       fillColor: p.panel2,
       contentPadding: decoration?.contentPadding ?? const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-      hintStyle: decoration?.hintStyle ?? TextStyle(color: p.ink4, fontSize: 12),
+      hintStyle: decoration?.hintStyle ?? TextStyle(color: p.ink4, fontSize: NonType.body),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: p.line)),
       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: p.line)),
       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: p.accent.withValues(alpha: 0.7))),
@@ -228,8 +228,8 @@ class BoardTemplateMenu extends StatelessWidget {
             width: _width,
             child: Row(children: [
               Icon(Icons.crop_square, size: 14, color: p.ink4),
-              const SizedBox(width: 8),
-              Text('空白画板', style: TextStyle(fontSize: 12, color: p.ink2)),
+              const SizedBox(width: NonSpace.sm),
+              Text('空白画板', style: TextStyle(fontSize: NonType.body, color: p.ink2)),
             ]),
           ),
         ),
@@ -258,10 +258,10 @@ class BoardTemplateMenu extends StatelessWidget {
                         Expanded(
                           child: Text((t['name'] ?? id).toString(),
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12, color: p.ink2)),
+                              style: TextStyle(fontSize: NonType.body, color: p.ink2)),
                         ),
-                        const SizedBox(width: 8),
-                        Text(id, style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                        const SizedBox(width: NonSpace.sm),
+                        Text(id, style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
                       ],
                     ),
                   ),
@@ -368,7 +368,7 @@ class Pill extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[Icon(icon, size: 10, color: fg), const SizedBox(width: 3)],
-          Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: fg)),
+          Text(label, style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w500, color: fg)),
         ],
       ),
     );
@@ -388,7 +388,7 @@ class SectionLabel extends StatelessWidget {
         Expanded(
           child: Text(
             text.toUpperCase(),
-            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4),
+            style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4),
           ),
         ),
         ?trailing,
@@ -409,7 +409,7 @@ class EmptyHint extends StatelessWidget {
     final p = context.palette;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(NonSpace.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -419,11 +419,11 @@ class EmptyHint extends StatelessWidget {
               decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(12)),
               child: Icon(icon, size: 18, color: p.ink3),
             ),
-            const SizedBox(height: 12),
-            Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
+            const SizedBox(height: NonSpace.md),
+            Text(title, style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink)),
             if (detail != null) ...[
-              const SizedBox(height: 4),
-              Text(detail!, textAlign: TextAlign.center, style: TextStyle(fontSize: 11, height: 1.5, color: p.ink3)),
+              const SizedBox(height: NonSpace.xs),
+              Text(detail!, textAlign: TextAlign.center, style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.ink3)),
             ],
             if (action != null) ...[const SizedBox(height: 14), action!],
           ],

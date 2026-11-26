@@ -208,7 +208,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
             children: [
               Container(
                 height: 48,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
                 // NonPalette 令牌：此前逐字节硬编码深色主题值，浅色下 ≈2:1 不可读。
                 decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
                 child: Row(
@@ -216,12 +216,12 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                     IconAction(icon: Icons.close, tooltip: '退出演示 Esc', size: 26, onTap: () => store.setView('design')),
                     const SizedBox(width: 6),
                     Pill(label: '演示模式', color: p.accent, background: p.accent.withValues(alpha: 0.14)),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: NonSpace.sm),
                     Text(board.name.isEmpty ? board.id : board.name,
-                        style: TextStyle(fontSize: 12, color: p.ink2)),
+                        style: TextStyle(fontSize: NonType.body, color: p.ink2)),
                     const SizedBox(width: 6),
                     Text('${render.artboards.indexWhere((b) => b.id == board.id) + 1} / ${render.artboards.length}',
-                        style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink3)),
+                        style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink3)),
                     const Spacer(),
                     // 标注模式：开启时热区点击短路，Esc/再点 ✏ 退出（deepDesign 同语义）。
                     IconAction(
@@ -235,7 +235,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                       },
                     ),
                     if (_inkMode) ...[
-                      const SizedBox(width: 4),
+                      const SizedBox(width: NonSpace.xs),
                       IconAction(
                         icon: Icons.cleaning_services_outlined,
                         tooltip: '清除本板标注',
@@ -243,7 +243,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                         onTap: () => setState(() => context.read<AppStore>().demoInks.remove(_activeBoard ?? board.id)),
                       ),
                     ],
-                    const SizedBox(width: 4),
+                    const SizedBox(width: NonSpace.xs),
                     // 热区显隐（原版 toggleHotZones 同语义）：隐藏后是真实成品观感，点击交互不受影响。
                     IconAction(
                       icon: _hotspotsVisible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
@@ -252,7 +252,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                       active: _hotspotsVisible,
                       onTap: () => setState(() => _hotspotsVisible = !_hotspotsVisible),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: NonSpace.xs),
                     // 总返回已移除（用户定案）：返回由原型内 back 节点/热区负责（引擎内置 back）；Esc 退出演示。
                     IconAction(
                       icon: Icons.restart_alt,
@@ -278,7 +278,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                           Expanded(
                             child: Text(_guideText(board),
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 10, color: p.ink3)),
+                                style: TextStyle(fontSize: NonType.micro, color: p.ink3)),
                           ),
                           InkWell(
                             onTap: () => setState(() => _guideVisible = false),
@@ -412,7 +412,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                                             ),
                                             child: Text(
                                               _toast!,
-                                              style: const TextStyle(fontSize: 12, color: Colors.white),
+                                              style: const TextStyle(fontSize: NonType.body, color: Colors.white),
                                             ),
                                           ),
                                   ),
@@ -444,7 +444,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                                             ),
                                             child: Text(
                                               _badge!,
-                                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                                              style: const TextStyle(fontSize: NonType.caption, fontWeight: FontWeight.w600, color: Colors.white),
                                             ),
                                           ),
                                   ),
@@ -498,7 +498,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                                               label,
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(fontSize: 10, color: Colors.white),
+                                              style: const TextStyle(fontSize: NonType.micro, color: Colors.white),
                                             ),
                                           ),
                                         ),
@@ -517,7 +517,7 @@ class _PlayViewState extends State<PlayView> with SingleTickerProviderStateMixin
                 alignment: Alignment.center,
                 decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
                 child: Text('Esc 退出 · ← 返回 · 点按、长按、滑动都能用',
-                    style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.35))),
+                    style: TextStyle(fontSize: NonType.micro, color: Colors.white.withValues(alpha: 0.35))),
               ),
             ],
           ),

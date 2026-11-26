@@ -172,7 +172,7 @@ class _MediaPipeModelCardState extends State<MediaPipeModelCard> {
 
     return Container(
       key: const ValueKey('mediapipe-model-card'),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(NonSpace.md),
       decoration: BoxDecoration(
         color: p.panel2.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(10),
@@ -184,16 +184,16 @@ class _MediaPipeModelCardState extends State<MediaPipeModelCard> {
           Row(
             children: [
               Icon(Icons.auto_awesome, size: 16, color: p.accent),
-              const SizedBox(width: 8),
+              const SizedBox(width: NonSpace.sm),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('本地语义模型',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
-                    const SizedBox(height: 2),
+                        style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w600, color: p.ink)),
+                    const SizedBox(height: NonSpace.xxs),
                     Text('用于作品与应用的本机语义检索；模型不随安装包分发。',
-                        style: TextStyle(fontSize: 10, height: 1.45, color: p.ink3)),
+                        style: TextStyle(fontSize: NonType.micro, height: NonType.lineBody, color: p.ink3)),
                   ],
                 ),
               ),
@@ -205,21 +205,21 @@ class _MediaPipeModelCardState extends State<MediaPipeModelCard> {
             children: [
               Expanded(
                 child: Text('大小 ${widget.sizeLabel} · 下载后自动校验文件完整性',
-                    style: TextStyle(fontSize: 10, color: p.ink4)),
+                    style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
               ),
               if (supported)
                 TextButton.icon(
                   key: const ValueKey('mediapipe-download'),
                   onPressed: _probing || _downloading || _deleting ? null : _download,
                   icon: Icon(ready ? Icons.refresh : Icons.download_outlined, size: 14),
-                  label: Text(ready ? '重新下载' : '下载', style: const TextStyle(fontSize: 11)),
+                  label: Text(ready ? '重新下载' : '下载', style: const TextStyle(fontSize: NonType.caption)),
                 ),
               if (ready)
                 TextButton.icon(
                   key: const ValueKey('mediapipe-delete'),
                   onPressed: _deleting || _downloading ? null : _delete,
                   icon: const Icon(Icons.delete_outline, size: 14),
-                  label: const Text('删除', style: TextStyle(fontSize: 11)),
+                  label: const Text('删除', style: TextStyle(fontSize: NonType.caption)),
                 ),
             ],
           ),
@@ -236,16 +236,16 @@ class _MediaPipeModelCardState extends State<MediaPipeModelCard> {
                 valueColor: AlwaysStoppedAnimation<Color>(p.accent),
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: NonSpace.xs),
             Text(
               [if (_sizeText.isNotEmpty) _sizeText, '正在下载…'].join(' · '),
-              style: TextStyle(fontSize: 10, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
             ),
           ],
           if (!supported && availability != null) ...[
             const SizedBox(height: 6),
             Text('当前设备不在官方支持范围内，本地语义检索会保持关闭。',
-                style: TextStyle(fontSize: 10, height: 1.45, color: p.warn)),
+                style: TextStyle(fontSize: NonType.micro, height: NonType.lineBody, color: p.warn)),
           ],
           if (_error != null) ...[
             const SizedBox(height: 6),
@@ -259,12 +259,12 @@ class _MediaPipeModelCardState extends State<MediaPipeModelCard> {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(_error!, style: TextStyle(fontSize: 10, color: p.warn)),
+                    child: Text(_error!, style: TextStyle(fontSize: NonType.micro, color: p.warn)),
                   ),
                   if (supported)
                     TextButton(
                       onPressed: _downloading ? null : _download,
-                      child: const Text('重试', style: TextStyle(fontSize: 11)),
+                      child: const Text('重试', style: TextStyle(fontSize: NonType.caption)),
                     ),
                 ],
               ),

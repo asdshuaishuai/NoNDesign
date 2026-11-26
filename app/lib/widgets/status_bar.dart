@@ -43,19 +43,19 @@ class StatusBar extends StatelessWidget {
             child: Text(
               store.projectPath == null ? '未保存项目' : (store.projectPath!.split(RegExp(r'[\\/]')).last),
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10, color: p.ink3),
+              style: TextStyle(fontSize: NonType.micro, color: p.ink3),
             ),
           ),
           if (store.dirty) ...[
             const SizedBox(width: 5),
-            Text('未保存', style: TextStyle(fontSize: 10, color: p.warn)),
+            Text('未保存', style: TextStyle(fontSize: NonType.micro, color: p.warn)),
           ],
           if (!narrow) ...[
-            const SizedBox(width: 12),
+            const SizedBox(width: NonSpace.md),
             Text(
               '版本 $version · $boards 画板 · $nodes 节点',
               key: const ValueKey('status-summary'),
-              style: TextStyle(fontSize: 10, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
             ),
           ],
           const Spacer(),
@@ -72,22 +72,22 @@ class StatusBar extends StatelessWidget {
                           : store.agentPhase == 'refining'
                               ? 'NaN 正在调整'
                               : '正在停止…',
-                  style: TextStyle(fontSize: 10, color: p.accent),
+                  style: TextStyle(fontSize: NonType.micro, color: p.accent),
                 ),
               ],
             )
           else
-            Text('就绪', style: TextStyle(fontSize: 10, color: p.ink4)),
-          const SizedBox(width: 12),
+            Text('就绪', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
+          const SizedBox(width: NonSpace.md),
           Text(
             _contextLabel(store),
             key: const ValueKey('status-context'),
-            style: TextStyle(fontSize: 10, color: p.ink4),
+            style: TextStyle(fontSize: NonType.micro, color: p.ink4),
           ),
           const SizedBox(width: 10),
           Flexible(
             child: Text(store.model?.name ?? '未选择模型',
-                overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: p.ink4)),
+                overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
           ),
           const SizedBox(width: 10),
           if (!narrow)
@@ -96,8 +96,8 @@ class StatusBar extends StatelessWidget {
               child: Row(
                 children: [
                   Icon(Icons.keyboard_command_key, size: 10, color: p.ink4),
-                  const SizedBox(width: 2),
-                  Text('K', style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                  const SizedBox(width: NonSpace.xxs),
+                  Text('K', style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
                 ],
               ),
             ),

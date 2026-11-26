@@ -550,10 +550,10 @@ class _PortfolioViewState extends State<PortfolioView> {
         backgroundColor: ctx.palette.panel,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: Text('删除这个热应用？',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+            style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
         content: Text(
           '会同时删除它在本机的数据，无法恢复：\n$title',
-          style: TextStyle(fontSize: 13, height: 1.5, color: ctx.palette.ink2),
+          style: TextStyle(fontSize: NonType.bodyStrong, height: 1.5, color: ctx.palette.ink2),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
@@ -590,10 +590,10 @@ class _PortfolioViewState extends State<PortfolioView> {
         backgroundColor: ctx.palette.panel,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: Text('删除这个 3D 场景？',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+            style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
         content: Text(
           '会删除整个项目目录，无法恢复。',
-          style: TextStyle(fontSize: 13, height: 1.5, color: ctx.palette.ink2),
+          style: TextStyle(fontSize: NonType.bodyStrong, height: 1.5, color: ctx.palette.ink2),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
@@ -660,7 +660,7 @@ class _PortfolioViewState extends State<PortfolioView> {
           child: Row(children: [
             // 全屏视图的可见出口（无项目启动也能进来，必须有回头路）。
             Padding(
-              padding: const EdgeInsets.only(left: 4),
+              padding: const EdgeInsets.only(left: NonSpace.xs),
               child: IconButton(
                 icon: const Icon(Icons.arrow_back, size: 18),
                 tooltip: '返回设计 ⌘1',
@@ -670,10 +670,10 @@ class _PortfolioViewState extends State<PortfolioView> {
                 onPressed: () => store.setView('design'),
               ),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: NonSpace.xs),
             Icon(Icons.collections_bookmark_outlined, size: 17, color: p.accent),
-            const SizedBox(width: 8),
-            Text('作品集', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
+            const SizedBox(width: NonSpace.sm),
+            Text('作品集', style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w700, color: p.ink)),
             const Spacer(),
             if (_busy)
               Padding(
@@ -696,7 +696,7 @@ class _PortfolioViewState extends State<PortfolioView> {
           height: 36,
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
             child: Row(children: [
               for (final (k, label) in _shelfTabs)
                 Padding(
@@ -713,7 +713,7 @@ class _PortfolioViewState extends State<PortfolioView> {
                       ),
                       child: Text(label,
                           style: TextStyle(
-                              fontSize: 11,
+                              fontSize: NonType.caption,
                               fontWeight: _filter == k ? FontWeight.w600 : FontWeight.w500,
                               color: _filter == k ? p.accent : p.ink3)),
                     ),
@@ -733,17 +733,17 @@ class _PortfolioViewState extends State<PortfolioView> {
     return SizedBox(
       height: 40,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+        padding: const EdgeInsets.fromLTRB(NonSpace.md, 0, NonSpace.md, 6),
         child: TextField(
           key: const ValueKey('shelf-search'),
           controller: _searchCtl,
           onChanged: _onSearchChanged,
           textInputAction: TextInputAction.search,
-          style: TextStyle(fontSize: 12, color: p.ink),
+          style: TextStyle(fontSize: NonType.body, color: p.ink),
           decoration: InputDecoration(
             isDense: true,
             hintText: '搜索作品（语义 / 关键词）',
-            hintStyle: TextStyle(fontSize: 12, color: p.ink4),
+            hintStyle: TextStyle(fontSize: NonType.body, color: p.ink4),
             prefixIcon: Icon(Icons.search, size: 15, color: p.ink3),
             prefixIconConstraints: const BoxConstraints(minWidth: 30, minHeight: 30),
             suffixIcon: _query.isEmpty
@@ -760,7 +760,7 @@ class _PortfolioViewState extends State<PortfolioView> {
             suffixIconConstraints: const BoxConstraints(minWidth: 30, minHeight: 30),
             filled: true,
             fillColor: p.panel,
-            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            contentPadding: const EdgeInsets.symmetric(vertical: NonSpace.sm),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(color: p.line),
@@ -783,7 +783,7 @@ class _PortfolioViewState extends State<PortfolioView> {
   Widget _searchNoteRow(NonPalette p) => Container(
         key: const ValueKey('shelf-search-note'),
         width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(14, 0, 12, 4),
+        padding: const EdgeInsets.fromLTRB(14, 0, NonSpace.md, NonSpace.xs),
         child: Row(children: [
           Icon(Icons.info_outline, size: 12, color: p.ink4),
           const SizedBox(width: 5),
@@ -792,7 +792,7 @@ class _PortfolioViewState extends State<PortfolioView> {
               _searchNote!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
             ),
           ),
         ]),
@@ -802,15 +802,15 @@ class _PortfolioViewState extends State<PortfolioView> {
   Widget _noSearchResults(NonPalette p) => Center(
         key: const ValueKey('shelf-search-empty'),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: NonSpace.xl),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.search_off, size: 38, color: p.ink4),
             const SizedBox(height: 10),
             Text('没有匹配的作品',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: p.ink2)),
+                style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink2)),
             const SizedBox(height: 6),
             Text('换个关键词试试；模型未就绪时按标题/路径做关键词匹配。',
-                textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: p.ink4)),
+                textAlign: TextAlign.center, style: TextStyle(fontSize: NonType.body, color: p.ink4)),
           ]),
         ),
       );
@@ -819,7 +819,7 @@ class _PortfolioViewState extends State<PortfolioView> {
         key: const ValueKey('shelf-error'),
         width: double.infinity,
         color: p.danger.withValues(alpha: 0.12),
-        padding: const EdgeInsets.fromLTRB(12, 4, 6, 4),
+        padding: const EdgeInsets.fromLTRB(NonSpace.md, NonSpace.xs, 6, NonSpace.xs),
         child: Row(children: [
           Icon(Icons.error_outline, size: 14, color: p.danger),
           const SizedBox(width: 6),
@@ -827,7 +827,7 @@ class _PortfolioViewState extends State<PortfolioView> {
             child: Text(_error!,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11, color: p.danger)),
+                style: TextStyle(fontSize: NonType.caption, color: p.danger)),
           ),
           TextButton(
             onPressed: _busy ? null : () => _load(forcePortfolio: true),
@@ -836,7 +836,7 @@ class _PortfolioViewState extends State<PortfolioView> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               padding: const EdgeInsets.symmetric(horizontal: 10),
             ),
-            child: const Text('重试', style: TextStyle(fontSize: 11)),
+            child: const Text('重试', style: TextStyle(fontSize: NonType.caption)),
           ),
         ]),
       );
@@ -844,17 +844,17 @@ class _PortfolioViewState extends State<PortfolioView> {
   Widget _emptyState(NonPalette p) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.xl),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.collections_bookmark_outlined, size: 42, color: p.ink4),
-          const SizedBox(height: 12),
+          const SizedBox(height: NonSpace.md),
           Text('还没有作品',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: p.ink2)),
+              style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink2)),
           const SizedBox(height: 6),
           Text(
             '生成的热应用、3D 场景与视频会自动收进这里。',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: p.ink4),
+            style: TextStyle(fontSize: NonType.body, color: p.ink4),
           ),
         ]),
       ),
@@ -868,31 +868,31 @@ class _PortfolioViewState extends State<PortfolioView> {
       padding: const EdgeInsets.only(top: 14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: NonSpace.lg),
           child: Row(children: [
             Text(shelfKindLabel[kind] ?? kind,
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.ink2)),
+                style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w700, color: p.ink2)),
             const SizedBox(width: 6),
-            Text('${items.length}', style: TextStyle(fontSize: 11, color: p.ink4)),
+            Text('${items.length}', style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
             if (hint != null) ...[
-              const SizedBox(width: 8),
+              const SizedBox(width: NonSpace.sm),
               Expanded(
                 child: Text(
                   hint,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10, color: p.ink4),
+                  style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                 ),
               ),
             ],
           ]),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: NonSpace.sm),
         SizedBox(
           height: 176,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: NonSpace.lg),
             itemCount: items.length,
             separatorBuilder: (context, index) => const SizedBox(width: 10),
             itemBuilder: (ctx, i) {
@@ -949,19 +949,19 @@ class _PasswordDialogState extends State<_PasswordDialog> {
       backgroundColor: p.panel,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       title: Text('项目已加密',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: p.ink)),
+          style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w700, color: p.ink)),
       content: SizedBox(
         width: 360,
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('打开「${widget.name}」需要口令',
-              style: TextStyle(fontSize: 13, color: p.ink2)),
+              style: TextStyle(fontSize: NonType.bodyStrong, color: p.ink2)),
           const SizedBox(height: 10),
           TextField(
             controller: _ctl,
             autofocus: true,
             obscureText: true,
             decoration: const InputDecoration(labelText: '口令'),
-            style: const TextStyle(fontSize: 13),
+            style: const TextStyle(fontSize: NonType.bodyStrong),
           ),
         ]),
       ),

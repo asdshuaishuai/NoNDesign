@@ -700,7 +700,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       ),
       child: Text(
         prototype ? '原型验证' : '可用应用',
-        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color),
+        style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w600, color: color),
       ),
     );
   }
@@ -730,7 +730,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
       builder: (ctx) => SimpleDialog(
         backgroundColor: ctx.palette.panel,
         title: Text('热应用',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
+            style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
         children: [
           SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, '__new__'),
@@ -744,7 +744,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
               child: Text('还没有热应用：可以直接描述一个可用应用。原型验证已移到设计工作台「验证原型」。',
-                  style: TextStyle(fontSize: 12, height: 1.5, color: ctx.palette.ink4)),
+                  style: TextStyle(fontSize: NonType.body, height: 1.5, color: ctx.palette.ink4)),
             ),
           for (final group in [
             ('可用应用', usable, nonAppOriginApp),
@@ -754,7 +754,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
                 child: Text(group.$1,
                     style: TextStyle(
-                        fontSize: 10,
+                        fontSize: NonType.micro,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.6,
                         color: ctx.palette.ink4)),
@@ -808,7 +808,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ctx.palette.ink)),
         content: Text(
           '会同时删除它在本机的数据，无法恢复。',
-          style: TextStyle(fontSize: 13, height: 1.5, color: ctx.palette.ink2),
+          style: TextStyle(fontSize: NonType.bodyStrong, height: 1.5, color: ctx.palette.ink2),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
@@ -929,7 +929,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
                 labelText: '应用名（小写字母、数字、短横线或下划线）',
                 hintText: 'bounce-demo',
               ),
-              style: const TextStyle(fontSize: 13),
+              style: const TextStyle(fontSize: NonType.bodyStrong),
             ),
             const SizedBox(height: 10),
             TextField(
@@ -940,7 +940,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
                 hintText: '做一个可点击加速的弹跳小球动画，彩色渐变背景',
                 alignLabelWithHint: true,
               ),
-              style: const TextStyle(fontSize: 13),
+              style: const TextStyle(fontSize: NonType.bodyStrong),
             ),
           ]),
         ),
@@ -1220,13 +1220,13 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
               text,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: p.ink2),
+              style: TextStyle(fontSize: NonType.caption, color: p.ink2),
             ),
           ),
           if (onExit != null)
             TextButton(
               onPressed: onExit,
-              child: Text(exitLabel ?? '知道了', style: const TextStyle(fontSize: 11)),
+              child: Text(exitLabel ?? '知道了', style: const TextStyle(fontSize: NonType.caption)),
             ),
         ]),
       );
@@ -1299,7 +1299,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
               child: Text(_app == null ? 'NaN 热应用' : '热应用 · $_app',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink)),
+                  style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w700, color: p.ink)),
             ),
           ),
           if (_entry != null) ...[
@@ -1315,7 +1315,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
                   _title.isEmpty ? '一句话生成 · 在本机运行 · 随时修改' : '$_title · 随时修改',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, color: p.ink4),
+                  style: TextStyle(fontSize: NonType.caption, color: p.ink4),
                 ),
               ),
             ),
@@ -1398,7 +1398,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
               child: Text(_lastError,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, color: p.danger)),
+                  style: TextStyle(fontSize: NonType.caption, color: p.danger)),
             ),
             if (_app != null && _offlinePath == null && _entry?.isA2ui != true)
               TextButton(
@@ -1406,7 +1406,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
                   final raw = _lastErrorDetail.isEmpty ? _lastError : _lastErrorDetail;
                   setState(() => _refineCtl.text = '修复这个运行错误：$raw');
                 },
-                child: const Text('填入修改框', style: TextStyle(fontSize: 11)),
+                child: const Text('填入修改框', style: TextStyle(fontSize: NonType.caption)),
               ),
             IconButton(
               tooltip: '忽略',
@@ -1425,7 +1425,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
                 tilePadding: const EdgeInsets.symmetric(horizontal: 20),
                 childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                 dense: true,
-                title: Text('技术详情', style: TextStyle(fontSize: 11, color: p.ink4)),
+                title: Text('技术详情', style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
                 iconColor: p.ink4,
                 collapsedIconColor: p.ink4,
                 children: [
@@ -1478,7 +1478,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
             child: Text(
               '可以用系统浏览器打开预览；文件就在本机，不会上传。',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: p.ink4, height: 1.6),
+              style: TextStyle(fontSize: NonType.body, color: p.ink4, height: 1.6),
             ),
           ),
           const SizedBox(height: 14),
@@ -1509,7 +1509,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
   Widget _previewFallback(NonPalette p) {
     if (_booting && _lastError.isEmpty) {
       return Center(
-        child: Text('正在打开…', style: TextStyle(fontSize: 12, color: p.ink3)),
+        child: Text('正在打开…', style: TextStyle(fontSize: NonType.body, color: p.ink3)),
       );
     }
     if (!_host.supportsInAppWebView) {
@@ -1520,7 +1520,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.dashboard_customize_outlined, size: 38, color: p.ink4),
           const SizedBox(height: 10),
-          Text('这个应用以卡片方式打开', style: TextStyle(fontSize: 13, color: p.ink2)),
+          Text('这个应用以卡片方式打开', style: TextStyle(fontSize: NonType.bodyStrong, color: p.ink2)),
           const SizedBox(height: 12),
           FilledButton(
             onPressed: () => _requestMount(_app!),
@@ -1532,7 +1532,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
     return Center(
       child: Text(
         _serviceError.isNotEmpty ? _serviceError : '还没有打开应用',
-        style: TextStyle(fontSize: 12, color: p.ink3),
+        style: TextStyle(fontSize: NonType.body, color: p.ink3),
       ),
     );
   }
@@ -1549,7 +1549,7 @@ class _HotAppWorkspaceState extends State<HotAppWorkspace> {
               onSubmitted: _generating ? null : _refine,
               decoration: InputDecoration(
                 hintText: '告诉它怎么改：换成绿色 / 加一个重置按钮 / 动画再快一点…',
-                hintStyle: TextStyle(fontSize: 12, color: p.ink4),
+                hintStyle: TextStyle(fontSize: NonType.body, color: p.ink4),
                 isDense: true,
                 filled: true,
                 fillColor: p.panel2,
@@ -1596,7 +1596,7 @@ class _EmptyHotApp extends StatelessWidget {
               '用一句话生成动画、演示或可玩的小应用。\n'
               '生成的内容就在本机运行，随时可以继续修改，也会收进作品集。',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: p.ink3, height: 1.7),
+              style: TextStyle(fontSize: NonType.body, color: p.ink3, height: 1.7),
             ),
           ),
           if (hint != null) ...[
@@ -1604,7 +1604,7 @@ class _EmptyHotApp extends StatelessWidget {
             Text(
               hint!,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: p.ink4, height: 1.5),
+              style: TextStyle(fontSize: NonType.caption, color: p.ink4, height: 1.5),
             ),
           ],
           const SizedBox(height: 18),
@@ -1666,7 +1666,7 @@ class _TopBtn extends StatelessWidget {
                   const SizedBox(width: 4),
                   Text(label,
                       style:
-                          TextStyle(fontSize: 12, color: onTap == null ? p.ink4 : p.ink2)),
+                          TextStyle(fontSize: NonType.body, color: onTap == null ? p.ink4 : p.ink2)),
                 ]),
         ),
       ),
@@ -1702,7 +1702,7 @@ class _TopMenu extends StatelessWidget {
               Text(
                 items[i].label,
                 style:
-                    TextStyle(fontSize: 13, color: items[i].onTap == null ? p.ink4 : p.ink),
+                    TextStyle(fontSize: NonType.bodyStrong, color: items[i].onTap == null ? p.ink4 : p.ink),
               ),
             ]),
           ),

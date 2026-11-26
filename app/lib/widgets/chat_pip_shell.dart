@@ -198,7 +198,7 @@ class _ChatPiPShellState extends State<ChatPiPShell> {
             backgroundColor: context.palette.accent,
             foregroundColor: Colors.white,
             icon: const Icon(Icons.forum_outlined, size: 18),
-            label: const Text('聊天', style: TextStyle(fontSize: 12)),
+            label: const Text('聊天', style: TextStyle(fontSize: NonType.body)),
             onPressed: _enableChatHome,
           ),
         ),
@@ -238,7 +238,7 @@ class _ChatPiPShellState extends State<ChatPiPShell> {
       children: [
         Container(
           height: 34,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
           decoration: BoxDecoration(
             border: Border(bottom: BorderSide(color: p.line)),
           ),
@@ -282,7 +282,7 @@ class _PaneEmpty extends StatelessWidget {
     final p = context.palette;
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(NonSpace.lg),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -290,17 +290,17 @@ class _PaneEmpty extends StatelessWidget {
             const SizedBox(height: 10),
             Text('工作区 · 等待第一块画板',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink3)),
-            const SizedBox(height: 4),
+                style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w600, color: p.ink3)),
+            const SizedBox(height: NonSpace.xs),
             Text('聊天里让 NaN 生成原型，或先建一块空画板。',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 10.5, color: p.ink4)),
-            const SizedBox(height: 12),
+                style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
+            const SizedBox(height: NonSpace.md),
             OutlinedButton.icon(
               key: const ValueKey('chat-shell-create-board'),
               onPressed: onCreate,
               icon: Icon(Icons.add, size: 14, color: p.ink2),
-              label: Text('新建空画板', style: TextStyle(fontSize: 11.5, color: p.ink2)),
+              label: Text('新建空画板', style: TextStyle(fontSize: NonType.body, color: p.ink2)),
             ),
             if (hint != null)
               Padding(
@@ -309,7 +309,7 @@ class _PaneEmpty extends StatelessWidget {
                   hint!,
                   key: const ValueKey('chat-shell-pane-hint'),
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 10.5, height: 1.5, color: p.warn),
+                  style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.warn),
                 ),
               ),
           ],

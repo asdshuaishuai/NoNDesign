@@ -403,7 +403,7 @@ class _A2uiCardState extends State<A2uiCard> {
       ),
       clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(NonSpace.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -412,7 +412,7 @@ class _A2uiCardState extends State<A2uiCard> {
               MarkdownBody(
                 data: _text,
                 styleSheet: markdownStyleSheetOf(context).copyWith(
-                  p: TextStyle(fontSize: 12, color: palette.ink2, height: 1.45),
+                  p: TextStyle(fontSize: NonType.body, color: palette.ink2, height: NonType.lineBody),
                 ),
               ),
             for (final surface in _surfaces) ...[
@@ -433,19 +433,19 @@ class _A2uiCardState extends State<A2uiCard> {
                       color: palette.accent,
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: NonSpace.sm),
                   Text(
                     '生成中…',
-                    style: TextStyle(fontSize: 11, color: palette.ink3),
+                    style: TextStyle(fontSize: NonType.caption, color: palette.ink3),
                   ),
                 ],
               ),
             ],
             if (_error != null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: NonSpace.sm),
               Text(
                 _error!,
-                style: TextStyle(fontSize: 11, color: palette.danger),
+                style: TextStyle(fontSize: NonType.caption, color: palette.danger),
               ),
             ],
           ],
@@ -560,7 +560,7 @@ Widget _offlineMediaBuilder(
       (props.string('description') ?? props.string('label') ?? '').trim();
   return Container(
     constraints: const BoxConstraints(maxWidth: 300),
-    padding: const EdgeInsets.all(12),
+    padding: const EdgeInsets.all(NonSpace.md),
     decoration: BoxDecoration(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(8),
@@ -569,11 +569,11 @@ Widget _offlineMediaBuilder(
       mainAxisSize: MainAxisSize.min,
       children: [
         const Icon(Icons.movie_outlined, size: 18),
-        const SizedBox(width: 8),
+        const SizedBox(width: NonSpace.sm),
         Flexible(
           child: Text(
             description.isEmpty ? '本地预览不播放外部媒体' : description,
-            style: const TextStyle(fontSize: 12),
+            style: const TextStyle(fontSize: NonType.body),
           ),
         ),
       ],

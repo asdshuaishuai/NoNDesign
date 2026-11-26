@@ -111,13 +111,13 @@ class _AgentPanelState extends State<AgentPanel> {
         children: [
           Row(children: [
             Icon(Icons.auto_awesome, size: 10, color: p.accent),
-            const SizedBox(width: 4),
-            Text('NaN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
+            const SizedBox(width: NonSpace.xs),
+            Text('NaN', style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w600, color: p.accent)),
           ]),
-          const SizedBox(height: 4),
+          const SizedBox(height: NonSpace.xs),
           SelectableText(
             store.streamText.length > 4000 ? store.streamText.substring(store.streamText.length - 4000) : store.streamText,
-            style: TextStyle(fontSize: 12, height: 1.55, color: p.ink2),
+            style: TextStyle(fontSize: NonType.body, height: 1.55, color: p.ink2),
           ),
         ],
       ),
@@ -131,18 +131,18 @@ class _AgentPanelState extends State<AgentPanel> {
         tilePadding: EdgeInsets.zero,
         childrenPadding: const EdgeInsets.only(bottom: 6),
         leading: Icon(Icons.psychology_outlined, size: 14, color: p.ink4),
-        title: Text('思考过程', style: TextStyle(fontSize: 11, color: p.ink4)),
+        title: Text('思考过程', style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
         children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.only(left: 8),
+            padding: const EdgeInsets.only(left: NonSpace.sm),
             decoration: BoxDecoration(
               border: Border(left: BorderSide(width: 2, color: p.ink4.withValues(alpha: 0.3))),
             ),
             child: Text(store.thinkingText,
                 maxLines: 20,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4)),
+                style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink4)),
           ),
         ],
       ),
@@ -156,7 +156,7 @@ class _AgentPanelState extends State<AgentPanel> {
   /// 卡片同样只渲染 surface（避免窄栏里同一句话出现两次）。
   Widget _buildA2uiCard(AppStore store, ChatMessage m, int index) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: NonSpace.sm),
       child: A2uiCard.messages(
         key: ValueKey('agent-a2ui-$index'),
         messages: m.a2uiMessages ?? const [],
@@ -222,7 +222,7 @@ class _AgentPanelState extends State<AgentPanel> {
                   onNotification: _onScrolled,
                   child: ListView.builder(
                     controller: _scroll,
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(NonSpace.md),
                     itemCount: (store.timeline.isEmpty &&
                                 store.streamText.isEmpty &&
                                 store.thinkingText.isEmpty &&
@@ -296,7 +296,7 @@ class _AgentPanelState extends State<AgentPanel> {
                         _followBottom(animate: true);
                       },
                       icon: const Icon(Icons.arrow_downward, size: 12),
-                      label: const Text('回到底部', style: TextStyle(fontSize: 10)),
+                      label: const Text('回到底部', style: TextStyle(fontSize: NonType.micro)),
                     ),
                   ),
                 ),
@@ -305,7 +305,7 @@ class _AgentPanelState extends State<AgentPanel> {
         ),
         Container(
           // 面板内容 padding 统一 12（与左栏/检查器同档，列间边缘对齐）。
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(NonSpace.md),
           decoration: BoxDecoration(
             border: Border(top: BorderSide(color: p.line)),
             color: p.bgElevated.withValues(alpha: 0.95),
@@ -327,7 +327,7 @@ class _AgentPanelState extends State<AgentPanel> {
                       focusNode: _inputFocus,
                       minLines: 2,
                       maxLines: 5,
-                      style: TextStyle(fontSize: 13, height: 1.5, color: p.ink),
+                      style: TextStyle(fontSize: NonType.bodyStrong, height: 1.5, color: p.ink),
                       decoration: InputDecoration(
                         hintText: inWorkspace
                             ? '描述要在$workspaceLabel工作台做的事，NaN 会直接调用它的工具…'
@@ -353,7 +353,7 @@ class _AgentPanelState extends State<AgentPanel> {
                               ? '消息将发给外部智能体 $agentLabel（模式芯片不参与）；在设置 → 外部智能体 里切换'
                               : 'NaN 内置管线；可在设置 → 外部智能体 里切换',
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
                             decoration: BoxDecoration(
                               color: external ? p.accentSoft : p.panel3,
                               borderRadius: BorderRadius.circular(6),
@@ -363,10 +363,10 @@ class _AgentPanelState extends State<AgentPanel> {
                             child: Row(mainAxisSize: MainAxisSize.min, children: [
                               Icon(external ? Icons.hub_outlined : Icons.auto_awesome,
                                   size: 10, color: external ? p.accent : p.ink3),
-                              const SizedBox(width: 4),
+                              const SizedBox(width: NonSpace.xs),
                               Text(agentLabel,
                                   style: TextStyle(
-                                      fontSize: 10,
+                                      fontSize: NonType.micro,
                                       fontWeight: FontWeight.w600,
                                       color: external ? p.accent : p.ink3)),
                             ]),
@@ -376,7 +376,7 @@ class _AgentPanelState extends State<AgentPanel> {
                           const SizedBox(width: 3),
                           Container(
                             key: const ValueKey('agent-workspace-chip'),
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
                             decoration: BoxDecoration(
                               color: p.accentSoft,
                               borderRadius: BorderRadius.circular(6),
@@ -384,10 +384,10 @@ class _AgentPanelState extends State<AgentPanel> {
                             ),
                             child: Row(mainAxisSize: MainAxisSize.min, children: [
                               Icon(Icons.dashboard_customize_outlined, size: 10, color: p.accent),
-                              const SizedBox(width: 4),
+                              const SizedBox(width: NonSpace.xs),
                               Text('$workspaceLabel工作台',
                                   style: TextStyle(
-                                      fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
+                                      fontSize: NonType.micro, fontWeight: FontWeight.w600, color: p.accent)),
                             ]),
                           ),
                         ] else if (!external) ...[
@@ -428,7 +428,7 @@ class _AgentPanelState extends State<AgentPanel> {
                             style: FilledButton.styleFrom(backgroundColor: p.danger, padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7)),
                             onPressed: () => store.cancelAgent(),
                             icon: const Icon(Icons.stop_rounded, size: 12),
-                            label: const Text('停止', style: TextStyle(fontSize: 11)),
+                            label: const Text('停止', style: TextStyle(fontSize: NonType.caption)),
                           )
                         else
                           // TextEditingController 本身是 Listenable：按钮行单独
@@ -444,7 +444,7 @@ class _AgentPanelState extends State<AgentPanel> {
                               ),
                               onPressed: _input.text.trim().isEmpty ? null : () => _send(store),
                               icon: const Icon(Icons.arrow_upward, size: 12),
-                              label: const Text('发送', style: TextStyle(fontSize: 11)),
+                              label: const Text('发送', style: TextStyle(fontSize: NonType.caption)),
                             ),
                           ),
                       ],
@@ -456,15 +456,15 @@ class _AgentPanelState extends State<AgentPanel> {
               Row(
                 children: [
                   Icon(Icons.auto_awesome, size: 9, color: p.accent),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: NonSpace.xs),
                   Expanded(
                     child: Text(
                       '${store.model?.name ?? '未选择模型'} · ${formatTokens(store.model?.context)} ctx',
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 10, color: p.ink4),
+                      style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                     ),
                   ),
-                  Text('${modCombo('⌘↵')} 发送', style: TextStyle(fontSize: 10, color: p.ink4)),
+                  Text('${modCombo('⌘↵')} 发送', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                 ],
               ),
             ],
@@ -497,7 +497,7 @@ class _ModeChip extends StatelessWidget {
         ),
         child: Text(label,
             style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600, color: active ? p.ink : p.ink4)),
+                fontSize: NonType.caption, fontWeight: FontWeight.w600, color: active ? p.ink : p.ink4)),
       ),
     );
   }
@@ -511,7 +511,7 @@ class _AgentIntro extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Padding(
-      padding: const EdgeInsets.only(top: 26, left: 8, right: 8),
+      padding: const EdgeInsets.only(top: 26, left: NonSpace.sm, right: NonSpace.sm),
       child: Column(
         children: [
           Container(
@@ -524,14 +524,14 @@ class _AgentIntro extends StatelessWidget {
             ),
             child: const Icon(Icons.auto_awesome, size: 19, color: Colors.white),
           ),
-          const SizedBox(height: 12),
-          Text('嗨，我是 NaN', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
-          const SizedBox(height: 4),
+          const SizedBox(height: NonSpace.md),
+          Text('嗨，我是 NaN', style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink)),
+          const SizedBox(height: NonSpace.xs),
           Text('描述目标，我先想清楚页面结构与交互，再画到工作台上；也能直接改选中的节点。'
               '做 3D 场景、代码动画视频或热应用时，切到对应工作台告诉我目标即可。',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, height: 1.55, color: p.ink3)),
-          const SizedBox(height: 16),
+              style: TextStyle(fontSize: NonType.caption, height: 1.55, color: p.ink3)),
+          const SizedBox(height: NonSpace.lg),
           for (final item in [
             ('一套登录 + 首页 + 设置的原型', 'build'),
             ('把当前页面改成深色主题', 'refine'),
@@ -545,7 +545,7 @@ class _AgentIntro extends StatelessWidget {
                 onTap: () => onPick(item.$2, item.$1),
                 child: Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: NonSpace.sm),
                   decoration: BoxDecoration(
                     border: Border.all(color: p.line),
                     borderRadius: BorderRadius.circular(8),
@@ -553,7 +553,7 @@ class _AgentIntro extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      Expanded(child: Text(item.$1, style: TextStyle(fontSize: 11, color: p.ink3))),
+                      Expanded(child: Text(item.$1, style: TextStyle(fontSize: NonType.caption, color: p.ink3))),
                       Icon(Icons.arrow_outward, size: 11, color: p.ink4),
                     ],
                   ),
@@ -562,14 +562,14 @@ class _AgentIntro extends StatelessWidget {
             ),
           if (!(context.watch<AppStore>().model?.toolCall ?? true))
             Container(
-              margin: const EdgeInsets.only(top: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              margin: const EdgeInsets.only(top: NonSpace.sm),
+              padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: 6),
               decoration: BoxDecoration(color: p.warn.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
               child: Row(
                 children: [
                   Icon(Icons.warning_amber_rounded, size: 12, color: p.warn),
                   const SizedBox(width: 5),
-                  Expanded(child: Text('当前模型不支持工具调用', style: TextStyle(fontSize: 10, color: p.warn))),
+                  Expanded(child: Text('当前模型不支持工具调用', style: TextStyle(fontSize: NonType.micro, color: p.warn))),
                 ],
               ),
             ),
@@ -600,10 +600,10 @@ class _ToolRowState extends State<_ToolRow> {
     // 展开的「技术详情」里出现。
     final subtitle = entry.message ?? _toolSubtitleText(entry);
     final subtitleStyle = (entry.message != null && entry.ok == false)
-        ? TextStyle(fontSize: 10, color: p.ink3)
-        : TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4);
+        ? TextStyle(fontSize: NonType.micro, color: p.ink3)
+        : TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
+      padding: const EdgeInsets.only(bottom: NonSpace.xxs),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -627,7 +627,7 @@ class _ToolRowState extends State<_ToolRow> {
                   ),
                   const SizedBox(width: 6),
                   Text(_toolLabel(entry.tool ?? ''),
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: p.ink2)),
+                      style: TextStyle(fontSize: NonType.caption, fontWeight: FontWeight.w500, color: p.ink2)),
                   if (subtitle != null) ...[
                     const SizedBox(width: 6),
                     Expanded(
@@ -639,7 +639,7 @@ class _ToolRowState extends State<_ToolRow> {
                   if (entry.ms != null) ...[
                     const SizedBox(width: 6),
                     Text('${entry.ms}ms',
-                        style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                        style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
                   ],
                 ],
               ),
@@ -647,15 +647,15 @@ class _ToolRowState extends State<_ToolRow> {
           ),
           if (_expanded)
             Padding(
-              padding: const EdgeInsets.only(left: 18, bottom: 4),
+              padding: const EdgeInsets.only(left: 18, bottom: NonSpace.xs),
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+                padding: const EdgeInsets.fromLTRB(NonSpace.sm, 6, NonSpace.sm, 6),
                 decoration: BoxDecoration(
                   border: Border(left: BorderSide(width: 2, color: p.accent.withValues(alpha: 0.35))),
                 ),
                 child: SelectableText(_toolDetailText(entry),
-                    style: TextStyle(fontSize: 10, fontFamily: 'Menlo', height: 1.45, color: p.ink4)),
+                    style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', height: NonType.lineBody, color: p.ink4)),
               ),
             ),
         ],
@@ -761,17 +761,17 @@ class _TimelineRow extends StatelessWidget {
               border: Border.all(color: p.line),
             ),
             child: Text(entry.text, maxLines: 6, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11, height: 1.5, color: p.ink2)),
+                style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.ink2)),
           ),
         );
       case 'phase':
         return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(vertical: NonSpace.xs),
           child: Row(
             children: [
               SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.4, color: p.accent)),
               const SizedBox(width: 6),
-              Text(entry.text, style: TextStyle(fontSize: 10, color: p.ink4)),
+              Text(entry.text, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
             ],
           ),
         );
@@ -788,7 +788,7 @@ class _TimelineRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   entry.text.isEmpty ? (entry.title ?? '') : '${entry.title} ${entry.text}',
-                  style: TextStyle(fontSize: 10, height: 1.4, color: p.success),
+                  style: TextStyle(fontSize: NonType.micro, height: NonType.lineCaption, color: p.success),
                 ),
               ),
             ],
@@ -801,7 +801,7 @@ class _TimelineRow extends StatelessWidget {
           child: MarkdownBody(
             data: entry.text,
             styleSheet: markdownStyleSheetOf(context).copyWith(
-              p: TextStyle(fontSize: 12, height: 1.55, color: p.ink2),
+              p: TextStyle(fontSize: NonType.body, height: 1.55, color: p.ink2),
             ),
           ),
         );
@@ -810,7 +810,7 @@ class _TimelineRow extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 4),
+            const SizedBox(height: NonSpace.xs),
             Divider(height: 1, thickness: 0.5, color: p.line),
             const SizedBox(height: 6),
             Row(
@@ -819,15 +819,15 @@ class _TimelineRow extends StatelessWidget {
                     size: 12, color: entry.ok ? p.success : p.danger),
                 const SizedBox(width: 5),
                 Text(entry.title ?? (entry.ok ? '完成' : '异常结束'),
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                    style: TextStyle(fontSize: NonType.caption, fontWeight: FontWeight.w600,
                         color: entry.ok ? p.success : p.danger)),
                 const Spacer(),
-                Text(formatTime(entry.ts), style: TextStyle(fontSize: 10, color: p.ink4)),
+                Text(formatTime(entry.ts), style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
               ],
             ),
             if (entry.text.isNotEmpty) ...[
               const SizedBox(height: 3),
-              Text(entry.text, style: TextStyle(fontSize: 11, height: 1.45, color: p.ink3)),
+              Text(entry.text, style: TextStyle(fontSize: NonType.caption, height: NonType.lineBody, color: p.ink3)),
             ],
             const SizedBox(height: 6),
           ],

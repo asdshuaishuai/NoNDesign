@@ -57,15 +57,15 @@ class NonAppA2uiViewer extends StatelessWidget {
           title,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: p.ink),
+          style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w700, color: p.ink),
         ),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 12),
+            padding: const EdgeInsets.only(right: NonSpace.md),
             child: Center(
               child: Text(
                 '本地预览',
-                style: TextStyle(fontSize: 11, color: p.ink4),
+                style: TextStyle(fontSize: NonType.caption, color: p.ink4),
               ),
             ),
           ),
@@ -87,16 +87,16 @@ class NonAppA2uiViewer extends StatelessWidget {
             child: gateError != null
                 ? Center(
                     child: Padding(
-                      padding: const EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(NonSpace.xl),
                       child: Text(
                         '这个应用暂时无法在本机显示。',
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12, color: p.ink3),
+                        style: TextStyle(fontSize: NonType.body, color: p.ink3),
                       ),
                     ),
                   )
                 : SingleChildScrollView(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(NonSpace.lg),
                     child: Center(
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 720),
@@ -169,7 +169,7 @@ class _ErrorBanner extends StatelessWidget {
               error.message,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: p.danger),
+              style: TextStyle(fontSize: NonType.caption, color: p.danger),
             ),
           ),
           if (onDismiss != null)
@@ -195,7 +195,7 @@ class _ErrorBanner extends StatelessWidget {
                 childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                 dense: true,
                 title: Text('技术详情',
-                    style: TextStyle(fontSize: 11, color: p.ink4)),
+                    style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
                 iconColor: p.ink4,
                 collapsedIconColor: p.ink4,
                 children: [
@@ -203,7 +203,7 @@ class _ErrorBanner extends StatelessWidget {
                     alignment: Alignment.centerLeft,
                     child: SelectableText(
                       error.detail,
-                      style: TextStyle(fontSize: 10.5, color: p.ink4, height: 1.4),
+                      style: TextStyle(fontSize: NonType.caption, color: p.ink4, height: NonType.lineCaption),
                     ),
                   ),
                 ],

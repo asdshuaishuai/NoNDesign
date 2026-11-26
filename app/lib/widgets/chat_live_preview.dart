@@ -35,7 +35,7 @@ class _ChatLivePreviewCardState extends State<ChatLivePreviewCard> {
     
     return Container(
       key: const ValueKey('chat-live-preview'),
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      margin: const EdgeInsets.fromLTRB(NonSpace.md, NonSpace.sm, NonSpace.md, NonSpace.xs),
       decoration: BoxDecoration(
         color: p.panel,
         borderRadius: BorderRadius.circular(14),
@@ -49,25 +49,25 @@ class _ChatLivePreviewCardState extends State<ChatLivePreviewCard> {
             onTap: () => setState(() => _collapsed = !_collapsed),
             child: Container(
               height: 38,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
               child: Row(
                 children: [
                   _PulseDot(color: p.accent),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: NonSpace.sm),
                   Expanded(
                     child: Text(
                       '实况预览 · 正在构建工作区',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: 12,
+                          fontSize: NonType.body,
                           fontWeight: FontWeight.w600,
                           color: p.ink),
                     ),
                   ),
                   Text(
                     '$frames 屏',
-                    style: TextStyle(fontSize: 10.5, color: p.ink3),
+                    style: TextStyle(fontSize: NonType.caption, color: p.ink3),
                   ),
                   const SizedBox(width: 6),
                   Icon(

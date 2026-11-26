@@ -85,7 +85,7 @@ class _DesignPrototypePreviewDialogState
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: NonType.subtitle,
                         fontWeight: FontWeight.w700,
                         color: p.ink,
                       ),
@@ -105,39 +105,39 @@ class _DesignPrototypePreviewDialogState
               child: _failed
                   ? Center(
                       child: Padding(
-                        padding: const EdgeInsets.all(24),
+                        padding: const EdgeInsets.all(NonSpace.xl),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: <Widget>[
                             Icon(Icons.public_off, size: 28, color: p.warn),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: NonSpace.sm),
                             Text(
                               '本机暂时不能打开原型预览',
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: NonType.bodyStrong,
                                 fontWeight: FontWeight.w600,
                                 color: p.ink,
                               ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: NonSpace.xs),
                             Text(
                               '原型已存在项目里；可以在电脑上用浏览器打开导出的 HTML。',
                               textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 12, color: p.ink4),
+                              style: TextStyle(fontSize: NonType.body, color: p.ink4),
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: NonSpace.sm),
                             ExpansionTile(
                               title: Text(
                                 '技术详情',
-                                style: TextStyle(fontSize: 11, color: p.ink4),
+                                style: TextStyle(fontSize: NonType.caption, color: p.ink4),
                               ),
                               children: <Widget>[
                                 Padding(
-                                  padding: const EdgeInsets.all(8),
+                                  padding: const EdgeInsets.all(NonSpace.sm),
                                   child: Text(
                                     _error,
                                     style: TextStyle(
-                                      fontSize: 11,
+                                      fontSize: NonType.caption,
                                       color: p.ink4,
                                     ),
                                   ),

@@ -53,7 +53,7 @@ class WorkspaceProgress extends StatelessWidget {
                   key: const ValueKey('workspace-progress-cancel'),
                   onPressed: onCancel,
                   icon: const Icon(Icons.stop_circle_outlined, size: 16),
-                  label: const Text('取消', style: TextStyle(fontSize: 12)),
+                  label: const Text('取消', style: TextStyle(fontSize: NonType.body)),
                 ),
             ],
           ),
@@ -62,7 +62,7 @@ class WorkspaceProgress extends StatelessWidget {
             Text(
               errorMessage!,
               key: const ValueKey('workspace-progress-error'),
-              style: TextStyle(fontSize: 12, height: 1.4, color: p.warn),
+              style: TextStyle(fontSize: NonType.body, height: NonType.lineCaption, color: p.warn),
             ),
           ],
         ],
@@ -95,14 +95,14 @@ class _StageChip extends StatelessWidget {
         Text(
           stage.label,
           style: TextStyle(
-            fontSize: 12,
+            fontSize: NonType.body,
             fontWeight: stage.state == WorkspaceStageState.running ? FontWeight.w700 : FontWeight.w500,
             color: stage.state == WorkspaceStageState.failed ? p.warn : p.ink,
           ),
         ),
         if (stage.detail.trim().isNotEmpty) ...<Widget>[
-          const SizedBox(width: 4),
-          Text(stage.detail, style: TextStyle(fontSize: 11, color: p.ink4)),
+          const SizedBox(width: NonSpace.xs),
+          Text(stage.detail, style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
         ],
         if (index < 0) const SizedBox.shrink(),
       ],

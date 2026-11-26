@@ -197,16 +197,16 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
       return Container(
         color: p.panel2,
         alignment: Alignment.center,
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(NonSpace.xl),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.movie_outlined, size: 36, color: p.ink4),
           const SizedBox(height: 10),
           Text('当前平台不支持应用内视频播放',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink2)),
+              style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink2)),
           const SizedBox(height: 6),
           Text('可复制路径后在系统播放器打开：\n${widget.path}',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: p.ink4, height: 1.5)),
+              style: TextStyle(fontSize: NonType.caption, color: p.ink4, height: 1.5)),
         ]),
       );
     }
@@ -228,33 +228,33 @@ class _VideoPlayerSurfaceState extends State<VideoPlayerSurface> {
       key: const ValueKey('video-error'),
       color: p.panel2,
       alignment: Alignment.center,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(NonSpace.xl),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.broken_image_outlined, size: 36, color: p.danger),
         const SizedBox(height: 10),
         Text(_error,
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: p.ink2, height: 1.5)),
-        const SizedBox(height: 8),
+            style: TextStyle(fontSize: NonType.body, color: p.ink2, height: 1.5)),
+        const SizedBox(height: NonSpace.sm),
         SelectableText(widget.path,
-            textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: p.ink4)),
+            textAlign: TextAlign.center, style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
         const SizedBox(height: 10),
-        Wrap(spacing: 8, children: [
+        Wrap(spacing: NonSpace.sm, children: [
           FilledButton.icon(
             onPressed: _retryLoad,
             icon: const Icon(Icons.refresh_outlined, size: 14),
-            label: const Text('重新加载', style: TextStyle(fontSize: 12)),
+            label: const Text('重新加载', style: TextStyle(fontSize: NonType.body)),
           ),
           OutlinedButton.icon(
             onPressed: _copyPath,
             icon: const Icon(Icons.copy_all_outlined, size: 14),
-            label: const Text('复制路径', style: TextStyle(fontSize: 12)),
+            label: const Text('复制路径', style: TextStyle(fontSize: NonType.body)),
           ),
           if (_capabilities.supportsRevealInFolder)
             OutlinedButton.icon(
               onPressed: _reveal,
               icon: const Icon(Icons.folder_open_outlined, size: 14),
-              label: const Text('在文件夹中显示', style: TextStyle(fontSize: 12)),
+              label: const Text('在文件夹中显示', style: TextStyle(fontSize: NonType.body)),
             ),
         ]),
       ]),

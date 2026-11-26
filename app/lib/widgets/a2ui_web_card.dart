@@ -599,10 +599,10 @@ class _A2uiWebCardState extends State<A2uiWebCard> {
                             color: palette.accent,
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: NonSpace.sm),
                         Text(
                           '预览准备中…',
-                          style: TextStyle(fontSize: 11, color: palette.ink3),
+                          style: TextStyle(fontSize: NonType.caption, color: palette.ink3),
                         ),
                       ],
                     ),
@@ -615,11 +615,11 @@ class _A2uiWebCardState extends State<A2uiWebCard> {
                   color: palette.panel,
                   child: Center(
                     child: Padding(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(NonSpace.lg),
                       child: Text(
                         _error!,
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12, color: palette.ink2),
+                        style: TextStyle(fontSize: NonType.body, color: palette.ink2),
                       ),
                     ),
                   ),

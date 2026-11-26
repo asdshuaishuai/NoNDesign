@@ -56,7 +56,7 @@ class ArtShelfCard extends StatelessWidget {
           onTap: onOpen,
           borderRadius: BorderRadius.circular(12),
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(NonSpace.md),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
                 Icon(shelfKindIcon[kind] ?? Icons.help_outline, size: 15, color: p.accent),
@@ -73,24 +73,24 @@ class ArtShelfCard extends StatelessWidget {
               Text(title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink, height: 1.25)),
-              const SizedBox(height: 4),
+                  style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink, height: 1.25)),
+              const SizedBox(height: NonSpace.xs),
               Text(detail,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10, color: p.ink4)),
+                  style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
               const Spacer(),
               Align(
                 alignment: Alignment.centerRight,
                 child: OutlinedButton(
                   onPressed: onOpen,
                   style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: NonSpace.md, vertical: NonSpace.xs),
                     minimumSize: const Size(0, 30),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     side: BorderSide(color: p.line),
                   ),
-                  child: Text('打开', style: TextStyle(fontSize: 11, color: p.ink2)),
+                  child: Text('打开', style: TextStyle(fontSize: NonType.caption, color: p.ink2)),
                 ),
               ),
             ]),
@@ -145,8 +145,8 @@ class ArtShelfCard extends StatelessWidget {
       height: 36,
       child: Row(children: [
         Icon(icon, size: 16, color: color),
-        const SizedBox(width: 8),
-        Text(label, style: TextStyle(fontSize: 13, color: danger ? color : null)),
+        const SizedBox(width: NonSpace.sm),
+        Text(label, style: TextStyle(fontSize: NonType.bodyStrong, color: danger ? color : null)),
       ]),
     );
   }
@@ -167,7 +167,7 @@ class _Badge extends StatelessWidget {
         color: accent2 ? color.withValues(alpha: 0.16) : p.accentSoft,
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(label, style: TextStyle(fontSize: 10, color: color)),
+      child: Text(label, style: TextStyle(fontSize: NonType.micro, color: color)),
     );
   }
 }

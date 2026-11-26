@@ -174,11 +174,11 @@ class _WelcomeState extends State<Welcome> {
                 Text('NaN',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
+                    style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink)),
                 Text('AI CREATION STUDIO',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, letterSpacing: 1.6, color: p.ink4)),
+                    style: TextStyle(fontSize: NonType.micro, letterSpacing: 1.6, color: p.ink4)),
               ],
             ),
           ),
@@ -212,12 +212,12 @@ class _WelcomeState extends State<Welcome> {
       height: 34,
       alignment: Alignment.center,
       decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
       child: Text('NaN · 本地创作 · 文档、原型与作品都在你手里 · 所有操作可撤销',
           textAlign: TextAlign.center,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 10, height: 1.3, color: p.ink4)),
+          style: TextStyle(fontSize: NonType.micro, height: 1.3, color: p.ink4)),
     );
   }
 
@@ -316,9 +316,9 @@ class _WelcomeState extends State<Welcome> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _hero(context, store, narrow: true),
-          const SizedBox(height: 16),
+          const SizedBox(height: NonSpace.lg),
           _briefCard(context, store),
-          const SizedBox(height: 8),
+          const SizedBox(height: NonSpace.sm),
           _briefHints(context),
           const SizedBox(height: 18),
           _portfolioCard(context, store),
@@ -358,7 +358,7 @@ class _WelcomeState extends State<Welcome> {
                 Icon(Icons.auto_awesome, size: 11, color: p.accent),
                 const SizedBox(width: 5),
                 Text('文档 · 原型 · 3D · 视频 · 热应用',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: p.accent)),
+                    style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w500, color: p.accent)),
               ],
             ),
           ),
@@ -378,9 +378,9 @@ class _WelcomeState extends State<Welcome> {
               )),
         ),
         SizedBox(height: narrow ? 12 : 14),
-        Text(_subtitle, style: TextStyle(fontSize: narrow ? 12.5 : 13, height: narrow ? 1.6 : 1.65, color: p.ink3)),
+        Text(_subtitle, style: TextStyle(fontSize: NonType.bodyStrong, height: narrow ? 1.6 : 1.65, color: p.ink3)),
         if (store.recovery != null) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: NonSpace.md),
           _recoveryBanner(context, store),
         ],
       ],
@@ -398,9 +398,9 @@ class _WelcomeState extends State<Welcome> {
       ),
       child: Row(
         children: [
-          Expanded(child: Text('检测到上次未保存的工作', style: TextStyle(fontSize: 11, color: p.warn))),
-          TextButton(onPressed: store.restoreRecovery, child: const Text('恢复', style: TextStyle(fontSize: 11))),
-          TextButton(onPressed: store.discardRecovery, child: const Text('忽略', style: TextStyle(fontSize: 11))),
+          Expanded(child: Text('检测到上次未保存的工作', style: TextStyle(fontSize: NonType.caption, color: p.warn))),
+          TextButton(onPressed: store.restoreRecovery, child: const Text('恢复', style: TextStyle(fontSize: NonType.caption))),
+          TextButton(onPressed: store.discardRecovery, child: const Text('忽略', style: TextStyle(fontSize: NonType.caption))),
         ],
       ),
     );
@@ -418,7 +418,7 @@ class _WelcomeState extends State<Welcome> {
         normalizeWorkspaceMode(store.chatWorkspaceMode) == workspaceModeDesign;
     return Container(
       key: const ValueKey('welcome-composer'),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(NonSpace.md),
       decoration: BoxDecoration(
         color: p.panel.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(16),
@@ -434,20 +434,20 @@ class _WelcomeState extends State<Welcome> {
             controller: _brief,
             minLines: 3,
             maxLines: 5,
-            style: TextStyle(fontSize: 13, height: 1.55, color: p.ink),
+            style: TextStyle(fontSize: NonType.bodyStrong, height: 1.55, color: p.ink),
             decoration: InputDecoration(
               hintText: '例如：做一个面向自由职业者的发票工具。需要登录、发票列表、新建发票、客户管理和设置；风格专业、克制，移动端优先。',
-              hintStyle: TextStyle(fontSize: 13, height: 1.55, color: p.ink4),
+              hintStyle: TextStyle(fontSize: NonType.bodyStrong, height: 1.55, color: p.ink4),
               border: InputBorder.none,
               enabledBorder: InputBorder.none,
               focusedBorder: InputBorder.none,
               filled: false,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: NonSpace.xs),
             ),
             onSubmitted: (_) => _start(store),
           ),
           if (designMode) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             _briefExamples(),
           ],
           const SizedBox(height: 10),
@@ -455,7 +455,7 @@ class _WelcomeState extends State<Welcome> {
           // 选择器独占一行（窗口窄时可以换行），下面一行是说明 + 开始创作，
           // 按钮固定在右下角——聊天框因此比旧版通栏尺寸小一圈。
           _workspaceSelector(context, store),
-          const SizedBox(height: 8),
+          const SizedBox(height: NonSpace.sm),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -463,10 +463,10 @@ class _WelcomeState extends State<Welcome> {
                 child: Text(
                   _workspaceHintText(normalizeWorkspaceMode(store.chatWorkspaceMode)),
                   key: const ValueKey('welcome-workspace-hint'),
-                  style: TextStyle(fontSize: 10, height: 1.3, color: p.ink4),
+                  style: TextStyle(fontSize: NonType.micro, height: 1.3, color: p.ink4),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: NonSpace.sm),
               _startButton(store),
             ],
           ),
@@ -479,7 +479,7 @@ class _WelcomeState extends State<Welcome> {
   Widget _briefExamples() {
     final p = context.palette;
     return Wrap(
-      spacing: 4,
+      spacing: NonSpace.xs,
       runSpacing: 6,
       children: [
         for (final example in ['电商 App', 'SaaS 仪表盘', 'AI 助手', '个人作品集'])
@@ -492,7 +492,7 @@ class _WelcomeState extends State<Welcome> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
               decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
-              child: Text(example, style: TextStyle(fontSize: 10, color: p.ink3)),
+              child: Text(example, style: TextStyle(fontSize: NonType.micro, color: p.ink3)),
             ),
           ),
       ],
@@ -509,9 +509,9 @@ class _WelcomeState extends State<Welcome> {
       ),
       onPressed: store.agentBusy ? null : () => _start(store),
       icon: store.agentBusy
-          ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5))
+          ? const SizedBox(width: NonSpace.md, height: NonSpace.md, child: CircularProgressIndicator(strokeWidth: 1.5))
           : const Icon(Icons.auto_awesome, size: 13),
-      label: const Text('开始创作', style: TextStyle(fontSize: 12)),
+      label: const Text('开始创作', style: TextStyle(fontSize: NonType.body)),
     );
   }
 
@@ -554,7 +554,7 @@ class _WelcomeState extends State<Welcome> {
             Text(
               workspaceModeLabel(mode),
               style: TextStyle(
-                fontSize: 11,
+                fontSize: NonType.caption,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 color: selected ? p.accent : p.ink3,
               ),
@@ -588,17 +588,17 @@ class _WelcomeState extends State<Welcome> {
     return Row(
       children: [
         if (!narrow) ...[
-          Text('${modCombo('⌘↵')} 开始', style: TextStyle(fontSize: 10, color: p.ink4)),
+          Text('${modCombo('⌘↵')} 开始', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
           const SizedBox(width: 10),
         ],
         InkWell(
           onTap: () => showNewProjectFlow(context),
-          child: Text('空白项目', style: TextStyle(fontSize: 10, color: p.ink4)),
+          child: Text('空白项目', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
         ),
         const SizedBox(width: 10),
         InkWell(
           onTap: () => openProjectFlow(context, ''),
-          child: Text('打开项目', style: TextStyle(fontSize: 10, color: p.ink4)),
+          child: Text('打开项目', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
         ),
       ],
     );
@@ -630,9 +630,9 @@ class _WelcomeState extends State<Welcome> {
         children: [
           Row(
             children: [
-              Text('作品集', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
+              Text('作品集', style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
               const SizedBox(width: 6),
-              Text('热应用 · 3D · 视频', style: TextStyle(fontSize: 10, color: p.ink4)),
+              Text('热应用 · 3D · 视频', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
               const Spacer(),
               if (store.portfolioLoading)
                 SizedBox(
@@ -645,19 +645,19 @@ class _WelcomeState extends State<Welcome> {
                   key: const ValueKey('welcome-portfolio-refresh'),
                   onTap: () => store.refreshPortfolio(force: true),
                   child: Padding(
-                    padding: const EdgeInsets.all(2),
+                    padding: const EdgeInsets.all(NonSpace.xxs),
                     child: Icon(Icons.refresh, size: 13, color: p.ink4),
                   ),
                 ),
-              const SizedBox(width: 8),
+              const SizedBox(width: NonSpace.sm),
               InkWell(
                 key: const ValueKey('welcome-portfolio-all'),
                 onTap: () => store.setView('portfolio'),
-                child: Text('查看全部…', style: TextStyle(fontSize: 10, color: p.ink4)),
+                child: Text('查看全部…', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: NonSpace.sm),
           if (store.portfolioError != null && entries.isEmpty)
             _shelfHint(context, store.portfolioError!, retryable: true)
           else if (entries.isEmpty)
@@ -674,7 +674,7 @@ class _WelcomeState extends State<Welcome> {
     final p = context.palette;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: NonSpace.lg),
       decoration: BoxDecoration(
         border: Border.all(color: p.line),
         borderRadius: BorderRadius.circular(8),
@@ -685,14 +685,14 @@ class _WelcomeState extends State<Welcome> {
           Flexible(
             child: Text(text,
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4)),
+                style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink4)),
           ),
           if (retryable) ...[
-            const SizedBox(width: 8),
+            const SizedBox(width: NonSpace.sm),
             InkWell(
               key: const ValueKey('welcome-portfolio-retry'),
               onTap: () => context.read<AppStore>().refreshPortfolio(force: true),
-              child: Text('重试', style: TextStyle(fontSize: 10, color: p.accent)),
+              child: Text('重试', style: TextStyle(fontSize: NonType.micro, color: p.accent)),
             ),
           ],
         ],
@@ -758,7 +758,7 @@ class _WelcomeState extends State<Welcome> {
               decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
               child: Icon(icon, size: 13, color: iconColor),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: NonSpace.sm),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -766,14 +766,14 @@ class _WelcomeState extends State<Welcome> {
                   Text(entry.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12, color: p.ink2)),
+                      style: TextStyle(fontSize: NonType.body, color: p.ink2)),
                   Text(
                     entry.modified == null
                         ? subtitle
                         : '$subtitle · ${relativeTime(entry.modified)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, color: p.ink4),
+                    style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                   ),
                 ],
               ),
@@ -804,15 +804,15 @@ class _WelcomeState extends State<Welcome> {
         children: [
           Row(
             children: [
-              Text('最近项目', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
+              Text('最近项目', style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
               const Spacer(),
               InkWell(
                 onTap: () => openProjectFlow(context, ''),
-                child: Text('打开…', style: TextStyle(fontSize: 10, color: p.ink4)),
+                child: Text('打开…', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: NonSpace.sm),
           if (store.recent.isEmpty && store.serverProjects.isEmpty)
             Container(
               width: double.infinity,
@@ -822,7 +822,7 @@ class _WelcomeState extends State<Welcome> {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text('还没有项目。上面输入一句话，马上开始。',
-                  textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: p.ink4)),
+                  textAlign: TextAlign.center, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
             ),
           for (final r in store.recent.take(6))
             InkWell(
@@ -838,7 +838,7 @@ class _WelcomeState extends State<Welcome> {
                       decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
                       child: Icon(Icons.layers_outlined, size: 13, color: p.ink4),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: NonSpace.sm),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -846,9 +846,9 @@ class _WelcomeState extends State<Welcome> {
                           Text(r['name']?.toString() ?? '',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12, color: p.ink2)),
+                              style: TextStyle(fontSize: NonType.body, color: p.ink2)),
                           Text(relativeTime(r['ts'] is int ? r['ts'] as int : null),
-                              style: TextStyle(fontSize: 10, color: p.ink4)),
+                              style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                         ],
                       ),
                     ),
@@ -858,12 +858,12 @@ class _WelcomeState extends State<Welcome> {
               ),
             ),
           if (store.serverProjects.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
               child: Row(
                 children: [
-                  Text('工作区与桌面', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
+                  Text('工作区与桌面', style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: p.ink4)),
                   const Spacer(),
                   InkWell(
                     onTap: () => store.refreshProjects(),
@@ -875,7 +875,7 @@ class _WelcomeState extends State<Welcome> {
                 ],
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: NonSpace.xs),
             for (final s in store.serverProjects.take(8))
               InkWell(
                 borderRadius: BorderRadius.circular(8),
@@ -890,7 +890,7 @@ class _WelcomeState extends State<Welcome> {
                         decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
                         child: Icon(Icons.folder_outlined, size: 13, color: p.ink4),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: NonSpace.sm),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -898,16 +898,16 @@ class _WelcomeState extends State<Welcome> {
                             Text(s['name']?.toString() ?? '',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 12, color: p.ink2)),
+                                style: TextStyle(fontSize: NonType.body, color: p.ink2)),
                             Text(
                               relativeTime(s['modified'] is num ? (s['modified'] as num).toInt() * 1000 : null),
-                              style: TextStyle(fontSize: 10, color: p.ink4),
+                              style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                             ),
                           ],
                         ),
                       ),
                       _sourceTag(s, p),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: NonSpace.xs),
                       Icon(Icons.chevron_right, size: 13, color: p.ink4),
                     ],
                   ),
@@ -925,12 +925,12 @@ class _WelcomeState extends State<Welcome> {
     // 「桌面」标签近乎不可读（≈1.9:1）；accent2 是品牌辅助色的主题化形态。
     final color = desktop ? p.accent2 : p.accent;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: NonSpace.xxs),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: Text(desktop ? '桌面' : '工作区', style: TextStyle(fontSize: 10, color: color)),
+      child: Text(desktop ? '桌面' : '工作区', style: TextStyle(fontSize: NonType.micro, color: color)),
     );
   }
 }

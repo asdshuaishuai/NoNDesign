@@ -50,7 +50,7 @@ class RightPanel extends StatelessWidget {
         children: [
           Container(
             height: 44,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
             decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
             child: Row(
               children: [
@@ -102,7 +102,7 @@ class RightPanel extends StatelessWidget {
             const SizedBox(width: 5),
             Text(label,
                 style: TextStyle(
-                    fontSize: 12,
+                    fontSize: NonType.body,
                     fontWeight: FontWeight.w600,
                     color: active ? p.ink : p.ink3)),
           ],

@@ -121,7 +121,7 @@ class _ThreeInspector extends StatelessWidget {
       );
     }
     return ListView(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(NonSpace.md),
       children: [
         _WiHeader(
           icon: Icons.view_in_ar_outlined,
@@ -129,7 +129,7 @@ class _ThreeInspector extends StatelessWidget {
           subtitle: project,
           trailing: Pill(label: '已打开', color: p.success),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: NonSpace.md),
         _WiCard(
           children: [
             _WiRow(label: '项目名', value: project),
@@ -138,10 +138,10 @@ class _ThreeInspector extends StatelessWidget {
               label: '场景状态',
               trailing: Pill(label: '已打开', color: p.success, background: p.panel3),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             Text(
               '切到 3D 工作台会回到这个场景；预览、测量与修复都在那边进行。',
-              style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink4),
             ),
           ],
         ),
@@ -151,7 +151,7 @@ class _ThreeInspector extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               '要新建场景，去 3D 工作台描述需求：先出规范，再逐层生成场景与代码。',
-              style: TextStyle(fontSize: 10, height: 1.5, color: p.ink3),
+              style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink3),
             ),
           ],
         ),
@@ -252,21 +252,21 @@ class _VideoInspector extends StatelessWidget {
     final sample = videoSamples[idx];
     final stats = _VideoSampleStats.of(sample);
     return ListView(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(NonSpace.md),
       children: [
         _WiHeader(
           icon: Icons.movie_outlined,
           title: '视频检查',
           subtitle: sample.label,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: NonSpace.md),
         _WiCard(
           children: [
             _WiRow(label: '当前示例', value: sample.label),
             const SizedBox(height: 6),
             Text(
               sample.note,
-              style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink4),
             ),
           ],
         ),
@@ -276,12 +276,12 @@ class _VideoInspector extends StatelessWidget {
               const SectionLabel('播放参数'),
               const SizedBox(height: 6),
               _WiRow(label: '帧率', value: '${stats.fps} fps'),
-              const SizedBox(height: 4),
+              const SizedBox(height: NonSpace.xs),
               _WiRow(label: '时长', value: '${stats.seconds.toStringAsFixed(1)} 秒'),
-              const SizedBox(height: 4),
+              const SizedBox(height: NonSpace.xs),
               _WiRow(label: '帧数', value: '${stats.frames} 帧'),
               if (stats.width > 0 && stats.height > 0) ...[
-                const SizedBox(height: 4),
+                const SizedBox(height: NonSpace.xs),
                 _WiRow(label: '画面', value: '${stats.width}×${stats.height}'),
               ],
             ],
@@ -290,7 +290,7 @@ class _VideoInspector extends StatelessWidget {
           children: [
             Text(
               '规范对照与逐帧预览在视频工作台里进行；这里只读当前示例的播放规格。',
-              style: TextStyle(fontSize: 10, height: 1.5, color: p.ink3),
+              style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink3),
             ),
           ],
         ),
@@ -325,23 +325,23 @@ class _VideoClipInspector extends StatelessWidget {
             .firstWhere((c) => true, orElse: () => null);
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(
-            child: Text('正在读动效合成…', style: TextStyle(fontSize: 11, color: p.ink4)),
+            child: Text('正在读动效合成…', style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
           );
         }
         if (clip == null) {
           return ListView(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(NonSpace.md),
             children: [
               _WiHeader(
                   icon: Icons.movie_outlined, title: '视频检查', subtitle: '动效合成'),
-              const SizedBox(height: 12),
+              const SizedBox(height: NonSpace.md),
               _WiCard(
                 children: [
                   Text(
                     catalog?.error.isNotEmpty == true
                         ? catalog!.error
                         : '这支短片不在示例清单里了，回工作台重新选一支。',
-                    style: TextStyle(fontSize: 10, height: 1.5, color: p.ink3),
+                    style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink3),
                   ),
                 ],
               ),
@@ -362,20 +362,20 @@ class _VideoClipInspector extends StatelessWidget {
           _ => '动效合成',
         };
         return ListView(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(NonSpace.md),
           children: [
             _WiHeader(
               icon: Icons.movie_outlined,
               title: '视频检查',
               subtitle: clip.title,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: NonSpace.md),
             _WiCard(
               children: [
                 _WiRow(label: '当前示例', value: clip.title),
                 const SizedBox(height: 6),
                 Text(clip.subtitle,
-                    style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4)),
+                    style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink4)),
               ],
             ),
             _WiCard(
@@ -383,11 +383,11 @@ class _VideoClipInspector extends StatelessWidget {
                 const SectionLabel('播放参数'),
                 const SizedBox(height: 6),
                 _WiRow(label: '类型', value: styleLabel),
-                const SizedBox(height: 4),
+                const SizedBox(height: NonSpace.xs),
                 _WiRow(label: '时长', value: '${clip.duration.toStringAsFixed(1)} 秒'),
-                const SizedBox(height: 4),
+                const SizedBox(height: NonSpace.xs),
                 _WiRow(label: '画面', value: '1280×720'),
-                const SizedBox(height: 4),
+                const SizedBox(height: NonSpace.xs),
                 _WiRow(label: '帧率', value: '30 fps'),
               ],
             ),
@@ -402,12 +402,12 @@ class _VideoClipInspector extends StatelessWidget {
                     children: [
                       for (final tag in clip.tags)
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: NonSpace.xxs),
                           decoration: BoxDecoration(
                             color: p.accent.withValues(alpha: 0.14),
                             borderRadius: BorderRadius.circular(5),
                           ),
-                          child: Text(tag, style: TextStyle(fontSize: 9.5, color: p.accent)),
+                          child: Text(tag, style: TextStyle(fontSize: NonType.micro, color: p.accent)),
                         ),
                     ],
                   ),
@@ -417,7 +417,7 @@ class _VideoClipInspector extends StatelessWidget {
               children: [
                 Text(
                   '这支是 HTML/CSS/JS 动效合成：应用内实时播放，可拖动进度逐帧看；成片导出暂未开放。',
-                  style: TextStyle(fontSize: 10, height: 1.5, color: p.ink3),
+                  style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink3),
                 ),
               ],
             ),
@@ -527,14 +527,14 @@ class _HotappInspectorState extends State<_HotappInspector> {
     final entry = _entry;
     final prototype = entry?.isPrototypeDemo ?? false;
     return ListView(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(NonSpace.md),
       children: [
         _WiHeader(
           icon: Icons.widgets_outlined,
           title: '热应用',
           subtitle: entry?.title ?? name,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: NonSpace.md),
         _WiCard(
           children: [
             _WiRow(label: '当前应用', value: entry?.title ?? name),
@@ -549,7 +549,7 @@ class _HotappInspectorState extends State<_HotappInspector> {
               ),
             ),
             if (_loading) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: NonSpace.sm),
               Row(
                 children: [
                   SizedBox(
@@ -558,16 +558,16 @@ class _HotappInspectorState extends State<_HotappInspector> {
                     child: CircularProgressIndicator(strokeWidth: 1.4, color: p.ink4),
                   ),
                   const SizedBox(width: 6),
-                  Text('正在读取应用信息…', style: TextStyle(fontSize: 10, color: p.ink4)),
+                  Text('正在读取应用信息…', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                 ],
               ),
             ] else if (_error.isNotEmpty) ...[
               const SizedBox(height: 6),
-              Text(_error, style: TextStyle(fontSize: 10, color: p.danger)),
+              Text(_error, style: TextStyle(fontSize: NonType.micro, color: p.danger)),
             ] else if (_screens != null || _jumps != null) ...[
               const SizedBox(height: 6),
               _WiRow(label: '屏数', value: '${_screens ?? 0} 屏'),
-              const SizedBox(height: 4),
+              const SizedBox(height: NonSpace.xs),
               _WiRow(label: '跳转数', value: '${_jumps ?? 0} 条'),
             ],
           ],
@@ -576,7 +576,7 @@ class _HotappInspectorState extends State<_HotappInspector> {
           children: [
             Text(
               '应用内容来自本地应用库；类型徽标区分可用应用与原型验证 demo。',
-              style: TextStyle(fontSize: 10, height: 1.5, color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink4),
             ),
           ],
         ),
@@ -667,7 +667,7 @@ class _WiHeader extends StatelessWidget {
           decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
           child: Icon(icon, size: 14, color: p.accent),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: NonSpace.sm),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -676,14 +676,14 @@ class _WiHeader extends StatelessWidget {
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink),
+                style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink),
               ),
               if (subtitle != null && subtitle!.isNotEmpty)
                 Text(
                   subtitle!,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
+                  style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4),
                 ),
             ],
           ),
@@ -732,7 +732,7 @@ class _WiRow extends StatelessWidget {
       children: [
         SizedBox(
           width: 62,
-          child: Text(label, style: TextStyle(fontSize: 11, color: p.ink3)),
+          child: Text(label, style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
         ),
         if (value != null)
           Expanded(
@@ -740,7 +740,7 @@ class _WiRow extends StatelessWidget {
               value!,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: p.ink2),
+              style: TextStyle(fontSize: NonType.body, color: p.ink2),
             ),
           )
         else
@@ -768,11 +768,11 @@ class _WiPrimary extends StatelessWidget {
     return FilledButton.icon(
       style: FilledButton.styleFrom(
         minimumSize: const Size(0, 34),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.md, vertical: NonSpace.sm),
       ),
       onPressed: onTap,
       icon: Icon(icon, size: 14),
-      label: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+      label: Text(label, style: const TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w600)),
     );
   }
 }

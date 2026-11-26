@@ -55,10 +55,10 @@ class DesignPrototypeBanner extends StatelessWidget {
           ),
         if (running && store.designPrototypeBusy)
           Padding(
-            padding: const EdgeInsets.only(top: 2),
+            padding: const EdgeInsets.only(top: NonSpace.xxs),
             child: Text(
               '正在验证原型…',
-              style: TextStyle(fontSize: 11, color: p.ink4),
+              style: TextStyle(fontSize: NonType.caption, color: p.ink4),
             ),
           ),
       ],
@@ -78,7 +78,7 @@ class DesignPrototypeBanner extends StatelessWidget {
         backgroundColor: p.panel,
         title: Text(
           doc.verified ? '原型覆盖检查：全部通过' : '原型覆盖检查：有未通过项',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: p.ink),
+          style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w700, color: p.ink),
         ),
         content: SizedBox(
           width: 520,
@@ -102,8 +102,8 @@ class DesignPrototypeBanner extends StatelessWidget {
                           check.detail,
                           key: ValueKey('prototype-check-${check.id}'),
                           style: TextStyle(
-                            fontSize: 12,
-                            height: 1.4,
+                            fontSize: NonType.body,
+                            height: NonType.lineCaption,
                             color: check.ok ? p.ink2 : p.warn,
                           ),
                         ),

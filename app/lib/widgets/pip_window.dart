@@ -167,7 +167,7 @@ class _PipWindowState extends State<PipWindow> {
                   widget.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: p.ink2),
+                  style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w600, color: p.ink2),
                 ),
               ),
               IconAction(
@@ -293,7 +293,7 @@ class _PipEdgeHandleState extends State<PipEdgeHandle> {
                 onTap: widget.onOpen,
                 child: Container(
                   width: 18,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: NonSpace.sm),
                   decoration: BoxDecoration(
                     border: Border.all(color: p.line),
                     borderRadius: BorderRadius.horizontal(
@@ -307,7 +307,7 @@ class _PipEdgeHandleState extends State<PipEdgeHandle> {
                       for (final ch in '工作区'.characters)
                         Text(ch,
                             style: TextStyle(
-                                fontSize: 10, height: 1.35, color: p.ink3)),
+                                fontSize: NonType.micro, height: 1.35, color: p.ink3)),
                     ],
                   ),
                 ),

@@ -16,10 +16,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nondesign/core/theme.dart';
 
 /// 棘轮上限：`lib/widgets/**` 中 `fontSize: <数字>` 的出现次数。
-/// 2026-11-26 首次盘点为 870；工作台外壳 + 设置面板 + 设计 + 3D + 视频/音乐
-/// 五个批次迁移完成后降到 317。继续迁移（chat_stream / welcome / docs_view /
-/// agent_panel / portfolio_view 等）时同步下调本值。
-const int rawFontSizeCeiling = 317;
+/// 2026-11-26 首次盘点为 870；外壳/设置面板/设计/3D/视频/音乐/聊天/文档/
+/// 首页/作品集/零散组件共八批迁移完成后降到 **6**。
+///
+/// 余下 6 处全在 `hotapp_workspace.dart`——该工作台内容区布局按用户裁决冻结，
+/// 且这 6 个字号不在 8 档刻度上（10.5/12.5/14/16/17），替换会改变视觉尺寸，
+/// 因此保留。若将来解冻热应用布局，请把最后 6 处迁掉并把本值改成 0。
+const int rawFontSizeCeiling = 6;
 
 void main() {
   test('排版尺度严格递增且覆盖 8 个档位', () {

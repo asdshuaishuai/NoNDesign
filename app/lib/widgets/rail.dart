@@ -29,12 +29,12 @@ class Rail extends StatelessWidget {
         color: p.bgElevated,
         border: Border(right: BorderSide(color: p.line)),
       ),
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      padding: const EdgeInsets.symmetric(vertical: NonSpace.md, horizontal: NonSpace.sm),
       child: Column(
         children: [
           for (final item in items)
             Padding(
-              padding: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.only(bottom: NonSpace.xs),
               child: Material(
                 color: store.panel == item.$1 ? p.accentSoft : Colors.transparent,
                 borderRadius: BorderRadius.circular(10),
@@ -58,10 +58,10 @@ class Rail extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(item.$2, size: 17, color: store.panel == item.$1 ? p.accent : p.ink3),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: NonSpace.xs),
                         Text(item.$3,
                             style: TextStyle(
-                                fontSize: 10,
+                                fontSize: NonType.micro,
                                 fontWeight: FontWeight.w500,
                                 color: store.panel == item.$1 ? p.accent : p.ink3)),
                       ],

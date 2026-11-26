@@ -511,7 +511,7 @@ class _CanvasViewState extends State<CanvasView> {
     final value = await showNonDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('编辑文本', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        title: const Text('编辑文本', style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600)),
         content: SizedBox(
           width: 360,
           child: TextField(
@@ -658,8 +658,8 @@ class _CanvasViewState extends State<CanvasView> {
                     children: [
                       if (store.agentBusy && store.previewRender != null)
                         Container(
-                          margin: const EdgeInsets.only(right: 8),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                          margin: const EdgeInsets.only(right: NonSpace.sm),
+                          padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: 5),
                           decoration: BoxDecoration(
                             color: p.accentSoft,
                             borderRadius: BorderRadius.circular(8),
@@ -669,12 +669,12 @@ class _CanvasViewState extends State<CanvasView> {
                             children: [
                               Container(width: 5, height: 5, decoration: BoxDecoration(color: p.accent, shape: BoxShape.circle)),
                               const SizedBox(width: 5),
-                              Text('LIVE · NaN 正在工作', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.accent)),
+                              Text('LIVE · NaN 正在工作', style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w600, color: p.accent)),
                             ],
                           ),
                         ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                        padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: 5),
                         decoration: BoxDecoration(
                           color: p.bgElevated.withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(8),
@@ -684,7 +684,7 @@ class _CanvasViewState extends State<CanvasView> {
                           MediaQuery.sizeOf(context).width < 700
                               ? '${boards.length} 画板'
                               : '${boards.length} 画板 · space 拖动 · ${modCombo('⌘')}滚轮缩放',
-                          style: TextStyle(fontSize: 10, color: p.ink4),
+                          style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                         ),
                       ),
                     ],
@@ -725,14 +725,14 @@ class _CanvasViewState extends State<CanvasView> {
                 Text(
                   board.name.isEmpty ? board.id : board.name,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: NonType.body,
                     fontWeight: active ? FontWeight.w600 : FontWeight.w500,
                     color: active ? p.accent : p.ink3,
                   ),
                 ),
                 const SizedBox(width: 6),
                 Text('${board.width.round()}×${board.height.round()}',
-                    style: TextStyle(fontSize: 10, fontFamily: 'monospace', color: p.ink4)),
+                    style: TextStyle(fontSize: NonType.micro, fontFamily: 'monospace', color: p.ink4)),
               ],
             ),
           ),
@@ -1019,18 +1019,18 @@ class _CanvasViewState extends State<CanvasView> {
       position: RelativeRect.fromLTRB(
           globalPosition.dx, globalPosition.dy, globalPosition.dx + 1, globalPosition.dy + 1),
       items: [
-        const PopupMenuItem(value: 'dup', height: 36, child: Text('复制节点', style: TextStyle(fontSize: 12))),
-        const PopupMenuItem(value: 'delete', height: 36, child: Text('删除节点', style: TextStyle(fontSize: 12))),
+        const PopupMenuItem(value: 'dup', height: 36, child: Text('复制节点', style: TextStyle(fontSize: NonType.body))),
+        const PopupMenuItem(value: 'delete', height: 36, child: Text('删除节点', style: TextStyle(fontSize: NonType.body))),
         const PopupMenuDivider(),
-        const PopupMenuItem(value: 'front', height: 36, child: Text('置顶', style: TextStyle(fontSize: 12))),
-        const PopupMenuItem(value: 'back', height: 36, child: Text('置底', style: TextStyle(fontSize: 12))),
+        const PopupMenuItem(value: 'front', height: 36, child: Text('置顶', style: TextStyle(fontSize: NonType.body))),
+        const PopupMenuItem(value: 'back', height: 36, child: Text('置底', style: TextStyle(fontSize: NonType.body))),
         if (multi)
-          const PopupMenuItem(value: 'group', height: 36, child: Text('编组选中节点', style: TextStyle(fontSize: 12))),
+          const PopupMenuItem(value: 'group', height: 36, child: Text('编组选中节点', style: TextStyle(fontSize: NonType.body))),
         if (parent != 'root')
           PopupMenuItem(
               value: 'ungroup',
               height: 36,
-              child: Text('解组 $parent', style: TextStyle(fontSize: 12))),
+              child: Text('解组 $parent', style: TextStyle(fontSize: NonType.body))),
       ],
     );
     if (action == null || !mounted) return;
@@ -2017,7 +2017,7 @@ class _EmptyCanvas extends StatelessWidget {
     // Expanded，按钮换行。宽屏仍保持 520 的卡片宽度。
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.lg),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: Container(
@@ -2049,9 +2049,9 @@ class _EmptyCanvas extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('从一句话开始', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: p.ink)),
+                      Text('从一句话开始', style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600, color: p.ink)),
                       Text('NaN 先写产品文档与设计规范，再把原型画到画布上。',
-                          style: TextStyle(fontSize: 11, color: p.ink3)),
+                          style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
                     ],
                   ),
                 ),
@@ -2062,7 +2062,7 @@ class _EmptyCanvas extends StatelessWidget {
               MediaQuery.sizeOf(context).width < 700
                   ? '在底部 NaN 面板描述你的产品；或先用文档页生成 PRD。'
                   : '在右侧 NaN 面板描述你的产品；或先用文档页生成 PRD。',
-              style: TextStyle(fontSize: 12, height: 1.6, color: p.ink3),
+              style: TextStyle(fontSize: NonType.body, height: 1.6, color: p.ink3),
             ),
             const SizedBox(height: 10),
             // 移动适配（2026-11-19）：空项目不再放操作按钮——描述文案
@@ -2099,7 +2099,7 @@ class _CanvasHud extends StatelessWidget {
       builder: (context, _) {
         final zoom = controller.value.getMaxScaleOnAxis();
         return Container(
-          padding: const EdgeInsets.all(2),
+          padding: const EdgeInsets.all(NonSpace.xxs),
           decoration: BoxDecoration(
             color: p.panel.withValues(alpha: 0.94),
             borderRadius: BorderRadius.circular(10),
@@ -2114,7 +2114,7 @@ class _CanvasHud extends StatelessWidget {
                 width: 48,
                 child: Text('${(zoom * 100).round()}%',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 11, fontFamily: 'monospace', color: p.ink2)),
+                    style: TextStyle(fontSize: NonType.caption, fontFamily: 'monospace', color: p.ink2)),
               ),
               IconAction(icon: Icons.add, tooltip: '放大', size: 26, onTap: onZoomIn),
               Container(width: 1, height: 16, color: p.line),

@@ -1209,7 +1209,7 @@ class _MusicStaffPainter extends CustomPainter {
       canvas,
       label,
       Offset(row.headerLeft, row.top + 7),
-      fontSize: 10,
+      fontSize: NonType.micro,
       color: labelColor,
       fontWeight: FontWeight.w600,
     );
@@ -1221,7 +1221,7 @@ class _MusicStaffPainter extends CustomPainter {
         canvas,
         layout.keySig.trim(),
         Offset(row.headerLeft + 27, row.staffTop + 10),
-        fontSize: 9,
+        fontSize: NonType.micro,
         color: palette.ink3,
       );
     }
@@ -1231,7 +1231,7 @@ class _MusicStaffPainter extends CustomPainter {
         canvas,
         '${timeSig[0]}',
         Offset(timeX, row.staffTop + 1),
-        fontSize: 10,
+        fontSize: NonType.micro,
         color: palette.ink2,
         center: true,
         fontWeight: FontWeight.w600,
@@ -1240,7 +1240,7 @@ class _MusicStaffPainter extends CustomPainter {
         canvas,
         '${timeSig[1]}',
         Offset(timeX, row.staffTop + 17),
-        fontSize: 10,
+        fontSize: NonType.micro,
         color: palette.ink2,
         center: true,
         fontWeight: FontWeight.w600,
@@ -1252,7 +1252,7 @@ class _MusicStaffPainter extends CustomPainter {
         canvas,
         '${column.measureIndex + 1}',
         Offset(column.x + 1, row.staffTop - 9),
-        fontSize: 8,
+        fontSize: NonType.micro,
         color: palette.ink4,
       );
     }
@@ -1492,7 +1492,7 @@ class _MusicStaffPainter extends CustomPainter {
         canvas,
         note.accidental,
         Offset(cx - kMusicStaffHeadWidth / 2 - 8, note.headY - 5),
-        fontSize: 9,
+        fontSize: NonType.micro,
         color: palette.ink2,
       );
     }
@@ -1511,7 +1511,7 @@ class _MusicStaffPainter extends CustomPainter {
         canvas,
         '${note.tupletN}',
         Offset(cx, note.headY - 16),
-        fontSize: 7,
+        fontSize: NonType.micro,
         color: palette.ink4,
         center: true,
       );
@@ -1818,7 +1818,7 @@ class _MusicStaffViewState extends State<MusicStaffView> {
     return SizedBox(
       height: 40,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
+        padding: const EdgeInsets.fromLTRB(NonSpace.md, 0, NonSpace.xs, 0),
         child: Row(
           children: <Widget>[
             Icon(Icons.music_note_outlined, size: 14, color: p.ink3),
@@ -1828,7 +1828,7 @@ class _MusicStaffViewState extends State<MusicStaffView> {
                 title.isEmpty ? '未命名乐谱 · $suffix' : '$title · $suffix',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, color: p.ink2),
+                style: TextStyle(fontSize: NonType.body, color: p.ink2),
               ),
             ),
             IconButton(
@@ -1849,7 +1849,7 @@ class _MusicStaffViewState extends State<MusicStaffView> {
                 '$_zoomPercent%',
                 key: const ValueKey('music-staff-zoom'),
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 10, color: p.ink3),
+                style: TextStyle(fontSize: NonType.micro, color: p.ink3),
               ),
             ),
             IconButton(
@@ -1885,7 +1885,11 @@ class _MusicStaffViewState extends State<MusicStaffView> {
         child: Text(
           message,
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
+          style: TextStyle(
+            fontSize: NonType.caption,
+            height: 1.5,
+            color: p.ink4,
+          ),
         ),
       ),
     );
