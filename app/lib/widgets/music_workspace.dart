@@ -93,7 +93,12 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   MusicProjectSnapshot? _snapshot;
   MusicProjectFailure? _failure;
   MusicInspectorStatus? _status;
-  int _selectedTrack = 0;
+
+  /// 左栏选中的轨道下标；`-1` = 未选轨道（检查页显示乐谱级属性）。
+  ///
+  /// 选中优先级：已选中音符 → 音符表；已选中轨道 → 轨道表；都没有但项目已
+  /// 打开 → 乐谱级表（标题/速度/拍号/调号）。点左栏「乐谱」条目回到乐谱级。
+  int _selectedTrack = -1;
 
   /// 中部谱面预览的本地视图选择：默认五线谱（只读），可切回钢琴卷帘。
   ///
@@ -230,7 +235,8 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
       _name = name;
       _failure = null;
       _status = null;
-      _selectedTrack = 0;
+      // 切项目 = 回到乐谱级（未选轨道/音符），检查页显示新乐谱的标题/速度等。
+      _selectedTrack = -1;
       _selectedEvent = null;
       _staffTapBusy = false;
       // 项目边界：旧项目的文档/源码不能留在栏目里，等新快照同一拍刷新。
@@ -552,6 +558,18 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     setState(() => _status = status);
   }
 
+  /// 选中乐谱级（未选轨道/音符）：检查页换成乐谱属性表。
+  ///
+  /// 只改本实例的选中状态，不写项目；项目刚打开或未选中任何轨道/音符时即此态。
+  void _selectScoreLevel() {
+    if (_selectedTrack < 0 && _selectedEvent == null) return;
+    setState(() {
+      _selectedTrack = -1;
+      _selectedEvent = null;
+    });
+    _checkController.notifySelectionChanged();
+  }
+
   /// 五线谱点击（task-16）：点已有音符 = 选中它（随后可用 Delete/Backspace 删除）；
   /// 点空白 = 在命中的**小节内拍位**插入音符（默认四分音符），再走 [_applyEdit]
   /// 的「改模型 → save → 重读 → 刷新」链路。
@@ -567,7 +585,8 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     if (_staffTapBusy) return;
     // 点谱面即索取键盘焦点：选中后 Delete/Backspace 才能落到谱面。
     _staffFocus.requestFocus();
-    if (_selectedTrack != hit.trackIndex) {
+    final bool trackChanged = _selectedTrack != hit.trackIndex;
+    if (trackChanged) {
       setState(() => _selectedTrack = hit.trackIndex);
     }
     // 已有音符：只选中，不插入；删除走键盘出口（见 [_onStaffKey]）。
@@ -593,6 +612,9 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
     // 点空白 = 按拍位插入；拍面选中的旧音符先取消选中。
     if (_selectedEvent != null) {
       setState(() => _selectedEvent = null);
+      _checkController.notifySelectionChanged();
+    } else if (trackChanged) {
+      // 只换轨道、没选音符：检查页也要跟着换对象（从乐谱级切到轨道表）。
       _checkController.notifySelectionChanged();
     }
     final MusicTrack track = snapshot.score.tracks[hit.trackIndex];
@@ -728,6 +750,44 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
                       error: _listError,
                     ),
                     if (score != null) ...<Widget>[
+                      Container(height: 1, color: p.line),
+                      // 乐谱级入口：未选轨道/音符时检查页显示乐谱属性（标题/
+                      // 速度/拍号/调号）；点它从轨道选中回到乐谱选中。
+                      InkWell(
+                        key: const ValueKey('music-score-entry'),
+                        onTap: _selectScoreLevel,
+                        child: Container(
+                          height: MusicPanelMetrics.listRowExtent,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: NonSpace.md,
+                          ),
+                          color: _selectedTrack < 0 ? p.accentSoft : null,
+                          child: Row(
+                            children: <Widget>[
+                              Icon(
+                                Icons.library_music_outlined,
+                                size: 12,
+                                color: _selectedTrack < 0 ? p.accent : p.ink4,
+                              ),
+                              const SizedBox(width: NonSpace.sm),
+                              Expanded(
+                                child: Text(
+                                  '乐谱「${score.title.trim().isEmpty ? '未命名乐谱' : score.title}」',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: NonType.body,
+                                    color: _selectedTrack < 0 ? p.ink : p.ink2,
+                                    fontWeight: _selectedTrack < 0
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                       Container(height: 1, color: p.line),
                       Expanded(
                         child: MusicTrackList(
@@ -1078,15 +1138,20 @@ class _MusicWorkspaceState extends State<MusicWorkspace> {
   }
 }
 
-/// 音乐检查控制器：把「选中轨道 / 选中音符」映射成通用属性表，写回 `score.json`。
+/// 音乐检查控制器：把「选中音符 / 选中轨道 / 乐谱级」映射成通用属性表，
+/// 写回 `score.json`。
+///
+/// 选中优先级（与工作台一致）：已选中音符 → 音符表；已选中轨道 → 轨道表；
+/// 都没有但项目已打开 → 乐谱级表（标题/速度/拍号/调号）。
 ///
 /// 写回纪律（最小编辑、绝不写坏乐谱）：
-/// * 音量/静音直接用 `music_edit.dart` 的既有纯函数
-///   （[editTrackVolume] / [editTrackMuted]）；
+/// * 音量/静音/标题/速度/拍号直接用 `music_edit.dart` 的既有纯函数
+///   （[editTrackVolume] / [editTrackMuted] / [editScoreTitle] /
+///   [editScoreTempo] / [editScoreTimeSig]）；
 /// * 名称/乐器/音符字段用 `core/music/music_patch.dart` 的既有确定性补丁
 ///   （`music_edit.dart` 没有这些纯函数；补丁层同样经 `parseMusicScore` 硬门，
 ///   未知字段与事件 id 原样保留）；
-/// * 谱号/时值/附点没有既有纯函数、也没有补丁白名单路径 → 字段显性只读，
+/// * 谱号/时值/附点/调号没有既有纯函数、也没有补丁白名单路径 → 字段显性只读，
 ///   `update` 返回 false 且不写盘（不在 widget 层另发明乐谱语义）；
 /// * 任何写入都经工作台既有 [_MusicWorkspaceState._applyEdit]（save → 重读 →
 ///   刷新播放面）；失败返回 false，调用方保持旧值。
@@ -1132,6 +1197,17 @@ final class _MusicCheckController extends WorkbenchCheckController {
     'percussion',
   ];
 
+  /// 拍号分母下拉选项。
+  ///
+  /// 契约允许 1/2/4/8/16/32（`music_edit.dart` 的 `musicAllowedBeatUnits`），
+  /// v1 界面只提供常用的 2/4/8/16；当前乐谱的分母不在表内时，[_scoreSheet]
+  /// 会把真实值补进选项，保证下拉显示当前值而不是「选择」。
+  static const List<String> _timeSigDenOptions = <String>['2', '4', '8', '16'];
+
+  /// 拍号分子的界面范围（契约允许 1–32；v1 界面按 1–16 提供）。
+  static const int _timeSigBeatsMin = 1;
+  static const int _timeSigBeatsMax = 16;
+
   @override
   void dispose() {
     _disposed = true;
@@ -1153,12 +1229,12 @@ final class _MusicCheckController extends WorkbenchCheckController {
       final CheckSheet? noteSheet = _noteSheet(score, selection);
       if (noteSheet != null) return noteSheet;
     }
-    final List<MusicTrack> tracks = score.tracks;
-    if (tracks.isEmpty) return null;
-    int index = _selectedTrackIndex();
-    if (index < 0) index = 0;
-    if (index >= tracks.length) index = tracks.length - 1;
-    return _trackSheet(tracks[index]);
+    final int trackIndex = _selectedTrackIndex();
+    if (trackIndex >= 0 && trackIndex < score.tracks.length) {
+      return _trackSheet(score.tracks[trackIndex]);
+    }
+    // 选中优先级最后一级：没有选中轨道/音符但项目已打开 → 乐谱级属性表。
+    return _scoreSheet(score);
   }
 
   CheckSheet _trackSheet(MusicTrack track) {
@@ -1204,6 +1280,71 @@ final class _MusicCheckController extends WorkbenchCheckController {
           value: track.clef,
           options: _clefOptions,
           enabled: false,
+        ),
+      ],
+    );
+  }
+
+  /// 乐谱级属性表：项目已打开、但没有选中轨道/音符时显示。
+  ///
+  /// 标题/速度/拍号有 `music_edit.dart` 的既有纯函数（可写）；调号没有既有
+  /// 纯函数、契约/校验器也没有可枚举的允许值 → 只读展示，`update` 显性拒绝。
+  CheckSheet _scoreSheet(MusicScore score) {
+    final String title = score.title.trim();
+    final List<int> timeSig = score.timeSig;
+    final int beats = timeSig.length == 2 && timeSig[0] > 0 ? timeSig[0] : 4;
+    final int beatUnit = timeSig.length == 2 && timeSig[1] > 0 ? timeSig[1] : 4;
+    final String beatUnitText = '$beatUnit';
+    // 当前分母不在常用选项里（如契约允许的 1/32）也要补进去：下拉要显示
+    // 真实值，不能显示成「选择」。
+    final List<String> beatUnitOptions = <String>[
+      if (!_timeSigDenOptions.contains(beatUnitText)) beatUnitText,
+      ..._timeSigDenOptions,
+    ];
+    return CheckSheet(
+      title: '乐谱「${title.isEmpty ? '未命名乐谱' : title}」',
+      subtitle: '来自 score.json',
+      kindLabel: '乐谱',
+      fields: <CheckField>[
+        CheckField(
+          key: 'title',
+          label: '标题',
+          kind: CheckFieldKind.text,
+          value: score.title,
+        ),
+        CheckField(
+          key: 'tempo',
+          label: '速度',
+          kind: CheckFieldKind.number,
+          value: score.tempo,
+          unit: 'BPM',
+          min: musicTempoMin,
+          max: musicTempoMax,
+        ),
+        CheckField(
+          key: 'timeSigBeats',
+          label: '拍号分子',
+          kind: CheckFieldKind.number,
+          value: beats,
+          min: _timeSigBeatsMin,
+          max: _timeSigBeatsMax,
+        ),
+        CheckField(
+          key: 'timeSigBeatUnit',
+          label: '拍号分母',
+          kind: CheckFieldKind.select,
+          value: beatUnitText,
+          options: beatUnitOptions,
+        ),
+        // 调号：core/music 没有改调号的纯函数，契约/校验器也没有可枚举的
+        // 允许值 → 只读展示当前值，update 显性拒绝（不在 widget 层发明语义）。
+        CheckField(
+          key: 'keySig',
+          label: '调号',
+          kind: CheckFieldKind.readOnly,
+          value: score.keySig,
+          enabled: false,
+          hint: '调号暂不支持编辑：没有对应的乐谱编辑函数，字段只读。',
         ),
       ],
     );
@@ -1328,11 +1469,12 @@ final class _MusicCheckController extends WorkbenchCheckController {
       }
     }
     final List<MusicTrack> tracks = score.tracks;
-    if (tracks.isEmpty) return null;
-    int index = _selectedTrackIndex();
-    if (index < 0) index = 0;
-    if (index >= tracks.length) index = tracks.length - 1;
-    return _trackEdit(tracks[index], index, key, value);
+    final int trackIndex = _selectedTrackIndex();
+    if (trackIndex >= 0 && trackIndex < tracks.length) {
+      return _trackEdit(tracks[trackIndex], trackIndex, key, value);
+    }
+    // 没有选中轨道/音符 → 乐谱级字段（标题/速度/拍号；调号无纯函数拒绝）。
+    return _scoreEdit(score, key, value);
   }
 
   ({MusicEditAction action, String message})? _trackEdit(
@@ -1387,6 +1529,85 @@ final class _MusicCheckController extends WorkbenchCheckController {
     }
     // clef：没有既有纯函数（music_edit 不含谱号编辑，补丁白名单不含 clef）。
     return null;
+  }
+
+  /// 乐谱级字段的一次最小编辑（标题/速度/拍号）。
+  ///
+  /// 非法值在构造编辑前就拒绝（返回 null → `update` false、不写盘）；拍号与
+  /// 已有小节内容冲突时由 [editScoreTimeSig] 抛 `time_sig_conflict`，经
+  /// `_applyEdit` 显性显示、同样不写盘。
+  ({MusicEditAction action, String message})? _scoreEdit(
+    MusicScore score,
+    String key,
+    Object? value,
+  ) {
+    if (key == 'title') {
+      if (value is! String) return null;
+      final String title = value.trim();
+      if (title.isEmpty || title.length > musicMaxTitleLength) return null;
+      return (
+        action: (MusicScore current) => editScoreTitle(current, title),
+        message: '乐谱标题已保存',
+      );
+    }
+    if (key == 'tempo') {
+      final int? tempo = _parseInt(value);
+      if (tempo == null || tempo < musicTempoMin || tempo > musicTempoMax) {
+        return null;
+      }
+      return (
+        action: (MusicScore current) => editScoreTempo(current, tempo),
+        message: '速度已保存',
+      );
+    }
+    if (key == 'timeSigBeats') {
+      final int? beats = _parseInt(value);
+      if (beats == null ||
+          beats < _timeSigBeatsMin ||
+          beats > _timeSigBeatsMax) {
+        return null;
+      }
+      final int beatUnit = _currentBeatUnitOf(score);
+      return (
+        action: (MusicScore current) =>
+            editScoreTimeSig(current, beats, beatUnit),
+        message: '拍号已保存',
+      );
+    }
+    if (key == 'timeSigBeatUnit') {
+      final int? beatUnit = _parseInt(value);
+      if (beatUnit == null || !_timeSigDenOptions.contains('$beatUnit')) {
+        return null;
+      }
+      final int beats = _currentBeatsOf(score);
+      return (
+        action: (MusicScore current) =>
+            editScoreTimeSig(current, beats, beatUnit),
+        message: '拍号已保存',
+      );
+    }
+    // keySig：没有既有纯函数 → 只读字段，拒绝写入且不写盘。
+    return null;
+  }
+
+  /// 只接受整数值（`120.0` 可以，`120.5` 不行），避免把小数写进整数契约字段。
+  static int? _parseInt(Object? value) {
+    if (value is int) return value;
+    if (value is num && value.isFinite && value == value.toInt()) {
+      return value.toInt();
+    }
+    if (value is String) return int.tryParse(value.trim());
+    return null;
+  }
+
+  static int _currentBeatsOf(MusicScore score) {
+    final List<int> timeSig = score.timeSig;
+    return timeSig.length == 2 && timeSig[0] > 0 ? timeSig[0] : 4;
+  }
+
+  static int _currentBeatUnitOf(MusicScore score) {
+    final List<int> timeSig = score.timeSig;
+    return timeSig.length == 2 && timeSig[1] > 0 ? timeSig[1] : 4;
   }
 
   ({MusicEditAction action, String message})? _noteEdit(

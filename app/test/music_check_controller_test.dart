@@ -1,12 +1,15 @@
-// 音乐工作台通用检查器（轨道 / 音符 → 右侧「检查」tab 属性表）回归测试。
+// 音乐工作台通用检查器（乐谱级 / 轨道 / 音符 → 右侧「检查」tab 属性表）回归测试。
 //
 // 覆盖：
-//  * 选中轨道 → 属性表（名称/乐器/音量/静音/谱号）字段与契约值；
-//  * 改音量/静音/名称 → update 返回 true 且 score.json 真落盘；
-//  * 非法值/缺失能力（音量越界、未知乐器、改谱号）→ false 且文件不变；
-//  * 选中音符 → 音符属性表（音高/八度/变音/时值/附点/休止），改音高 → 落盘；
+//  * 无选中（项目已打开）→ 乐谱级属性表（标题/速度/拍号/调号）的字段与契约值；
+//  * 选中轨道/音符 → 对应属性表，不回退到乐谱级；点「乐谱」条目回到乐谱级；
+//  * 宽屏壳层在场时内容区旧检查器降级只读，标题/速度仍可从右栏检查写回
+//    score.json（标题真的落盘变化）；
+//  * 改标题/速度/拍号 → update true 且 score.json 真落盘；非法速度（0/999）等
+//    → false 且文件逐字节不变；
+//  * 调号只读（core/music 没有既有纯函数）；拍号与已有小节内容冲突 → 拒绝；
 //  * 无项目/坏项目 → sheet 为 null；
-//  * 宽屏壳层在场时内容区旧检查器降级为只读摘要；独立工作台（无 provider）保持可编辑；
+//  * 独立工作台（无 provider）内容区检查器保持可编辑；
 //  * 卸载只清自己的控制器注册，不误清别的工作台。
 //
 // 全部用临时目录 + fake 播放面，不构造真 WebView。
@@ -82,6 +85,23 @@ MusicScore _score() => MusicScore(
           ],
         ),
       ],
+    ),
+  ],
+);
+
+/// 只有空小节（= 整小节休止）的乐谱：拍号改动不会被已有内容卡住，
+/// 用来固化「拍号有既有纯函数、可写」。
+MusicScore _emptyMeasureScore() => MusicScore(
+  title: '空小节练习曲',
+  tempo: 96,
+  timeSig: const <int>[4, 4],
+  keySig: 'C',
+  tracks: <MusicTrack>[
+    MusicTrack(
+      id: 'track_0',
+      name: '主旋律',
+      instrument: 'piano',
+      measures: <MusicMeasure>[MusicMeasure(id: 'm1', events: <MusicEvent>[])],
     ),
   ],
 );
@@ -187,6 +207,12 @@ Future<void> _settle(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 50));
 }
 
+/// 点左栏某条轨道（选中轨道 = 检查页换成轨道属性表）。
+Future<void> _selectTrack(WidgetTester tester, String trackId) async {
+  await tester.tap(find.byKey(ValueKey('music-track-$trackId')));
+  await _settle(tester);
+}
+
 Finder _staffHitFinder() => find.byKey(const ValueKey('music-staff-hit'));
 
 MusicStaffLayout _staffLayoutOf(WidgetTester tester, MusicScore score) =>
@@ -227,10 +253,216 @@ void main() {
 
   File scoreFile() => File('${temp.path}/study/score.json');
 
-  testWidgets('选中轨道 → 属性表字段齐全；切轨道跟着换；宽屏内容区检查器降级只读', (tester) async {
+  testWidgets('无选中（项目已打开）→ 乐谱级属性表；选中轨道不回退；点「乐谱」条目回到乐谱级', (tester) async {
     await musicStore.save('study', _score());
     await _pumpWorkspace(tester, musicStore, appStore: appStore);
     final WorkbenchCheckController controller = controllerOf();
+
+    // 项目刚打开、没有选中轨道/音符 → 乐谱级属性表。
+    final CheckSheet? sheet = controller.sheet;
+    expect(sheet, isNotNull);
+    expect(sheet!.title, '乐谱「检查器练习曲」');
+    expect(sheet.kindLabel, '乐谱');
+    expect(sheet.subtitle, '来自 score.json');
+    expect(sheet.fields.map((CheckField field) => field.key).toList(), <String>[
+      'title',
+      'tempo',
+      'timeSigBeats',
+      'timeSigBeatUnit',
+      'keySig',
+    ]);
+    expect(sheet.field('title')!.value, '检查器练习曲');
+    expect(sheet.field('tempo')!.value, 96);
+    expect(sheet.field('tempo')!.min, 20);
+    expect(sheet.field('tempo')!.max, 300);
+    expect(sheet.field('tempo')!.unit, 'BPM');
+    expect(sheet.field('timeSigBeats')!.value, 4);
+    expect(sheet.field('timeSigBeats')!.min, 1);
+    expect(sheet.field('timeSigBeats')!.max, 16);
+    expect(sheet.field('timeSigBeatUnit')!.value, '4');
+    expect(sheet.field('timeSigBeatUnit')!.options, <String>[
+      '2',
+      '4',
+      '8',
+      '16',
+    ]);
+    expect(sheet.field('keySig')!.value, 'C');
+    expect(sheet.field('keySig')!.kind, CheckFieldKind.readOnly);
+    expect(
+      sheet.field('keySig')!.enabled,
+      isFalse,
+      reason: '调号没有既有纯函数/可枚举校验器允许值，字段显性只读',
+    );
+    expect(sheet.field('keySig')!.hint, isNotEmpty);
+
+    // 宽屏 + 壳层在场：内容区旧检查器降级为只读摘要（编辑走右栏检查 tab）。
+    expect(find.byKey(const ValueKey('music-inspector')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('music-inspector-readonly-hint')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('music-title-field')))
+          .enabled,
+      isFalse,
+    );
+    // 左栏「乐谱」条目在场（乐谱级选中态）。
+    expect(find.byKey(const ValueKey('music-score-entry')), findsOneWidget);
+
+    // 选中第二条轨道：检查 tab 换成轨道表，不回退到乐谱级。
+    int notifications = 0;
+    controller.addListener(() => notifications += 1);
+    await _selectTrack(tester, 'track_1');
+    expect(notifications, greaterThan(0), reason: '选中变化必须通知检查面板重取');
+    final CheckSheet? trackSheet = controller.sheet;
+    expect(trackSheet, isNotNull);
+    expect(trackSheet!.title, '轨道「低音」');
+    expect(trackSheet.kindLabel, '轨道');
+    expect(trackSheet.subtitle, '来自 score.json');
+    expect(trackSheet.field('instrument')!.value, 'bass');
+    expect(trackSheet.field('muted')!.value, isTrue);
+
+    // 轨道选中时乐谱级字段不可写（同一属性不会两处同时生效）。
+    final String before = scoreFile().readAsStringSync();
+    expect(await controller.update('title', '不该落盘'), isFalse);
+    expect(scoreFile().readAsStringSync(), before);
+    expect((await musicStore.read('study')).score.title, '检查器练习曲');
+
+    // 点左栏「乐谱」条目 → 回到乐谱级属性表。
+    await tester.tap(find.byKey(const ValueKey('music-score-entry')));
+    await _settle(tester);
+    expect(controller.sheet!.kindLabel, '乐谱');
+    expect(controller.sheet!.title, '乐谱「检查器练习曲」');
+
+    await _settle(tester);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('宽屏：内容区检查器只读降级后，右栏检查仍可改标题 → score.json 真的变化', (tester) async {
+    await musicStore.save('study', _score());
+    await _pumpWorkspace(tester, musicStore, appStore: appStore);
+    final WorkbenchCheckController controller = controllerOf();
+    expect(controller.sheet!.kindLabel, '乐谱');
+
+    // 内容区旧检查器（宽屏）只读：标题输入框禁用。
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('music-title-field')))
+          .enabled,
+      isFalse,
+      reason: '宽屏下内容区检查器降级只读，主编辑入口是右栏检查 tab',
+    );
+
+    final String before = scoreFile().readAsStringSync();
+    expect(await controller.update('title', '宽屏新标题'), isTrue);
+    expect(scoreFile().readAsStringSync(), isNot(before), reason: '标题必须真的落盘');
+    final Map<String, Object?> json =
+        jsonDecode(scoreFile().readAsStringSync()) as Map<String, Object?>;
+    expect(json['title'], '宽屏新标题');
+    final MusicProjectSnapshot reread = await musicStore.read('study');
+    expect(reread.score.title, '宽屏新标题');
+    expect(reread.validation.verified, isTrue);
+    expect(controller.sheet!.title, '乐谱「宽屏新标题」', reason: '成功后属性表刷新');
+    expect(controller.sheet!.field('title')!.value, '宽屏新标题');
+
+    // 非法标题（空/超长）→ 拒绝且不再写盘。
+    final String after = scoreFile().readAsStringSync();
+    expect(await controller.update('title', '   '), isFalse);
+    expect(await controller.update('title', 'x' * 81), isFalse);
+    expect(scoreFile().readAsStringSync(), after);
+
+    await _settle(tester);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('改速度 → 落盘；非法速度（0 / 999）→ update false 且文件逐字节不变', (tester) async {
+    await musicStore.save('study', _score());
+    await _pumpWorkspace(tester, musicStore, appStore: appStore);
+    final WorkbenchCheckController controller = controllerOf();
+    expect(controller.sheet!.kindLabel, '乐谱');
+    expect(controller.sheet!.field('tempo')!.value, 96);
+
+    final String before = scoreFile().readAsStringSync();
+    expect(await controller.update('tempo', 0), isFalse, reason: '速度 0 越界');
+    expect(await controller.update('tempo', 999), isFalse, reason: '速度 999 越界');
+    expect(await controller.update('tempo', 19), isFalse);
+    expect(await controller.update('tempo', 301), isFalse);
+    expect(await controller.update('tempo', 'abc'), isFalse);
+    expect(scoreFile().readAsStringSync(), before, reason: '任何非法速度都不写盘');
+
+    expect(await controller.update('tempo', 120), isTrue);
+    final Map<String, Object?> json =
+        jsonDecode(scoreFile().readAsStringSync()) as Map<String, Object?>;
+    expect(json['tempo'], 120);
+    final MusicProjectSnapshot reread = await musicStore.read('study');
+    expect(reread.score.tempo, 120);
+    expect(reread.validation.verified, isTrue);
+    expect(controller.sheet!.field('tempo')!.value, 120, reason: '成功后属性表刷新');
+
+    await _settle(tester);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('拍号：既有纯函数可写（空小节乐谱落盘）；非法分母/分子 → false 且文件不变', (tester) async {
+    await musicStore.save('study', _emptyMeasureScore());
+    await _pumpWorkspace(tester, musicStore, appStore: appStore);
+    final WorkbenchCheckController controller = controllerOf();
+    expect(controller.sheet!.kindLabel, '乐谱');
+    expect(controller.sheet!.field('timeSigBeats')!.value, 4);
+    expect(controller.sheet!.field('timeSigBeatUnit')!.value, '4');
+
+    // 分子 4 → 3（空小节不冲突）→ 落盘。
+    expect(await controller.update('timeSigBeats', 3), isTrue);
+    final Map<String, Object?> first =
+        jsonDecode(scoreFile().readAsStringSync()) as Map<String, Object?>;
+    expect(first['timeSig'], <Object?>[3, 4]);
+    expect((await musicStore.read('study')).score.timeSig, <int>[3, 4]);
+    expect(controller.sheet!.field('timeSigBeats')!.value, 3);
+
+    // 分母 4 → 8 → 落盘。
+    expect(await controller.update('timeSigBeatUnit', '8'), isTrue);
+    final Map<String, Object?> second =
+        jsonDecode(scoreFile().readAsStringSync()) as Map<String, Object?>;
+    expect(second['timeSig'], <Object?>[3, 8]);
+    expect((await musicStore.read('study')).score.timeSig, <int>[3, 8]);
+    expect(controller.sheet!.field('timeSigBeatUnit')!.value, '8');
+
+    // 契约外分母 / 越界分子 → 拒绝且文件不变。
+    final String before = scoreFile().readAsStringSync();
+    expect(await controller.update('timeSigBeatUnit', '5'), isFalse);
+    expect(await controller.update('timeSigBeatUnit', 1), isFalse);
+    expect(await controller.update('timeSigBeats', 0), isFalse);
+    expect(await controller.update('timeSigBeats', 17), isFalse);
+    expect(scoreFile().readAsStringSync(), before, reason: '非法拍号不写盘');
+
+    // 调号：没有既有纯函数 → 只读，update 显性拒绝且不写盘。
+    expect(await controller.update('keySig', 'G'), isFalse);
+    expect(scoreFile().readAsStringSync(), before);
+
+    await _settle(tester);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('拍号改动被已有内容的小节拒绝（time_sig_conflict）→ false 且文件不变', (tester) async {
+    await musicStore.save('study', _score());
+    await _pumpWorkspace(tester, musicStore, appStore: appStore);
+    final WorkbenchCheckController controller = controllerOf();
+    final String before = scoreFile().readAsStringSync();
+
+    // 两轨小节都已写满 4/4，改成 3 拍会让已有小节时值对不上 → 显性拒绝。
+    expect(await controller.update('timeSigBeats', 3), isFalse);
+    expect(scoreFile().readAsStringSync(), before, reason: '冲突不写盘');
+    await _settle(tester);
+    expect(find.textContaining('对不上'), findsWidgets, reason: '失败原因要显性显示');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('选中轨道 → 轨道属性表；改音量/静音/名称 → update true 且落盘', (tester) async {
+    await musicStore.save('study', _score());
+    await _pumpWorkspace(tester, musicStore, appStore: appStore);
+    final WorkbenchCheckController controller = controllerOf();
+    await _selectTrack(tester, 'track_0');
 
     final CheckSheet? sheet = controller.sheet;
     expect(sheet, isNotNull);
@@ -258,37 +490,6 @@ void main() {
       reason: '谱号没有既有纯函数/补丁路径，字段显性只读',
     );
 
-    // 宽屏 + 壳层在场：内容区旧检查器降级为只读摘要（编辑走右栏检查 tab）。
-    expect(find.byKey(const ValueKey('music-inspector')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('music-inspector-readonly-hint')),
-      findsOneWidget,
-    );
-    expect(
-      tester
-          .widget<TextField>(find.byKey(const ValueKey('music-title-field')))
-          .enabled,
-      isFalse,
-    );
-
-    // 切到第二条轨道：检查 tab 跟着换对象（静音值来自 score.json）。
-    int notifications = 0;
-    controller.addListener(() => notifications += 1);
-    await tester.tap(find.byKey(const ValueKey('music-track-track_1')));
-    await _settle(tester);
-    expect(notifications, greaterThan(0), reason: '选中变化必须通知检查面板重取');
-    final CheckSheet? second = controller.sheet;
-    expect(second, isNotNull);
-    expect(second!.title, '轨道「低音」');
-    expect(second.field('instrument')!.value, 'bass');
-    expect(second.field('muted')!.value, isTrue);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('改音量/静音/名称 → update true 且 score.json 落盘变化', (tester) async {
-    await musicStore.save('study', _score());
-    await _pumpWorkspace(tester, musicStore, appStore: appStore);
-    final WorkbenchCheckController controller = controllerOf();
     final String before = scoreFile().readAsStringSync();
 
     // 音量（既有纯函数 editTrackVolume）。
@@ -325,10 +526,11 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('非法值/缺失能力 → update false 且文件不变', (tester) async {
+  testWidgets('非法轨道值/缺失能力 → update false 且文件不变', (tester) async {
     await musicStore.save('study', _score());
     await _pumpWorkspace(tester, musicStore, appStore: appStore);
     final WorkbenchCheckController controller = controllerOf();
+    await _selectTrack(tester, 'track_0');
     final String before = scoreFile().readAsStringSync();
 
     expect(await controller.update('volume', 1.5), isFalse, reason: '音量 >1');
@@ -354,7 +556,8 @@ void main() {
     await musicStore.save('study', _score());
     await _pumpWorkspace(tester, musicStore, appStore: appStore);
     final WorkbenchCheckController controller = controllerOf();
-    expect(controller.sheet!.kindLabel, '轨道');
+    // 未选中任何轨道/音符时是乐谱级；点谱面音符后才是音符表。
+    expect(controller.sheet!.kindLabel, '乐谱');
 
     final MusicStaffLayout layout = _staffLayoutOf(tester, _score());
     await tester.tapAt(_staffPointOnFirstNote(tester, layout));
