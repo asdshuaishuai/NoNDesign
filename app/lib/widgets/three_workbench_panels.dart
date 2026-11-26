@@ -11,6 +11,58 @@ import 'package:material_ui/material_ui.dart';
 
 import '../core/theme.dart';
 
+/// 面板头部统一规格：左侧大纲 / 右侧检查器 / 设计面左栏都用同一个高度与内边距。
+///
+/// 44 = NonSpace.xxl(32) + NonSpace.md(12)：不引入新的魔法数，也不为两个面板
+/// 各写一套「差不多」的头部。新增面板必须复用 [_PanelHeader]。
+const double panelHeaderHeight = NonSpace.xxl + NonSpace.md;
+
+/// 面板头部（标题 > 关键值 > 说明 的第一级）：固定高度 + 左右 md 内边距 +
+/// 底边 1px 分隔（就是面板唯一的外边框，不再叠第二层 Divider）。
+class _PanelHeader extends StatelessWidget {
+  const _PanelHeader({
+    required this.headKey,
+    required this.icon,
+    required this.title,
+    this.trailing,
+  });
+
+  final Key headKey;
+  final IconData icon;
+  final String title;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Container(
+      key: headKey,
+      height: panelHeaderHeight,
+      padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: p.line)),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(icon, size: 13, color: p.ink4),
+          const SizedBox(width: NonSpace.sm),
+          // 区块标题统一 NonType.bodyStrong；列表/说明各自低一档，见下面注释。
+          Text(
+            title,
+            style: NonType.of(
+              NonType.bodyStrong,
+              color: p.ink,
+              weight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
+          ?trailing,
+        ],
+      ),
+    );
+  }
+}
+
 /// 大纲条目种类（只做 layout/检查器分区，不是场景事实源）。
 enum ThreeOutlinerKind { component, material, camera, node }
 
@@ -295,39 +347,25 @@ class ThreeOutlinerPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 10, 8),
-            child: Row(
-              children: <Widget>[
-                Icon(Icons.account_tree_outlined, size: 13, color: p.ink4),
-                const SizedBox(width: 6),
-                Text(
-                  '场景大纲',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: p.ink,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '${items.length}',
-                  style: TextStyle(fontSize: 10, color: p.ink4),
-                ),
-              ],
+          _PanelHeader(
+            headKey: const ValueKey('three-outliner-head'),
+            icon: Icons.account_tree_outlined,
+            title: '场景大纲',
+            trailing: Text(
+              '${items.length}',
+              style: NonType.of(NonType.caption, color: p.ink4),
             ),
           ),
-          Divider(height: 1, color: p.line),
           Expanded(
             child: items.isEmpty
                 ? Center(
                     child: Padding(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(NonSpace.lg),
                       child: Text(
                         '还没有场景内容\n先让 NaN 生成规格/场景',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: NonType.caption,
                           height: 1.5,
                           color: p.ink4,
                         ),
@@ -335,9 +373,17 @@ class ThreeOutlinerPanel extends StatelessWidget {
                     ),
                   )
                 : ListView.builder(
+                    // 行高一致（单行标签 + 右侧 mono 详情）：固定 itemExtent
+                    // 让滚动只构建/重绘可视行，且随系统字号缩放一起变高，
+                    // 不会出现「文字变大压出黄条」。
+                    itemExtent:
+                        MediaQuery.textScalerOf(context).scale(NonType.body) *
+                            NonType.lineBody +
+                        NonSpace.lg +
+                        NonSpace.xxs,
                     padding: const EdgeInsets.symmetric(
-                      vertical: 6,
-                      horizontal: 6,
+                      vertical: NonSpace.sm,
+                      horizontal: NonSpace.sm,
                     ),
                     itemCount: items.length,
                     itemBuilder: (context, index) {
@@ -345,12 +391,12 @@ class ThreeOutlinerPanel extends StatelessWidget {
                       final active = item.id == selectedId;
                       return InkWell(
                         key: ValueKey('three-outliner-${item.id}'),
-                        borderRadius: BorderRadius.circular(7),
+                        borderRadius: BorderRadius.circular(NonRadius.sm),
                         onTap: () => onSelect(item),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 7,
+                            horizontal: NonSpace.sm,
+                            vertical: NonSpace.sm,
                           ),
                           child: Row(
                             children: <Widget>[
@@ -359,14 +405,14 @@ class ThreeOutlinerPanel extends StatelessWidget {
                                 size: 13,
                                 color: active ? p.accent : p.ink4,
                               ),
-                              const SizedBox(width: 7),
+                              const SizedBox(width: NonSpace.sm),
                               Expanded(
                                 child: Text(
                                   item.label,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: 12,
+                                    fontSize: NonType.body,
                                     color: active ? p.ink : p.ink2,
                                     fontWeight: active
                                         ? FontWeight.w600
@@ -380,7 +426,7 @@ class ThreeOutlinerPanel extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: 9,
+                                    fontSize: NonType.micro,
                                     fontFamily: 'Menlo',
                                     color: p.ink4,
                                   ),
@@ -680,16 +726,16 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
     bool numeric = false,
   }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 9),
+      padding: const EdgeInsets.only(bottom: NonSpace.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(field, style: TextStyle(fontSize: 10, color: p.ink4)),
-          const SizedBox(height: 3),
+          Text(field, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
+          const SizedBox(height: NonSpace.xs),
           TextField(
             key: ValueKey('three-inspector-field-$field'),
             controller: controller,
-            style: TextStyle(fontSize: 11, color: p.ink),
+            style: TextStyle(fontSize: NonType.body, color: p.ink),
             cursorColor: p.accent,
             keyboardType: numeric
                 ? const TextInputType.numberWithOptions(decimal: true)
@@ -697,21 +743,21 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
             decoration: InputDecoration(
               isDense: true,
               hintText: hint,
-              hintStyle: TextStyle(fontSize: 10, color: p.ink4),
+              hintStyle: TextStyle(fontSize: NonType.micro, color: p.ink4),
               contentPadding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 7,
+                horizontal: NonSpace.sm,
+                vertical: NonSpace.sm,
               ),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(NonRadius.sm),
                 borderSide: BorderSide(color: p.line),
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(NonRadius.sm),
                 borderSide: BorderSide(color: p.line),
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(NonRadius.sm),
                 borderSide: BorderSide(color: p.accent),
               ),
             ),
@@ -729,18 +775,19 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
     ValueChanged<double> onChanged,
   ) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
+      padding: const EdgeInsets.only(bottom: NonSpace.xxs),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Row(
             children: <Widget>[
-              Text(field, style: TextStyle(fontSize: 10, color: p.ink4)),
+              Text(field, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
               const Spacer(),
               Text(
                 value.toStringAsFixed(2),
                 style: TextStyle(
-                  fontSize: 10,
+                  // 关键值比标签高一档：滑块数值是「值」，不是说明。
+                  fontSize: NonType.body,
                   fontFamily: 'Menlo',
                   color: p.ink2,
                 ),
@@ -816,12 +863,12 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        const SizedBox(height: 4),
-        Text('其他属性', style: TextStyle(fontSize: 10, color: p.ink4)),
-        const SizedBox(height: 4),
+        const SizedBox(height: NonSpace.xs),
+        Text('其他属性', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
+        const SizedBox(height: NonSpace.xs),
         for (final entry in rows)
           Padding(
-            padding: const EdgeInsets.only(bottom: 5),
+            padding: const EdgeInsets.only(bottom: NonSpace.xs),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -829,16 +876,17 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
                   width: 78,
                   child: Text(
                     entry.key,
-                    style: TextStyle(fontSize: 10, color: p.ink4),
+                    style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                   ),
                 ),
                 Expanded(
                   child: Text(
                     '${entry.value}',
                     style: TextStyle(
-                      fontSize: 11,
+                      // 关键值统一 NonType.body（比标签高一档、比标题低一档）。
+                      fontSize: NonType.body,
                       color: p.ink2,
-                      height: 1.35,
+                      height: NonType.lineCaption,
                     ),
                   ),
                 ),
@@ -854,7 +902,7 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
         widget.item != null && widget.item!.kind != ThreeOutlinerKind.node;
     final bool canSave = editable && _dirty && widget.onSaveEdit != null;
     return Padding(
-      padding: const EdgeInsets.only(top: 2),
+      padding: const EdgeInsets.only(top: NonSpace.xxs),
       child: Row(
         children: <Widget>[
           TextButton(
@@ -863,10 +911,10 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
             style: TextButton.styleFrom(
               foregroundColor: p.ink3,
               visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
               minimumSize: const Size(0, 30),
             ),
-            child: const Text('重置', style: TextStyle(fontSize: 11)),
+            child: const Text('重置', style: TextStyle(fontSize: NonType.caption)),
           ),
           const Spacer(),
           FilledButton(
@@ -874,9 +922,9 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
             onPressed: canSave ? _save : null,
             style: FilledButton.styleFrom(
               visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: NonSpace.md, vertical: NonSpace.sm),
               minimumSize: const Size(0, 30),
-              textStyle: const TextStyle(fontSize: 11),
+              textStyle: const TextStyle(fontSize: NonType.caption),
             ),
             child: const Text('保存属性'),
           ),
@@ -895,24 +943,11 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 10, 8),
-            child: Row(
-              children: <Widget>[
-                Icon(Icons.tune, size: 13, color: p.ink4),
-                const SizedBox(width: 6),
-                Text(
-                  '检查器',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: p.ink,
-                  ),
-                ),
-              ],
-            ),
+          _PanelHeader(
+            headKey: const ValueKey('three-inspector-head'),
+            icon: Icons.tune,
+            title: '检查器',
           ),
-          Divider(height: 1, color: p.line),
           if (item == null)
             _InspectorEmpty(
               p: p,
@@ -922,34 +957,34 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
           else
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(NonSpace.md),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
                       item.label,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: NonType.bodyStrong,
                         fontWeight: FontWeight.w700,
                         color: p.ink,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: NonSpace.xs),
                     Text(switch (item.kind) {
                       ThreeOutlinerKind.component => '组件',
                       ThreeOutlinerKind.material => '材质',
                       ThreeOutlinerKind.camera => '相机',
                       ThreeOutlinerKind.node => '节点',
-                    }, style: TextStyle(fontSize: 10, color: p.ink4)),
-                    const SizedBox(height: 10),
+                    }, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
+                    const SizedBox(height: NonSpace.md),
                     if (item.kind == ThreeOutlinerKind.node) ...<Widget>[
                       _readOnlyRows(p, item),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: NonSpace.sm),
                       Text(
                         '场景节点属性编辑在场景编辑器批次接入；这里只做只读投影。',
                         style: TextStyle(
-                          fontSize: 10,
-                          height: 1.45,
+                          fontSize: NonType.caption,
+                          height: NonType.lineBody,
                           color: p.ink4,
                         ),
                       ),
@@ -960,31 +995,31 @@ class _ThreeNodeInspectorState extends State<ThreeNodeInspector> {
                         Text(
                           '只读预览：打开项目后可以保存属性。',
                           style: TextStyle(
-                            fontSize: 10,
-                            height: 1.45,
+                            fontSize: NonType.caption,
+                            height: NonType.lineBody,
                             color: p.ink4,
                           ),
                         ),
                       if (_localError != null)
                         Padding(
                           key: const ValueKey('three-inspector-error'),
-                          padding: const EdgeInsets.only(top: 2, bottom: 6),
+                          padding: const EdgeInsets.only(top: NonSpace.xxs, bottom: NonSpace.sm),
                           child: Text(
                             _localError!,
                             style: TextStyle(
-                              fontSize: 10,
+                              fontSize: NonType.micro,
                               height: 1.4,
                               color: p.danger,
                             ),
                           ),
                         ),
                       _actions(p),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: NonSpace.sm),
                       Text(
                         '保存后写回项目规范，不改场景代码；重新生成时生效。',
                         style: TextStyle(
-                          fontSize: 10,
-                          height: 1.45,
+                          fontSize: NonType.caption,
+                          height: NonType.lineBody,
                           color: p.ink4,
                         ),
                       ),
@@ -1014,25 +1049,29 @@ class _InspectorEmpty extends StatelessWidget {
   Widget build(BuildContext context) {
     return Expanded(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(NonSpace.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
               '场景概览',
               style: TextStyle(
-                fontSize: 13,
+                fontSize: NonType.bodyStrong,
                 fontWeight: FontWeight.w700,
                 color: p.ink,
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             _kv(p, '当前层', currentPass.isEmpty ? '—' : currentPass),
             _kv(p, '场景代码', '$sceneChars 字符'),
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             Text(
               '在左侧大纲选择组件/材质/相机查看并编辑属性。',
-              style: TextStyle(fontSize: 10, height: 1.45, color: p.ink4),
+              style: TextStyle(
+                fontSize: NonType.caption,
+                height: NonType.lineBody,
+                color: p.ink4,
+              ),
             ),
           ],
         ),
@@ -1041,25 +1080,33 @@ class _InspectorEmpty extends StatelessWidget {
   }
 
   Widget _kv(NonPalette p, String key, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
+    padding: const EdgeInsets.only(bottom: NonSpace.sm),
     child: Row(
       children: <Widget>[
         SizedBox(
           width: 78,
-          child: Text(key, style: TextStyle(fontSize: 10, color: p.ink4)),
+          child: Text(key, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
         ),
         Expanded(
-          child: Text(value, style: TextStyle(fontSize: 11, color: p.ink2)),
+          child: Text(
+            value,
+            style: TextStyle(fontSize: NonType.body, color: p.ink2),
+          ),
         ),
       ],
     ),
   );
 }
 
+/// 3D 内容区底部状态条高度：与 `WorkbenchLayout(three).bottomBarHeight`
+/// （34 = NonSpace.xxl + NonSpace.xxs）保持同一档，widget 不再另写 30。
+const double threeWorkbenchStatusBarHeight = NonSpace.xxl + NonSpace.xxs;
+
 /// 3D 内容区底部状态条（不是共享外壳的 StatusBar）。
 class ThreeWorkbenchStatusBar extends StatelessWidget {
   const ThreeWorkbenchStatusBar({
     super.key,
+    this.height = threeWorkbenchStatusBarHeight,
     required this.currentPass,
     required this.blocked,
     required this.attempts,
@@ -1071,13 +1118,16 @@ class ThreeWorkbenchStatusBar extends StatelessWidget {
   final int attempts;
   final String? gateVerdict;
 
+  /// 高度由宿主按 `WorkbenchLayout.bottomBarHeight` 传入（默认 34）。
+  final double height;
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     return Container(
       key: const ValueKey('three-workbench-status'),
-      height: 30,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      height: height,
+      padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
       decoration: BoxDecoration(
         color: p.bgElevated,
         border: Border(top: BorderSide(color: p.line)),
@@ -1089,21 +1139,21 @@ class ThreeWorkbenchStatusBar extends StatelessWidget {
             size: 12,
             color: blocked ? p.warn : p.ink4,
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: NonSpace.sm),
           Text(
             blocked
                 ? '已阻塞 · $currentPass'
                 : '当前层 · ${currentPass.isEmpty ? '—' : currentPass}',
-            style: TextStyle(fontSize: 11, color: blocked ? p.warn : p.ink3),
+            style: TextStyle(fontSize: NonType.caption, color: blocked ? p.warn : p.ink3),
           ),
-          const SizedBox(width: 12),
-          Text('尝试 $attempts', style: TextStyle(fontSize: 10, color: p.ink4)),
+          const SizedBox(width: NonSpace.md),
+          Text('尝试 $attempts', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
           const Spacer(),
           if (gateVerdict != null)
             Text(
               '门 · $gateVerdict',
               style: TextStyle(
-                fontSize: 10,
+                fontSize: NonType.micro,
                 color: gateVerdict == 'ERROR' ? p.warn : p.ink4,
               ),
             ),

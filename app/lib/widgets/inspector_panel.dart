@@ -83,7 +83,7 @@ class _InspectorState extends State<Inspector> {
     }
     if (store.activeBoard != null) _ensureNodeInteractions(store, store.activeBoard!);
     return ListView(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(NonSpace.md),
       children: [
         if (node != null) ..._nodeInspector(context, store, node) else ..._boardInspector(context, store),
       ],
@@ -101,22 +101,22 @@ class _InspectorState extends State<Inspector> {
     return [
       if (store.selectedNodes.length >= 2) ...[
         Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(9),
+          margin: const EdgeInsets.only(bottom: NonSpace.md),
+          padding: const EdgeInsets.all(NonSpace.sm),
           decoration: BoxDecoration(
             color: p.accentSoft.withValues(alpha: 0.5),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(NonRadius.md),
             border: Border.all(color: p.accent.withValues(alpha: 0.25)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('多选 · ${store.selectedNodes.length} 个节点',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: p.accent)),
-              const SizedBox(height: 7),
+                  style: TextStyle(fontSize: NonType.caption, fontWeight: FontWeight.w600, color: p.accent)),
+              const SizedBox(height: NonSpace.sm),
               Wrap(
-                spacing: 4,
-                runSpacing: 4,
+                spacing: NonSpace.xs,
+                runSpacing: NonSpace.xs,
                 children: [
                   for (final (label, mode) in [
                     ('左对齐', 'left'), ('右对齐', 'right'),
@@ -127,7 +127,7 @@ class _InspectorState extends State<Inspector> {
                         label: label,
                         icon: Icons.border_inner,
                         onTap: () => store.alignNodes(store.selectedNodes, mode)),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: NonSpace.xs),
                   _MiniButton(label: '编组', icon: Icons.workspaces_outline, onTap: () async {
                     final gid = 'grp_${DateTime.now().millisecondsSinceEpoch % 100000}';
                     if (await store.groupNodes(gid, store.selectedNodes)) {
@@ -146,20 +146,20 @@ class _InspectorState extends State<Inspector> {
           Container(
             width: 32,
             height: 32,
-            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(NonRadius.md)),
             child: Icon(Icons.crop_square, size: 14, color: p.accent),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: NonSpace.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(node.text.trim().isEmpty ? node.id : node.text.trim(),
                     maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
+                    style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink)),
                 Text('${node.component.isEmpty ? node.kind : node.component} · ${node.id}',
                     maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                    style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
               ],
             ),
           ),
@@ -167,25 +167,25 @@ class _InspectorState extends State<Inspector> {
           IconAction(icon: Icons.delete_outline, tooltip: '删除', size: 24, onTap: () => store.deleteNode(node.id)),
         ],
       ),
-      const SizedBox(height: 14),
+      const SizedBox(height: NonSpace.lg),
       const SectionLabel('变换与层级'),
-      const SizedBox(height: 6),
+      const SizedBox(height: NonSpace.sm),
       Row(
         children: [
           _MiniButton(label: '上移', icon: Icons.arrow_upward, onTap: () => store.reorderNode(node.id, 'up')),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           _MiniButton(label: '下移', icon: Icons.arrow_downward, onTap: () => store.reorderNode(node.id, 'down')),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           _MiniButton(label: '置顶', icon: Icons.vertical_align_top, onTap: () => store.reorderNode(node.id, 'front')),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           _MiniButton(label: '置底', icon: Icons.vertical_align_bottom, onTap: () => store.reorderNode(node.id, 'back')),
         ],
       ),
-      const SizedBox(height: 5),
+      const SizedBox(height: NonSpace.xs),
       Row(
         children: [
           _MiniButton(label: '翻转 H', icon: Icons.flip, onTap: () => store.flipNode(node.id, 'h')),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           _MiniButton(label: '翻转 V', icon: Icons.flip, onTap: () => store.flipNode(node.id, 'v')),
           const Spacer(),
           _MiniButton(label: '让 NaN 改', icon: Icons.auto_awesome, accent: true, onTap: () {
@@ -194,28 +194,28 @@ class _InspectorState extends State<Inspector> {
           }),
         ],
       ),
-      const SizedBox(height: 14),
+      const SizedBox(height: NonSpace.lg),
       const SectionLabel('布局'),
-      const SizedBox(height: 6),
+      const SizedBox(height: NonSpace.sm),
       Row(
         children: [
           _NumField(label: 'X', value: node.x, onCommit: (v) => store.moveNode(node.id, v, node.y)),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           _NumField(label: 'Y', value: node.y, onCommit: (v) => store.moveNode(node.id, node.x, v)),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           _NumField(label: 'W', value: node.w, onCommit: (v) => store.updateNode(node.id, {'w': v})),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           _NumField(label: 'H', value: node.h, onCommit: (v) => store.updateNode(node.id, {'h': v})),
         ],
       ),
-      const SizedBox(height: 8),
+      const SizedBox(height: NonSpace.sm),
       Row(
         children: [
           IconAction(icon: Icons.format_align_left, tooltip: '左对齐', size: 24, onTap: () => store.updateNode(node.id, {'align': 'left'})),
           IconAction(icon: Icons.format_align_center, tooltip: '居中', size: 24, onTap: () => store.updateNode(node.id, {'align': 'center'})),
           IconAction(icon: Icons.format_align_right, tooltip: '右对齐', size: 24, onTap: () => store.updateNode(node.id, {'align': 'right'})),
           const Spacer(),
-          Text('可见', style: TextStyle(fontSize: 11, color: p.ink3)),
+          Text('可见', style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
           Switch(
             value: node.style.visible,
             onChanged: (v) => store.updateNode(node.id, {'visible': v}),
@@ -223,38 +223,38 @@ class _InspectorState extends State<Inspector> {
           ),
         ],
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: NonSpace.md),
       SectionLabel('布局意图', trailing: Pill(label: '整板生效', color: p.ink4)),
-      const SizedBox(height: 6),
+      const SizedBox(height: NonSpace.sm),
       const _ConstrainBar(),
-      const SizedBox(height: 12),
+      const SizedBox(height: NonSpace.md),
       const SectionLabel('外观'),
-      const SizedBox(height: 6),
+      const SizedBox(height: NonSpace.sm),
       _ColorRow(label: '填充', value: node.style.fill, onCommit: (v) => store.updateNode(node.id, {'fill': v})),
-      const SizedBox(height: 5),
+      const SizedBox(height: NonSpace.xs),
       _ColorRow(label: '文字', value: node.style.textColor, onCommit: (v) => store.updateNode(node.id, {'text_color': v})),
-      const SizedBox(height: 5),
+      const SizedBox(height: NonSpace.xs),
       Row(
         children: [
           _NumField(label: '圆角', value: node.style.radius, onCommit: (v) => store.updateNode(node.id, {'radius': v})),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           _NumField(label: '字号', value: node.style.fontSize, onCommit: (v) => store.updateNode(node.id, {'font_size': v})),
         ],
       ),
-      const SizedBox(height: 5),
+      const SizedBox(height: NonSpace.xs),
       Row(
         children: [
-          Text('透明度', style: TextStyle(fontSize: 11, color: p.ink3)),
+          Text('透明度', style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
           Expanded(
             child: _OpacitySlider(
               value: node.style.opacity,
               onCommit: (v) => store.updateNode(node.id, {'opacity': v}),
             ),
           ),
-          Text('${(node.style.opacity * 100).round()}%', style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+          Text('${(node.style.opacity * 100).round()}%', style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
         ],
       ),
-      const SizedBox(height: 5),
+      const SizedBox(height: NonSpace.xs),
       Row(
         children: [
           Expanded(
@@ -265,7 +265,7 @@ class _InspectorState extends State<Inspector> {
               onChanged: (v) => store.updateNode(node.id, {'weight': v}),
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           Expanded(
             child: _SelectField(
               label: '对齐',
@@ -276,7 +276,7 @@ class _InspectorState extends State<Inspector> {
           ),
         ],
       ),
-      const SizedBox(height: 5),
+      const SizedBox(height: NonSpace.xs),
       // 阴影档位（引擎 e1/e2/e3 三档海拔，原版同词表）。
       _SelectField(
         label: '阴影',
@@ -284,15 +284,15 @@ class _InspectorState extends State<Inspector> {
         options: const ['none', 'e1', 'e2', 'e3'],
         onChanged: (v) => store.updateNode(node.id, {'shadow': v}),
       ),
-      const SizedBox(height: 5),
+      const SizedBox(height: NonSpace.xs),
       Row(
         children: [
           _NumField(label: '描边宽', value: node.style.strokeWidth, onCommit: (v) => store.updateNode(node.id, {'stroke_width': v})),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           Expanded(child: _ColorRow(label: '描边色', value: node.style.stroke == 'none' ? '#000000' : node.style.stroke, onCommit: (v) => store.updateNode(node.id, {'stroke': v}))),
         ],
       ),
-      const SizedBox(height: 5),
+      const SizedBox(height: NonSpace.xs),
       Row(
         children: [
           Expanded(
@@ -303,7 +303,7 @@ class _InspectorState extends State<Inspector> {
               onChanged: (v) => store.updateNode(node.id, {'italic': v}),
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           Expanded(
             child: _SelectField(
               label: '线型',
@@ -314,9 +314,9 @@ class _InspectorState extends State<Inspector> {
           ),
         ],
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: NonSpace.md),
       const SectionLabel('布局'),
-      const SizedBox(height: 6),
+      const SizedBox(height: NonSpace.sm),
       Row(
         children: [
           Expanded(
@@ -336,7 +336,7 @@ class _InspectorState extends State<Inspector> {
               },
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           Expanded(
             child: _SelectField(
               label: '高模式',
@@ -353,7 +353,7 @@ class _InspectorState extends State<Inspector> {
           ),
         ],
       ),
-      const SizedBox(height: 5),
+      const SizedBox(height: NonSpace.xs),
       Row(
         children: [
           Expanded(
@@ -364,7 +364,7 @@ class _InspectorState extends State<Inspector> {
               onChanged: (v) => store.updateNode(node.id, {'layout': v}),
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           Expanded(
             child: _SelectField(
               label: '对齐方式',
@@ -379,43 +379,43 @@ class _InspectorState extends State<Inspector> {
           ),
         ],
       ),
-      const SizedBox(height: 5),
+      const SizedBox(height: NonSpace.xs),
       Row(
         children: [
           _NumField(
             label: '间距', value: node.layoutGap, enabled: node.layoutDir != 'none', disabledHint: '先选布局',
             onCommit: (v) => store.updateNode(node.id, {'gap': v}),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           _NumField(
             label: '内边距', value: node.layoutPadding, enabled: node.layoutDir != 'none', disabledHint: '先选布局',
             onCommit: (v) => store.updateNode(node.id, {'padding': v}),
           ),
         ],
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: NonSpace.md),
       const SectionLabel('内容'),
-      const SizedBox(height: 6),
+      const SizedBox(height: NonSpace.sm),
       _TextContentField(node: node, onCommit: (v) => store.updateNode(node.id, {'text': v})),
-      const SizedBox(height: 14),
+      const SizedBox(height: NonSpace.lg),
       _NodeStatesSection(
         key: ValueKey('states-${store.activeBoard}-${node.id}'),
         node: node,
         revision: store.render.revision,
       ),
-      const SizedBox(height: 14),
+      const SizedBox(height: NonSpace.lg),
       SectionLabel('交互动作', trailing: Pill(label: '${nodeFlows.length + nodeInteractions.length}', color: p.ink4)),
-      const SizedBox(height: 5),
+      const SizedBox(height: NonSpace.xs),
       for (final flow in nodeFlows)
         Container(
-          margin: const EdgeInsets.only(bottom: 4),
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-          decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(8)),
+          margin: const EdgeInsets.only(bottom: NonSpace.xs),
+          padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
+          decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(NonRadius.md)),
           child: Row(
             children: [
               Icon(Icons.link, size: 10, color: p.accent),
-              const SizedBox(width: 5),
-              Expanded(child: Text('→ ${flow.to}', style: TextStyle(fontSize: 11, color: p.ink3))),
+              const SizedBox(width: NonSpace.xs),
+              Expanded(child: Text('→ ${flow.to}', style: TextStyle(fontSize: NonType.caption, color: p.ink3))),
               IconAction(icon: Icons.close, tooltip: '移除', size: 24, onTap: () => store.disconnectFlow(flow.to)),
             ],
           ),
@@ -425,29 +425,29 @@ class _InspectorState extends State<Inspector> {
           Expanded(
             child: nonSelect<String>(context,
               value: _flowTarget,
-              decoration: const InputDecoration(hintText: '连接到画板…', contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+              decoration: const InputDecoration(hintText: '连接到画板…', contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm)),
               items: [
                 for (final b in store.render.artboards.where((b) => b.id != store.activeBoard))
-                  DropdownMenuItem(value: b.id, child: Text(b.name.isEmpty ? b.id : b.name, style: const TextStyle(fontSize: 11))),
+                  DropdownMenuItem(value: b.id, child: Text(b.name.isEmpty ? b.id : b.name, style: const TextStyle(fontSize: NonType.caption))),
               ],
               onChanged: (v) => setState(() => _flowTarget = v),
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           FilledButton(
-            style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9)),
+            style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: NonSpace.md, vertical: NonSpace.sm)),
             onPressed: _flowTarget == null
                 ? null
                 : () async {
                     if (await store.connectFlow(_flowTarget!)) setState(() => _flowTarget = null);
                   },
-            child: const Text('连接', style: TextStyle(fontSize: 11)),
+            child: const Text('连接', style: TextStyle(fontSize: NonType.caption)),
           ),
         ],
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: NonSpace.md),
       _NodeInteractionsEditor(key: ValueKey('interact-${node.id}-${store.activeBoard}'), node: node),
-      const SizedBox(height: 14),
+      const SizedBox(height: NonSpace.lg),
       _PageHealthSection(key: ValueKey('health-${store.activeBoard ?? ''}')),
     ];
   }
@@ -462,10 +462,10 @@ class _InspectorState extends State<Inspector> {
           Container(
             width: 32,
             height: 32,
-            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(NonRadius.md)),
             child: Icon(Icons.layers_outlined, size: 14, color: p.accent),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: NonSpace.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -474,49 +474,49 @@ class _InspectorState extends State<Inspector> {
                   Flexible(
                     child: Text(board.name.isEmpty ? board.id : board.name,
                         maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink)),
+                        style: TextStyle(fontSize: NonType.bodyStrong, fontWeight: FontWeight.w600, color: p.ink)),
                   ),
                   if (store.render.entry == board.id)
                     Padding(
-                      padding: const EdgeInsets.only(left: 5),
+                      padding: const EdgeInsets.only(left: NonSpace.xs),
                       child: Pill(label: '入口', color: p.accent, background: p.accentSoft),
                     ),
                 ]),
                 Text('${board.id} · ${board.width.round()}×${board.height.round()} · ${board.nodes.length} 节点',
-                    style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                    style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
               ],
             ),
           ),
         ],
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: NonSpace.md),
       const SectionLabel('画板'),
-      const SizedBox(height: 6),
+      const SizedBox(height: NonSpace.sm),
       Row(
         children: [
           _NumField(label: 'W', value: board.width, onCommit: (v) => store.applyOp('resize-canvas ${board.id} ${v.round()} ${board.height.round()}')),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           _NumField(label: 'H', value: board.height, onCommit: (v) => store.applyOp('resize-canvas ${board.id} ${board.width.round()} ${v.round()}')),
-          const SizedBox(width: 8),
+          const SizedBox(width: NonSpace.sm),
           Expanded(
             child: nonSelect<String>(context,
               value: _theme,
-              decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+              decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm)),
               // 运行时数据源（api.themes()，engine-0.2 的 13 项全量）；
               // 拉取失败/为空回落 6 项硬编码。frontmatter 解析出的越界
               // _theme（如 harmony）由此获得匹配项。
               items: _themes.isEmpty
                   ? const [
-                      DropdownMenuItem(value: 'light', child: Text('浅色', style: TextStyle(fontSize: 11))),
-                      DropdownMenuItem(value: 'dark', child: Text('深色', style: TextStyle(fontSize: 11))),
-                      DropdownMenuItem(value: 'high_contrast', child: Text('高对比', style: TextStyle(fontSize: 11))),
-                      DropdownMenuItem(value: 'sepia', child: Text('护眼', style: TextStyle(fontSize: 11))),
-                      DropdownMenuItem(value: 'nord', child: Text('北境', style: TextStyle(fontSize: 11))),
-                      DropdownMenuItem(value: 'sunset', child: Text('日落', style: TextStyle(fontSize: 11))),
+                      DropdownMenuItem(value: 'light', child: Text('浅色', style: TextStyle(fontSize: NonType.caption))),
+                      DropdownMenuItem(value: 'dark', child: Text('深色', style: TextStyle(fontSize: NonType.caption))),
+                      DropdownMenuItem(value: 'high_contrast', child: Text('高对比', style: TextStyle(fontSize: NonType.caption))),
+                      DropdownMenuItem(value: 'sepia', child: Text('护眼', style: TextStyle(fontSize: NonType.caption))),
+                      DropdownMenuItem(value: 'nord', child: Text('北境', style: TextStyle(fontSize: NonType.caption))),
+                      DropdownMenuItem(value: 'sunset', child: Text('日落', style: TextStyle(fontSize: NonType.caption))),
                     ]
                   : [
                       for (final (id, label) in _themes)
-                        DropdownMenuItem(value: id, child: Text(_themeLabel(id, label), style: const TextStyle(fontSize: 11))),
+                        DropdownMenuItem(value: id, child: Text(_themeLabel(id, label), style: const TextStyle(fontSize: NonType.caption))),
                     ],
               onChanged: (v) async {
                 if (v == null) return;
@@ -527,64 +527,64 @@ class _InspectorState extends State<Inspector> {
           ),
         ],
       ),
-      const SizedBox(height: 10),
+      const SizedBox(height: NonSpace.md),
       Row(
         children: [
           _MiniButton(label: '自动修复', icon: Icons.auto_fix_high, onTap: () => store.autoFix()),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           _MiniButton(label: '运行评审', icon: Icons.fact_check_outlined, onTap: () async {
             final result = await store.critique();
             setState(() => _critique = result);
           }),
-          const SizedBox(width: 4),
+          const SizedBox(width: NonSpace.xs),
           _MiniButton(label: '让 NaN 继续', icon: Icons.auto_awesome, accent: true, onTap: () => store.setRightTab('agent')),
         ],
       ),
       if (_critique != null) ...[
-        const SizedBox(height: 14),
+        const SizedBox(height: NonSpace.lg),
         const SectionLabel('评审结果'),
-        const SizedBox(height: 5),
+        const SizedBox(height: NonSpace.xs),
         for (final result in (((_critique!['results'] as List?) ?? const []).whereType<Map>()))
           Container(
-            margin: const EdgeInsets.only(bottom: 5),
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(8)),
+            margin: const EdgeInsets.only(bottom: NonSpace.xs),
+            padding: const EdgeInsets.all(NonSpace.sm),
+            decoration: BoxDecoration(color: p.panel2.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(NonRadius.md)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
                     Expanded(child: Text((result['principle'] ?? '').toString(),
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: p.ink2))),
+                        style: TextStyle(fontSize: NonType.caption, fontWeight: FontWeight.w500, color: p.ink2))),
                     Pill(label: '${result['score']}/10', color: (result['score'] as num? ?? 0) >= 8 ? p.success : p.warn),
                   ],
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: NonSpace.xs),
                 Text((result['observation'] ?? '').toString(),
-                    style: TextStyle(fontSize: 10, height: 1.45, color: p.ink4)),
+                    style: TextStyle(fontSize: NonType.micro, height: 1.45, color: p.ink4)),
               ],
             ),
           ),
       ],
-      const SizedBox(height: 14),
+      const SizedBox(height: NonSpace.lg),
       SectionLabel('本板交互', trailing: Pill(label: '${flows.length}', color: p.ink4)),
-      const SizedBox(height: 5),
+      const SizedBox(height: NonSpace.xs),
       for (final flow in flows)
         Padding(
-          padding: const EdgeInsets.only(bottom: 3),
+          padding: const EdgeInsets.only(bottom: NonSpace.xs),
           child: Row(
             children: [
               Icon(Icons.link, size: 10, color: p.accent),
-              const SizedBox(width: 5),
-              Expanded(child: Text('${flow.nodeId} → ${flow.to}', style: TextStyle(fontSize: 10, color: p.ink3))),
+              const SizedBox(width: NonSpace.xs),
+              Expanded(child: Text('${flow.nodeId} → ${flow.to}', style: TextStyle(fontSize: NonType.micro, color: p.ink3))),
             ],
           ),
         ),
 
       // 板级能力（无需选中节点）：布局意图条 + 页面体检。
-      const SizedBox(height: 14),
+      const SizedBox(height: NonSpace.lg),
       const _ConstrainBar(),
-      const SizedBox(height: 10),
+      const SizedBox(height: NonSpace.md),
       _PageHealthSection(key: ValueKey('board-health-${store.activeBoard ?? ''}')),
     ];
   }
@@ -629,20 +629,20 @@ class _MiniButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return InkWell(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(NonRadius.md),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
         decoration: BoxDecoration(
           color: accent ? p.accentSoft : p.panel2,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(NonRadius.md),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 11, color: accent ? p.accent : p.ink3),
-            const SizedBox(width: 4),
-            Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: accent ? p.accent : p.ink3)),
+            const SizedBox(width: NonSpace.xs),
+            Text(label, style: TextStyle(fontSize: NonType.micro, fontWeight: FontWeight.w500, color: accent ? p.accent : p.ink3)),
           ],
         ),
       ),
@@ -696,13 +696,13 @@ class _NumFieldState extends State<_NumField> {
         child: TextField(
           controller: _controller,
           enabled: widget.enabled,
-          style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink),
+          style: TextStyle(fontSize: NonType.caption, fontFamily: 'Menlo', color: p.ink),
           decoration: InputDecoration(
             prefixText: '${widget.label} ',
-            prefixStyle: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
+            prefixStyle: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4),
             hintText: widget.enabled ? null : widget.disabledHint,
-            hintStyle: TextStyle(fontSize: 10, color: p.ink4),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            hintStyle: TextStyle(fontSize: NonType.micro, color: p.ink4),
+            contentPadding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
           ),
           onSubmitted: (_) => _commit(),
           onTapOutside: (_) => _commit(),
@@ -747,24 +747,24 @@ class _ColorRowState extends State<_ColorRow> {
     final p = context.palette;
     return Row(
       children: [
-        SizedBox(width: 50, child: Text(widget.label, style: TextStyle(fontSize: 11, color: p.ink3))),
+        SizedBox(width: 50, child: Text(widget.label, style: TextStyle(fontSize: NonType.caption, color: p.ink3))),
         Container(
           width: 24,
           height: 24,
           decoration: BoxDecoration(
             color: parseHex(widget.value),
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(NonRadius.sm),
             border: Border.all(color: p.lineStrong),
           ),
         ),
-        const SizedBox(width: 5),
+        const SizedBox(width: NonSpace.xs),
         Expanded(
           child: SizedBox(
             height: 27,
             child: TextField(
               controller: _controller,
-              style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink2),
-              decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 7, vertical: 4), isDense: true),
+              style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink2),
+              decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs), isDense: true),
               onSubmitted: (_) => _commit(),
               onTapOutside: (_) => _commit(),
             ),
@@ -808,8 +808,8 @@ class _TextContentFieldState extends State<_TextContentField> {
       controller: _controller,
       minLines: 2,
       maxLines: 4,
-      style: TextStyle(fontSize: 12, height: 1.5, color: p.ink2),
-      decoration: const InputDecoration(hintText: '节点文本', contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+      style: TextStyle(fontSize: NonType.body, height: 1.5, color: p.ink2),
+      decoration: const InputDecoration(hintText: '节点文本', contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm)),
       onSubmitted: (v) {
         if (v != widget.node.text) widget.onCommit(v);
       },
@@ -838,16 +838,16 @@ class _SelectField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(fontSize: 10, color: p.ink4)),
-        const SizedBox(height: 2),
+        Text(label, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
+        const SizedBox(height: NonSpace.xxs),
         nonSelect<String>(context,
           value: enabled ? (options.contains(value) ? value : options.first) : null,
           enabled: enabled,
           hint: (!enabled && disabledHint != null) ? Text(disabledHint!) : null,
-            decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 7, vertical: 6)),
+            decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm)),
           items: [
             for (final o in options)
-              DropdownMenuItem(value: o, child: Text(o, style: TextStyle(fontSize: 11, color: p.ink2))),
+              DropdownMenuItem(value: o, child: Text(o, style: TextStyle(fontSize: NonType.caption, color: p.ink2))),
           ],
           onChanged: (v) {
             if (v != null) onChanged(v);
@@ -958,15 +958,15 @@ class _ConstrainBarState extends State<_ConstrainBar> {
             Expanded(
               child: TextField(
                 controller: _input,
-                style: TextStyle(fontSize: 12, color: p.ink),
+                style: TextStyle(fontSize: NonType.body, color: p.ink),
                 decoration: const InputDecoration(
                   hintText: '如「居中」「等宽」「网格 3」',
-                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm),
                 ),
                 onSubmitted: (_) => _apply(),
               ),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: NonSpace.xs),
             _MiniButton(
               label: _busy ? '应用中…' : '应用',
               icon: Icons.auto_fix_high,
@@ -975,34 +975,34 @@ class _ConstrainBarState extends State<_ConstrainBar> {
           ],
         ),
         if (_vocab.isNotEmpty) ...[
-          const SizedBox(height: 6),
-          Text('这句话没看懂，可以试试：', style: TextStyle(fontSize: 10, color: p.warn)),
-          const SizedBox(height: 4),
+          const SizedBox(height: NonSpace.sm),
+          Text('这句话没看懂，可以试试：', style: TextStyle(fontSize: NonType.micro, color: p.warn)),
+          const SizedBox(height: NonSpace.xs),
           Wrap(
-            spacing: 4,
-            runSpacing: 4,
+            spacing: NonSpace.xs,
+            runSpacing: NonSpace.xs,
             children: [
               for (final token in _vocab)
                 InkWell(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(NonRadius.sm),
                   onTap: () => _input.text = token.replaceAll('N', '3'),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
                     decoration: BoxDecoration(
                       color: p.panel2,
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(NonRadius.sm),
                       border: Border.all(color: p.line),
                     ),
-                    child: Text(token, style: TextStyle(fontSize: 10, color: p.ink2)),
+                    child: Text(token, style: TextStyle(fontSize: NonType.micro, color: p.ink2)),
                   ),
                 ),
             ],
           ),
         ],
         if (_error != null) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: NonSpace.sm),
           Text(_error!, maxLines: 3, overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10, color: p.danger)),
+              style: TextStyle(fontSize: NonType.micro, color: p.danger)),
         ],
       ],
     );
@@ -1175,36 +1175,36 @@ class _NodeStatesSectionState extends State<_NodeStatesSection> {
               ? SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.4, color: p.ink4))
               : Pill(label: '当前 $_current', color: _current == 'default' ? p.ink4 : p.accent),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: NonSpace.sm),
         if (_error != null)
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(_error!, style: TextStyle(fontSize: 10, color: p.danger)),
+              Text(_error!, style: TextStyle(fontSize: NonType.micro, color: p.danger)),
               if (_errorDetail.isNotEmpty) _InspectorDetails(text: _errorDetail),
             ],
           )
         else ...[
           if (_states.isEmpty)
-            Text('未定义状态。定义后可一键切换节点外观。', style: TextStyle(fontSize: 10, color: p.ink4))
+            Text('未定义状态。定义后可一键切换节点外观。', style: TextStyle(fontSize: NonType.micro, color: p.ink4))
           else
             for (final state in _states)
               Container(
-                margin: const EdgeInsets.only(bottom: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+                margin: const EdgeInsets.only(bottom: NonSpace.xs),
+                padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
                 decoration: BoxDecoration(
                   color: state == _current ? p.accentSoft : p.panel2.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(NonRadius.md),
                   border: Border.all(color: state == _current ? p.accent.withValues(alpha: 0.4) : Colors.transparent),
                 ),
                 child: Row(
                   children: [
                     Icon(Icons.tune, size: 10, color: state == _current ? p.accent : p.ink4),
-                    const SizedBox(width: 5),
+                    const SizedBox(width: NonSpace.xs),
                     Expanded(
                       child: Text(state,
                           style: TextStyle(
-                              fontSize: 11, fontFamily: 'Menlo',
+                              fontSize: NonType.caption, fontFamily: 'Menlo',
                               color: state == _current ? p.accent : p.ink2)),
                     ),
                     if (state == _current)
@@ -1218,21 +1218,21 @@ class _NodeStatesSectionState extends State<_NodeStatesSection> {
                   ],
                 ),
               ),
-          const SizedBox(height: 5),
+          const SizedBox(height: NonSpace.xs),
           Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _name,
-                  style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink),
+                  style: TextStyle(fontSize: NonType.caption, fontFamily: 'Menlo', color: p.ink),
                   decoration: const InputDecoration(
                     hintText: '状态名，如 pressed / disabled',
-                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm),
                   ),
                   onSubmitted: (_) => _define(),
                 ),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: NonSpace.xs),
               _MiniButton(
                 label: _busyDefining ? '定义中…' : '定义状态',
                 icon: Icons.add_circle_outline,
@@ -1240,25 +1240,25 @@ class _NodeStatesSectionState extends State<_NodeStatesSection> {
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: NonSpace.xs),
           TextField(
             controller: _patch,
             enabled: !_busyDefining,
-            style: TextStyle(fontSize: 11, fontFamily: 'Menlo', color: p.ink),
+            style: TextStyle(fontSize: NonType.caption, fontFamily: 'Menlo', color: p.ink),
             decoration: const InputDecoration(
               hintText: '外观补丁，如 fill=#FF5722 radius=8（留空则记录当前外观）',
-              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm),
             ),
             onSubmitted: (_) => _define(),
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: NonSpace.xs),
           Text(
             '可用键：填充（fill）、文字色（text_color）、文本（text）、圆角（radius）、字号（font_size）；补丁留空时记录节点当前外观。',
-            style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4),
+            style: TextStyle(fontSize: NonType.micro, height: 1.4, color: p.ink4),
           ),
           if (_defineError != null) ...[
-            const SizedBox(height: 3),
-            Text(_defineError!, style: TextStyle(fontSize: 10, color: p.danger)),
+            const SizedBox(height: NonSpace.xs),
+            Text(_defineError!, style: TextStyle(fontSize: NonType.micro, color: p.danger)),
           ],
         ],
       ],
@@ -1434,10 +1434,10 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SectionLabel('页面体检'),
-        const SizedBox(height: 6),
+        const SizedBox(height: NonSpace.sm),
         Wrap(
-          spacing: 4,
-          runSpacing: 4,
+          spacing: NonSpace.xs,
+          runSpacing: NonSpace.xs,
           children: [
             _MiniButton(
               label: _busyMissing ? '体检中…' : '缺失体检',
@@ -1461,29 +1461,29 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
             ),
           ],
         ),
-        const SizedBox(height: 5),
+        const SizedBox(height: NonSpace.xs),
         Text(
           '一键填充只补齐外壳与占位文字；具体业务内容（占位标记的容器）还要让 NaN 补或手动填，每个容器至少 2 条。',
-          style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4),
+          style: TextStyle(fontSize: NonType.micro, height: 1.4, color: p.ink4),
         ),
         if (_missingError != null) ...[
-          const SizedBox(height: 6),
-          Text(_missingError!, style: TextStyle(fontSize: 10, color: p.danger)),
+          const SizedBox(height: NonSpace.sm),
+          Text(_missingError!, style: TextStyle(fontSize: NonType.micro, color: p.danger)),
           if (_missingDetail.isNotEmpty) _InspectorDetails(text: _missingDetail),
         ],
         if (_typeError != null) ...[
-          const SizedBox(height: 6),
-          Text(_typeError!, style: TextStyle(fontSize: 10, color: p.danger)),
+          const SizedBox(height: NonSpace.sm),
+          Text(_typeError!, style: TextStyle(fontSize: NonType.micro, color: p.danger)),
           if (_typeDetail.isNotEmpty) _InspectorDetails(text: _typeDetail),
         ],
         if (missing != null) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: NonSpace.sm),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(NonSpace.sm),
             decoration: BoxDecoration(
               color: p.panel2.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(NonRadius.md),
               border: Border.all(
                   color: missingCount > 0 ? p.warn.withValues(alpha: 0.25) : p.success.withValues(alpha: 0.25)),
             ),
@@ -1494,11 +1494,11 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
                   children: [
                     Icon(missingCount > 0 ? Icons.warning_amber_rounded : Icons.check_circle_outline,
                         size: 12, color: missingCount > 0 ? p.warn : p.success),
-                    const SizedBox(width: 5),
+                    const SizedBox(width: NonSpace.xs),
                     Text(
                       missingCount > 0 ? '缺失 $missingCount 项建议' : '未发现缺失',
                       style: TextStyle(
-                          fontSize: 11, fontWeight: FontWeight.w600,
+                          fontSize: NonType.caption, fontWeight: FontWeight.w600,
                           color: missingCount > 0 ? p.warn : p.success),
                     ),
                     const Spacer(),
@@ -1507,20 +1507,20 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
                   ],
                 ),
                 for (final item in missingList) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: NonSpace.sm),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                        decoration: BoxDecoration(color: p.panel3, borderRadius: BorderRadius.circular(4)),
+                        padding: const EdgeInsets.symmetric(horizontal: NonSpace.xs, vertical: NonSpace.xxs),
+                        decoration: BoxDecoration(color: p.panel3, borderRadius: BorderRadius.circular(NonRadius.sm)),
                         child: Text((item['element'] ?? '').toString(),
-                            style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink3)),
+                            style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink3)),
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: NonSpace.sm),
                       Expanded(
                         child: Text((item['suggestion'] ?? '').toString(),
-                            style: TextStyle(fontSize: 10, height: 1.4, color: p.ink3)),
+                            style: TextStyle(fontSize: NonType.micro, height: 1.4, color: p.ink3)),
                       ),
                     ],
                   ),
@@ -1530,13 +1530,13 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
           ),
         ],
         if (pageType != null) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: NonSpace.sm),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(NonSpace.sm),
             decoration: BoxDecoration(
               color: p.panel2.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(NonRadius.md),
               border: Border.all(color: p.accent.withValues(alpha: 0.25)),
             ),
             child: Column(
@@ -1545,16 +1545,16 @@ class _PageHealthSectionState extends State<_PageHealthSection> {
                 Row(
                   children: [
                     Icon(Icons.category, size: 12, color: p.accent),
-                    const SizedBox(width: 5),
-                    Text('页型判定', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: p.ink2)),
+                    const SizedBox(width: NonSpace.xs),
+                    Text('页型判定', style: TextStyle(fontSize: NonType.caption, fontWeight: FontWeight.w600, color: p.ink2)),
                     const Spacer(),
                     if (pageTypeName.isNotEmpty) Pill(label: pageTypeName, color: p.accent),
                   ],
                 ),
                 if (confidence is num) ...[
-                  const SizedBox(height: 5),
+                  const SizedBox(height: NonSpace.xs),
                   Text('置信度 ${(confidence * 100).toStringAsFixed(0)}%',
-                      style: TextStyle(fontSize: 10, color: p.ink3)),
+                      style: TextStyle(fontSize: NonType.micro, color: p.ink3)),
                 ],
                 if (signals is Map && signals.isNotEmpty)
                   _InspectorDetails(
@@ -1725,14 +1725,14 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
         // 不支持按单条解绑——同节点多条绑定会一并移除，与引擎 op 语义一致）。
         if (_refreshError != null)
           Padding(
-            padding: const EdgeInsets.only(bottom: 4),
+            padding: const EdgeInsets.only(bottom: NonSpace.xs),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('交互列表没有刷新出来，请重试',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, color: p.warn)),
+                    style: TextStyle(fontSize: NonType.micro, color: p.warn)),
                 _InspectorDetails(text: _refreshError!),
               ],
             ),
@@ -1740,16 +1740,16 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
         if (_entries.isNotEmpty) ...[
           for (final e in _entries)
             Padding(
-              padding: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.only(bottom: NonSpace.xs),
               child: Row(
                 children: [
                   Icon(Icons.bolt, size: 11, color: p.accent),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: NonSpace.xs),
                   Expanded(
                     child: Text(
                       '${_triggerLabel((e['trigger'] ?? 'tap').toString())} → ${_actionLabel((e['action'] ?? '').toString())}',
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, color: p.ink3),
+                      style: TextStyle(fontSize: NonType.caption, color: p.ink3),
                     ),
                   ),
                   InkWell(
@@ -1762,12 +1762,12 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
                             setState(() => _busy = false);
                             await _refresh();
                           },
-                    child: Text('解绑', style: TextStyle(fontSize: 10, color: p.danger)),
+                    child: Text('解绑', style: TextStyle(fontSize: NonType.micro, color: p.danger)),
                   ),
                 ],
               ),
             ),
-          const SizedBox(height: 4),
+          const SizedBox(height: NonSpace.xs),
         ],
         Row(
           children: [
@@ -1775,22 +1775,22 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
               width: 108,
               child: nonSelect<String>(context,
                 value: _trigger,
-                  decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+                  decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm)),
                 items: [
                   for (final t in ['tap', 'long_press', 'swipe_left', 'swipe_right', 'swipe_up', 'swipe_down', 'scroll_end', 'key_enter', 'focus', 'blur'])
-                    DropdownMenuItem(value: t, child: Text(_triggerLabel(t), style: TextStyle(fontSize: 11))),
+                    DropdownMenuItem(value: t, child: Text(_triggerLabel(t), style: TextStyle(fontSize: NonType.caption))),
                 ],
                 onChanged: (v) => setState(() => _trigger = v ?? 'tap'),
               ),
             ),
-            const SizedBox(width: 5),
+            const SizedBox(width: NonSpace.xs),
             Expanded(
               child: nonSelect<String>(context,
                 value: _action,
-                  decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+                  decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm)),
                 items: [
                   for (final t in ['show_toast', 'navigate_to', 'set_text', 'set_state', 'toggle_state', 'haptic', 'play_sound', 'back'])
-                    DropdownMenuItem(value: t, child: Text(_actionLabel(t), style: const TextStyle(fontSize: 11))),
+                    DropdownMenuItem(value: t, child: Text(_actionLabel(t), style: const TextStyle(fontSize: NonType.caption))),
                 ],
                 onChanged: (v) => setState(() => _action = v ?? 'show_toast'),
               ),
@@ -1799,89 +1799,89 @@ class _NodeInteractionsEditorState extends State<_NodeInteractionsEditor> {
         ),
         if (_action == 'show_toast')
           Padding(
-            padding: const EdgeInsets.only(top: 5),
+            padding: const EdgeInsets.only(top: NonSpace.xs),
             child: TextField(
               controller: _message,
-              style: const TextStyle(fontSize: 11),
-              decoration: const InputDecoration(hintText: '提示文案', contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+              style: const TextStyle(fontSize: NonType.caption),
+              decoration: const InputDecoration(hintText: '提示文案', contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm)),
               onSubmitted: (_) => _add(),
             ),
           ),
         if (_action == 'set_text') ...[
           Padding(
-            padding: const EdgeInsets.only(top: 5),
+            padding: const EdgeInsets.only(top: NonSpace.xs),
             child: nonSelect<String>(context,
               value: _targetNode,
-              hint: const Text('目标节点', style: TextStyle(fontSize: 11)),
+              hint: const Text('目标节点', style: TextStyle(fontSize: NonType.caption)),
               items: [
                 for (final n in (board?.nodes ?? const <CanvasNode>[]))
-                  DropdownMenuItem(value: n.id, child: Text(n.id, style: const TextStyle(fontSize: 11))),
+                  DropdownMenuItem(value: n.id, child: Text(n.id, style: const TextStyle(fontSize: NonType.caption))),
               ],
               onChanged: (v) => setState(() => _targetNode = v),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.only(top: 5),
+            padding: const EdgeInsets.only(top: NonSpace.xs),
             child: TextField(
               controller: _extraText,
-              style: const TextStyle(fontSize: 11),
-              decoration: const InputDecoration(hintText: '新文字', contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+              style: const TextStyle(fontSize: NonType.caption),
+              decoration: const InputDecoration(hintText: '新文字', contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm)),
               onSubmitted: (_) => _add(),
             ),
           ),
         ],
         if (_action == 'set_state' || _action == 'toggle_state')
           Padding(
-            padding: const EdgeInsets.only(top: 5),
+            padding: const EdgeInsets.only(top: NonSpace.xs),
             child: TextField(
               controller: _message,
-              style: const TextStyle(fontSize: 11),
-              decoration: const InputDecoration(hintText: '状态名', contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+              style: const TextStyle(fontSize: NonType.caption),
+              decoration: const InputDecoration(hintText: '状态名', contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm)),
               onSubmitted: (_) => _add(),
             ),
           ),
         if (_action == 'navigate_to')
           Padding(
-            padding: const EdgeInsets.only(top: 5),
+            padding: const EdgeInsets.only(top: NonSpace.xs),
             // 画板下拉（nonSelect）：替代手输画板 id——boards/_targetBoard
             // 由这里消费，_add 的 navigate_to 分支取 _targetBoard。
             child: nonSelect<String>(context,
               value: _targetBoard,
-              hint: const Text('目标画板', style: TextStyle(fontSize: 11)),
+              hint: const Text('目标画板', style: TextStyle(fontSize: NonType.caption)),
               items: [
                 for (final b in boards)
-                  DropdownMenuItem(value: b.id, child: Text(b.name.isEmpty ? b.id : b.name, style: const TextStyle(fontSize: 11))),
+                  DropdownMenuItem(value: b.id, child: Text(b.name.isEmpty ? b.id : b.name, style: const TextStyle(fontSize: NonType.caption))),
               ],
               onChanged: (v) => setState(() => _targetBoard = v),
             ),
           ),
         if (_action == 'play_sound')
           Padding(
-            padding: const EdgeInsets.only(top: 5),
+            padding: const EdgeInsets.only(top: NonSpace.xs),
             child: TextField(
               controller: _message,
-              style: const TextStyle(fontSize: 11),
+              style: const TextStyle(fontSize: NonType.caption),
               decoration: const InputDecoration(
                   hintText: '音效名',
-                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+                  contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm)),
               onSubmitted: (_) => _add(),
             ),
           ),
-        const SizedBox(height: 6),
+        const SizedBox(height: NonSpace.sm),
         // 统一提交入口：back / haptic 无参数框，此前没有任何提交控件，
         // 动作永远加不上——所有动作都可经此按钮提交。
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton(
             onPressed: _busy ? null : _add,
-            child: const Text('添加', style: TextStyle(fontSize: 11)),
+            child: const Text('添加', style: TextStyle(fontSize: NonType.caption)),
           ),
         ),
         if (isBack)
           Padding(
-            padding: const EdgeInsets.only(bottom: 4),
+            padding: const EdgeInsets.only(bottom: NonSpace.xs),
             child: Text('「返回」由应用内置处理，演示模式里点按即生效。',
-                style: TextStyle(fontSize: 10, color: p.ink4)),
+                style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
           ),
       ],
     );
@@ -1917,18 +1917,18 @@ class _InspectorDetails extends StatelessWidget {
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
-        childrenPadding: const EdgeInsets.only(bottom: 6),
+        childrenPadding: const EdgeInsets.only(bottom: NonSpace.sm),
         dense: true,
         title: Text('技术详情',
-            style: TextStyle(fontSize: 10, color: p.ink4, fontWeight: FontWeight.w600)),
+            style: TextStyle(fontSize: NonType.micro, color: p.ink4, fontWeight: FontWeight.w600)),
         children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(6)),
+            padding: const EdgeInsets.all(NonSpace.sm),
+            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(NonRadius.sm)),
             child: SelectableText(
               text,
-              style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4, height: 1.4),
+              style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4, height: 1.4),
             ),
           ),
         ],

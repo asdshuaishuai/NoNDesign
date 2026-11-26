@@ -5,19 +5,26 @@ import '../core/models.dart';
 import '../core/keys.dart';
 import '../core/store.dart';
 import '../core/theme.dart';
+import '../core/workbench_layout.dart';
 import '../core/dart_agent.dart' show toolFailureMessage;
 import 'common.dart';
-import 'workspace.dart' show openProjectFlow;
+import 'workspace.dart' show openProjectFlow, workspaceHeaderHeight;
 
 class LeftPanel extends StatelessWidget {
-  const LeftPanel({super.key});
+  /// 面板宽度：父级按 `WorkbenchLayout(design).leftWidth` 传入（不再由本 widget
+  /// 写死 252）；底部 sheet 传 [double.infinity] 占满可用宽度。缺省取设计面规格。
+  final double? width;
+
+  const LeftPanel({super.key, this.width});
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final p = context.palette;
+    final double resolvedWidth =
+        width ?? workbenchLayoutSpecs[WorkbenchKind.design]!.leftWidth;
     return Container(
-      width: 252,
+      width: resolvedWidth,
       decoration: BoxDecoration(
         color: p.bgElevated.withValues(alpha: 0.82),
         border: Border(right: BorderSide(color: p.line)),
@@ -41,13 +48,23 @@ class _PanelHead extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Container(
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      // 面板头统一规格：高度/内边距与 3D 大纲/检查器面板同一档
+      // （workspaceHeaderHeight = panelHeaderHeight = 44，左右 NonSpace.md）。
+      key: ValueKey('panel-head-$title'),
+      height: workspaceHeaderHeight,
+      padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
       decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
       child: Row(
         children: [
-          Text(title.toUpperCase(),
-              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: p.ink3)),
+          // 区块标题统一 NonType.bodyStrong（标题 > 关键值 > 说明 的第一级）。
+          Text(
+            title,
+            style: NonType.of(
+              NonType.bodyStrong,
+              color: p.ink,
+              weight: FontWeight.w600,
+            ),
+          ),
           const Spacer(),
           ...actions,
         ],
@@ -71,42 +88,42 @@ class _ProjectPanel extends StatelessWidget {
       for (final b in store.render.artboards) () => _BoardRow(board: b, active: b.id == store.activeBoard),
       if (store.render.artboards.isEmpty)
         () => Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(NonSpace.md),
               child: Text(
                   // 项目已打开但本机没有画布运行时：不是「空项目」，别让
                   // 空画板冒充还没建过画板（审查 depython-1）。
                   store.canvasPreviewUnavailable
                       ? '项目已打开，画布需要连接桌面后才能预览。'
                       : '还没有画板——让 NaN 生成，或点面板顶部 ＋ 新建。',
-                  style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4)),
+                  style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.ink4)),
             ),
       if (board != null) ...[
-        () => const SizedBox(height: 14),
+        () => const SizedBox(height: NonSpace.lg),
         () => SectionLabel('图层 · ${board.nodes.length}'),
-        () => const SizedBox(height: 6),
+        () => const SizedBox(height: NonSpace.sm),
         for (final node in board.nodes.reversed) () => _LayerRow(node: node),
       ],
       if (store.render.flows.isNotEmpty) ...[
-        () => const SizedBox(height: 14),
+        () => const SizedBox(height: NonSpace.lg),
         () => SectionLabel('流程 · ${store.render.flows.length}'),
-        () => const SizedBox(height: 6),
+        () => const SizedBox(height: NonSpace.sm),
         for (final flow in store.render.flows.take(16))
           () => InkWell(
                 onTap: () {
                   store.selectBoard(flow.from);
                   store.selectNode(flow.nodeId);
                 },
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(NonRadius.sm),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                  padding: const EdgeInsets.symmetric(vertical: NonSpace.xs, horizontal: NonSpace.xs),
                   child: Row(
                     children: [
                       Icon(Icons.link, size: 11, color: p.ink4),
-                      const SizedBox(width: 5),
+                      const SizedBox(width: NonSpace.xs),
                       Expanded(
                         child: Text('${flow.from} → ${flow.to}',
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 11, color: p.ink3)),
+                            style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
                       ),
                     ],
                   ),
@@ -114,19 +131,19 @@ class _ProjectPanel extends StatelessWidget {
               ),
       ],
       if (store.recent.isNotEmpty) ...[
-        () => const SizedBox(height: 16),
+        () => const SizedBox(height: NonSpace.lg),
         () => SectionLabel('最近项目'),
-        () => const SizedBox(height: 4),
+        () => const SizedBox(height: NonSpace.xs),
         for (final r in store.recent.take(5))
           () => InkWell(
                 // 与 welcome 的最近项目列表同一入口：带路径直接打开
                 // （免对话框，需密码时 openProjectFlow 自行追问）。
                 onTap: () => openProjectFlow(context, r['path']?.toString() ?? ''),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                  padding: const EdgeInsets.symmetric(vertical: NonSpace.xs, horizontal: NonSpace.xs),
                   child: Text((r['name'] ?? '').toString(),
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, color: p.ink4)),
+                      style: TextStyle(fontSize: NonType.caption, color: p.ink4)),
                 ),
               ),
       ],
@@ -147,7 +164,7 @@ class _ProjectPanel extends StatelessWidget {
         Expanded(
           child: ListView.builder(
             // 面板内容 padding 统一 12（四档 8/10/11/12 → 一档；底部 16 余量并入）。
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(NonSpace.md),
             itemCount: items.length,
             itemBuilder: (context, i) => items[i](),
           ),
@@ -168,15 +185,15 @@ class _BoardRow extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: active ? p.panel2 : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(NonRadius.md),
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(NonRadius.md),
         onTap: () => store.selectBoard(board.id),
         child: Container(
-          padding: const EdgeInsets.all(5),
-          margin: const EdgeInsets.only(bottom: 2),
+          padding: const EdgeInsets.all(NonSpace.xs),
+          margin: const EdgeInsets.only(bottom: NonSpace.xxs),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(NonRadius.md),
             border: Border.all(color: active ? p.lineStrong : Colors.transparent),
           ),
           child: Row(
@@ -186,13 +203,13 @@ class _BoardRow extends StatelessWidget {
                 height: 42,
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(NonRadius.sm),
                   border: Border.all(color: p.line),
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: CustomPaint(painter: BoardMiniPainter(board)),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: NonSpace.sm),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -202,14 +219,14 @@ class _BoardRow extends StatelessWidget {
                         Expanded(
                           child: Text(board.name.isEmpty ? board.id : board.name,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
+                              style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w600, color: p.ink)),
                         ),
                         if (store.render.entry == board.id) Pill(label: '入口', color: p.accent, background: p.accentSoft),
                       ],
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: NonSpace.xxs),
                     Text('${board.width.round()}×${board.height.round()} · ${board.nodes.length} 节点',
-                        style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                        style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
                   ],
                 ),
               ),
@@ -218,17 +235,17 @@ class _BoardRow extends StatelessWidget {
                 padding: EdgeInsets.zero,
                 icon: Icon(Icons.more_horiz, size: 15, color: p.ink4),
                 color: p.panel,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: p.lineStrong)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(NonRadius.md), side: BorderSide(color: p.lineStrong)),
                 onSelected: (v) {
                   if (v == 'dup') store.duplicateBoard(board.id);
                   if (v == 'del') store.deleteBoard(board.id);
                   if (v == 'responsive') _runResponsive(context, store, board.id);
                 },
                 itemBuilder: (context) => [
-                  PopupMenuItem(value: 'dup', child: Text('复制画板', style: TextStyle(fontSize: 12, color: p.ink2))),
-                  PopupMenuItem(value: 'responsive', child: Text('响应式适配', style: TextStyle(fontSize: 12, color: p.ink2))),
+                  PopupMenuItem(value: 'dup', child: Text('复制画板', style: TextStyle(fontSize: NonType.body, color: p.ink2))),
+                  PopupMenuItem(value: 'responsive', child: Text('响应式适配', style: TextStyle(fontSize: NonType.body, color: p.ink2))),
                   if (store.render.artboards.length > 1)
-                    PopupMenuItem(value: 'del', child: Text('删除画板', style: TextStyle(fontSize: 12, color: p.danger))),
+                    PopupMenuItem(value: 'del', child: Text('删除画板', style: TextStyle(fontSize: NonType.body, color: p.danger))),
                 ],
               ),
             ],
@@ -260,24 +277,24 @@ class _LayerRow extends StatelessWidget {
     final depth = node.parent != 'root' ? 1 : 0;
     return InkWell(
       onTap: () => store.selectNode(node.id),
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(NonRadius.sm),
       child: Container(
         height: 27,
         margin: const EdgeInsets.only(bottom: 1),
-        padding: EdgeInsets.only(left: 5 + depth * 12, right: 3),
+        padding: EdgeInsets.only(left: NonSpace.xs + depth * NonSpace.md, right: NonSpace.xs),
         decoration: BoxDecoration(
           color: active ? p.accentSoft : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(NonRadius.sm),
         ),
         child: Row(
           children: [
             Icon(_nodeIcon(node.component), size: 12, color: active ? p.accent : p.ink4),
-            const SizedBox(width: 5),
+            const SizedBox(width: NonSpace.xs),
             Expanded(
               child: Text(
                 node.text.trim().isNotEmpty ? node.text.trim() : (node.name.isNotEmpty ? node.name : node.id),
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11, color: active ? p.accent : p.ink2),
+                style: TextStyle(fontSize: NonType.caption, color: active ? p.accent : p.ink2),
               ),
             ),
             IconButton(
@@ -292,10 +309,10 @@ class _LayerRow extends StatelessWidget {
             IconButton(
               tooltip: '上移一层',
               onPressed: () => store.reorderNode(node.id, 'up'),
-              icon: const Icon(Icons.arrow_upward, size: 11),
+              icon: const Icon(Icons.arrow_upward, size: NonSpace.md),
               color: p.ink4,
               visualDensity: VisualDensity.compact,
-              constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+              constraints: const BoxConstraints(minWidth: NonSpace.xl, minHeight: NonSpace.xl),
               padding: EdgeInsets.zero,
             ),
             IconButton(
@@ -337,7 +354,7 @@ class _DocsPanel extends StatelessWidget {
         const _PanelHead('设计文档'),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(NonSpace.md),
             children: [
               _docCard(context, Icons.description_outlined, '产品需求 PRD',
                   docs.prd.trim().isEmpty ? '还没有生成——描述产品，NaN 会先写文档' : '${docs.prd.replaceAll(RegExp(r'\s'), '').length} 字 · 目标 / 流程 / 页面清单',
@@ -347,19 +364,21 @@ class _DocsPanel extends StatelessWidget {
                   false, 'ui'),
               _docCard(context, Icons.palette_outlined, '设计规范',
                   '配色 / 字体 / 间距 / 圆角 / 规则', true, 'spec'),
-              const SizedBox(height: 14),
+              const SizedBox(height: NonSpace.lg),
+              // 静态概览卡：只留 panel2 填充与圆角——左栏本身已有外边框
+              // （Container border right），再叠一层卡片边框就是「面板框 +
+              // 卡片框」两层；交互卡（下方文档卡）仍保留边框以示可点。
               Container(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.all(NonSpace.md),
                 decoration: BoxDecoration(
                   color: p.panel2.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: p.line),
+                  borderRadius: BorderRadius.circular(NonRadius.md),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     SectionLabel('概览', trailing: Pill(label: '${store.render.artboards.length} 屏', color: p.accent)),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: NonSpace.sm),
                     Row(
                       children: [
                         _stat(context, '画板', store.render.artboards.length.toString()),
@@ -371,22 +390,22 @@ class _DocsPanel extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: NonSpace.md),
+              // 调色板卡同理：静态信息，不再叠卡片边框（左栏已有外边框）。
               Container(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.all(NonSpace.md),
                 decoration: BoxDecoration(
                   color: p.panel2.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: p.line),
+                  borderRadius: BorderRadius.circular(NonRadius.md),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const SectionLabel('调色板'),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: NonSpace.sm),
                     Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
+                      spacing: NonSpace.sm,
+                      runSpacing: NonSpace.sm,
                       children: [
                         for (final entry in docs.design.palette.entries)
                           Tooltip(
@@ -396,7 +415,7 @@ class _DocsPanel extends StatelessWidget {
                               height: 24,
                               decoration: BoxDecoration(
                                 color: parseHex(entry.value),
-                                borderRadius: BorderRadius.circular(6),
+                                borderRadius: BorderRadius.circular(NonRadius.sm),
                                 border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
                               ),
                             ),
@@ -417,17 +436,17 @@ class _DocsPanel extends StatelessWidget {
     final store = context.read<AppStore>();
     final p = context.palette;
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(NonRadius.md),
       onTap: () {
         store.setDocsTab(tab);
         store.setView('docs');
       },
       child: Container(
-        margin: const EdgeInsets.only(bottom: 6),
-        padding: const EdgeInsets.all(9),
+        margin: const EdgeInsets.only(bottom: NonSpace.sm),
+        padding: const EdgeInsets.all(NonSpace.sm),
         decoration: BoxDecoration(
           color: p.panel2.withValues(alpha: 0.35),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(NonRadius.md),
           border: Border.all(color: p.line),
         ),
         child: Row(
@@ -435,27 +454,27 @@ class _DocsPanel extends StatelessWidget {
             Container(
               width: 28,
               height: 28,
-              decoration: BoxDecoration(color: p.panel3, borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: p.panel3, borderRadius: BorderRadius.circular(NonRadius.md)),
               child: Icon(icon, size: 14, color: p.ink3),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: NonSpace.sm),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      Text(title, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.ink)),
+                      Text(title, style: TextStyle(fontSize: NonType.body, fontWeight: FontWeight.w600, color: p.ink)),
                       if (active)
                         Padding(
-                          padding: const EdgeInsets.only(left: 5),
+                          padding: const EdgeInsets.only(left: NonSpace.xs),
                           child: Container(width: 5, height: 5, decoration: BoxDecoration(color: p.success, shape: BoxShape.circle)),
                         ),
                     ],
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: NonSpace.xxs),
                   Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 10, height: 1.35, color: p.ink4)),
+                      style: TextStyle(fontSize: NonType.micro, height: 1.35, color: p.ink4)),
                 ],
               ),
             ),
@@ -470,14 +489,14 @@ class _DocsPanel extends StatelessWidget {
     final p = context.palette;
     return Expanded(
       child: Container(
-        margin: const EdgeInsets.only(right: 4),
-        padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 6),
-        decoration: BoxDecoration(color: p.panel3.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(8)),
+        margin: const EdgeInsets.only(right: NonSpace.xs),
+        padding: const EdgeInsets.symmetric(vertical: NonSpace.xs, horizontal: NonSpace.sm),
+        decoration: BoxDecoration(color: p.panel3.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(NonRadius.md)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(value, style: TextStyle(fontSize: 13, fontFamily: 'Menlo', fontWeight: FontWeight.w600, color: p.ink)),
-            Text(label, style: TextStyle(fontSize: 10, color: p.ink4)),
+            Text(value, style: TextStyle(fontSize: NonType.bodyStrong, fontFamily: 'Menlo', fontWeight: FontWeight.w600, color: p.ink)),
+            Text(label, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
           ],
         ),
       ),
@@ -566,13 +585,13 @@ class _SpecPanelState extends State<_SpecPanel> {
         ]),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(NonSpace.md),
             children: [
               const SectionLabel('调色板'),
-              const SizedBox(height: 6),
+              const SizedBox(height: NonSpace.sm),
               for (final entry in design.palette.entries)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 5),
+                  padding: const EdgeInsets.only(bottom: NonSpace.xs),
                   child: Row(
                     children: [
                       Container(
@@ -580,14 +599,14 @@ class _SpecPanelState extends State<_SpecPanel> {
                         height: 24,
                         decoration: BoxDecoration(
                           color: parseHex(entry.value),
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: BorderRadius.circular(NonRadius.sm),
                           border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
                         ),
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: NonSpace.sm),
                       SizedBox(
                         width: 70,
-                        child: Text(entry.key, style: TextStyle(fontSize: 11, color: p.ink3)),
+                        child: Text(entry.key, style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
                       ),
                       Expanded(
                         child: _CommitField(
@@ -616,14 +635,14 @@ class _SpecPanelState extends State<_SpecPanel> {
                   ),
                 ),
               if (_extracting) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: NonSpace.md),
                 const SectionLabel('提取结果'),
-                const SizedBox(height: 6),
+                const SizedBox(height: NonSpace.sm),
                 Text('正在从 ${store.activeBoard ?? '画板'} 取色…',
-                    style: TextStyle(fontSize: 10, height: 1.4, color: p.ink4)),
+                    style: TextStyle(fontSize: NonType.micro, height: 1.4, color: p.ink4)),
               ],
               if (_extract != null) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: NonSpace.md),
                 SectionLabel(
                   '提取结果 · ${_extractAb ?? ''}',
                   trailing: IconAction(
@@ -636,34 +655,34 @@ class _SpecPanelState extends State<_SpecPanel> {
                     }),
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: NonSpace.sm),
                 ExtractCompareView(data: _extract!),
               ],
-              const SizedBox(height: 12),
+              const SizedBox(height: NonSpace.md),
               SectionLabel('画板', trailing: Text(store.activeBoard ?? '—',
-                  style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4))),
-              const SizedBox(height: 6),
+                  style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4))),
+              const SizedBox(height: NonSpace.sm),
               _PanelActionButton(
                 icon: Icons.devices_outlined,
                 label: '响应式适配',
                 enabled: store.activeBoard != null && !store.agentBusy,
                 onTap: _runResponsive,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: NonSpace.md),
               const SectionLabel('字体层级'),
-              const SizedBox(height: 6),
+              const SizedBox(height: NonSpace.sm),
               Row(
                 children: [
                   for (final item in [('H1', design.h1), ('H2', design.h2), ('BODY', design.body)])
                     Expanded(
                       child: Container(
-                        margin: const EdgeInsets.only(right: 4),
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(8)),
+                        margin: const EdgeInsets.only(right: NonSpace.xs),
+                        padding: const EdgeInsets.all(NonSpace.sm),
+                        decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(NonRadius.md)),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(item.$1, style: TextStyle(fontSize: 10, color: p.ink4)),
+                            Text(item.$1, style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
                             _CommitField(
                               value: item.$2.round().toString(),
                               monospace: true,
@@ -691,45 +710,45 @@ class _SpecPanelState extends State<_SpecPanel> {
                     ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: NonSpace.md),
               const SectionLabel('间距 / 圆角'),
-              const SizedBox(height: 6),
+              const SizedBox(height: NonSpace.sm),
               Wrap(
-                spacing: 5,
-                runSpacing: 5,
+                spacing: NonSpace.xs,
+                runSpacing: NonSpace.xs,
                 children: [
                   for (final s in design.spacing)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                      decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(4)),
-                      child: Text(s.round().toString(), style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink3)),
+                      padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
+                      decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(NonRadius.sm)),
+                      child: Text(s.round().toString(), style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink3)),
                     ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: NonSpace.md),
               const SectionLabel('规则'),
-              const SizedBox(height: 6),
+              const SizedBox(height: NonSpace.sm),
               for (final rule in design.rules)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
+                  padding: const EdgeInsets.only(bottom: NonSpace.xs),
                   child: Row(
                     children: [
                       Icon(Icons.check, size: 10, color: p.success),
-                      const SizedBox(width: 5),
-                      Expanded(child: Text(rule, style: TextStyle(fontSize: 11, height: 1.4, color: p.ink3))),
+                      const SizedBox(width: NonSpace.xs),
+                      Expanded(child: Text(rule, style: TextStyle(fontSize: NonType.caption, height: 1.4, color: p.ink3))),
                     ],
                   ),
                 ),
-              const SizedBox(height: 12),
+              const SizedBox(height: NonSpace.md),
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(NonSpace.sm),
                 decoration: BoxDecoration(
                   color: p.accentSoft.withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(NonRadius.md),
                   border: Border.all(color: p.accent.withValues(alpha: 0.2)),
                 ),
                 child: Text('每次生成都会带上这份规范，保持全局视觉一致。',
-                    style: TextStyle(fontSize: 10, height: 1.5, color: p.ink3)),
+                    style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink3)),
               ),
             ],
           ),
@@ -824,11 +843,11 @@ class _HistoryPanelState extends State<_HistoryPanel> {
           IconAction(icon: Icons.redo, tooltip: '重做 ${modCombo('⇧⌘Z')}（本地快照）', size: 26, onTap: store.redo),
         ]),
         Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          padding: const EdgeInsets.fromLTRB(NonSpace.sm, NonSpace.sm, NonSpace.sm, 0),
           child: Row(
             children: [
               _seg(context, '本地快照', !_engineMode, () => setState(() => _engineMode = false)),
-              const SizedBox(width: 4),
+              const SizedBox(width: NonSpace.xs),
               _seg(context, '版本记录', _engineMode, () => setState(() => _engineMode = true)),
             ],
           ),
@@ -836,7 +855,7 @@ class _HistoryPanelState extends State<_HistoryPanel> {
         if (!_engineMode)
           Expanded(
             child: ListView.builder(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(NonSpace.md),
             itemCount: store.history.length,
             itemBuilder: (context, i) {
               final index = store.history.length - 1 - i;
@@ -848,13 +867,13 @@ class _HistoryPanelState extends State<_HistoryPanel> {
               final chars = snapshot.replaceAll(RegExp(r'\s+'), '').length;
               return InkWell(
                 onTap: () => store.jumpHistory(index),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(NonRadius.md),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 7),
-                  margin: const EdgeInsets.only(bottom: 2),
+                  padding: const EdgeInsets.symmetric(vertical: NonSpace.sm, horizontal: NonSpace.sm),
+                  margin: const EdgeInsets.only(bottom: NonSpace.xxs),
                   decoration: BoxDecoration(
                     color: active ? p.accentSoft : Colors.transparent,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(NonRadius.md),
                   ),
                   child: Row(
                     children: [
@@ -863,17 +882,17 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                         height: 5,
                         decoration: BoxDecoration(color: active ? p.accent : p.ink4, shape: BoxShape.circle),
                       ),
-                      const SizedBox(width: 7),
+                      const SizedBox(width: NonSpace.sm),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(active ? '当前版本' : '版本 ${index + 1}',
-                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: active ? p.accent : p.ink3)),
+                                style: TextStyle(fontSize: NonType.caption, fontWeight: FontWeight.w500, color: active ? p.accent : p.ink3)),
                             Text('$boards 板 · $chars 字符',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4)),
+                                style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4)),
                           ],
                         ),
                       ),
@@ -890,23 +909,23 @@ class _HistoryPanelState extends State<_HistoryPanel> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
                   child: Text(
                     '当前画板：${store.activeBoard ?? '（未选择）'} · ${_initializedBoard.isEmpty ? '还没有开始记录' : '正在记录 $_initializedBoard'}',
-                    style: TextStyle(fontSize: 10, color: p.ink4),
+                    style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: NonSpace.sm),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
                   child: Wrap(
-                    spacing: 4,
-                    runSpacing: 4,
+                    spacing: NonSpace.xs,
+                    runSpacing: NonSpace.xs,
                     children: [
                       for (final (cmd, label) in _historyCommands)
                         ActionChip(
                           label: Text(label,
-                              style: TextStyle(fontSize: 10, color: _engineBusy ? p.ink4 : p.ink2)),
+                              style: TextStyle(fontSize: NonType.micro, color: _engineBusy ? p.ink4 : p.ink2)),
                           onPressed: _engineBusy
                               ? null
                               : () async {
@@ -917,14 +936,14 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: NonSpace.sm),
                 Expanded(
                   child: Container(
-                    margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                    padding: const EdgeInsets.all(8),
+                    margin: const EdgeInsets.fromLTRB(NonSpace.sm, 0, NonSpace.sm, NonSpace.sm),
+                    padding: const EdgeInsets.all(NonSpace.sm),
                     decoration: BoxDecoration(
                       color: p.bgElevated,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(NonRadius.md),
                       border: Border.all(color: p.line),
                     ),
                     child: SingleChildScrollView(
@@ -935,7 +954,7 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                             _engineSummary.isEmpty
                                 ? '选一个画板，点「开始记录」，之后每次「保存版本」都会留下一个可回看的版本。\n撤销、重做与对比也在这排按钮里。'
                                 : _engineSummary,
-                            style: TextStyle(fontSize: 10, height: 1.5, color: p.ink3),
+                            style: TextStyle(fontSize: NonType.micro, height: 1.5, color: p.ink3),
                           ),
                           if (_engineDetail.isNotEmpty) _HistoryDetails(text: _engineDetail),
                         ],
@@ -953,17 +972,17 @@ class _HistoryPanelState extends State<_HistoryPanel> {
   Widget _seg(BuildContext context, String label, bool active, VoidCallback onTap) {
     final p = context.palette;
     return InkWell(
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(NonRadius.sm),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
         decoration: BoxDecoration(
           color: active ? p.accentSoft : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(NonRadius.sm),
         ),
         child: Text(label,
             style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600, color: active ? p.accent : p.ink3)),
+                fontSize: NonType.caption, fontWeight: FontWeight.w600, color: active ? p.accent : p.ink3)),
       ),
     );
   }
@@ -981,18 +1000,18 @@ class _HistoryDetails extends StatelessWidget {
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
-        childrenPadding: const EdgeInsets.only(bottom: 4),
+        childrenPadding: const EdgeInsets.only(bottom: NonSpace.xs),
         dense: true,
         title: Text('技术详情',
-            style: TextStyle(fontSize: 10, color: p.ink4, fontWeight: FontWeight.w600)),
+            style: TextStyle(fontSize: NonType.micro, color: p.ink4, fontWeight: FontWeight.w600)),
         children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(6)),
+            padding: const EdgeInsets.all(NonSpace.sm),
+            decoration: BoxDecoration(color: p.panel2, borderRadius: BorderRadius.circular(NonRadius.sm)),
             child: SelectableText(
               text,
-              style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4, height: 1.4),
+              style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4, height: 1.4),
             ),
           ),
         ],
@@ -1035,9 +1054,9 @@ class _CommitFieldState extends State<_CommitField> {
       height: 28,
       child: TextField(
         controller: _controller,
-        style: TextStyle(fontSize: widget.monospace ? 10.5 : 12, fontFamily: widget.monospace ? 'Menlo' : null, color: p.ink2),
+        style: TextStyle(fontSize: widget.monospace ? NonType.micro : NonType.body, fontFamily: widget.monospace ? 'Menlo' : null, color: p.ink2),
         decoration: const InputDecoration(
-          contentPadding: EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+          contentPadding: EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.xs),
           isDense: true,
         ),
         onSubmitted: widget.onSubmit,
@@ -1114,15 +1133,15 @@ class ExtractCompareView extends StatelessWidget {
       children: [
         Text(
           '颜色 ${summary['total_colors'] ?? tokens.length} · 尺寸组 ${summary['total_sizes'] ?? '—'} · 节点 ${summary['total_nodes'] ?? '—'}',
-          style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
+          style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4),
         ),
-        const SizedBox(height: 7),
+        const SizedBox(height: NonSpace.sm),
         if (tokens.isEmpty)
-          Text('这个画板没有可提取的颜色。', style: TextStyle(fontSize: 11, color: p.ink4))
+          Text('这个画板没有可提取的颜色。', style: TextStyle(fontSize: NonType.caption, color: p.ink4))
         else
           for (final t in tokens) _tokenRow(context, design, t),
         if (tokens.isNotEmpty) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: NonSpace.sm),
           _PanelActionButton(
             icon: Icons.merge_type,
             label: diffs > 0 ? '合并 $diffs 处建议到规范' : '已与现规范一致',
@@ -1143,7 +1162,7 @@ class ExtractCompareView extends StatelessWidget {
     final current = design.palette[name];
     final same = _sameValue(value, current);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 5),
+      padding: const EdgeInsets.only(bottom: NonSpace.xs),
       child: Row(
         children: [
           Container(
@@ -1151,11 +1170,11 @@ class ExtractCompareView extends StatelessWidget {
             height: 18,
             decoration: BoxDecoration(
               color: parseHex(value),
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(NonRadius.sm),
               border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
             ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: NonSpace.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1163,22 +1182,22 @@ class ExtractCompareView extends StatelessWidget {
                 Text(name.isEmpty ? '—' : name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, color: p.ink3)),
+                    style: TextStyle(fontSize: NonType.micro, color: p.ink3)),
                 Text(same ? value : '$value → ${current ?? '新增'}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: same ? p.ink4 : p.ink2)),
+                    style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: same ? p.ink4 : p.ink2)),
               ],
             ),
           ),
           Icon(same ? Icons.check : Icons.swap_horiz, size: 11, color: same ? p.success : p.accent),
-          const SizedBox(width: 6),
+          const SizedBox(width: NonSpace.sm),
           SizedBox(
             width: 56,
             child: Text(
               '${usage != null ? '×$usage' : ''}${confidence != null ? ' · $confidence%' : ''}',
               textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4),
             ),
           ),
         ],
@@ -1231,19 +1250,19 @@ class _PanelActionButton extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: enabled ? p.panel2 : p.panel2.withValues(alpha: 0.4),
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(NonRadius.md),
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(NonRadius.md),
         onTap: enabled ? onTap : null,
         child: Container(
           height: 30,
-          padding: const EdgeInsets.symmetric(horizontal: 9),
+          padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
           child: Row(
             children: [
               Icon(icon, size: 13, color: enabled ? p.ink2 : p.ink4),
-              const SizedBox(width: 7),
+              const SizedBox(width: NonSpace.sm),
               Text(label,
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: enabled ? p.ink2 : p.ink4)),
+                  style: TextStyle(fontSize: NonType.caption, fontWeight: FontWeight.w500, color: enabled ? p.ink2 : p.ink4)),
             ],
           ),
         ),
@@ -1317,12 +1336,12 @@ class _BenchmarkStripState extends State<_BenchmarkStrip> {
     final data = _data;
     if (_loading && data == null) {
       return Padding(
-        padding: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.only(top: NonSpace.sm),
         child: Row(
           children: [
             SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.2, color: p.ink4)),
-            const SizedBox(width: 6),
-            Text('正在评分…', style: TextStyle(fontSize: 10, color: p.ink4)),
+            const SizedBox(width: NonSpace.sm),
+            Text('正在评分…', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
           ],
         ),
       );
@@ -1337,7 +1356,7 @@ class _BenchmarkStripState extends State<_BenchmarkStrip> {
       _ => p.danger,
     };
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.only(top: NonSpace.sm),
       child: Row(
         children: [
           Pill(
@@ -1345,13 +1364,13 @@ class _BenchmarkStripState extends State<_BenchmarkStrip> {
             color: color,
             background: color.withValues(alpha: 0.14),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: NonSpace.sm),
           Expanded(
             child: Text(
               '${nodes ?? '—'} 节点 · ${_fmtBytes(data['total_memory'])}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10, fontFamily: 'Menlo', color: p.ink4),
+              style: TextStyle(fontSize: NonType.micro, fontFamily: 'Menlo', color: p.ink4),
             ),
           ),
           IconAction(icon: Icons.refresh, tooltip: '重新评分', size: 20, onTap: _fetch),

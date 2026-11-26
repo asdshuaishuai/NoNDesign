@@ -10,6 +10,7 @@ import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/workbench_layout.dart';
 import '../core/toast_service.dart';
+import 'aqua.dart';
 import 'canvas_view.dart';
 import 'command_palette.dart';
 import 'common.dart';
@@ -23,6 +24,12 @@ import 'workspace_chrome.dart';
 import 'settings_dialog.dart';
 import 'status_bar.dart';
 import 'title_bar.dart';
+
+/// 设计壳内工具条 / 面板头部统一高度：44 = NonSpace.xxl(32) + NonSpace.md(12)。
+///
+/// 与 3D 面板头（`three_workbench_panels.panelHeaderHeight`）和右侧检查栏同一档；
+/// `_BoardTabs` / `_SourceView` 不再各自写 44。新增头部一律复用。
+const double workspaceHeaderHeight = NonSpace.xxl + NonSpace.md;
 
 class Workspace extends StatefulWidget {
   /// 嵌入式宿主（聊天流常驻分栏 / 画中画浮窗，docs/plan-chat-stream-shell.md
@@ -231,8 +238,10 @@ class _WorkspaceState extends State<Workspace> {
                               ))
                       : null,
                   leftPanel: leftDockEdge
-                      ? _leftPanelWithDivider(store)
-                      : (showLeft && leftPaneSafe ? const LeftPanel() : null),
+                      ? _leftPanelWithDivider(store, designLayout.leftWidth)
+                      : (showLeft && leftPaneSafe
+                            ? LeftPanel(width: designLayout.leftWidth)
+                            : null),
                   main: _center(store, pluginView),
                   rightPanel: rightDockEdge
                       ? _rightPanelWithDivider(store)
@@ -276,7 +285,8 @@ class _WorkspaceState extends State<Workspace> {
       builder: (_) => SafeArea(
         child: SizedBox(
           height: MediaQuery.of(context).size.height * 0.6,
-          child: const LeftPanel(),
+          // 底部 sheet 里占满可用宽度（原来 252 的固定宽会缩成左半边）。
+          child: LeftPanel(width: double.infinity),
         ),
       ),
     );
@@ -311,10 +321,10 @@ class _WorkspaceState extends State<Workspace> {
                 context: context,
                 backgroundColor: p.panel,
                 isScrollControlled: true,
-                builder: (_) => sheet(const LeftPanel()),
+                builder: (_) => sheet(LeftPanel(width: double.infinity)),
               ),
               icon: const Icon(Icons.view_sidebar_outlined, size: 16),
-              label: const Text('项目面板', style: TextStyle(fontSize: 12)),
+              label: const Text('项目面板', style: TextStyle(fontSize: NonType.body)),
             ),
             const Spacer(),
           ],
@@ -327,7 +337,7 @@ class _WorkspaceState extends State<Workspace> {
                 builder: (_) => sheet(const WorkspaceRightPanel()),
               ),
               icon: const Icon(Icons.auto_awesome, size: 16),
-              label: const Text('NaN 面板', style: TextStyle(fontSize: 12)),
+              label: const Text('NaN 面板', style: TextStyle(fontSize: NonType.body)),
             ),
             const Spacer(),
           ],
@@ -344,7 +354,10 @@ class _WorkspaceState extends State<Workspace> {
   }
 
   /// 设计面左栏 + 右缘 8px 分隔热区；折叠时只留热区（仍可双击恢复）。
-  Widget _leftPanelWithDivider(AppStore store) {
+  ///
+  /// [width] 来自 `WorkbenchLayout(design).leftWidth`（不再由 LeftPanel 自己
+  /// 写死 252）；底部 sheet 里的 LeftPanel 传宽度约束的宽（满宽）。
+  Widget _leftPanelWithDivider(AppStore store, double width) {
     final divider = _PanelDivider(
       dividerKey: const ValueKey('design-left-panel-divider'),
       tooltip: store.leftPanelCollapsed ? '双击展开左侧面板' : '双击折叠左侧面板',
@@ -353,7 +366,7 @@ class _WorkspaceState extends State<Workspace> {
     if (store.leftPanelCollapsed) return divider;
     return Row(
       mainAxisSize: MainAxisSize.min,
-      children: [const LeftPanel(), divider],
+      children: [LeftPanel(width: width), divider],
     );
   }
 
@@ -410,17 +423,29 @@ class _WorkspaceState extends State<Workspace> {
                     // 画板条（＋ 新建）仍在，生成入口走聊天。
                     // 打开的项目没有可用画布（手机离线/预览失败）：不能把
                     // 空画布显示成「还没有画板」的空项目（审查 depython-1）。
-                    child: store.canvasPreviewUnavailable
-                        ? const _CanvasNeedsDesktopHint()
-                        : widget.embedded && store.render.artboards.isEmpty
-                        ? const _EmbeddedNoBoardHint()
-                        : const CanvasView(),
+                    child: _canvasStage(
+                      context,
+                      store.canvasPreviewUnavailable
+                          ? const _CanvasNeedsDesktopHint()
+                          : widget.embedded && store.render.artboards.isEmpty
+                          ? const _EmbeddedNoBoardHint()
+                          : const CanvasView(),
+                    ),
                   ),
                 ],
               ),
             },
       ),
     );
+  }
+
+  /// 画布主区：CanvasView 外包 [RepaintBoundary]（画布 painter / 手势本地 ghost
+  /// 逐帧重绘时不连累整壳）。浅色（Aqua）下再套一层细条纹窗口底；深色不套，
+  /// 布局尺寸与既有画布几何保持不变。
+  Widget _canvasStage(BuildContext context, Widget canvas) {
+    final Widget framed = RepaintBoundary(child: canvas);
+    if (!isAquaTheme(context)) return framed;
+    return AquaWindowSurface(child: framed);
   }
 
   Future<void> _command() async {
@@ -616,12 +641,12 @@ class _OpenProjectDialog extends StatelessWidget {
     return AlertDialog(
       backgroundColor: p.panel,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(NonRadius.lg),
         side: BorderSide(color: p.lineStrong),
       ),
       title: const Text(
         '打开项目',
-        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600),
       ),
       content: SizedBox(
         width: 460,
@@ -637,7 +662,7 @@ class _OpenProjectDialog extends StatelessWidget {
                   children: [
                     if (empty && store.refreshingProjects)
                       Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 22),
+                        padding: const EdgeInsets.symmetric(vertical: NonSpace.xl),
                         child: Row(
                           children: [
                             SizedBox(
@@ -648,20 +673,20 @@ class _OpenProjectDialog extends StatelessWidget {
                                 color: p.accent,
                               ),
                             ),
-                            const SizedBox(width: 9),
+                            const SizedBox(width: NonSpace.sm),
                             Text(
                               '正在扫描工作区与桌面…',
-                              style: TextStyle(fontSize: 12, color: p.ink3),
+                              style: TextStyle(fontSize: NonType.body, color: p.ink3),
                             ),
                           ],
                         ),
                       )
                     else if (empty)
                       Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 18),
+                        padding: const EdgeInsets.symmetric(vertical: NonSpace.lg),
                         child: Text(
                           '工作区与桌面还没有项目。',
-                          style: TextStyle(fontSize: 11, color: p.ink4),
+                          style: TextStyle(fontSize: NonType.caption, color: p.ink4),
                         ),
                       )
                     else ...[
@@ -672,25 +697,25 @@ class _OpenProjectDialog extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             InkWell(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(NonRadius.md),
               onTap: () => Navigator.pop(context, '__file__'),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
+                padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm),
                 decoration: BoxDecoration(
                   color: p.panel2.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(NonRadius.md),
                   border: Border.all(color: p.line),
                 ),
                 child: Row(
                   children: [
                     Icon(Icons.folder_open_outlined, size: 15, color: p.ink4),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: NonSpace.sm),
                     Expanded(
                       child: Text(
                         '从文件选择…',
-                        style: TextStyle(fontSize: 12, color: p.ink2),
+                        style: TextStyle(fontSize: NonType.body, color: p.ink2),
                       ),
                     ),
                     Icon(Icons.chevron_right, size: 13, color: p.ink4),
@@ -721,11 +746,11 @@ class _OpenProjectDialog extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(top: 6, bottom: 3),
+          padding: const EdgeInsets.only(top: NonSpace.sm, bottom: NonSpace.xs),
           child: Text(
             label,
             style: TextStyle(
-              fontSize: 10,
+              fontSize: NonType.micro,
               fontWeight: FontWeight.w700,
               letterSpacing: 1.1,
               color: p.ink4,
@@ -734,10 +759,10 @@ class _OpenProjectDialog extends StatelessWidget {
         ),
         for (final s in items)
           InkWell(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(NonRadius.md),
             onTap: () => Navigator.pop(context, s['path']?.toString() ?? ''),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm, vertical: NonSpace.sm),
               child: Row(
                 children: [
                   Container(
@@ -745,11 +770,11 @@ class _OpenProjectDialog extends StatelessWidget {
                     height: 28,
                     decoration: BoxDecoration(
                       color: p.panel2,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(NonRadius.md),
                     ),
                     child: Icon(Icons.layers_outlined, size: 14, color: p.ink4),
                   ),
-                  const SizedBox(width: 9),
+                  const SizedBox(width: NonSpace.sm),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -757,7 +782,7 @@ class _OpenProjectDialog extends StatelessWidget {
                         Text(
                           s['name']?.toString() ?? '',
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: p.ink2),
+                          style: TextStyle(fontSize: NonType.body, color: p.ink2),
                         ),
                         Text(
                           relativeTime(
@@ -765,7 +790,7 @@ class _OpenProjectDialog extends StatelessWidget {
                                 ? (s['modified'] as num).toInt() * 1000
                                 : null,
                           ),
-                          style: TextStyle(fontSize: 10, color: p.ink4),
+                          style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                         ),
                       ],
                     ),
@@ -793,12 +818,12 @@ class _BoardTabs extends StatelessWidget {
     final store = context.watch<AppStore>();
     final p = context.palette;
     return Container(
-      height: 44,
+      height: workspaceHeaderHeight,
       decoration: BoxDecoration(
         color: p.bgElevated.withValues(alpha: 0.7),
         border: Border(bottom: BorderSide(color: p.line)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
       child: Row(
         children: [
           Expanded(
@@ -808,18 +833,18 @@ class _BoardTabs extends StatelessWidget {
                 children: [
                   for (final b in store.render.artboards)
                     Padding(
-                      padding: const EdgeInsets.only(right: 2),
+                      padding: const EdgeInsets.only(right: NonSpace.xxs),
                       child: InkWell(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(NonRadius.md),
                         onTap: () => store.selectBoard(b.id),
                         child: Container(
                           height: 28,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
                           decoration: BoxDecoration(
                             color: store.activeBoard == b.id
                                 ? p.panel2
                                 : Colors.transparent,
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(NonRadius.md),
                           ),
                           child: Row(
                             children: [
@@ -830,7 +855,7 @@ class _BoardTabs extends StatelessWidget {
                                     ? p.accent
                                     : p.ink4,
                               ),
-                              const SizedBox(width: 4),
+                              const SizedBox(width: NonSpace.xs),
                               ConstrainedBox(
                                 constraints: const BoxConstraints(
                                   maxWidth: 140,
@@ -839,7 +864,7 @@ class _BoardTabs extends StatelessWidget {
                                   b.name.isEmpty ? b.id : b.name,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: 12,
+                                    fontSize: NonType.body,
                                     fontWeight: FontWeight.w500,
                                     color: store.activeBoard == b.id
                                         ? p.ink
@@ -847,11 +872,11 @@ class _BoardTabs extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 4),
+                              const SizedBox(width: NonSpace.xs),
                               Text(
                                 '${b.nodes.length}',
                                 style: TextStyle(
-                                  fontSize: 10,
+                                  fontSize: NonType.micro,
                                   fontFamily: 'Menlo',
                                   color: p.ink4,
                                 ),
@@ -930,11 +955,11 @@ class _BoardTabs extends StatelessWidget {
             // 「由原型生成热应用」只有一个入口，放在热应用工作台顶栏（带进度与
             // 结果反馈）。设计工具条这里只保留进入热应用工作台的按钮，避免出现
             // 三个看起来一样、点了没动静的生成入口。
-            const SizedBox(width: 4),
+            const SizedBox(width: NonSpace.xs),
             TextButton.icon(
               onPressed: () => store.setView('docs'),
               icon: Icon(Icons.auto_awesome, size: 11, color: p.accent),
-              label: const Text('文档', style: TextStyle(fontSize: 11)),
+              label: const Text('文档', style: TextStyle(fontSize: NonType.caption)),
             ),
           ],
         ],
@@ -953,16 +978,16 @@ class _EmbeddedNoBoardHint extends StatelessWidget {
     final p = context.palette;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(NonSpace.lg),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.dashboard_customize_outlined, size: 24, color: p.ink4),
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             Text(
               '还没有画板——让 NaN 生成，或点画板条 ＋ 新建。',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
+              style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.ink4),
             ),
           ],
         ),
@@ -983,22 +1008,22 @@ class _CanvasNeedsDesktopHint extends StatelessWidget {
     final p = context.palette;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(NonSpace.lg),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.desktop_windows_outlined, size: 24, color: p.ink4),
-            const SizedBox(height: 8),
+            const SizedBox(height: NonSpace.sm),
             Text(
               '项目已打开，画布需要连接桌面后才能预览',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, height: 1.5, color: p.ink),
+              style: TextStyle(fontSize: NonType.body, height: 1.5, color: p.ink),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: NonSpace.sm),
             Text(
               '文档与项目内容都已就绪，连接桌面后即可继续查看和编辑画布。',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, height: 1.5, color: p.ink4),
+              style: TextStyle(fontSize: NonType.caption, height: 1.5, color: p.ink4),
             ),
           ],
         ),
@@ -1030,20 +1055,20 @@ class _EmbeddedRail extends StatelessWidget {
         color: p.bgElevated,
         border: Border(right: BorderSide(color: p.line)),
       ),
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      padding: const EdgeInsets.symmetric(vertical: NonSpace.md, horizontal: NonSpace.sm),
       child: Column(
         children: [
           for (final item in items)
             Padding(
-              padding: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.only(bottom: NonSpace.xs),
               child: Material(
                 color: store.panel == item.$1
                     ? p.accentSoft
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(NonRadius.md),
                 child: InkWell(
                   key: ValueKey('embedded-rail-${item.$1}'),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(NonRadius.md),
                   // setPanel('project'|'history') 只改面板不动 view（store.dart
                   // 的 setPanel：只有 docs/spec 才会连带 setView('docs')）。
                   onTap: () => store.setPanel(item.$1),
@@ -1058,11 +1083,11 @@ class _EmbeddedRail extends StatelessWidget {
                           size: 17,
                           color: store.panel == item.$1 ? p.accent : p.ink3,
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: NonSpace.xs),
                         Text(
                           item.$3,
                           style: TextStyle(
-                            fontSize: 10,
+                            fontSize: NonType.micro,
                             fontWeight: FontWeight.w500,
                             color: store.panel == item.$1 ? p.accent : p.ink3,
                           ),
@@ -1121,8 +1146,8 @@ class _SourceViewState extends State<_SourceView> {
       child: Column(
         children: [
           Container(
-            height: 44,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            height: workspaceHeaderHeight,
+            padding: const EdgeInsets.symmetric(horizontal: NonSpace.md),
             decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: p.line)),
             ),
@@ -1136,12 +1161,12 @@ class _SourceViewState extends State<_SourceView> {
                 Text(
                   '源码',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: NonType.body,
                     fontWeight: FontWeight.w500,
                     color: p.ink2,
                   ),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: NonSpace.sm),
                 Pill(label: '当前版本 · ${lines.length} 行'),
                 const Spacer(),
                 TextButton.icon(
@@ -1189,14 +1214,14 @@ class _SourceViewState extends State<_SourceView> {
                     icon: const Icon(Icons.close, size: 12),
                     label: const Text('取消'),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: NonSpace.xs),
                   FilledButton.icon(
                     style: FilledButton.styleFrom(
                       backgroundColor: p.accent,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
+                        horizontal: NonSpace.md,
+                        vertical: NonSpace.sm,
                       ),
                     ),
                     onPressed: _applying ? null : _apply,
@@ -1219,14 +1244,14 @@ class _SourceViewState extends State<_SourceView> {
           Expanded(
             child: _editing
                 ? Padding(
-                    padding: const EdgeInsets.all(14),
+                    padding: const EdgeInsets.all(NonSpace.lg),
                     child: TextField(
                       controller: _editController,
                       maxLines: null,
                       expands: true,
                       textAlignVertical: TextAlignVertical.top,
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: NonType.caption,
                         height: 1.7,
                         fontFamily: 'Menlo',
                         color: p.ink,
@@ -1235,15 +1260,15 @@ class _SourceViewState extends State<_SourceView> {
                         filled: true,
                         fillColor: p.bgElevated,
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(NonRadius.md),
                           borderSide: BorderSide(color: p.line),
                         ),
-                        contentPadding: const EdgeInsets.all(12),
+                        contentPadding: const EdgeInsets.all(NonSpace.md),
                       ),
                     ),
                   )
                 : SingleChildScrollView(
-                    padding: const EdgeInsets.all(14),
+                    padding: const EdgeInsets.all(NonSpace.lg),
                     child: SelectableText(
                       lines
                           .asMap()
@@ -1254,7 +1279,7 @@ class _SourceViewState extends State<_SourceView> {
                           )
                           .join('\n'),
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: NonType.caption,
                         height: 1.7,
                         fontFamily: 'Menlo',
                         color: p.ink2,
@@ -1293,12 +1318,12 @@ class _PasswordDialogState extends State<PasswordDialog> {
     return AlertDialog(
       backgroundColor: p.panel,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(NonRadius.lg),
         side: BorderSide(color: p.lineStrong),
       ),
       title: const Text(
         '打开受保护的项目',
-        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600),
       ),
       content: SizedBox(
         width: 360,
@@ -1309,12 +1334,12 @@ class _PasswordDialogState extends State<PasswordDialog> {
             Text(
               name,
               style: TextStyle(
-                fontSize: 11,
+                fontSize: NonType.caption,
                 fontFamily: 'Menlo',
                 color: p.ink4,
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: NonSpace.md),
             TextField(
               controller: _controller,
               autofocus: true,
@@ -1325,8 +1350,8 @@ class _PasswordDialogState extends State<PasswordDialog> {
               ),
               onSubmitted: (v) => Navigator.pop(context, v),
             ),
-            const SizedBox(height: 8),
-            Text('口令只在本机内存中使用。', style: TextStyle(fontSize: 10, color: p.ink4)),
+            const SizedBox(height: NonSpace.sm),
+            Text('口令只在本机内存中使用。', style: TextStyle(fontSize: NonType.micro, color: p.ink4)),
           ],
         ),
       ),
@@ -1378,12 +1403,12 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
     return AlertDialog(
       backgroundColor: p.panel,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(NonRadius.lg),
         side: BorderSide(color: p.lineStrong),
       ),
       title: const Text(
         '新建项目',
-        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600),
       ),
       content: SizedBox(
         width: 520,
@@ -1391,15 +1416,15 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('项目名', style: TextStyle(fontSize: 11, color: p.ink3)),
-            const SizedBox(height: 4),
+            Text('项目名', style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
+            const SizedBox(height: NonSpace.xs),
             TextField(
               controller: _name,
               decoration: const InputDecoration(hintText: '例如：invoice-studio'),
             ),
-            const SizedBox(height: 12),
-            Text('设备', style: TextStyle(fontSize: 11, color: p.ink3)),
-            const SizedBox(height: 4),
+            const SizedBox(height: NonSpace.md),
+            Text('设备', style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
+            const SizedBox(height: NonSpace.xs),
             Row(
               children: [
                 for (final item in [
@@ -1408,11 +1433,11 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                   ('desktop', '桌面 1440×900'),
                 ])
                   Padding(
-                    padding: const EdgeInsets.only(right: 6),
+                    padding: const EdgeInsets.only(right: NonSpace.sm),
                     child: ChoiceChip(
                       label: Text(
                         item.$2,
-                        style: const TextStyle(fontSize: 11),
+                        style: const TextStyle(fontSize: NonType.caption),
                       ),
                       selected: _device == item.$1,
                       onSelected: (_) => setState(() => _device = item.$1),
@@ -1420,9 +1445,9 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                   ),
               ],
             ),
-            const SizedBox(height: 12),
-            Text('起始画板', style: TextStyle(fontSize: 11, color: p.ink3)),
-            const SizedBox(height: 4),
+            const SizedBox(height: NonSpace.md),
+            Text('起始画板', style: TextStyle(fontSize: NonType.caption, color: p.ink3)),
+            const SizedBox(height: NonSpace.xs),
             // nonSelect 统一下拉（M3 DropdownMenu，32px 菜单行 + panel2 配色）。
             // 空白画板条目 value=null：DropdownMenu initialSelection 按
             // entry.value == null 匹配到首条，选中态显示与旧 DropdownButton 一致；
@@ -1435,26 +1460,26 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                 items: [
                   const DropdownMenuItem<String?>(
                     value: null,
-                    child: Text('空白画板', style: TextStyle(fontSize: 11)),
+                    child: Text('空白画板', style: TextStyle(fontSize: NonType.caption)),
                   ),
                   for (final t in store.templates.whereType<Map>())
                     DropdownMenuItem<String?>(
                       value: t['id']?.toString(),
                       child: Text(
                         '${t['name'] ?? t['id']} · ${t['id']}',
-                        style: const TextStyle(fontSize: 11),
+                        style: const TextStyle(fontSize: NonType.caption),
                       ),
                     ),
                 ],
                 onChanged: (v) => setState(() => _template = v),
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: NonSpace.lg),
             Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(NonSpace.md),
               decoration: BoxDecoration(
                 color: p.accentSoft.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(NonRadius.md),
                 border: Border.all(color: p.accent.withValues(alpha: 0.2)),
               ),
               child: Column(
@@ -1463,23 +1488,23 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                   Row(
                     children: [
                       Icon(Icons.auto_awesome, size: 12, color: p.accent),
-                      const SizedBox(width: 5),
+                      const SizedBox(width: NonSpace.xs),
                       Text(
                         '让 NaN 生成第一版（可选）',
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: NonType.caption,
                           fontWeight: FontWeight.w500,
                           color: p.ink,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: NonSpace.sm),
                   TextField(
                     controller: _brief,
                     minLines: 2,
                     maxLines: 4,
-                    style: const TextStyle(fontSize: 12),
+                    style: const TextStyle(fontSize: NonType.body),
                     decoration: const InputDecoration(
                       hintText: '描述产品目标与页面范围；留空则只创建项目。',
                     ),
@@ -1545,18 +1570,18 @@ class _ShortcutsDialog extends StatelessWidget {
     return AlertDialog(
       backgroundColor: p.panel,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(NonRadius.lg),
         side: BorderSide(color: p.lineStrong),
       ),
       title: const Text(
         '快捷键与命令',
-        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        style: TextStyle(fontSize: NonType.subtitle, fontWeight: FontWeight.w600),
       ),
       content: SizedBox(
         width: 560,
         child: Wrap(
-          spacing: 32,
-          runSpacing: 18,
+          spacing: NonSpace.xxl,
+          runSpacing: NonSpace.lg,
           children: [
             for (final group in groups.entries)
               SizedBox(
@@ -1567,28 +1592,28 @@ class _ShortcutsDialog extends StatelessWidget {
                     Text(
                       group.key,
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: NonType.micro,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 1,
                         color: p.ink4,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: NonSpace.sm),
                     for (final row in group.value)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 5),
+                        padding: const EdgeInsets.only(bottom: NonSpace.xs),
                         child: Row(
                           children: [
                             Expanded(
                               child: Text(
                                 row.$1,
-                                style: TextStyle(fontSize: 11, color: p.ink3),
+                                style: TextStyle(fontSize: NonType.caption, color: p.ink3),
                               ),
                             ),
                             Text(
                               row.$2,
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: NonType.micro,
                                 fontFamily: 'Menlo',
                                 color: p.ink4,
                               ),

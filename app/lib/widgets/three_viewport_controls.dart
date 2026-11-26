@@ -67,19 +67,19 @@ class ThreeViewportControls extends StatelessWidget {
       elevation: 3,
       shadowColor: Colors.black.withValues(alpha: 0.3),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(NonRadius.md),
         side: BorderSide(color: p.lineStrong),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2),
+        padding: const EdgeInsets.symmetric(horizontal: NonSpace.xxs),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            const SizedBox(width: 5),
+            const SizedBox(width: NonSpace.xs),
             Icon(Icons.open_with, size: 13, color: color),
-            const SizedBox(width: 5),
-            Text('视角', style: TextStyle(fontSize: 11, color: color)),
-            const SizedBox(width: 2),
+            const SizedBox(width: NonSpace.xs),
+            Text('视角', style: TextStyle(fontSize: NonType.caption, color: color)),
+            const SizedBox(width: NonSpace.xxs),
             for (final preset in ThreeViewPreset.values)
               _ViewportAction(
                 buttonKey: ValueKey('three-view-${preset.id}'),
@@ -108,7 +108,7 @@ class ThreeViewportControls extends StatelessWidget {
               tooltip: enabled ? '重置到初始视角' : disabledHint,
               onTap: onReset,
             ),
-            const SizedBox(width: 3),
+            const SizedBox(width: NonSpace.xs),
           ],
         ),
       ),
@@ -116,7 +116,7 @@ class ThreeViewportControls extends StatelessWidget {
   }
 
   Widget _divider(NonPalette p) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 3),
+    padding: const EdgeInsets.symmetric(horizontal: NonSpace.xs),
     child: Container(width: 1, height: 14, color: p.lineStrong),
   );
 }
@@ -155,18 +155,18 @@ class _ViewportAction extends StatelessWidget {
           visualDensity: VisualDensity.compact,
           minimumSize: const Size(0, 26),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          padding: const EdgeInsets.symmetric(horizontal: 6),
+          padding: const EdgeInsets.symmetric(horizontal: NonSpace.sm),
           foregroundColor: color,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(NonRadius.sm)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             if (icon != null) ...[
               Icon(icon, size: 13, color: color),
-              const SizedBox(width: 4),
+              const SizedBox(width: NonSpace.xs),
             ],
-            Text(label, style: TextStyle(fontSize: 11, color: color)),
+            Text(label, style: TextStyle(fontSize: NonType.caption, color: color)),
           ],
         ),
       ),
