@@ -54,7 +54,7 @@
 | 文档 | 状态 | 覆盖 |
 | --- | --- | --- |
 | [plan-creative-workbench.md](plan-creative-workbench.md) | **方案定稿；批次 0/1/1b/2/3 已落地，批次 4 仅契约面（2026-11-24 工作树）** | 全局交互（右 chat + 执行/结果双面）、设计验证式原型绑定、3D 建模 + 3dcodeverse harness、视频导演台/剧本/三风格 + `toon_3d` 候选/TTS/配乐联动、强绑定强规范框架、施工批次 0–8 |
-| [plan-next-iterations.md](plan-next-iterations.md) | **方案 v3（2026-11-24；P2 数据契约/编译/存储/预览已落地，agent 工具面未落地，见 §1.4 该文档施工状态）** | 收窄到视频双轨：M0 收口 → D 设计阶段（双轨 ADR/3D 视频 three-live 引擎设计/数据契约/导演台最小面）→ P1 three-live 3D 视频 POC → P2 3D 视频最小纵切；P3 常规视频只回归；音乐/VFX/TTS/视口/GLB/judge 移入 backlog；raea 嵌入已关闭（只参考） |
+| [plan-next-iterations.md](plan-next-iterations.md) | **方案 v3（2026-11-24；P2 数据契约/编译/存储/预览 + 工具面 `video3d_list/status/create` 已落地；`render_frames` 与真 three 渲染待后续）** | 收窄到视频双轨：M0 收口 → D 设计阶段（双轨 ADR/3D 视频 three-live 引擎设计/数据契约/导演台最小面）→ P1 three-live 3D 视频 POC → P2 3D 视频最小纵切；P3 常规视频只回归；音乐/VFX/TTS/视口/GLB/judge 移入 backlog；raea 嵌入已关闭（只参考） |
 | [plan-workbench-ui.md](plan-workbench-ui.md) | **已落地（2026-11-24）：UI-0–UI-4，四工作台内容区独立布局；能力批次另列** | 四工作台内容区交互姿态/布局独立适配：共享外层壳不变；设计（画布专注+选区浮条）/ 3D（大纲+检查器+工具条）/ 视频（导演台+时间线+运输条）/ 音乐（项目+轨道+只读谱面+检查器+运输条）；热应用暂不改动 |
 | [design/video-tracks-adr.md](design/video-tracks-adr.md) | 已落地（D1，2026-11-25 冻结；双轨并存：常规视频 v1 + 3D 视频独立项目） | 视频双轨（常规视频 / 3D 视频）边界、事实源、执行面、共享/隔离 |
 | [design/video3d-execution.md](design/video3d-execution.md) | 已落地（D2，2026-11-25/26；项目层/预览页编译器/工作台；v1 是确定性 Canvas2D，真 three/WebGL 待后续） | 3D 视频 three-live 执行面：场景合成/镜头时间/确定性/帧证据/性能 |
