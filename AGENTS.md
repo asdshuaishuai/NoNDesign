@@ -427,6 +427,14 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   WebView2）、`dart_agent_tools_test.dart` 的 `workspace mode tool surface`（workspace
   run 必须暴露 three_*/video_*/hotapp_*，且不含画布/文档工具）。改这些链路必须同步
   跑对应锚点。
+- **创作栈守卫（2026-11-27）**：`app/test/creative_stack_guard_test.dart` 把
+  `docs/audit-3d-video-2026-11-27.md` 的核查结论变成自动红绿灯——three.module.js
+  字节/sha256 与常量一致、three-live 许可与占位、ThreeUI 组件数在 8–12 内且页面齐全、
+  视频 v1 短片零网络引用、**被裁决「只参考不引入」的运行时（raea / material-painter /
+  openmotion / hyperframes / remotion / bevy / phaser）零残留**、3D/视频/3D 视频工具
+  全部注册且 `video3d_*` 失败码都有 `toolFailureMessage` 分支、SKILL.md 与 7 份参考
+  不丢且蒸馏纪律真被引用。改动这些资源/工具/契约时必须保持该测试为绿；扫描已做
+  「去 data URI + 标识符边界」处理，base64 里的巧合子串不会误报。
 - **Windows 逐字节契约（2026-11-20）**：`app/assets/a2ui_web/**` 与
   `app/test/fixtures/**` 由 `.gitattributes` 钉成 LF，DDP 容器 `.ddp` 标 `-text`
   二进制——这些是 sha256 / golden 逐字节断言，别再让 `core.autocrlf` 改字节。

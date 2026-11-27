@@ -697,6 +697,8 @@ String toolFailureMessage(String? rawError) {
       return '没有找到这个 3D 视频项目';
     case 'video3d_corrupt':
       return '这个 3D 视频项目的两份源文件读不出来，先修好再打开';
+    case 'video3d_invalid_input':
+      return '3D 视频的两份源文件不是可写对象，请按模板核对结构';
     case 'video3d_path_escape':
       return '项目名把读写带到了项目库之外，已拒绝';
     case 'video3d_unverified':

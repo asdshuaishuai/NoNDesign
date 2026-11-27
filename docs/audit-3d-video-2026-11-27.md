@@ -217,7 +217,19 @@ Python / Blender / CadQuery / URDF / moderngl 运行时**均未进入产品**（
      `video3d_status/list` 不认领；
    - 测试：`video3d_tools_test.dart`（8 条：落盘/拒覆盖/未通过不写盘/非法名/查看/
      坏项目只读/不存在/列表）+ 工具面收窄与端到端执行 2 条 + 认领 2 条。
-4. 未实现的能力（§6 的 2–5）**不在本轮伪造**：全部按「未施工 / 缺口」记账，
+4. **把核查结论固化成自动守卫（2026-11-27，本轮）**：新增
+   `app/test/creative_stack_guard_test.dart`（12 条），防止本报告里已对齐的事实被
+   后来的改动悄悄破坏：
+   - three.module.js 字节/`sha256` 与代码常量一致（CRLF/裁剪即红）；
+   - three-live 在库 + 许可/NOTICE + 版本 1.4.0 + 预览页占位恰好一处 + `connect-src 'none'`；
+   - ThreeUI 组件数在 8–12 硬边界内、每个 catalog 条目都有实体页面；
+   - 视频 v1：`clips.json` 每条页面在场、引擎资产在场、页面零网络引用；
+   - 只参考项零依赖：依赖面 + 代码/资产/脚本目录里不出现 `raea` / `material-painter` /
+     `openmotion` / `hyperframes` / `remotion` / `bevy` / `phaser`（去 data URI +
+     标识符边界，避免 base64 里的巧合子串误报）；
+   - 3D/视频/3D 视频工具全部注册，每条 `video3d_*` 失败码都有 `toolFailureMessage` 分支；
+   - SKILL.md + 7 份参考不丢，且蒸馏纪律确实被 `dart_agent.dart` 引用。
+5. 未实现的能力（§6 的 2–5）**不在本轮伪造**：全部按「未施工 / 缺口」记账，
    下一步施工顺序见 §9。
 
 ## 8. 复现命令
