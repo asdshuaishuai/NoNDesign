@@ -367,6 +367,18 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   **像素确定性口径分档**：Canvas2D 逐字节确定；WebGL 各档几何/相机/帧号确定、
   同设备同帧恒定、跨设备像素可能不同，three 与 Babylon **也互不逐字节一致**——
   不要把它们写成逐字节硬验收。
+- **常规视频「剧本」契约 + 引擎短片播放页（2026-11-28 部分落地）**：
+  `app/lib/core/video/video_screenplay.dart` 是 `nan.screenplay/1` 的**唯一硬门**——
+  扁平 `shots[]`（`id/start/duration/events[]`）、30fps 整数帧、未知字段保留、
+  失败给 JSON Pointer；事件类型只允许 `vfx/sfx/camera.shake/caption`；
+  **VFX 事件 `cue` 必须命中 `videoVfxCueAllowlist`（11 个 pixelfx id）**，未知 cue
+  编译期拒绝（与 `app/assets/pixelfx/build-manifest.json` 的 `allowedEffectIds` 逐字一致，
+  守卫测试三处同源对账）。`app/lib/core/video/video_short_player.dart` 把已校验剧本
+  组装成**自包含单文件页**（CSP 关网、Phaser 4.2.1 原文内联、`NONSHORT_PLAYER`
+  命令面 + `NONSHORT` 桥、30fps 整数帧时钟）；真机 WebKitGTK 实测 `phaser=4.2.1`、
+  seekFrame 同步、画布 57,600 像素非空。
+  **仍未施工**：VFX 像素级渲染接线（当前页面画确定性色块/位置标记，不跑 pixelfx 像素管线）、
+  `screenplay.json` 项目存储与 `video_*` 工具、风格包（palette/type/motion）、TTS。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
   成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
 - **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，

@@ -35,6 +35,8 @@ import 'package:nondesign/core/video3d/video3d_evidence.dart';
 import 'package:nondesign/core/video3d/video3d_player.dart';
 import 'package:nondesign/core/video3d/video3d_project.dart';
 import 'package:nondesign/core/three_service.dart';
+import 'package:nondesign/core/video/video_screenplay.dart';
+import 'package:nondesign/core/video/video_short_player.dart';
 import 'package:nondesign/widgets/music_playback_surface.dart';
 import 'package:nondesign/widgets/video3d_preview_surface.dart';
 
@@ -806,5 +808,108 @@ export default function build(THREE, scene, camera, controls, renderer) {
     // ignore: avoid_print
     print('[webview-overlay] taps=$taps probe=$probe');
     expect(probe.contains('hit'), isTrue, reason: '浮层点击后页面 JS 没有生效：$probe');
+  });
+
+  testWidgets('引擎短片播放页：Phaser 4 在 WebKitGTK 里就绪 + seekFrame + 画布有像素', (
+    tester,
+  ) async {
+    final VideoScreenplayVerification verified = verifyVideoScreenplay(
+      <String, Object?>{
+        'schema': 'nan.screenplay/1',
+        'width': 320,
+        'height': 180,
+        'shots': <Object?>[
+          <String, Object?>{
+            'id': 's1',
+            'start': 0.0,
+            'duration': 2.0,
+            'events': <Object?>[
+              <String, Object?>{
+                'f': 15,
+                'type': 'vfx',
+                'cue': 'fire.campfire',
+                'x': 4,
+                'y': 2,
+              },
+              <String, Object?>{'f': 20, 'type': 'caption'},
+            ],
+          },
+        ],
+      },
+    );
+    expect(verified.verified, isTrue, reason: '${verified.toJson()}');
+    final String phaser = await rootBundle.loadString(
+      videoShortPhaserAssetKey,
+    );
+    final String html = assembleVideoShortPage(
+      verified.screenplay!,
+      phaserSource: phaser,
+    );
+
+    final _Bridge bridge = _Bridge();
+    final WebViewController controller = await _mount(
+      tester,
+      videoShortBridge,
+      bridge,
+    );
+    await controller.loadHtmlString(html);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: WebViewWidget(controller: controller)),
+      ),
+    );
+    await tester.pump();
+
+    // 页面 create 回调跑完才挂命令面；同时等桥的 ready（两条证据都要）。
+    String probe = '';
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
+    while (DateTime.now().isBefore(deadline)) {
+      probe =
+          '${await controller.runJavaScriptReturningResult('typeof window.NONSHORT_PLAYER')}';
+      await tester.pump();
+      if (probe.contains('object') && bridge.ofKind('ready').isNotEmpty) break;
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    expect(
+      probe.contains('object'),
+      isTrue,
+      reason: '引擎短片页没挂上命令面：$probe；桥=${bridge.raw.length} 条',
+    );
+    expect(
+      bridge.ofKind('ready'),
+      isNotEmpty,
+      reason: '引擎短片页没有回 ready；桥=${bridge.raw}',
+    );
+    final Map<String, dynamic> ready = bridge.ofKind('ready').last;
+    // ignore: avoid_print
+    print(
+      '[webview-short] ready=$probe totalFrames=${ready['total_frames']} '
+      'renderer=${ready['renderer']} phaser=${ready['phaser']}',
+    );
+    expect(ready['total_frames'], 60);
+    expect(ready['renderer'], videoShortRenderer);
+    // 版本如实回传（页面从 Phaser.VERSION 读，不是宿主猜的）。
+    expect('${ready['phaser']}', startsWith('4.'));
+
+    await controller.runJavaScript('window.NONSHORT_PLAYER.seekFrame(30)');
+    final String frame =
+        '${await controller.runJavaScriptReturningResult('window.NONSHORT_PLAYER.frame()')}';
+    expect(frame, contains('30'), reason: 'seekFrame(30) 后帧号未同步：$frame');
+    expect(
+      bridge.messages.where((Map<String, dynamic> m) => m['kind'] == 'frame'),
+      isNotEmpty,
+      reason: 'seek 后页面没有回 frame 桥消息',
+    );
+
+    // 画布真的画了东西：PNG data URL 长度 > 100（空白画布也会 >100，故再取像素统计）。
+    final String pixels =
+        '${await controller.runJavaScriptReturningResult('(function(){var c=document.querySelector("canvas");if(!c)return -1;var g=c.getContext("2d");var d=g.getImageData(0,0,c.width,c.height).data;var n=0;for(var i=0;i<d.length;i+=4){if(d[i]||d[i+1]||d[i+2])n++;}return n;})()')}';
+    // ignore: avoid_print
+    print('[webview-short] nonEmptyPixels=$pixels');
+    expect(
+      num.parse(pixels).toInt(),
+      greaterThan(1000),
+      reason: '引擎短片画布几乎是空的（像素数=$pixels）',
+    );
   });
 }

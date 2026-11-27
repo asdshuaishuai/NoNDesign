@@ -17,6 +17,8 @@ import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nondesign/core/three_service.dart';
+import 'package:nondesign/core/video/video_short_player.dart';
+import 'package:nondesign/core/video/video_screenplay.dart';
 
 /// 仓库内的相对路径统一用 `/`（Windows 下 `p` 可能带 `\`）。
 String _norm(String path) => path.replaceAll('\\', '/');
@@ -314,6 +316,20 @@ void main() {
           reason: 'on-body 特效不在子集内：${file.path}',
         );
       }
+    });
+
+    test('Dart 侧 VFX allowlist 与 pixelfx 清单逐字一致（三处同源）', () {
+      final List<String> ids = (manifest['allowedEffectIds'] as List<dynamic>)
+          .map((dynamic value) => '$value')
+          .toList();
+      // 顺序也对齐：清单由 fx/index.js 的登记顺序生成，Dart 常量与此同序。
+      expect(videoVfxCueAllowlist, ids);
+      // 页面的 Phaser 资产键必须指向被清单校验过的文件。
+      expect(
+        _file(videoShortPhaserAssetKey).existsSync(),
+        isTrue,
+        reason: '引擎短片播放页引用的 Phaser 资产不在库',
+      );
     });
 
     test('allowlist 与入库文件一致：不多不少', () {
