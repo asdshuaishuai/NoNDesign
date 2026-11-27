@@ -49,21 +49,21 @@
 | [plan-a2ui-web-spike.md](plan-a2ui-web-spike.md) | spike 完成（未接产品） | 官方 A2UI Web 渲染器可行性 |
 | [plan-cross-platform-runtime.md](plan-cross-platform-runtime.md) | **已落地（批次 A+B1，2026-11-20）**；B2–B4 待真机/退役 | WebView 统一 `webview_all`；引擎 classic wasm + JS 宿主跑进离屏 WebView；wasm_run 仅兜底；flutter_scene 不采用 |
 
-### 1.4 方案线（**未施工**，施工前不得当作现状）
+### 1.4 方案线（状态见各行；标「未施工」的不得当作现状）
 
 | 文档 | 状态 | 覆盖 |
 | --- | --- | --- |
 | [plan-creative-workbench.md](plan-creative-workbench.md) | **方案定稿；批次 0/1/1b/2/3 已落地，批次 4 仅契约面（2026-11-24 工作树）** | 全局交互（右 chat + 执行/结果双面）、设计验证式原型绑定、3D 建模 + 3dcodeverse harness、视频导演台/剧本/三风格 + `toon_3d` 候选/TTS/配乐联动、强绑定强规范框架、施工批次 0–8 |
-| [plan-next-iterations.md](plan-next-iterations.md) | **方案 v3（2026-11-24，设计先行，未施工）** | 收窄到视频双轨：M0 收口 → D 设计阶段（双轨 ADR/3D 视频 three-live 引擎设计/数据契约/导演台最小面）→ P1 three-live 3D 视频 POC → P2 3D 视频最小纵切；P3 常规视频只回归；音乐/VFX/TTS/视口/GLB/judge 移入 backlog；raea 嵌入已关闭（只参考） |
+| [plan-next-iterations.md](plan-next-iterations.md) | **方案 v3（2026-11-24；P2 数据契约/编译/存储/预览已落地，agent 工具面未落地，见 §1.4 该文档施工状态）** | 收窄到视频双轨：M0 收口 → D 设计阶段（双轨 ADR/3D 视频 three-live 引擎设计/数据契约/导演台最小面）→ P1 three-live 3D 视频 POC → P2 3D 视频最小纵切；P3 常规视频只回归；音乐/VFX/TTS/视口/GLB/judge 移入 backlog；raea 嵌入已关闭（只参考） |
 | [plan-workbench-ui.md](plan-workbench-ui.md) | **已落地（2026-11-24）：UI-0–UI-4，四工作台内容区独立布局；能力批次另列** | 四工作台内容区交互姿态/布局独立适配：共享外层壳不变；设计（画布专注+选区浮条）/ 3D（大纲+检查器+工具条）/ 视频（导演台+时间线+运输条）/ 音乐（项目+轨道+只读谱面+检查器+运输条）；热应用暂不改动 |
-| [design/video-tracks-adr.md](design/video-tracks-adr.md) | 设计草案（D1，2026-11-25，未施工） | 视频双轨（常规视频 / 3D 视频）边界、事实源、执行面、共享/隔离 |
-| [design/video3d-execution.md](design/video3d-execution.md) | 设计草案（D2，2026-11-25，未施工） | 3D 视频 three-live 执行面：场景合成/镜头时间/确定性/帧证据/性能 |
-| [design/video3d-contract.md](design/video3d-contract.md) | 设计草案（D3，2026-11-25，未施工） | `scene3d.json` / `screenplay3d.json` v1 数据契约与校验 |
-| [skills/creative-workbench/SKILL.md](skills/creative-workbench/SKILL.md) | **方案定稿，未接线** | 统一创作 skill：intake → direction → structure → build → check → blind judge → refine → deliver；spec/plan/src/artifacts/judge 标准工作区；视频/3D/设计共用 |
+| [design/video-tracks-adr.md](design/video-tracks-adr.md) | 已落地（D1，2026-11-25 冻结；双轨并存：常规视频 v1 + 3D 视频独立项目） | 视频双轨（常规视频 / 3D 视频）边界、事实源、执行面、共享/隔离 |
+| [design/video3d-execution.md](design/video3d-execution.md) | 已落地（D2，2026-11-25/26；项目层/预览页编译器/工作台；v1 是确定性 Canvas2D，真 three/WebGL 待后续） | 3D 视频 three-live 执行面：场景合成/镜头时间/确定性/帧证据/性能 |
+| [design/video3d-contract.md](design/video3d-contract.md) | 已落地（D3，2026-11-25；契约/校验/编译/存储/检查器；**agent 工具面未落地**） | `scene3d.json` / `screenplay3d.json` v1 数据契约与校验 |
+| [skills/creative-workbench/SKILL.md](skills/creative-workbench/SKILL.md) | **部分接线（2026-11-27 核查）：硬纪律已注入 run，完整流程未接线** | 统一创作 skill：intake → direction → structure → build → check → blind judge → refine → deliver；spec/plan/src/artifacts/judge 标准工作区；视频/3D/设计共用 |
 | [plan-music-module.md](plan-music-module.md) | **方案定稿，未施工** | 音乐（编曲）模块：score.json、五线谱编辑器、Web Audio 编译播放、music_* 工具面 |
 | [creative-refactor-decisions.md](creative-refactor-decisions.md) | **R0 契约核心已落地；设计 R1、3D R3 契约面已实施（2026-11-24 工作树），视频/音乐未施工** | R0 决策冻结：轮次版本化、blind judge 通道、Phaser 版本、`ink_line` 首版、TTS 随包策略、`scene.json` 双 authoring、评分默认参数；**Genkit 迁移冲突（2026-11-23 同日裁决：保留 genkit、移除 ai_sdk，见 §2 台账）** |
 | [design-contract.md](design-contract.md) | **已实施（R1 设计模块，2026-11-24）** | 设计模块契约：验证原型绑定项目本身（`.ddp` 内 `prototype/`）、覆盖验证规则、`design_verify_prototype` 收口、热应用列表迁移过滤、只借 intake/judge |
-| [three-contract.md](three-contract.md) | **R3 契约面 + 检查器属性编辑已落地（2026-11-24/25；视口/gizmo/GLB/多视角/judge 待后续）** | 3D 模块契约：三轨 + 双 authoring、工作区、plan schema、确定性门阈值、盲评、10 个 `three_*` 工具（拟实现）、GLB/许可/迁移 |
+| [three-contract.md](three-contract.md) | **R3 契约面 + 检查器属性编辑 + 视口预设 + 盲评已落地（2026-11-24/25/26；gizmo/GLB/多视角待后续）** | 3D 模块契约：三轨 + 双 authoring、工作区、plan schema、确定性门阈值、盲评、12 个 `three_*` 工具（已实现）、GLB/许可/迁移 |
 | [video-screenplay-contract.md](video-screenplay-contract.md) | **草案（R0，2026-11-23）· 未施工** | 视频模块契约：`screenplay.json` 唯一事实源、30fps 确定性、TimingCompiler、cutout rig/clip、Phaser 锁版本、三风格、pixelfx 子集、TTS、桥 v2、导出仍屏蔽、v1 兼容 |
 | [music-contract.md](music-contract.md) | **R1 契约核心 + 编辑闭环 + 播放页编译产物已落地（2026-11-24/25；播放 UI/music_* 工具/五线谱编辑器未施工）** | 音乐模块契约：`score.json` v1、整数 tick（ppq 3840）、`verifyScore`、Web Audio 播放页、Bravura/SIL OFL、`music_*` 工具（拟实现）、存储与验收 |
 | [plan-flutter-3.50-adoption.md](plan-flutter-3.50-adoption.md) | backlog（待排期） | Flutter 3.50 采纳清单 |

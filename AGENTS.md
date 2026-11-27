@@ -18,7 +18,8 @@ AI 原生创作工作台。**一句话 → 产品需求设计文档 → 完整�
 文档分层、决策台账、状态口径与施工顺序都在那里。当前**未施工**的方案线：
 `docs/plan-creative-workbench.md`（交互升级 + 四模块 + 强绑定强规范）、
 `docs/plan-music-module.md`（音乐/编曲）、
-`docs/skills/creative-workbench/SKILL.md`（统一创作 skill 契约，未接线）。
+`docs/skills/creative-workbench/SKILL.md`（统一创作 skill 契约，**部分接线**：硬纪律经
+`app/lib/core/creative/creative_skill.dart` 注入 run，完整流程未接线）。
 **已落地**：`docs/plan-cross-platform-runtime.md`（批次 A/B1：webview_all 全平台 +
 引擎 classic wasm 进离屏 WebView；wasm_run 仅兜底；flutter_scene 不采用）。
 方案文档写的是目标态，不要当作现状引用；两者冲突时以文档总纲的决策台账为准。
