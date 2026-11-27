@@ -841,9 +841,14 @@ export default function build(THREE, scene, camera, controls, renderer) {
     final String phaser = await rootBundle.loadString(
       videoShortPhaserAssetKey,
     );
+    // 真像素 VFX：真的随包 pixelfx 子集（不是占位标记）。
+    final String pixelfx = await rootBundle.loadString(
+      videoShortPixelfxAssetKey,
+    );
     final String html = assembleVideoShortPage(
       verified.screenplay!,
       phaserSource: phaser,
+      pixelfxSource: pixelfx,
     );
 
     final _Bridge bridge = _Bridge();
@@ -888,6 +893,11 @@ export default function build(THREE, scene, camera, controls, renderer) {
     );
     expect(ready['total_frames'], 60);
     expect(ready['renderer'], videoShortRenderer);
+    expect(
+      ready['vfx'],
+      videoShortVfxPixelRenderer,
+      reason: 'pixelfx 包在场时必须走真像素渲染面，实得「${ready['vfx']}」',
+    );
     // 版本如实回传（页面从 Phaser.VERSION 读，不是宿主猜的）。
     expect('${ready['phaser']}', startsWith('4.'));
 
@@ -911,5 +921,32 @@ export default function build(THREE, scene, camera, controls, renderer) {
       greaterThan(1000),
       reason: '引擎短片画布几乎是空的（像素数=$pixels）',
     );
+
+    // 像素哈希（采样可见画布；同帧两次必须一致，VFX 生效帧必须与无特效帧不同）。
+    const String hashScript =
+        '(function(){var c=document.querySelector("canvas");if(!c)return -1;'
+        'var g=c.getContext("2d");var d=g.getImageData(0,0,c.width,c.height).data;'
+        'var h=0;for(var i=0;i<d.length;i+=16){h=(h*31+d[i]+d[i+1]+d[i+2])&0x7fffffff;}'
+        'return h;})()';
+    Future<String> hashAt(int frame) async {
+      await controller.runJavaScript(
+        'window.NONSHORT_PLAYER.seekFrame($frame)',
+      );
+      await tester.pump();
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      return '${await controller.runJavaScriptReturningResult(hashScript)}';
+    }
+
+    // 事件 f=15 之前（f=14）画面里没有该火焰特效；f=20 已有 5 帧推进。
+    final String before = await hashAt(14);
+    final String withVfx = await hashAt(20);
+    // 同帧重放：确定性（同一帧号两次 take 出同一像素）。
+    final String replay = await hashAt(20);
+    // ignore: avoid_print
+    print(
+      '[webview-short] pixelHash frame14=$before frame20=$withVfx replay=$replay',
+    );
+    expect(withVfx, isNot(before), reason: 'VFX 生效帧与无特效帧像素相同（特效没画出来）');
+    expect(replay, withVfx, reason: '同一帧号两次渲染像素不一致（非确定性）');
   });
 }

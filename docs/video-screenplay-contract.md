@@ -1,7 +1,7 @@
 # 视频模块契约（screenplay.json 唯一事实源 · 引擎短片 + 三风格 + VFX + TTS）
 
 > 状态：**部分落地（R0 契约已实施：v1 硬门 + VFX cue allowlist + Phaser 4 播放页，2026-11-28；
->   项目存储/工具/VFX 像素渲染/风格包仍未施工）**。原文保留为目标态设计。
+>   项目存储/工具/风格包仍未施工）**。原文保留为目标态设计。
 > 事实源、时间模型、TimingCompiler、rig/clip、Phaser 4.x 锁版本、pixelfx 子集、TTS、桥 v2、导出与 v1 兼容。
 >
 > 相关：[plan-creative-workbench.md](plan-creative-workbench.md) §5（方案事实源）·

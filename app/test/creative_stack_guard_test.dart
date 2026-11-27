@@ -332,6 +332,28 @@ void main() {
       );
     });
 
+    test('页面用 IIFE 包暴露真渲染入口（无人物代码）', () {
+      final File bundle = _file('assets/pixelfx/pixelfx.min.js');
+      expect(bundle.existsSync(), isTrue, reason: 'pixelfx 页面包缺失');
+      final String text = bundle.readAsStringSync();
+      expect(text, contains('NAN_PIXELFX'));
+      expect(text, contains('renderInto'));
+      // 内联进 <script>：不能含结束标签序列。
+      expect(
+        RegExp('</script', caseSensitive: false).hasMatch(text),
+        isFalse,
+        reason: 'pixelfx 包含 </script 序列，不能内联',
+      );
+      // 人物/rig 代码零残留（包里也不能出现这些模块名）。
+      expect(text, isNot(contains('stockActor')));
+      // 页面引用的资产键必须指向被清单对账过的文件。
+      expect(
+        _file(videoShortPixelfxAssetKey).existsSync(),
+        isTrue,
+        reason: '引擎短片播放页引用的 pixelfx 资产不在库',
+      );
+    });
+
     test('allowlist 与入库文件一致：不多不少', () {
       final List<dynamic> ids = manifest['allowedEffectIds'] as List<dynamic>;
       expect(ids, hasLength(11));

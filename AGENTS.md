@@ -118,7 +118,11 @@ plugins/             独立插件资产（视频制作说明）
   `fx/index.js`）。**11 个允许特效**（campfire/fireball/flame-pillar、frost-breath/
   ice-shatter/ice-crystal、lightning-strike/spark-arc、small/big-explosion、earth-spike）
   经 `node scripts/pixelfx_probe.mjs` 验证：同种子两次哈希一致、非空像素、换种子画面不同。
-  **渲染接线（`{f,type:"vfx",cue}` 编译进时间线）仍未施工**，v1 常规视频不消费它。
+  **渲染接线已施工（2026-11-28）**：`third_party/pixelfx_web` 打包成
+  `app/assets/pixelfx/pixelfx.min.js`（111.6 KiB IIFE，全局 `NAN_PIXELFX`，清单锁
+  sha256），Phaser 引擎短片页按帧重建特效实例 → 合成 RGBA → `textures.addCanvas`
+  上屏；`ready.vfx` 如实回传 `pixelfx_pixels` / `placeholder_markers`。
+  v1 常规视频（Dart 矢量 + DOM 短片）仍不消费它（consumed by 引擎短片页）。
   ③ **`awesome-opus5-5-videos` 只借结构**：六段 prompt（inputs/direction/structure/
   build/gotchas/start）+ seek(t)/beat grid/帧证据进统一 skill，不复制作品/服务。
   ④ **统一 skill**：`docs/skills/creative-workbench/SKILL.md` 是视频/3D/设计的
@@ -377,8 +381,14 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   组装成**自包含单文件页**（CSP 关网、Phaser 4.2.1 原文内联、`NONSHORT_PLAYER`
   命令面 + `NONSHORT` 桥、30fps 整数帧时钟）；真机 WebKitGTK 实测 `phaser=4.2.1`、
   seekFrame 同步、画布 57,600 像素非空。
-  **仍未施工**：VFX 像素级渲染接线（当前页面画确定性色块/位置标记，不跑 pixelfx 像素管线）、
-  `screenplay.json` 项目存储与 `video_*` 工具、风格包（palette/type/motion）、TTS。
+  **VFX 像素渲染已接线（2026-11-28）**：`third_party/pixelfx_web` 把入库的 actor-free
+  子集打包成 `app/assets/pixelfx/pixelfx.min.js`（111.6 KiB IIFE，全局 `NAN_PIXELFX`，
+  清单锁 sha256），页面按帧从 t=0 重建特效实例并推进到目标帧 → 合成 RGBA →
+  `textures.addCanvas` 上屏；`ready.vfx` 如实回传 `pixelfx_pixels` 或
+  `placeholder_markers`（没有该包时诚实降级）。真机实测：frame14 与 frame20 像素哈希不同
+  （特效真的画出来）、同帧重放哈希完全一致（确定性）。
+  **仍未施工**：`screenplay.json` 项目存储与 `video_*` 工具、风格包
+  （palette/type/motion）、TTS、导出。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
   成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
 - **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，

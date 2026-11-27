@@ -166,6 +166,11 @@
       "file": "fx/nature/earth-spike.js",
       "bytes": 14083,
       "sha256": "2d702ba98f099e42270b4be16997b1eb6bdb81c3db3f3ed8f64526bb83eefceb"
+    },
+    {
+      "file": "pixelfx.min.js",
+      "bytes": 114282,
+      "sha256": "9c181a59cd6355086b78d0d5392f895436b08e1fbfc2e746385093d7b0745f8a"
     }
   ],
   "probe": "node scripts/pixelfx_probe.mjs（同种子两次哈希一致 / 非空像素 / 种子敏感）"

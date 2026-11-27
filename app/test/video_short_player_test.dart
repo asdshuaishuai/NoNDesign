@@ -5,6 +5,8 @@ import 'package:nondesign/core/video/video_screenplay.dart';
 import 'package:nondesign/core/video/video_short_player.dart';
 
 const String _phaserStub = 'var Phaser = { VERSION: "4.2.1" };\n';
+const String _pixelfxStub =
+    'window.NAN_PIXELFX = { effectIds: [], renderInto: function () { return 0; } };\n';
 
 VideoScreenplay _screenplay({List<Object?>? events}) {
   final Map<String, Object?> raw = <String, Object?>{
@@ -36,8 +38,15 @@ VideoScreenplay _screenplay({List<Object?>? events}) {
   return result.screenplay!;
 }
 
-String _page({String phaser = _phaserStub, List<Object?>? events}) =>
-    assembleVideoShortPage(_screenplay(events: events), phaserSource: phaser);
+String _page({
+  String phaser = _phaserStub,
+  String pixelfx = '',
+  List<Object?>? events,
+}) => assembleVideoShortPage(
+  _screenplay(events: events),
+  phaserSource: phaser,
+  pixelfxSource: pixelfx,
+);
 
 void main() {
   group('页面结构', () {
@@ -57,7 +66,7 @@ void main() {
       expect(html, contains('window[BRIDGE].postMessage'));
       expect(html, contains('window[CONTROLLER]'));
       expect(html, contains('phaser4_canvas'));
-      // 页面只有两个脚本块（运行时 + 页面逻辑），没有半截。
+      // 没有 pixelfx 时两个脚本块（运行时 + 页面逻辑），没有半截。
       expect(RegExp('</script', caseSensitive: false).allMatches(html).length, 2);
     });
 
@@ -130,6 +139,43 @@ void main() {
         ],
       );
       expect(RegExp('</script', caseSensitive: false).allMatches(html).length, 2);
+    });
+  });
+
+  group('VFX 像素渲染接线', () {
+    test('没有 pixelfx 包：如实降级为占位标记（页面明确标识）', () {
+      final String html = _page();
+      expect(html, contains('var RENDERER_PLACEHOLDER = "placeholder_markers"'));
+      expect(html, isNot(contains('<script id="short-pixelfx">')));
+      expect(html, contains('function renderFrameMarkers('));
+    });
+
+    test('有 pixelfx 包：真像素分支 + Canvas 纹理上屏 + 如实 vfxRenderer', () {
+      final String html = _page(pixelfx: _pixelfxStub);
+      // 三段脚本块（运行时 + pixelfx + 页面逻辑）。
+      expect(RegExp('</script', caseSensitive: false).allMatches(html).length, 3);
+      expect(html, contains(_pixelfxStub.trim()));
+      expect(html, contains('var RENDERER_PIXELS = "pixelfx_pixels"'));
+      expect(html, contains('window.NAN_PIXELFX.renderInto'));
+      expect(html, contains("textures.addCanvas('short-pixels'"));
+      expect(html, contains('vfxRenderer: function ()'));
+      expect(html, contains('function renderFramePixels('));
+      // 像素渲染是纯帧号函数：从 t=0 重建实例并推进，不跨帧漂移。
+      expect(html, contains('advanceFrames: advance'));
+      expect(html, contains('tmpCtx.clearRect'));
+    });
+
+    test('pixelfx 文本里的 </script 被转义', () {
+      final String html = _page(
+        pixelfx: 'var x = "</script>";\nwindow.NAN_PIXELFX = {};\n',
+      );
+      expect(RegExp('</script', caseSensitive: false).allMatches(html).length, 3);
+    });
+
+    test('含 pixelfx 时仍字节确定', () {
+      final String a = _page(pixelfx: _pixelfxStub);
+      final String b = _page(pixelfx: _pixelfxStub);
+      expect(a, b);
     });
   });
 

@@ -1,0 +1,14 @@
+{
+  "name": "nondesign-pixelfx-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Build-time bundling of the vendored pixelfx effect subset (actor-free) into a single offline IIFE for the Phaser engine-short player page.",
+  "license": "MIT",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

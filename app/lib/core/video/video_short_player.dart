@@ -17,6 +17,14 @@ import 'video_screenplay.dart';
 /// Phaser 4 vendored 运行时资源键（`build-manifest.json` 锁 sha256/字节）。
 const String videoShortPhaserAssetKey = 'assets/phaser/phaser.min.js';
 
+/// pixelfx 特效子集的 IIFE 包（`third_party/pixelfx_web` 构建；
+/// `build-manifest.json` 锁 sha256/字节）。可选：缺失时页面如实降级为占位标记。
+const String videoShortPixelfxAssetKey = 'assets/pixelfx/pixelfx.min.js';
+
+/// VFX 渲染面标识：真像素（pixelfx）或占位标记（没有该包时的诚实降级）。
+const String videoShortVfxPixelRenderer = 'pixelfx_pixels';
+const String videoShortVfxPlaceholderRenderer = 'placeholder_markers';
+
 /// 播放页 CSP：只允许内联脚本/样式与 data 图片，**不允许任何网络连接**。
 const String videoShortPageCsp =
     "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
@@ -56,6 +64,9 @@ final class VideoShortPlayerError implements Exception {
 
 const String _cspSlot = '/*__CSP__*/';
 const String _phaserSlot = '/*__PHASER_SOURCE__*/';
+const String _pixelfxSlot = '/*__PIXELFX_SOURCE__*/';
+const String _pixelsRendererSlot = '/*__PIXELS_RENDERER__*/';
+const String _placeholderRendererSlot = '/*__PLACEHOLDER_RENDERER__*/';
 const String _timelineSlot = '/*__TIMELINE_JSON__*/';
 const String _widthSlot = '/*__WIDTH__*/';
 const String _heightSlot = '/*__HEIGHT__*/';
@@ -66,6 +77,9 @@ const String _controllerSlot = '/*__CONTROLLER_NAME__*/';
 const List<String> _templateSlots = <String>[
   _cspSlot,
   _phaserSlot,
+  _pixelfxSlot,
+  _pixelsRendererSlot,
+  _placeholderRendererSlot,
   _timelineSlot,
   _widthSlot,
   _heightSlot,
@@ -82,6 +96,7 @@ const List<String> _templateSlots = <String>[
 String assembleVideoShortPage(
   VideoScreenplay screenplay, {
   required String phaserSource,
+  String pixelfxSource = '',
 }) {
   final String phaser = phaserSource.trim();
   if (phaser.isEmpty) {
@@ -116,15 +131,29 @@ String assembleVideoShortPage(
     ],
   });
 
+  final String pixelfx = pixelfxSource.trim().isEmpty
+      ? ''
+      : _inlineSource(pixelfxSource.trim());
   var page = _playerTemplate
       .replaceFirst(_cspSlot, videoShortPageCsp)
       .replaceFirst(_phaserSlot, _inlineSource(phaser))
+      .replaceFirst(_pixelfxSlot, pixelfx)
       .replaceFirst(_timelineSlot, timelineJson)
       .replaceFirst(_widthSlot, '${screenplay.width}')
       .replaceFirst(_heightSlot, '${screenplay.height}')
       .replaceFirst(_rendererSlot, _embeddedJson(videoShortRenderer))
+      .replaceFirst(_pixelsRendererSlot, _embeddedJson(videoShortVfxPixelRenderer))
+      .replaceFirst(_placeholderRendererSlot, _embeddedJson(videoShortVfxPlaceholderRenderer))
       .replaceFirst(_bridgeSlot, _embeddedJson(videoShortBridge))
       .replaceFirst(_controllerSlot, _embeddedJson(videoShortController));
+
+  // 没有 pixelfx 包时把整块脚本删掉（不留空 script 标签）。
+  if (pixelfx.isEmpty) {
+    page = page.replaceFirst(
+      '<script id="short-pixelfx">\n\n</script>\n',
+      '',
+    );
+  }
 
   for (final String slot in _templateSlots) {
     if (page.contains(slot)) {
@@ -165,6 +194,9 @@ const String _playerTemplate = '''
 <script id="short-runtime">
 /*__PHASER_SOURCE__*/
 </script>
+<script id="short-pixelfx">
+/*__PIXELFX_SOURCE__*/
+</script>
 <script>
 (function () {
   'use strict';
@@ -172,6 +204,8 @@ const String _playerTemplate = '''
   var BRIDGE = /*__BRIDGE_NAME__*/;
   var CONTROLLER = /*__CONTROLLER_NAME__*/;
   var RENDERER = /*__RENDERER__*/;
+  var RENDERER_PIXELS = /*__PIXELS_RENDERER__*/;
+  var RENDERER_PLACEHOLDER = /*__PLACEHOLDER_RENDERER__*/;
   var TIMELINE = /*__TIMELINE_JSON__*/;
   var WIDTH = /*__WIDTH__*/;
   var HEIGHT = /*__HEIGHT__*/;
@@ -187,19 +221,29 @@ const String _playerTemplate = '''
   var startFrame = 0;
   var lastFrame = 0;
 
+  // 像素渲染面：pixelfx 包在场时走真像素，否则如实降级为占位标记。
+  var HAS_PIXELFX = false;
+  try {
+    HAS_PIXELFX = !!(window.NAN_PIXELFX && typeof window.NAN_PIXELFX.renderInto === 'function');
+  } catch (err) { HAS_PIXELFX = false; }
+  var VFX_RENDERER = HAS_PIXELFX ? RENDERER_PIXELS : RENDERER_PLACEHOLDER;
+  var pxCanvas = null;
+  var pxCtx = null;
+  var tmpCanvas = null;
+  var tmpCtx = null;
+  var pxTexture = null;
+  var currentShotColor = null;
+
   function post(kind, payload) {
     try {
       var message = { kind: kind };
       if (payload) {
         for (var key in payload) {
-          if (Object.prototype.hasOwnProperty.call(payload, key)) {
-            message[key] = payload[key];
-          }
+          if (Object.prototype.hasOwnProperty.call(payload, key)) message[key] = payload[key];
         }
       }
       window[BRIDGE].postMessage(JSON.stringify(message));
     } catch (err) {
-      // 桥不可用不致命（页面仍能自己跑）；但错误要留痕。
       try { console.error('short bridge failed', err); } catch (e2) {}
     }
   }
@@ -219,65 +263,134 @@ const String _playerTemplate = '''
     return null;
   }
 
-  // 确定性调色：按镜头序号取固定色相（同一剧本同一镜头永远同色）。
-  function shotColor(index) {
+  // 确定性调色：HSL -> RGB 手算（不依赖引擎内部状态，同输入必然同色）。
+  function shotRgb(index) {
     var hue = (index * 47) % 360;
-    return { h: hue, css: 'hsl(' + hue + ', 55%, 42%)' };
+    var s = 0.55, l = 0.24;
+    var c = (1 - Math.abs(2 * l - 1)) * s;
+    var x = c * (1 - Math.abs((hue / 60) % 2 - 1));
+    var m = l - c / 2;
+    var r = 0, g = 0, b = 0;
+    if (hue < 60) { r = c; g = x; } else if (hue < 120) { r = x; g = c; }
+    else if (hue < 180) { g = c; b = x; } else if (hue < 240) { g = x; b = c; }
+    else if (hue < 300) { r = x; b = c; } else { r = c; b = x; }
+    function channel(value) { return Math.max(0, Math.min(255, Math.floor((value + m) * 255))); }
+    return { r: channel(r), g: channel(g), b: channel(b) };
   }
 
-  // 一帧画面 = 镜头底 + 事件标记；纯函数（只吃帧号）。
-  function renderFrame(frame) {
-    if (!scene) return;
+  function shotRgbLight(index) {
+    var base = shotRgb(index);
+    function lighten(value) { return Math.max(0, Math.min(255, Math.floor(value + (255 - value) * 0.28))); }
+    return { r: lighten(base.r), g: lighten(base.g), b: lighten(base.b) };
+  }
+
+  function drawBackgroundPixels(shot, index, local) {
+    var bg = shotRgb(index);
+    var band = shotRgbLight(index);
+    pxCtx.fillStyle = 'rgb(' + bg.r + ',' + bg.g + ',' + bg.b + ')';
+    pxCtx.fillRect(0, 0, WIDTH, HEIGHT);
+    pxCtx.fillStyle = 'rgb(' + band.r + ',' + band.g + ',' + band.b + ')';
+    pxCtx.fillRect(0, Math.floor(HEIGHT * 0.62), WIDTH, Math.floor(HEIGHT * 0.38));
+    var progress = shot.frames > 1 ? local / (shot.frames - 1) : 0;
+    var barWidth = Math.max(2, Math.floor(WIDTH * 0.2));
+    pxCtx.fillStyle = 'rgba(255,255,255,0.85)';
+    pxCtx.fillRect(Math.floor(progress * (WIDTH - barWidth)), Math.floor(HEIGHT * 0.62) - 3, barWidth, 3);
+  }
+
+  // 真像素路径：pixelfx 逐事件渲染 → 叠到像素画布 → 刷新 Phaser 画布纹理。
+  function renderFramePixels(target) {
+    var shot = shotAt(target);
+    pxCtx.clearRect(0, 0, WIDTH, HEIGHT);
+    if (!shot) {
+      pxCtx.fillStyle = 'rgb(6,8,12)';
+      pxCtx.fillRect(0, 0, WIDTH, HEIGHT);
+    } else {
+      var index = TIMELINE.shots.indexOf(shot);
+      var local = target - shot.start;
+      drawBackgroundPixels(shot, index, local);
+      for (var i = 0; i < shot.events.length; i++) {
+        var event = shot.events[i];
+        if (event.type !== 'vfx') continue;
+        if (event.f > local) continue;
+        if (!HAS_PIXELFX) continue;
+        var advance = local - event.f;
+        try {
+          tmpCtx.clearRect(0, 0, WIDTH, HEIGHT);
+          window.NAN_PIXELFX.renderInto(tmpCtx, {
+            cue: event.cue,
+            x: Math.floor(WIDTH * 0.5) + (event.x || 0),
+            y: Math.floor(HEIGHT * 0.72) + (event.y || 0),
+            seed: event.seed || 0,
+            flip: !!event.flip,
+            advanceFrames: advance,
+            fps: FPS,
+            width: WIDTH,
+            height: HEIGHT
+          });
+          pxCtx.drawImage(tmpCanvas, 0, 0);
+        } catch (renderErr) {
+          post('error', { message: 'vfx 渲染失败：' + String(renderErr) });
+        }
+      }
+      // 非 VFX 事件的确定性标记（captions/shake/sfx）。
+      for (var j = 0; j < shot.events.length; j++) {
+        var marker = shot.events[j];
+        if (marker.f > local) continue;
+        if (marker.type === 'caption') {
+          pxCtx.fillStyle = 'rgba(255,255,255,0.18)';
+          pxCtx.fillRect(Math.floor(WIDTH * 0.1), Math.floor(HEIGHT * 0.82), Math.floor(WIDTH * 0.8), 3);
+        } else if (marker.type === 'camera.shake') {
+          pxCtx.fillStyle = 'rgba(255,255,255,0.10)';
+          pxCtx.fillRect(0, 0, WIDTH, HEIGHT);
+        } else if (marker.type === 'sfx') {
+          pxCtx.fillStyle = 'rgba(255,255,255,0.06)';
+          pxCtx.fillRect(Math.floor(WIDTH * 0.5), Math.floor(HEIGHT * 0.45), 3, 3);
+        }
+      }
+    }
+    if (pxTexture && typeof pxTexture.refresh === 'function') {
+      pxTexture.refresh();
+    }
+    currentFrame = target;
+  }
+
+  // 占位路径（没有 pixelfx 包时）：确定性色块，明确不是像素级 VFX。
+  function renderFrameMarkers(target) {
     var g = scene.__g;
     if (!g) return;
-    var target = clampFrame(frame);
     var shot = shotAt(target);
     g.clear();
     g.fillStyle(0x06080c, 1);
     g.fillRect(0, 0, WIDTH, HEIGHT);
-    if (!shot) {
-      currentFrame = target;
-      updateReadout();
-      return;
-    }
+    if (!shot) { currentFrame = target; return; }
     var index = TIMELINE.shots.indexOf(shot);
-    var color = shotColor(index);
     var local = target - shot.start;
-    var progress = shot.frames > 1 ? local / (shot.frames - 1) : 0;
-    // 镜头底：一条随进度移动的色带（只由帧号决定，可复验）。
-    g.fillStyle(Phaser.Display.Color.HSLToColor(color.h / 360, 0.55, 0.24).color, 1);
+    var color = shotRgb(index);
+    var hexBase = (color.r << 16) | (color.g << 8) | color.b;
+    g.fillStyle(hexBase, 1);
     g.fillRect(0, 0, WIDTH, HEIGHT);
-    g.fillStyle(Phaser.Display.Color.HSLToColor(color.h / 360, 0.55, 0.42).color, 1);
-    g.fillRect(0, Math.floor(HEIGHT * 0.62), WIDTH, Math.floor(HEIGHT * 0.38));
     g.fillStyle(0xffffff, 0.85);
+    var progress = shot.frames > 1 ? local / (shot.frames - 1) : 0;
     var barWidth = Math.max(2, Math.floor(WIDTH * 0.2));
     g.fillRect(Math.floor(progress * (WIDTH - barWidth)), Math.floor(HEIGHT * 0.62) - 3, barWidth, 3);
-    // 事件标记：按 layer 分前后；vfx 用允许的 cue 名字做确定性「占位符」。
     for (var i = 0; i < shot.events.length; i++) {
       var event = shot.events[i];
       if (event.f > local) continue;
       if (event.type === 'vfx') {
         var top = event.layer === 'back' ? 0.12 : 0.34;
         var size = Math.max(3, Math.floor(10 * (event.scale || 1)));
-        g.fillStyle(Phaser.Display.Color.HSLToColor((color.h + 180) % 360 / 360, 0.7, 0.6).color, 0.9);
+        g.fillStyle(0xffffff, 0.9);
         g.fillRect(Math.floor(WIDTH * 0.5) + Math.floor(event.x || 0), Math.floor(HEIGHT * top) + Math.floor(event.y || 0), size, size);
-      } else if (event.type === 'caption') {
-        g.fillStyle(0xffffff, 0.18);
-        g.fillRect(Math.floor(WIDTH * 0.1), Math.floor(HEIGHT * 0.82), Math.floor(WIDTH * 0.8), 3);
-      } else if (event.type === 'camera.shake') {
-        g.fillStyle(0xffffff, 0.10);
-        g.fillRect(0, 0, WIDTH, HEIGHT);
-      } else if (event.type === 'sfx') {
-        g.fillStyle(0xffffff, 0.06);
-        g.fillRect(Math.floor(WIDTH * 0.5), Math.floor(HEIGHT * 0.45), 3, 3);
       }
     }
     currentFrame = target;
-    updateReadout();
   }
 
-  function updateReadout() {
-    // 页面上不放宿主文案（文案由 Flutter 侧出）；这里只留像素画布。
+  function renderFrame(frame) {
+    if (!scene) return;
+    var target = clampFrame(frame);
+    if (pxCtx && pxTexture) renderFramePixels(target);
+    else renderFrameMarkers(target);
   }
 
   function renderCurrent() {
@@ -329,7 +442,7 @@ const String _playerTemplate = '''
     }
     if (frame !== lastFrame) {
       lastFrame = frame;
-      renderCurrent();
+      renderFrame(frame);
       post('frame', { frame: frame, seconds: frame / FPS });
     }
     requestTick();
@@ -340,10 +453,6 @@ const String _playerTemplate = '''
     startTimestamp = null;
     var target = clampFrame(frame);
     currentFrame = target;
-    // 播放中 seek：把播放头落到目标帧并从那里继续。
-    if (target >= TOTAL_FRAMES - 1) {
-      playing = false;
-    }
     renderCurrent();
     post('frame', { frame: target, seconds: target / FPS, seeked: true });
     return target;
@@ -355,6 +464,7 @@ const String _playerTemplate = '''
     totalFrames: function () { return TOTAL_FRAMES; },
     fps: function () { return FPS; },
     renderer: function () { return RENDERER; },
+    vfxRenderer: function () { return VFX_RENDERER; },
     play: function () { play(); return true; },
     pause: function () { pause(); return true; },
     stop: function () { stopPlayback(); return true; },
@@ -375,7 +485,28 @@ const String _playerTemplate = '''
       scene: {
         create: function () {
           scene = this;
-          scene.__g = scene.add.graphics();
+          if (HAS_PIXELFX) {
+            pxCanvas = document.createElement('canvas');
+            pxCanvas.width = WIDTH;
+            pxCanvas.height = HEIGHT;
+            pxCtx = pxCanvas.getContext('2d');
+            if (pxCtx) pxCtx.imageSmoothingEnabled = false;
+            tmpCanvas = document.createElement('canvas');
+            tmpCanvas.width = WIDTH;
+            tmpCanvas.height = HEIGHT;
+            tmpCtx = tmpCanvas.getContext('2d');
+            if (pxCtx && tmpCtx) {
+              pxTexture = scene.textures.addCanvas('short-pixels', pxCanvas);
+              if (pxTexture && typeof pxTexture.setFilter === 'function') {
+                pxTexture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+              }
+              scene.add.image(0, 0, 'short-pixels').setOrigin(0, 0);
+            } else {
+              pxCtx = null;
+              pxTexture = null;
+            }
+          }
+          if (!pxCtx) scene.__g = scene.add.graphics();
           renderFrame(0);
           ready = true;
           post('ready', {
@@ -384,6 +515,7 @@ const String _playerTemplate = '''
             width: WIDTH,
             height: HEIGHT,
             renderer: RENDERER,
+            vfx: VFX_RENDERER,
             phaser: String(Phaser.VERSION || '')
           });
         }
