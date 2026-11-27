@@ -89,6 +89,21 @@ bool _hasStandaloneToken(String text, String token) {
 String _stripDataUris(String text) =>
     text.replaceAll(RegExp(r'''data:[^"')]+'''), ' ');
 
+/// 去掉 Dart 注释（`//` 与 `/* */`）：注释里提到某个资源名不算「已接线」。
+String _stripComments(String text) {
+  final String withoutBlock = text.replaceAll(
+    RegExp(r'/*[^/]*/', dotAll: true),
+    ' ',
+  );
+  return withoutBlock
+      .split('\n')
+      .map((String line) {
+        final int index = line.indexOf('//');
+        return index < 0 ? line : line.substring(0, index);
+      })
+      .join('\n');
+}
+
 void main() {
   group('3D 栈资源锁定', () {
     test('three.module.js 字节与 sha256 与代码常量一致（CRLF/裁剪都会红）', () async {
@@ -176,6 +191,155 @@ void main() {
     });
   });
 
+  group('Phaser 4 vendored 运行时（只引入、未启用）', () {
+    test('产物与清单逐文件对账：版本 4.2.1 / 字节 / sha256', () async {
+      final File manifestFile = _file('assets/phaser/build-manifest.json');
+      expect(manifestFile.existsSync(), isTrue);
+      final Map<String, dynamic> manifest =
+          jsonDecode(manifestFile.readAsStringSync()) as Map<String, dynamic>;
+      expect(manifest['schema'], 'nan.phaser_vendor/1');
+      final Map<String, dynamic> versions =
+          manifest['versions'] as Map<String, dynamic>;
+      expect(versions['phaser'], '4.2.1', reason: '用户 2026-11-28 裁决：Phaser 4.x');
+      final List<dynamic> files = manifest['files'] as List<dynamic>;
+      expect(files, isNotEmpty);
+      for (final dynamic raw in files) {
+        final Map<String, dynamic> entry = raw as Map<String, dynamic>;
+        final File file = _file('assets/phaser/${entry['file']}');
+        expect(file.existsSync(), isTrue, reason: '${entry['file']} 不在库');
+        expect(file.lengthSync(), entry['bytes'], reason: '${entry['file']} 字节数漂移');
+        expect(
+          await _sha256Hex(file.readAsBytesSync()),
+          entry['sha256'],
+          reason: '${entry['file']} sha256 漂移',
+        );
+      }
+      expect(_file('assets/phaser/LICENSE.md').existsSync(), isTrue);
+      expect(
+        _file('assets/phaser/LICENSE.md').readAsStringSync(),
+        contains('MIT License'),
+      );
+      expect(_file('assets/phaser/NOTICE.md').existsSync(), isTrue);
+    });
+
+    test('产物版本串自洽；只引入、未启用（产品代码里没有引用）', () {
+      final String bundle =
+          _file('assets/phaser/phaser.min.js').readAsStringSync();
+      expect(bundle, contains('VERSION:"4.2.1"'));
+      // 未接线：lib 下不应出现 phaser 资源键/全局引用（启用时改本条 + 补烟测）。
+      final List<File> sources = Directory('lib')
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((file) => file.path.endsWith('.dart'))
+          .toList();
+      for (final File file in sources) {
+        final String text = _stripComments(file.readAsStringSync());
+        expect(
+          text.toLowerCase().contains('assets/phaser'),
+          isFalse,
+          reason: '${file.path} 已接线 Phaser，但本批次裁决是「只引入、暂不启用」',
+        );
+      }
+    });
+  });
+
+  group('pixelfx 特效子集（actor-free）', () {
+    late Map<String, dynamic> manifest;
+    late String root;
+
+    setUpAll(() {
+      root = 'assets/pixelfx';
+      manifest = jsonDecode(
+        _file('$root/build-manifest.json').readAsStringSync(),
+      ) as Map<String, dynamic>;
+    });
+
+    test('上游/许可/版本口径在场', () {
+      expect(manifest['schema'], 'nan.pixelfx_vendor/1');
+      expect(manifest['upstream'], 'patch-gg/pixelfx');
+      expect(manifest['upstreamVersion'], '0.3.1');
+      expect(manifest['upstreamCommit'], isNotNull);
+      expect(_file('$root/LICENSE').readAsStringSync(), contains('MIT License'));
+      expect(_file('$root/NOTICE.md').existsSync(), isTrue);
+      expect(_file('$root/NOTICE-DIVERGENCE.md').existsSync(), isTrue);
+    });
+
+    test('逐文件 sha256/字节与清单对账', () async {
+      final List<dynamic> files = manifest['files'] as List<dynamic>;
+      expect(files, isNotEmpty);
+      for (final dynamic raw in files) {
+        final Map<String, dynamic> entry = raw as Map<String, dynamic>;
+        final File file = _file('$root/${entry['file']}');
+        expect(file.existsSync(), isTrue, reason: '${entry['file']} 不在库');
+        expect(file.lengthSync(), entry['bytes'], reason: '${entry['file']} 字节漂移');
+        expect(
+          await _sha256Hex(file.readAsBytesSync()),
+          entry['sha256'],
+          reason: '${entry['file']} sha256 漂移（改上游代码必须重跑清单）',
+        );
+      }
+    });
+
+    test('人物/rig/on-body 零残留（裁决边界）', () {
+      // 1) 被排除的文件不得出现（大小写不敏感，去掉注释后再找标识符）。
+      const List<String> forbiddenFiles = <String>[
+        'actor.js',
+        'act.js',
+        'rig.js',
+        'poses.js',
+      ];
+      final List<String> jsFiles = Directory(root)
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((file) => file.path.endsWith('.js'))
+          .map((file) => file.path.toLowerCase().replaceAll(r'\\', '/'))
+          .toList();
+      for (final String name in forbiddenFiles) {
+        expect(
+          jsFiles.any((path) => path.endsWith(name)),
+          isFalse,
+          reason: '特效子集里出现了 $name（人物代码按裁决不随包分发）',
+        );
+      }
+
+      // 2) 特效代码里不得有 meta.actor（on-body 特效越界）。
+      for (final File file in Directory('$root/fx')
+          .listSync(recursive: true)
+          .whereType<File>()) {
+        if (!file.path.endsWith('.js')) continue;
+        final String text = _stripComments(file.readAsStringSync());
+        expect(
+          RegExp(r'actor\s*:').hasMatch(text),
+          isFalse,
+          reason: 'on-body 特效不在子集内：${file.path}',
+        );
+      }
+    });
+
+    test('allowlist 与入库文件一致：不多不少', () {
+      final List<dynamic> ids = manifest['allowedEffectIds'] as List<dynamic>;
+      expect(ids, hasLength(11));
+      final String index = _file('$root/fx/index.js').readAsStringSync();
+      // 索引里登记的特效 id 必须与清单逐字一致（新增特效三处同源）。
+      for (final dynamic raw in ids) {
+        expect(index, contains('"$raw"'), reason: '清单里的 $raw 没登记在索引');
+      }
+      // 索引里的 id 数量也要对得上（防止「文件在库但不可达」）。
+      final int registered =
+          RegExp(r'"([a-z]+\.[a-z-]+)":').allMatches(index).length;
+      expect(registered, ids.length);
+      // 索引不得引用被排除的模块。
+      expect(index, isNot(contains('actor.js')));
+      expect(index, isNot(contains('rig.js')));
+      // 探针脚本在场（渲染确定性不是口头的）。
+      expect(
+        _file('../scripts/pixelfx_probe.mjs').existsSync(),
+        isTrue,
+        reason: 'pixelfx 确定性探针缺失',
+      );
+    });
+  });
+
   group('ThreeUI 目录一致性', () {
     test('组件数在硬边界内，且每个 catalog 条目都有页面文件', () {
       final Map<String, dynamic> catalog =
@@ -254,7 +418,9 @@ void main() {
       'hyperframes',
       'remotion',
       'bevy',
-      'phaser',
+      // 注意：`phaser` 不在此列——2026-11-20 裁决「视频引入游戏引擎」+ 2026-11-28
+      // 裁决「Phaser 采用 4.x」是**明确引入例外**；它的锁定改由上面的
+      // 「Phaser 4 vendored 运行时（只引入、未启用）」组正向防守。
     ];
 
     test('依赖面不含被禁运行时', () {

@@ -1,0 +1,17 @@
+{
+  "schema": "nan.phaser_vendor/1",
+  "source": "npm:phaser (official dist build)",
+  "versions": {
+    "phaser": "4.2.1"
+  },
+  "upstream": "https://registry.npmjs.org/phaser/-/phaser-4.2.1.tgz :: dist/phaser.min.js",
+  "files": [
+    {
+      "file": "phaser.min.js",
+      "bytes": 1375976,
+      "sha256": "66348b1b5141e49b7d5ebbe688cddcb502eab1cb00f21c538686a5b2c5abe4de"
+    }
+  ],
+  "license": "MIT (see LICENSE.md)",
+  "notes": "引擎短片（规划批次）的 vendored 运行时；当前只入库、未接线。索引：AGENTS.md 创作线引入例外 ③/Phaser 4 裁决。"
+}

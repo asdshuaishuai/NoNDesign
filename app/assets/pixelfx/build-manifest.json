@@ -1,0 +1,172 @@
+{
+  "schema": "nan.pixelfx_vendor/1",
+  "upstream": "patch-gg/pixelfx",
+  "upstreamVersion": "0.3.1",
+  "upstreamCommit": "5294518ce7c72e48b6100a744596e0acf57f2826",
+  "license": "MIT (see LICENSE; NOTICE.md for upstream notices; NOTICE-DIVERGENCE.md for our subset fork)",
+  "vendored": "actor-free effect subset: fire / ice / lightning / explosions / nature (wind-earth)",
+  "excludedByRuling": [
+    "actor.js",
+    "act.js",
+    "rig.js",
+    "poses.js",
+    "src/fx/moves/**",
+    "meta.actor effects (e.g. ice/frost-nova)"
+  ],
+  "allowedEffectIds": [
+    "fire.campfire",
+    "fire.fireball",
+    "fire.flame-pillar",
+    "ice.frost-breath",
+    "ice.ice-shatter",
+    "ice.ice-crystal",
+    "lightning.lightning-strike",
+    "lightning.spark-arc",
+    "explosions.small-explosion",
+    "explosions.big-explosion",
+    "nature.earth-spike"
+  ],
+  "files": [
+    {
+      "file": "core/chain.js",
+      "bytes": 2137,
+      "sha256": "5014a0eae326f1855f5e320308ad370dbc342d2f1051df3665866401956bfef9"
+    },
+    {
+      "file": "core/color.js",
+      "bytes": 5283,
+      "sha256": "4e63f3074df7c1e138f721959858d12e4f6ccc2bf4f8e98c576efbae51241e54"
+    },
+    {
+      "file": "core/font.js",
+      "bytes": 5399,
+      "sha256": "c094f1d3a9f94478a255f1cc81aa7ccd2c2ba7a97fc1227a29d268acc1f2ec7c"
+    },
+    {
+      "file": "core/fx.js",
+      "bytes": 5289,
+      "sha256": "05ac772fcfe3812262c81327b104b7fc4f81e66ad7c904c1c0131cb5b5b6cebf"
+    },
+    {
+      "file": "core/index.js",
+      "bytes": 942,
+      "sha256": "02e42def3561a8daf940ad45bdf4af84d25c55a74cd2786d4e4cfaf3dbdafb7c"
+    },
+    {
+      "file": "core/math.js",
+      "bytes": 6102,
+      "sha256": "da45e1ed43f7d119dd80fbe97c7de2b35b4ea95dea8781671c296ee5942ac0bc"
+    },
+    {
+      "file": "core/painter.js",
+      "bytes": 16717,
+      "sha256": "5b8ada6a25cdf1e63ae3684cc56276c61306558dc0a3a827a6a39ab038f74681"
+    },
+    {
+      "file": "core/particles.js",
+      "bytes": 3242,
+      "sha256": "867e58baf522278b4aad383c7224c599cff9ba93268b5eac9485a39a3809477b"
+    },
+    {
+      "file": "core/scene.js",
+      "bytes": 1683,
+      "sha256": "520a465f771829162dde114880224eb30efbab3cff859cb8a24a28e49d8e198c"
+    },
+    {
+      "file": "core/shapes.js",
+      "bytes": 2225,
+      "sha256": "3e28f77e25b3083949f083c74304ead6826b7b1da20a658ccb114ab531fc8898"
+    },
+    {
+      "file": "core/sim.js",
+      "bytes": 19530,
+      "sha256": "517febe05b72de9d07e3596c019b9bb01e1f97a74089a30fa80e9e98849ba4b0"
+    },
+    {
+      "file": "fx/explosions/_lib.js",
+      "bytes": 23224,
+      "sha256": "3571c77ac617a36b6dd1c4c3b6f4c157dc317ca0033139fe460a737b004d936c"
+    },
+    {
+      "file": "fx/explosions/big-explosion.js",
+      "bytes": 12462,
+      "sha256": "3f0eea9e36abfd9d8c1b15430fc13412c4b18abb55545f5f589e882ad50b4b0a"
+    },
+    {
+      "file": "fx/explosions/small-explosion.js",
+      "bytes": 8733,
+      "sha256": "86b8b0bc9ab758233f06cad3686f0d6037ed674d3637381b1fbebf6cbcd63d54"
+    },
+    {
+      "file": "fx/fire/_lib.js",
+      "bytes": 17250,
+      "sha256": "ffa1d5e92b65c7bbac94baa63a0f1dff9feb249c084552ed149876bcf42191da"
+    },
+    {
+      "file": "fx/fire/campfire.js",
+      "bytes": 10240,
+      "sha256": "9e406f69bac94a7a81ebe37fb09860b909807b05be0d2fa562b65afcb213103b"
+    },
+    {
+      "file": "fx/fire/fireball.js",
+      "bytes": 6070,
+      "sha256": "22b286d2632742216940e775a931a91d3bbe3ef914bc150b70b041dbe5e02bb4"
+    },
+    {
+      "file": "fx/fire/flame-pillar.js",
+      "bytes": 11582,
+      "sha256": "348910dcff7d5f69287912dd0b5a130cb31f03553884d50fc4eb07abc1aff659"
+    },
+    {
+      "file": "fx/ice/_lib.js",
+      "bytes": 16487,
+      "sha256": "a81ae57b7f90a1e8266cf2f7f6f11dd4551a088220ddeac03d4539dfb40e5782"
+    },
+    {
+      "file": "fx/ice/frost-breath.js",
+      "bytes": 6119,
+      "sha256": "3d9ef4563c1c8619c9d58231e7b81e25df6ab7e9d74fb926ab57fa6e786fd6cf"
+    },
+    {
+      "file": "fx/ice/ice-crystal.js",
+      "bytes": 6525,
+      "sha256": "8872044281a9ed3134dddbe6b3c5ed56294126789b8d8cfe0505027e6b2d0e3b"
+    },
+    {
+      "file": "fx/ice/ice-shatter.js",
+      "bytes": 12999,
+      "sha256": "3019c63190db31416371ee1ba51d3611996d4f2312536d37bc376d4b51b0b12e"
+    },
+    {
+      "file": "fx/index.js",
+      "bytes": 1501,
+      "sha256": "0c53d2380148c8866884b9b248f94f33109b84beec90cfd193d24bc23db650e8"
+    },
+    {
+      "file": "fx/lightning/_lib.js",
+      "bytes": 10421,
+      "sha256": "6fa0eba00e706590865c0cadbcb0c79b07ae934f0f40dbf72426e45b51ccf487"
+    },
+    {
+      "file": "fx/lightning/lightning-strike.js",
+      "bytes": 14169,
+      "sha256": "bbb6485615807a740df19f5196a81c033f938fc7081deefeb750d941790fddec"
+    },
+    {
+      "file": "fx/lightning/spark-arc.js",
+      "bytes": 5836,
+      "sha256": "5e904fe8138dc30cfbd20ed69c5d759443bb2108c91d87fd84ad16f544ea844b"
+    },
+    {
+      "file": "fx/nature/_lib.js",
+      "bytes": 15435,
+      "sha256": "680109e1707dea41439ee1a632dc983336227c7834a83571452c124e0b37d322"
+    },
+    {
+      "file": "fx/nature/earth-spike.js",
+      "bytes": 14083,
+      "sha256": "2d702ba98f099e42270b4be16997b1eb6bdb81c3db3f3ed8f64526bb83eefceb"
+    }
+  ],
+  "probe": "node scripts/pixelfx_probe.mjs（同种子两次哈希一致 / 非空像素 / 种子敏感）"
+}

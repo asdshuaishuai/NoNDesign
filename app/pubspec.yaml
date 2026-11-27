@@ -166,6 +166,13 @@ flutter:
     # Babylon.js 降级渲染面（third_party/babylon_web 的 tree-shaken 产物 +
     # build-manifest.json 锁 sha256/字节；3D 视频预览在 three 不可用时用它兜底）。
     - assets/babylon/
+    # Phaser 4.2.1 vendored 运行时（引擎短片批次用；**只入库、未接线**，
+    # build-manifest.json 锁字节/sha256，MIT 许可同目录）。
+    - assets/phaser/
+    # pixelfx 特效子集（MIT，actor-free）：只包含火焰/冰霜/闪电/爆炸/风土特效；
+    # 人物与 rig 代码按裁决**不随包分发**（见 NOTICE-DIVERGENCE.md）。
+    # 当前只入库、可被 probe 验证，渲染接线未施工。
+    - assets/pixelfx/
     # A2UI 官方 Web 渲染器的自包含页面（release 依赖 asset 声明，debug 回退
     # 仓库路径只用于测试）。
     - assets/a2ui_web/

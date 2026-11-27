@@ -19,3 +19,9 @@ app/assets/engine/*.wasm -text
 # Babylon 降级渲染面按字节锁定（build-manifest.json 的 sha256/字节是硬校验）：
 # 换行符漂移会让内联产物与清单对不上。
 app/assets/babylon/** -text
+
+# Phaser vendored 运行时同样是哈希锁定产物（build-manifest.json 逐字节对账）。
+app/assets/phaser/** -text
+
+# pixelfx 特效子集逐文件 sha256 锁定（build-manifest.json 对账）。
+app/assets/pixelfx/** -text

@@ -70,7 +70,10 @@ plugins/             独立插件资产（视频制作说明）
   自己的产品，不是别人的工作台。**3D 栈是明确例外：three.js / three-live 之外，
   2026-11-28 用户裁决新增 Babylon.js 作为「共同托底」**（three 不可用时接管 3D
   视频预览，见下文「创作线引入例外」①b）。**Phaser 引擎选型按 2026-11-28 裁决升级为
-  4.x**（版本研究见 `docs/plan-creative-workbench.md` §5.0）。**代码/技能包同理**：`JDhruv14/line-art-animation`（MIT）只作为
+  4.x**（版本研究见 `docs/plan-creative-workbench.md` §5.0）。**Phaser 4.2.1 运行时已于
+  2026-11-28 入库**（`app/assets/phaser/`：1,375,976 B + `build-manifest.json` 锁
+  sha256/字节 + MIT 许可 + NOTICE；`.gitattributes` 标 `-text`），但**播放页/解释器仍未
+  施工、未启用**（守卫测试会断言 lib 下没有引用它）。**代码/技能包同理**：`JDhruv14/line-art-animation`（MIT）只作为
   `ink_line` 墨线手绘风格的规则参考，不复制其代码、不依赖其 TypeScript/SVG 运行时；
   方案线的风格包渲染走自研 Canvas2D 矢量笔触（未施工，I0 spike 验证）。
   `mromidev/claude-animated-shorts`（MIT 代码/文档）同样只参考：只借 8 段脚本、
@@ -109,6 +112,13 @@ plugins/             独立插件资产（视频制作说明）
   ② **视频 VFX 直接引入** `pixelfx` **特效子集**（MIT）：火焰/冰霜/风/爆炸/闪电等；
   **不引人物**——`actor.js`/`rig.js`/`poses.js`/`act.js`/`moves/` 与 `meta.actor`/
   `o.actor`/on-body 特效一律不引入，角色仍用我们自己的 rig。
+  **已入库（2026-11-28）**：`app/assets/pixelfx/`（上游 v0.3.1，commit 锁在
+  `build-manifest.json`，28 个 JS 文件逐字节 sha256 + `NOTICE-DIVERGENCE.md` 记录裁剪
+  fork：删 actor 导入、`meta.actor` 分支改显性抛错、重写裁剪版 `core/index.js` 与
+  `fx/index.js`）。**11 个允许特效**（campfire/fireball/flame-pillar、frost-breath/
+  ice-shatter/ice-crystal、lightning-strike/spark-arc、small/big-explosion、earth-spike）
+  经 `node scripts/pixelfx_probe.mjs` 验证：同种子两次哈希一致、非空像素、换种子画面不同。
+  **渲染接线（`{f,type:"vfx",cue}` 编译进时间线）仍未施工**，v1 常规视频不消费它。
   ③ **`awesome-opus5-5-videos` 只借结构**：六段 prompt（inputs/direction/structure/
   build/gotchas/start）+ seek(t)/beat grid/帧证据进统一 skill，不复制作品/服务。
   ④ **统一 skill**：`docs/skills/creative-workbench/SKILL.md` 是视频/3D/设计的
