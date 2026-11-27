@@ -1066,6 +1066,8 @@ class AppStore extends ChangeNotifier {
     switch (view) {
       case 'plugin:music':
         return 'music';
+      case 'plugin:video3d':
+        return 'video3d';
       case 'plugin:three':
         return workspaceModeThree;
       case 'plugin:video':
@@ -1151,6 +1153,7 @@ class AppStore extends ChangeNotifier {
       case 'hotapp_inspect':
       case 'design_verify_prototype':
       case 'video_create':
+      case 'video3d_create':
       case 'music_create':
         return true;
       default:
@@ -1187,6 +1190,8 @@ class AppStore extends ChangeNotifier {
       setThreeProjectName(pendingName);
     } else if (tool.startsWith('hotapp_')) {
       setHotApp(pendingName);
+    } else if (tool.startsWith('video3d_')) {
+      setVideo3dProjectName(pendingName);
     } else if (tool.startsWith('video_')) {
       setVideoProjectName(pendingName);
     } else if (tool.startsWith('music_')) {
@@ -3083,6 +3088,13 @@ class AppStore extends ChangeNotifier {
         requested == 'music' || (requested.isEmpty && viewHint == 'music');
     if (musicRun) {
       return _runAgent('workspace', instruction, workspaceHint: 'music');
+    }
+    // 3D 视频同理（不在 chatWorkspaceMode 枚举里）：一次性 hint 收窄到
+    // `video3d_*`，绝不把非法枚举写进 settings。
+    final video3dRun =
+        requested == 'video3d' || (requested.isEmpty && viewHint == 'video3d');
+    if (video3dRun) {
+      return _runAgent('workspace', instruction, workspaceHint: 'video3d');
     }
     final target = normalizeWorkspaceMode(
       requested.isNotEmpty ? requested : workspaceModeForView(view),

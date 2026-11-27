@@ -75,6 +75,8 @@ import 'three_service.dart';
 import 'video_project.dart';
 import 'video_samples.dart';
 import 'video_service.dart';
+import 'video3d/video3d_compile.dart';
+import 'video3d/video3d_project.dart';
 
 // ============================================================
 // thinking 方言表（权威：迁移前参考实现的 reasoning 处理）
@@ -500,6 +502,12 @@ String toolLabel(String tool) {
       return '视频 · 对照检查';
     case 'video_render':
       return '视频 · 渲染';
+    case 'video3d_list':
+      return '3D 视频';
+    case 'video3d_status':
+      return '3D 视频 · 查看';
+    case 'video3d_create':
+      return '3D 视频 · 新建';
     case 'nonapp_list':
       return '应用包';
     case 'nonapp_inspect':
@@ -680,6 +688,21 @@ String toolFailureMessage(String? rawError) {
     case 'video_export_disabled':
       // 视频模块是代码动画（用户裁决 2026-11-18）：不落 mp4。
       return '视频现在是代码动画，直接在工作台里播放；暂不导出成片';
+    // 3D 视频（scene3d.json + screenplay3d.json）的稳定失败码。
+    case 'video3d_invalid_name':
+      return '3D 视频名只能用字母、数字、下划线和连字符';
+    case 'video3d_project_exists':
+      return '已经有同名 3D 视频了，换一个名字再新建（已有项目不会被覆盖）';
+    case 'video3d_no_project':
+      return '没有找到这个 3D 视频项目';
+    case 'video3d_corrupt':
+      return '这个 3D 视频项目的两份源文件读不出来，先修好再打开';
+    case 'video3d_path_escape':
+      return '项目名把读写带到了项目库之外，已拒绝';
+    case 'video3d_unverified':
+      return '3D 视频的场景或镜头表还没通过校验，按问题清单改好再保存';
+    case 'video3d_io_error':
+      return '3D 视频项目没有保存成功，请检查磁盘空间后重试';
     case 'nonapp_unavailable':
       return '应用包暂时不可用';
     case 'figma_unavailable':
@@ -868,6 +891,24 @@ abstract class AgentWorkspaceServices {
   Future<Map<String, dynamic>> videoList();
   Future<Map<String, dynamic>> videoSample({int index = 0});
 
+  // -- 3D 视频（scene3d.json + screenplay3d.json 是唯一事实源）--
+  /// 列本机 3D 视频项目（节点数/镜头数/片长/帧数/校验状态）。
+  Future<Map<String, dynamic>> video3dList();
+
+  /// 读一个 3D 视频项目：校验状态 + 问题清单 + 两份事实源原文。
+  ///
+  /// 校验失败也照常返回（`verified == false` + `checks`），让模型按问题改，
+  /// 不炸项目；缺文件才报 `video3d_corrupt`。
+  Future<Map<String, dynamic>> video3dStatus(String name);
+
+  /// 由**完整**两份事实源创建 3D 视频项目：先过 [verifyVideo3d] 再落盘，
+  /// 未通过不写盘（磁盘上不出现半成品）；同名已存在则拒绝覆盖。
+  Future<Map<String, dynamic>> video3dCreate({
+    required String name,
+    required Map<String, dynamic> scene,
+    required Map<String, dynamic> screenplay,
+  });
+
   // -- 音乐编曲（score.json 是唯一事实源；契约见 docs/music-contract.md §7）--
   /// 列本机音乐项目（名称/标题/轨道数/小节数/校验状态）。
   Future<Map<String, dynamic>> musicList();
@@ -923,6 +964,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
     Future<NonAppLibrary> Function()? nonAppFactory,
     VideoService? video,
     VideoProjectStore? videoProjects,
+    Video3dProjectStore? video3dProjects,
     MusicProjectStore? musicProjects,
     FigmaExporter? figma,
     this.designPrototypeVerify,
@@ -933,6 +975,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
        _nonAppFactory = nonAppFactory ?? (() => NonAppLibrary.open()),
        _video = video ?? VideoService.instance,
        _videoProjects = videoProjects ?? VideoProjectStore.instance,
+       _video3dProjects = video3dProjects ?? Video3dProjectStore.instance,
        _musicProjects = musicProjects ?? MusicProjectStore.instance,
        _figma = figma ?? FigmaExporter();
 
@@ -951,6 +994,9 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
 
   /// 视频生成项目的本地库（工作台与工具共用同一存储；测试注入临时根）。
   final VideoProjectStore _videoProjects;
+
+  /// 3D 视频项目库（scene3d.json + screenplay3d.json；测试注入临时根）。
+  final Video3dProjectStore _video3dProjects;
 
   /// 音乐项目的本地库（默认生产 instance；测试注入 `MusicProjectStore(root:)`
   /// 临时目录，绝不落用户文档目录）。
@@ -1596,6 +1642,138 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
     'message': error.message,
     'detail': error.detail,
   };
+
+  // -- 3D 视频 ---------------------------------------------------------------
+
+  /// 3D 视频项目摘要（与工作台列表同源：节点/镜头/片长/帧数/校验状态）。
+  Map<String, dynamic> _video3dEntry(Video3dProjectEntry entry) =>
+      <String, dynamic>{
+        'name': entry.name,
+        'nodes': entry.nodes,
+        'shots': entry.shots,
+        'seconds': entry.durationSeconds,
+        'frames': entry.totalFrames,
+        'verified': entry.verified,
+        if (entry.corrupt) 'corrupt': true,
+      };
+
+  /// 编译出的整数总帧数；校验未通过或编译失败时回 0（不抛给模型）。
+  int _video3dFrames(dynamic screenplay) {
+    if (screenplay == null) return 0;
+    try {
+      return compileVideo3dTimeline(screenplay).totalFrames;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> video3dList() async {
+    try {
+      final entries = await _video3dProjects.list();
+      return <String, dynamic>{
+        'ok': true,
+        'projects': [for (final entry in entries) _video3dEntry(entry)],
+        'count': entries.length,
+      };
+    } on Video3dProjectFailure catch (error) {
+      final code = 'video3d_${error.code}';
+      return _failure(code, toolFailureMessage(code), error.technical);
+    } catch (error) {
+      return _failure(
+        'video3d_io_error',
+        toolFailureMessage('video3d_io_error'),
+        '$error',
+      );
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> video3dStatus(String name) async {
+    try {
+      final snapshot = await _video3dProjects.read(name);
+      final verification = snapshot.verification;
+      return <String, dynamic>{
+        'ok': true,
+        'project': snapshot.name,
+        'verified': verification.verified,
+        'checks': verification.checks
+            .map((issue) => issue.toJson())
+            .toList(growable: false),
+        'nodes': verification.scene?.nodes.length ?? 0,
+        'shots': verification.screenplay?.shots.length ?? 0,
+        'seconds': verification.screenplay?.durationSeconds ?? 0,
+        'frames': _video3dFrames(verification.screenplay),
+        'scene': snapshot.sceneRaw,
+        'screenplay': snapshot.screenplayRaw,
+      };
+    } on Video3dProjectFailure catch (error) {
+      final code = 'video3d_${error.code}';
+      return _failure(code, toolFailureMessage(code), error.technical);
+    } catch (error) {
+      return _failure(
+        'video3d_io_error',
+        toolFailureMessage('video3d_io_error'),
+        '$error',
+      );
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> video3dCreate({
+    required String name,
+    required Map<String, dynamic> scene,
+    required Map<String, dynamic> screenplay,
+  }) async {
+    try {
+      // 同名已存在 → 拒绝覆盖（与 video_create 同一纪律：已生成的项目不被
+      // 悄悄替换）。read 在项目不存在时抛 no_project，正好当存在性判定。
+      try {
+        await _video3dProjects.read(name);
+        return _failure(
+          'video3d_project_exists',
+          toolFailureMessage('video3d_project_exists'),
+        );
+      } on Video3dProjectFailure catch (error) {
+        if (error.code != 'no_project') rethrow;
+      }
+      final verification = await _video3dProjects.save(
+        name,
+        scene: scene,
+        screenplay: screenplay,
+      );
+      if (!verification.verified) {
+        // 先校验后落盘：未通过时 save 不碰磁盘，这里如实回问题清单。
+        return <String, dynamic>{
+          'ok': false,
+          'error': 'video3d_unverified',
+          'message': toolFailureMessage('video3d_unverified'),
+          'verified': false,
+          'checks': verification.checks
+              .map((issue) => issue.toJson())
+              .toList(growable: false),
+        };
+      }
+      return <String, dynamic>{
+        'ok': true,
+        'project': name,
+        'verified': true,
+        'nodes': verification.scene?.nodes.length ?? 0,
+        'shots': verification.screenplay?.shots.length ?? 0,
+        'seconds': verification.screenplay?.durationSeconds ?? 0,
+        'frames': _video3dFrames(verification.screenplay),
+      };
+    } on Video3dProjectFailure catch (error) {
+      final code = 'video3d_${error.code}';
+      return _failure(code, toolFailureMessage(code), error.technical);
+    } catch (error) {
+      return _failure(
+        'video3d_io_error',
+        toolFailureMessage('video3d_io_error'),
+        '$error',
+      );
+    }
+  }
 
   @override
   Future<Map<String, dynamic>> musicList() async {
@@ -3578,6 +3756,7 @@ ToolSet _buildTools(_Ctx ctx, Genkit ai) {
     'hotapp_refine',
     'design_verify_prototype',
     'video_create',
+    'video3d_create',
     'music_create',
     'music_patch',
     'figma_export',
@@ -4217,6 +4396,9 @@ ToolSet _buildTools(_Ctx ctx, Genkit ai) {
         return workspaceHint == 'three' || workspaceHint == 'video';
       }
       if (workspaceHint == 'three') return name.startsWith('three_');
+      // 3D 视频是独立工作台：只见 `video3d_*`（`video_` 前缀收窄不会误纳它，
+      // 因为 `video3d_…` 并不以 `video_` 开头）。
+      if (workspaceHint == 'video3d') return name.startsWith('video3d_');
       if (workspaceHint == 'video') return name.startsWith('video_');
       if (workspaceHint == 'hotapp') {
         return name.startsWith('hotapp_') || name.startsWith('nonapp_');
@@ -4930,6 +5112,72 @@ ToolSet _buildTools(_Ctx ctx, Genkit ai) {
         return workspace.videoRender(
           timeline: Map<String, dynamic>.from(timeline),
           spec: spec is Map ? Map<String, dynamic>.from(spec) : null,
+        );
+      },
+    );
+
+    addWorkspaceTool(
+      'video3d_list',
+      'List 3D-video projects on this device: name, node/shot counts, seconds, integer '
+          'frame total and whether both source files pass the contract checks. Look here '
+          'before creating so you never overwrite an existing project.',
+      const <String, dynamic>{},
+      const <String>[],
+      (_) => workspace.video3dList(),
+    );
+    addWorkspaceTool(
+      'video3d_status',
+      'Read one 3D-video project: verification state, the exact check list '
+          '(pointer + code + fix hint), node/shot counts, seconds, integer frames, and the '
+          'two fact sources (scene3d.json / screenplay3d.json) verbatim. A project that '
+          'fails checks is returned as-is (verified=false) so you can fix the listed '
+          'fields instead of rewriting from scratch.',
+      const <String, dynamic>{
+        'name': {'type': 'string', 'description': 'Project name (a-z0-9_-)'},
+      },
+      const <String>['name'],
+      (args) => workspace.video3dStatus(str(args, 'name')),
+    );
+    addWorkspaceTool(
+      'video3d_create',
+      'Create a 3D-video project from its two fact sources: scene3d.json (nodes, '
+          'materials, lights, cameras, environment) and screenplay3d.json (shots with '
+          'integer-frame durations and camera moves). Both documents are verified BEFORE '
+          'anything is written: on failure nothing touches the disk and the returned checks '
+          'say what to fix; on success the project opens in the 3D-video workbench. An '
+          'existing name is never overwritten — call video3d_list first, or video3d_status '
+          'to edit an existing project. Agent writes JSON only (never JS/React).',
+      const <String, dynamic>{
+        'name': {
+          'type': 'string',
+          'description': 'ASCII project name (a-z0-9_-), must be unique',
+        },
+        'scene': {
+          'type': 'object',
+          'description':
+              'scene3d.json: {v, units, nodes[], materials?, lights[], cameras[], environment?}',
+        },
+        'screenplay': {
+          'type': 'object',
+          'description':
+              'screenplay3d.json: {v, fps:30, shots[]} with integer-frame shot durations',
+        },
+      },
+      const <String>['name', 'scene', 'screenplay'],
+      (args) {
+        final scene = args['scene'];
+        final screenplay = args['screenplay'];
+        if (scene is! Map || screenplay is! Map) {
+          return Future.value(<String, dynamic>{
+            'ok': false,
+            'error': 'invalid_args',
+            'message': toolFailureMessage('invalid_args'),
+          });
+        }
+        return workspace.video3dCreate(
+          name: str(args, 'name'),
+          scene: Map<String, dynamic>.from(scene),
+          screenplay: Map<String, dynamic>.from(screenplay),
         );
       },
     );

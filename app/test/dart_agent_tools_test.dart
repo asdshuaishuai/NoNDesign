@@ -322,6 +322,44 @@ class _FakeWorkspace implements AgentWorkspaceServices {
     'spec': <String, dynamic>{'kind': 'science'},
   };
 
+  // -- 3D 视频（video3d_list / video3d_status / video3d_create）--
+  String? lastVideo3dName;
+  Map<String, dynamic>? lastVideo3dScene;
+  Map<String, dynamic>? lastVideo3dScreenplay;
+  Map<String, dynamic> video3dCreateResult = <String, dynamic>{
+    'ok': true,
+    'project': 'stage',
+    'verified': true,
+    'nodes': 3,
+    'shots': 1,
+    'seconds': 5.0,
+    'frames': 150,
+  };
+  Map<String, dynamic> video3dStatusResult = <String, dynamic>{
+    'ok': true,
+    'project': 'stage',
+    'verified': true,
+    'checks': <dynamic>[],
+    'nodes': 3,
+    'shots': 1,
+    'seconds': 5.0,
+    'frames': 150,
+  };
+  Map<String, dynamic> video3dListResult = <String, dynamic>{
+    'ok': true,
+    'projects': <dynamic>[
+      <String, dynamic>{
+        'name': 'stage',
+        'nodes': 3,
+        'shots': 1,
+        'seconds': 5.0,
+        'frames': 150,
+        'verified': true,
+      },
+    ],
+    'count': 1,
+  };
+
   // -- 音乐工具（music_list / music_read / music_inspect / music_create / music_patch）--
   String? lastMusicName;
   Map<String, dynamic>? lastMusicScore;
@@ -679,6 +717,32 @@ class _FakeWorkspace implements AgentWorkspaceServices {
     calls.add('video_sample:$index');
     lastVideoSampleIndex = index;
     return Map<String, dynamic>.from(videoSampleResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> video3dList() async {
+    calls.add('video3d_list');
+    return Map<String, dynamic>.from(video3dListResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> video3dStatus(String name) async {
+    calls.add('video3d_status:$name');
+    lastVideo3dName = name;
+    return Map<String, dynamic>.from(video3dStatusResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> video3dCreate({
+    required String name,
+    required Map<String, dynamic> scene,
+    required Map<String, dynamic> screenplay,
+  }) async {
+    calls.add('video3d_create:$name');
+    lastVideo3dName = name;
+    lastVideo3dScene = scene;
+    lastVideo3dScreenplay = screenplay;
+    return Map<String, dynamic>.from(video3dCreateResult);
   }
 
   @override
@@ -2164,6 +2228,31 @@ void main() {
       );
     });
 
+    test('video3d 收窄：只暴露 video3d_*，不混入视频/3D 工具', () async {
+      final names = await surfaceFor('video3d');
+      expect(
+        names,
+        containsAll(<String>[
+          'video3d_list',
+          'video3d_status',
+          'video3d_create',
+        ]),
+      );
+      // `video3d_…` 不以 `video_` 开头：`video` 收窄不会误纳它，反过来
+      // `video3d` 收窄也不该混入 v1 视频 / 3D / 热应用 / 音乐的工具。
+      expect(
+        names.where(
+          (n) =>
+              n.startsWith('video_') ||
+              n.startsWith('three_') ||
+              n.startsWith('hotapp_') ||
+              n.startsWith('nonapp_') ||
+              n.startsWith('music_'),
+        ),
+        isEmpty,
+      );
+    });
+
     test('hotapp 收窄：热应用 + 应用包，不暴露 3D/视频', () async {
       final names = await surfaceFor('hotapp');
       expect(
@@ -2434,6 +2523,48 @@ void main() {
       expect(workspace.calls, contains('video_review'));
       final end = events.firstWhere(
         (e) => e['type'] == 'tool_end' && e['tool'] == 'video_review',
+      );
+      expect(end['ok'], isTrue);
+    });
+
+    test('3D 视频工作台 run：video3d_create 真执行（不再 unknown tool）', () async {
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      final model = ScriptedAgentModel(<List<Part>>[
+        <Part>[
+          scriptToolCall(
+            toolName: 'video3d_create',
+            input: <String, dynamic>{
+              'name': 'stage',
+              'scene': <String, dynamic>{'v': 1, 'units': 'm'},
+              'screenplay': <String, dynamic>{
+                'v': 1,
+                'fps': 30,
+                'shots': <dynamic>[],
+              },
+            },
+          ),
+        ],
+        <Part>[
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '完成'},
+          ),
+        ],
+      ]);
+      final result = await runDartAgent(
+        request: workspaceRequest('video3d'),
+        modelOverride: model.model,
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      expect(result.ok, isTrue);
+      expect(workspace.calls, contains('video3d_create:stage'));
+      // 两份事实源按对象原样传给服务（不是被字符串化的 JSON）。
+      expect(workspace.lastVideo3dScene, isNotNull);
+      expect(workspace.lastVideo3dScreenplay, isNotNull);
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'video3d_create',
       );
       expect(end['ok'], isTrue);
     });

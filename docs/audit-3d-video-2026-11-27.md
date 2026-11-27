@@ -20,7 +20,7 @@
 | 常规视频 v1（矢量 + DOM 短片） | 现状保留 | 两渲染面俱在 + 桥契约 + 测试 | ✅ |
 | 3D 视频数据契约/编译/存储/预览 | 设计 WIP | 全部落地且真机冒烟通过 | ✅ |
 | 3D 视频「真 three/WebGL 渲染」 | 设计待后续 | v1 是确定性 Canvas2D 投影 + THREE 兼容层 | 🟡 |
-| 3D 视频 agent 工具面（`video3d_*`） | 计划 P2 明确列为必做 | **零实现** | ❌ |
+| 3D 视频 agent 工具面（`video3d_*`） | 计划 P2 明确列为必做 | `list` / `status` / `create` 已补齐（2026-11-27）；`render_frames` 待后续 | ✅ |
 | pixelfx VFX 子集 | 方案定稿·未施工 | 只有事件 schema，零渲染面 | ⬜ |
 | Phaser 3 引擎短片 | 方案定稿·未施工 | 无依赖、无运行时 | ⬜ |
 | 只参考项零依赖 | 生效裁决 | 全仓零残留 | ✅ |
@@ -146,20 +146,23 @@ Python / Blender / CadQuery / URDF / moderngl 运行时**均未进入产品**（
 | --- | --- | --- |
 | 3D（three-live + 3dcodeverse） | 12 | `three_plan_validate` `three_create` `three_pass` `three_continue` `three_feedback` `three_build` `three_measure` `three_check` `three_check_placement` `three_status` `three_list` `three_workspace_migrate` |
 | 常规视频 | 5 | `video_sample` `video_create` `video_review` `video_list` `video_render`（只回导出屏蔽） |
-| 3D 视频 | **0** | —— |
+| 3D 视频 | 3 | `video3d_list` `video3d_status` `video3d_create`（2026-11-27 补齐；`video3d_render_frames` 未做） |
 | 盲评（3D/视频共用） | 1 | `creative_judge`（仅 `mode == 'workspace'` 暴露，`kind ∈ {3d, video}`） |
 
-`dart_agent.dart` 与工作台模式里**没有 `video3d` 这个 workspace mode**
-（只有 `three` / `video` / `music` / `design`），因此 agent 无法创建或修改 3D 视频项目 ——
-用户只能在 UI 里手填 `scene3d.json` / `screenplay3d.json`。
+`plugin:video3d` 经 `AppStore.workspaceHintForView` 映射成一次性 hint `video3d`
+（与音乐工作台同法），工具面收窄到 `video3d_*`；`video` 的收窄用 `video_` 前缀，
+不会误纳 `video3d_…`。`video3d_create` 成功后走既有产物认领链，把当前 3D 视频项目
+换成新项目（工作台跟着切），失败不认领。
 
 ## 5. 调用链流畅性证据（本轮实测）
 
 | 检查 | 结果 |
 | --- | --- |
-| `flutter analyze --no-pub` | **No issues found!（2.6s）** |
-| 3D/视频/创意定向测试（38 文件） | **446 passed / 0 failed（44s）** |
-| 全量 `flutter test` | **1802 passed / 5 skipped / 1 failed**；唯一失败是 AGENTS.md 已登记的环境限制 `desktop_rpc_host_test`（容器 loopback 观测不到「对端消失 → 取消」） |
+| `flutter analyze --no-pub` | **No issues found!（2.2s）** |
+| 3D/视频/创意定向测试（38 文件，工具面补齐前） | **446 passed / 0 failed（44s）** |
+| 3D/视频/工作台定向回归（54 文件，补齐后） | **615 passed / 0 failed（52s）** |
+| 新增 `video3d_*` 测试 | `video3d_tools_test.dart` 8 条 + 工具面收窄 1 条 + 端到端执行 1 条 + 产物认领 2 条，全绿 |
+| 全量 `flutter test`（补齐后） | **1814 passed / 5 skipped / 1 failed**；唯一失败是 AGENTS.md 已登记的环境限制 `desktop_rpc_host_test`（容器 loopback 观测不到「对端消失 → 取消」） |
 | 真机 WebView 冒烟（Linux WebKitGTK，`scripts/wf/run_webview_smoke.sh`） | **6/6 passed** |
 | `flutter build linux --debug` | 见 §7 门禁记录 |
 
@@ -181,16 +184,18 @@ Python / Blender / CadQuery / URDF / moderngl 运行时**均未进入产品**（
 
 ## 6. 缺口（按严重度）
 
-1. **❌ 3D 视频没有 agent 工具面**。`docs/plan-next-iterations.md:94` 明确写了
-   `video3d_create`（最小）/`video3d_status`/`video3d_render_frames`，实现为零；
-   `dart_agent.dart` 全文无 `video3d` 字样。后果：3D 视频只能靠人手写两份 JSON。
+1. **✅ 已补齐（2026-11-27）：3D 视频 agent 工具面**。新增 `video3d_list` /
+   `video3d_status` / `video3d_create`；`plugin:video3d` → hint `video3d` 收窄；
+   `video3d_create` 进产物认领链（成功后当前项目跟着切）；`toolLabel` /
+   `toolFailureMessage` 各有映射。剩下 `video3d_render_frames`（帧证据产物）
+   与真渲染批次一起做，不单独伪造。
 2. **🟡 3D 视频预览不是真 three 渲染**。v1 是确定性 Canvas2D 投影 + 最小 THREE 兼容层；
    保真度（光照/材质/透视正确性）与「3D」名义有落差，属设计文档已登记的后续批次。
 3. **⬜ pixelfx VFX 未施工**。事件 schema 已冻结但零渲染面、零事实源字段、
    `CreativePlanVideo` 无消费者。
 4. **⬜ Phaser 引擎短片未施工**。无依赖无运行时，常规视频维持 v1。
 5. **🟡 SKILL.md 完整流程未接线**（硬纪律已注入）。
-6. **台账滞后**（本轮已纠偏，见 §7）：`docs/README.md` 把已落地的 3D 视频三份设计稿、
+6. **✅ 已纠正：台账滞后**（见 §7）：`docs/README.md` 把已落地的 3D 视频三份设计稿、
    3D 视口预设与盲评标成「未施工 / 待后续」；AGENTS.md 把 skill 写成「未接线」。
 7. 非代码残留：仓库根有未跟踪的 `server/__pycache__/`（无 Python 源码，`.gitignore` 外的
    陈旧构建产物），不影响门禁，建议清理。
@@ -203,7 +208,16 @@ Python / Blender / CadQuery / URDF / moderngl 运行时**均未进入产品**（
    - `docs/design/video-tracks-adr.md` 状态头；
    - `docs/plan-next-iterations.md` P2 施工状态；
    - `AGENTS.md` 文档入口里的 skill 状态。
-3. 未实现的能力（§6 的 1–4）**不在本轮伪造**：全部按「未施工 / 缺口」记账，
+3. **补齐 3D 视频工具面（2026-11-27，本轮）**：
+   - `AgentWorkspaceServices` 增加 `video3dList` / `video3dStatus` / `video3dCreate`，
+     `LocalWorkspaceServices` 用 `Video3dProjectStore` 实现（依赖可注入，测试用临时根）；
+   - 三个工具定义 + `video3d` hint 收窄 + `workspaceWriteTools` 水位；
+   - `toolLabel`（3D 视频 / 查看 / 新建）与 7 条失败码人话；
+   - `AppStore`：`plugin:video3d` → hint、`video3d_create` 产物认领、
+     `video3d_status/list` 不认领；
+   - 测试：`video3d_tools_test.dart`（8 条：落盘/拒覆盖/未通过不写盘/非法名/查看/
+     坏项目只读/不存在/列表）+ 工具面收窄与端到端执行 2 条 + 认领 2 条。
+4. 未实现的能力（§6 的 2–5）**不在本轮伪造**：全部按「未施工 / 缺口」记账，
    下一步施工顺序见 §9。
 
 ## 8. 复现命令
@@ -232,10 +246,10 @@ grep -rniI "raea|material-painter|openmotion|hyperframes|remotion|bevy" \
 
 ## 9. 下一步施工顺序（按缺口严重度）
 
-1. **3D 视频工具面**：`video3d_create` / `video3d_status`（先最小），
-   加 `video3d` workspace mode + 工作区适配器 + 测试（把「只能手填 JSON」补上）。
+1. **✅ 已完成（2026-11-27）：3D 视频工具面** `video3d_list` / `video3d_status` /
+   `video3d_create` + `video3d` hint + 产物认领 + 测试。
 2. **3D 视频真 three 渲染**：把 Canvas2D 投影替换为 three-live 场景渲染，保留整数帧
-   seek 与帧证据桥。
+   seek 与帧证据桥（`video3d_render_frames` 与该批次一起落）。
 3. **pixelfx VFX**：先落 `screenplay.json` 的 `vfx` 字段 + allowlist 编译期硬门，
    再落特效渲染（只取火焰/冰霜/风/爆炸/闪电，不取人物）。
 4. **Phaser 引擎短片**：按 `docs/plan-creative-workbench.md` §5.0 批次 5a。

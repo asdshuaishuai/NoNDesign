@@ -326,6 +326,13 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   `docs/skills/creative-workbench/references/story-short.md`。
   详见 `docs/research/line-art-animation.md`、`docs/research/pixelfx.md`、
   `docs/research/awesome-opus5-5-videos.md`。
+- **3D 视频工具（2026-11-27 补齐）**：`video3d_list` / `video3d_status` /
+  `video3d_create` 已接线，事实源是 `scene3d.json` + `screenplay3d.json`；
+  **先校验后落盘**（未通过不碰磁盘、回问题清单），**同名拒绝覆盖**；
+  `plugin:video3d` 经 `AppStore.workspaceHintForView` 收窄到 `video3d_*`
+  （`video` 的 `video_` 前缀收窄不会误纳 `video3d_…`）；`video3d_create` 成功后走产物
+  认领把当前 3D 视频项目换成新项目。`video3d_render_frames`（帧证据）与真 three 渲染
+  仍待后续批次，不要把它们当作现状。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
   成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
 - **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，

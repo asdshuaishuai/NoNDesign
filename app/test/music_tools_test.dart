@@ -426,6 +426,9 @@ void main() {
       expect(AppStore.workspaceHintForView('plugin:music'), 'music');
       expect(AppStore.workspaceHintForView('plugin:three'), workspaceModeThree);
       expect(AppStore.workspaceHintForView('plugin:video'), workspaceModeVideo);
+      // 3D 视频同样不在 chatWorkspaceMode 枚举里：用一次性 hint 收窄到
+      // `video3d_*`，不把非法枚举写进 settings。
+      expect(AppStore.workspaceHintForView('plugin:video3d'), 'video3d');
       expect(
         AppStore.workspaceHintForView('plugin:hotapp'),
         workspaceModeHotapp,

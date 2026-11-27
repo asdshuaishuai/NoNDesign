@@ -121,6 +121,19 @@ void main() {
       expect(store.settings.videoProjectName, 'keep-me');
     });
 
+    test('video3d_create 成功 → video3dProjectName 认领（工作台切到新项目）', () async {
+      await start('video3d_create', <String, dynamic>{'name': 'stage'});
+      await end('video3d_create');
+      expect(store.video3dProjectName, 'stage');
+    });
+
+    test('video3d_status 不是产出工具 → 不动当前 3D 视频项目', () async {
+      store.video3dProjectName = 'keep-me';
+      await start('video3d_status', <String, dynamic>{'name': 'other'});
+      await end('video3d_status');
+      expect(store.video3dProjectName, 'keep-me');
+    });
+
     test('无 name 参数的调用不认领（读类工具不抢当前项目）', () async {
       await start('three_list', <String, dynamic>{});
       await end('three_list');
