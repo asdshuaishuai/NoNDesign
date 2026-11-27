@@ -33,8 +33,10 @@ import 'package:webview_all/webview_all.dart';
 
 import '../core/platform_capabilities.dart';
 import '../core/theme.dart';
+import '../core/three_module.dart';
 import '../core/video3d/video3d_compile.dart';
 import '../core/video3d/video3d_contract.dart';
+import '../core/video3d/video3d_evidence.dart';
 import '../core/video3d/video3d_player.dart';
 import '../core/video3d/video3d_project.dart';
 
@@ -125,6 +127,10 @@ abstract class Video3dPreviewController extends ChangeNotifier {
   /// 原始诊断：只进折叠的「技术详情」，绝不作为主文案。
   String get technicalDetail;
 
+  /// 页面 `ready` 如实回传的渲染器标识（`webgl_three_r160` /
+  /// `canvas2d_deterministic`）；就绪前为空串（不猜）。
+  String get renderer => '';
+
   /// 挂载/启动预览面（WebView 实现在这里读运行时、组装页面、载入并等就绪）。
   Future<void> start();
 
@@ -139,6 +145,21 @@ abstract class Video3dPreviewController extends ChangeNotifier {
 
   /// 按整数帧 seek（页面 `renderFrame` 只由帧号决定，确定性）。
   Future<void> seekFrame(int frame);
+
+  /// 抓一帧证据（PNG）。默认实现 = 这个预览面不支持抓帧（如测试 Fake）；
+  /// 生产实现在预览就绪后走页面 `capture(frame)` + 桥 `evidence`。
+  Future<List<Video3dFrameEvidence>> captureFrames(List<int> frames) async {
+    throw const Video3dEvidenceError(
+      video3dCaptureUnavailableCode,
+      '当前预览面不支持抓帧',
+    );
+  }
+
+  /// 抓单帧；失败码与 [captureFrames] 相同。
+  Future<Video3dFrameEvidence> captureFrame(int frame) async {
+    final List<Video3dFrameEvidence> one = await captureFrames(<int>[frame]);
+    return one.single;
+  }
 }
 
 /// 生产实现：`webview_all` 控制器 + `NONVIDEO3D` 桥 + 就绪/状态轮询。
@@ -149,6 +170,8 @@ class Video3dWebPreview extends Video3dPreviewController {
     required this.timeline,
     this.host,
     this.runtimeLoader,
+    this.threeLoader,
+    this.captureTimeout = video3dCaptureTimeout,
     this.readyTimeout = video3dPreviewReadyTimeout,
   });
 
@@ -165,6 +188,13 @@ class Video3dWebPreview extends Video3dPreviewController {
   /// 测试可注入失败/空白文本来覆盖显性降级路径。
   final Future<String> Function()? runtimeLoader;
 
+  /// 渲染库文本读取器；生产为 null（[rootBundle] 读
+  /// [threeModuleAssetKeyPath]）。测试注入小样本可避免读 1.2MB 资产。
+  final Future<String> Function()? threeLoader;
+
+  /// 单帧抓帧等待上限（测试可压短）。
+  final Duration captureTimeout;
+
   /// 就绪等待上限（测试可压短）。
   final Duration readyTimeout;
 
@@ -178,6 +208,11 @@ class Video3dWebPreview extends Video3dPreviewController {
   int _fps = 0;
   String _loadError = '';
   String _technicalDetail = '';
+  String _renderer = '';
+
+  /// 抓帧等待者：同一时刻只允许一帧在飞；超时/页面报错都会清空。
+  Completer<Video3dFrameEvidence>? _captureWaiter;
+  int _captureExpectedFrame = -1;
   Timer? _stateTimer;
   Future<void>? _startFuture;
   DateTime _lastFrameNotify = DateTime.fromMillisecondsSinceEpoch(0);
@@ -194,6 +229,9 @@ class Video3dWebPreview extends Video3dPreviewController {
 
   @override
   bool get ready => !_disposed && _ready;
+
+  @override
+  String get renderer => _renderer;
 
   @override
   bool get playing => !_disposed && _playing;
@@ -254,6 +292,25 @@ class Video3dWebPreview extends Video3dPreviewController {
     }
     if (_disposed) return;
 
+    // 1b) 渲染库文本：同样随包发布，读不到就显性失败（不悄悄降级成 2D，
+    //     否则用户看到的是「3D 视频不 3D」而没有任何提示）。
+    String threeSource;
+    try {
+      final Future<String> Function() load =
+          threeLoader ??
+          () => rootBundle.loadString(threeModuleAssetKeyPath, cache: false);
+      threeSource = await load();
+    } catch (error) {
+      _fail('预览需要的 3D 渲染文件没有找到，请重新安装后再试', '$error');
+      return;
+    }
+    if (_disposed) return;
+    if (threeSource.trim().isEmpty) {
+      // 空文件同样是坏包：不许悄悄退成 2D（用户会看到「3D 视频不 3D」）。
+      _fail('预览需要的 3D 渲染文件不完整，请重新安装后再试', 'three module is blank');
+      return;
+    }
+
     // 2) 组装页面：契约/模板/时间表问题都显性降级，不静默。
     String html;
     try {
@@ -261,6 +318,7 @@ class Video3dWebPreview extends Video3dPreviewController {
         scene,
         screenplay,
         runtimeSource: runtimeSource,
+        threeSource: threeSource,
       );
     } on Video3dPlayerError catch (error) {
       _fail(video3dPreviewFailureMessage(error), error.toString());
@@ -464,6 +522,87 @@ class Video3dWebPreview extends Video3dPreviewController {
     );
   }
 
+  @override
+  Future<List<Video3dFrameEvidence>> captureFrames(List<int> frames) async {
+    if (frames.isEmpty) {
+      throw const Video3dEvidenceError(
+        video3dEvidenceEmptyCode,
+        '没有要抓的帧',
+      );
+    }
+    if (frames.length > video3dEvidenceMaxFrames) {
+      throw Video3dEvidenceError(
+        video3dEvidenceLimitCode,
+        '一次抓帧数量超过上限',
+        '${frames.length} > $video3dEvidenceMaxFrames',
+      );
+    }
+    if (!ready || _controller == null) {
+      throw const Video3dEvidenceError(
+        video3dCaptureUnavailableCode,
+        '预览还没有就绪，不能抓帧',
+      );
+    }
+    final List<Video3dFrameEvidence> collected = <Video3dFrameEvidence>[];
+    for (final int frame in frames) {
+      collected.add(await _captureOne(frame));
+    }
+    checkVideo3dEvidenceBudget(collected);
+    return collected;
+  }
+
+  Future<Video3dFrameEvidence> _captureOne(int frame) async {
+    final WebViewController? controller = _controller;
+    final int target = _clampFrame(frame);
+    if (controller == null) {
+      throw const Video3dEvidenceError(
+        video3dCaptureUnavailableCode,
+        '预览还没有就绪，不能抓帧',
+      );
+    }
+    if (_captureWaiter != null && !_captureWaiter!.isCompleted) {
+      throw const Video3dEvidenceError(
+        video3dCaptureFailedCode,
+        '上一帧还没抓完，不能并发抓帧',
+      );
+    }
+    final Completer<Video3dFrameEvidence> completer =
+        Completer<Video3dFrameEvidence>();
+    // 页面可能在 `runJavaScript` 返回前就同步回执（测试桩就是同步的）：
+    // `ignore()` 先把它标记为「已处理」，真正的抛出仍走下面的 await。
+    completer.future.ignore();
+    _captureWaiter = completer;
+    _captureExpectedFrame = target;
+    try {
+      await controller.runJavaScript(
+        '$video3dPreviewHostObject && $video3dPreviewHostObject.capture && '
+        '$video3dPreviewHostObject.capture($target)',
+      );
+    } catch (error) {
+      _clearCaptureWaiter();
+      throw Video3dEvidenceError(
+        video3dCaptureFailedCode,
+        '抓帧命令没有发出去',
+        '$error',
+      );
+    }
+    try {
+      return await completer.future.timeout(captureTimeout);
+    } on TimeoutException {
+      _clearCaptureWaiter();
+      throw Video3dEvidenceError(
+        video3dCaptureTimeoutCode,
+        '这一帧等超时了，可以重试',
+        'frame=$target',
+      );
+    }
+  }
+
+  void _clearCaptureWaiter() {
+    _captureWaiter = null;
+    _captureExpectedFrame = -1;
+  }
+
   int _clampFrame(int frame) {
     final int total = _totalFrames > 0
         ? _totalFrames
@@ -518,6 +657,9 @@ class Video3dWebPreview extends Video3dPreviewController {
         final int? total = _readInt(decoded['total_frames']);
         if (fps != null && fps > 0) _fps = fps;
         if (total != null && total > 0) _totalFrames = total;
+        // 渲染器身份由页面如实回传（不认识的值原样保留，不猜、不改写）。
+        final String reportedRenderer = '${decoded['renderer'] ?? ''}'.trim();
+        if (reportedRenderer.isNotEmpty) _renderer = reportedRenderer;
         _frame = 0;
         _playing = false;
         _ready = true;
@@ -543,12 +685,50 @@ class Video3dWebPreview extends Video3dPreviewController {
         notifyListeners();
       case 'error':
         final String raw = '${decoded['message'] ?? ''}';
+        // 抓帧等待中收到页面错误：立刻失败，不让工具侧干等到超时。
+        final Completer<Video3dFrameEvidence>? waiter = _captureWaiter;
+        if (waiter != null && !waiter.isCompleted) {
+          _clearCaptureWaiter();
+          waiter.completeError(
+            Video3dEvidenceError(
+              video3dCaptureFailedCode,
+              '页面没能给出这一帧',
+              raw.isEmpty ? 'page error' : raw,
+            ),
+          );
+        }
         _stateTimer?.cancel();
         _stateTimer = null;
         _playing = false;
         _loadError = video3dPageErrorMessage(raw);
         _technicalDetail = raw.isEmpty ? '页面报告了未知错误' : raw;
         notifyListeners();
+      case 'evidence':
+        final int? frame = _readInt(decoded['frame']);
+        final Completer<Video3dFrameEvidence>? waiter = _captureWaiter;
+        if (frame == null ||
+            waiter == null ||
+            waiter.isCompleted ||
+            frame != _captureExpectedFrame) {
+          // 没有等待者 / 帧号对不上（可能是超时后的迟到消息）：忽略，不猜。
+          return;
+        }
+        final String renderer = '${decoded['renderer'] ?? ''}';
+        _clearCaptureWaiter();
+        try {
+          final decodedBytes = decodeVideo3dEvidenceDataUrl(
+            '${decoded['data_url'] ?? ''}',
+          );
+          waiter.complete(
+            Video3dFrameEvidence(
+              frame: frame,
+              bytes: decodedBytes,
+              renderer: renderer,
+            ),
+          );
+        } on Video3dEvidenceError catch (error) {
+          waiter.completeError(error);
+        }
       default:
         return;
     }

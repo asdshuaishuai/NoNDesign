@@ -121,9 +121,12 @@ seekFrame 回帧、播放时钟推进）。冒烟同时抓到并修复一个生�
 ### P2 · 3D 视频最小纵切（1–1.5 周，P1 go 后）
 
 > **施工状态（2026-11-27 核查 + 补齐）**：数据契约/校验/确定性编译/项目存储/预览面/
-> 检查器**已落地**；工具面 `video3d_list` / `video3d_status` / `video3d_create`
-> **已于 2026-11-27 接线**（见 `docs/audit-3d-video-2026-11-27.md`）。剩余缺口：
-> `video3d_render_frames`（帧证据）与真 three/WebGL 渲染（v1 预览是确定性 Canvas2D 投影）。
+> 检查器**已落地**；工具面 `video3d_list` / `video3d_status` / `video3d_create` /
+> `video3d_render_frames` **已于 2026-11-27 接线**；**真 three/WebGL 渲染与帧证据**
+> 同日落地并在 Linux WebKitGTK 真机验证（`renderer=webgl_three_r160`、抓帧
+> frame=90 → 11,871 B PNG）。见 `docs/audit-3d-video-2026-11-27.md`。
+> 剩余可选项：contact sheet 拼帧与性能预算观测；无 WebGL 环境走 Canvas2D 降级面
+> （`renderer=canvas2d_deterministic`，如实回传）。
 
 只做一条可演示链路：
 - 数据：`scene3d.json` + `screenplay3d.json` 样例 → three-live 预览（5–10s、单镜头）。

@@ -20,6 +20,7 @@ import 'package:nondesign/core/platform_capabilities.dart';
 import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/core/video3d/video3d_compile.dart';
 import 'package:nondesign/core/video3d/video3d_contract.dart';
+import 'package:nondesign/core/video3d/video3d_evidence.dart';
 import 'package:nondesign/core/video3d/video3d_player.dart';
 import 'package:nondesign/widgets/video3d_preview_surface.dart';
 // 平台接口桩直接从平台接口库取（测试专用传递依赖，与 music_playback_surface_test 同形）。
@@ -234,6 +235,12 @@ class _FakeController extends PlatformWebViewController {
   /// 页面 `window.NONVIDEO3D_PLAYER.state()` 的返回值（状态轮询用）。
   String pageState = 'idle';
 
+  /// 抓帧回执行为：`ok` 立刻回 evidence；`none` 不回（覆盖超时）；`error`
+  /// 回页面错误（覆盖「页面没给出这一帧」）。
+  String captureMode = 'ok';
+  String captureRenderer = 'webgl_three_r160';
+  String capturePngDataUrl = _pngDataUrl;
+
   @override
   Future<void> setJavaScriptMode(JavaScriptMode mode) async {}
 
@@ -258,6 +265,28 @@ class _FakeController extends PlatformWebViewController {
   @override
   Future<void> runJavaScript(String javaScript) async {
     jsCommands.add(javaScript);
+    // 抓帧命令：按 captureMode 立刻模拟页面回执（真实页面经桥异步回传）。
+    final RegExpMatch? capture = RegExp(
+      '.capture\\((\\d+)\\)',
+    ).firstMatch(javaScript);
+    if (capture == null) return;
+    final int frame = int.parse(capture.group(1)!);
+    if (captureMode == 'none') return;
+    if (captureMode == 'error') {
+      fireBridge(jsonEncode(<String, Object?>{
+        'kind': 'error',
+        'message': 'evidence_empty',
+      }));
+      return;
+    }
+    fireBridge(
+      jsonEncode(<String, Object?>{
+        'kind': 'evidence',
+        'frame': frame,
+        'renderer': captureRenderer,
+        'data_url': capturePngDataUrl,
+      }),
+    );
   }
 
   @override
@@ -305,6 +334,19 @@ Future<_FakeWebViewPlatform> _installFakePlatform() async {
   return fake;
 }
 
+/// 极小渲染库样本（形状与 r160 一致：末尾一条出口块）。
+///
+/// 预览面默认注入它，避免每个用例都读 1.2MB 真资产、组装 1.5MB 页面。
+const String _threeStub =
+    'const Vector3 = class Vector3 {};\n'
+    'export { Vector3 };\n';
+
+/// 69 字节的合法 1×1 PNG（IHDR + IDAT + IEND），抓帧回执样本。
+const String _pngBase64 =
+    'iVBORw0KGgpJSERSAAAADQAAAAEAAAABCAIAAACQd1PeSURBVAAAAAx4nGNgYGAAAAAEAAH2FzhV'
+    'SUVORAAAAACuQmCC';
+const String _pngDataUrl = 'data:image/png;base64,$_pngBase64';
+
 Video3dWebPreview _preview({
   String runtime = '/* fake runtime text */',
   PlatformCapabilities? host,
@@ -316,6 +358,7 @@ Video3dWebPreview _preview({
     timeline: models.timeline,
     host: host,
     runtimeLoader: () async => runtime,
+    threeLoader: () async => _threeStub,
   );
 }
 
@@ -590,12 +633,13 @@ void main() {
         screenplay: models.screenplay,
         timeline: models.timeline,
         runtimeLoader: () async => runtime,
+        threeLoader: () async => _threeStub,
       );
       await playback.start();
       expect(playback.ready, isTrue, reason: '真实运行时文本可以组装并载入');
       final String html = playback.html!;
       // 与 assembleVideo3dPreview 同一转义口径：运行时文本里的 `</script` 被转义，
-      // 页面本身只剩模板的 3 个脚本块结束标签（否则运行时可能提前关闭脚本）。
+      // 页面只剩模板四个脚本块（运行时/模块渲染面/场景/页面）的结束标签。
       final String inlined = runtime.replaceAll(
         RegExp('</script', caseSensitive: false),
         r'<\/script',
@@ -603,10 +647,124 @@ void main() {
       expect(html, contains(inlined));
       expect(
         RegExp('</script', caseSensitive: false).allMatches(html).length,
-        3,
-        reason: '模板三个脚本块 + 运行时零个裸结束标签',
+        4,
+        reason: '模板四个脚本块 + 运行时零个裸结束标签',
       );
       playback.dispose();
+    });
+
+    test('renderer 如实回传：页面报 webgl_three_r160 → 控制器照抄，不猜', () async {
+      await _installFakePlatform();
+      final Video3dWebPreview playback = _preview();
+      await playback.start();
+      final _FakeWebViewPlatform platform =
+          WebViewPlatform.instance! as _FakeWebViewPlatform;
+      final _FakeController controller = platform.lastController!;
+
+      controller.fireBridge(
+        jsonEncode(<String, Object?>{
+          'kind': 'ready',
+          'fps': 30,
+          'total_frames': 150,
+          'renderer': video3dWebglRenderer,
+        }),
+      );
+      expect(playback.renderer, 'webgl_three_r160');
+      playback.dispose();
+    });
+
+    test('抓帧：命令走页面 capture(frame) → evidence 回传解码成 PNG 字节', () async {
+      await _installFakePlatform();
+      final Video3dWebPreview playback = _preview();
+      await playback.start();
+      final _FakeWebViewPlatform platform =
+          WebViewPlatform.instance! as _FakeWebViewPlatform;
+      final _FakeController controller = platform.lastController!;
+
+      final List<Video3dFrameEvidence> evidence = await playback.captureFrames(
+        <int>[12],
+      );
+      // 命令面是页面自己的 API（不是宿主伪造像素）。
+      expect(
+        controller.jsCommands.last,
+        contains('window.NONVIDEO3D_PLAYER.capture(12)'),
+      );
+      expect(evidence, hasLength(1));
+      expect(evidence.single.frame, 12);
+      expect(evidence.single.renderer, 'webgl_three_r160');
+      expect(evidence.single.byteLength, 69);
+      expect(evidence.single.bytes[0], 0x89, reason: 'PNG 魔数');
+      playback.dispose();
+    });
+
+    test('抓帧超时：显性失败（不产出空白 PNG）', () async {
+      await _installFakePlatform();
+      final models = _models();
+      final Video3dWebPreview playback = Video3dWebPreview(
+        scene: models.scene,
+        screenplay: models.screenplay,
+        timeline: models.timeline,
+        runtimeLoader: () async => '/* rt */',
+        threeLoader: () async => _threeStub,
+        captureTimeout: const Duration(milliseconds: 120),
+      );
+      await playback.start();
+      final _FakeWebViewPlatform platform =
+          WebViewPlatform.instance! as _FakeWebViewPlatform;
+      platform.lastController!.captureMode = 'none';
+      await expectLater(
+        playback.captureFrames(<int>[7]),
+        throwsA(
+          isA<Video3dEvidenceError>().having(
+            (e) => e.code,
+            'code',
+            video3dCaptureTimeoutCode,
+          ),
+        ),
+      );
+      playback.dispose();
+    });
+
+    test('抓帧时页面报错：立刻失败，不等超时', () async {
+      await _installFakePlatform();
+      final Video3dWebPreview playback = _preview();
+      await playback.start();
+      final _FakeWebViewPlatform platform =
+          WebViewPlatform.instance! as _FakeWebViewPlatform;
+      platform.lastController!.captureMode = 'error';
+      await expectLater(
+        playback.captureFrames(<int>[3]),
+        throwsA(
+          isA<Video3dEvidenceError>().having(
+            (e) => e.code,
+            'code',
+            video3dCaptureFailedCode,
+          ),
+        ),
+      );
+      playback.dispose();
+    });
+
+    test('渲染库读取失败 / 空文本：组装前显性降级（不悄悄退成 2D）', () async {
+      await _installFakePlatform();
+      final models = _models();
+      final List<Future<String> Function()> loaders = <Future<String> Function()>[
+        () async => throw StateError('bundle missing'),
+        () async => '   ',
+      ];
+      for (final Future<String> Function() loader in loaders) {
+        final Video3dWebPreview playback = Video3dWebPreview(
+          scene: models.scene,
+          screenplay: models.screenplay,
+          timeline: models.timeline,
+          runtimeLoader: () async => '/* rt */',
+          threeLoader: loader,
+        );
+        await playback.start();
+        expect(playback.ready, isFalse);
+        expect(playback.loadError, contains('3D 渲染文件'));
+        playback.dispose();
+      }
     });
 
     test('WebView 不可用：显性降级，不假装可播', () async {

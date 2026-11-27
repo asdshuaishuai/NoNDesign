@@ -271,6 +271,7 @@ void main() {
         'video3d_list',
         'video3d_status',
         'video3d_create',
+        'video3d_render_frames',
         'creative_judge',
       ];
       for (final String name in tools) {

@@ -31,6 +31,7 @@ import 'package:nondesign/core/music/music_player.dart';
 import 'package:nondesign/core/music/music_score.dart';
 import 'package:nondesign/core/video3d/video3d_contract.dart';
 import 'package:nondesign/core/video3d/video3d_compile.dart';
+import 'package:nondesign/core/video3d/video3d_evidence.dart';
 import 'package:nondesign/core/video3d/video3d_player.dart';
 import 'package:nondesign/core/video3d/video3d_project.dart';
 import 'package:nondesign/core/three_service.dart';
@@ -602,13 +603,35 @@ export default function build(THREE, scene, camera, controls, renderer) {
     print(
       '[webview-video3d-surface] ready=${preview.ready} '
       'totalFrames=${preview.totalFrames} frame=${preview.frame} '
-      'error=${preview.loadError}',
+      'renderer=${preview.renderer} error=${preview.loadError}',
+    );
+    // 渲染器身份必须如实且非空（webgl_three_r160 或 canvas2d_deterministic）。
+    // 不要求一定是 WebGL：真机有没有 WebGL 上下文是环境事实，页面必须如实降级。
+    expect(
+      preview.renderer,
+      anyOf('webgl_three_r160', 'canvas2d_deterministic'),
+      reason: '页面没有如实回传渲染器身份，实得「${preview.renderer}」',
     );
     expect(
       preview.frame,
       90,
       reason: 'seekFrame(90) 后页面帧号未同步，实得 ${preview.frame}',
     );
+
+    // 真机抓一帧：页面渲染 → toDataURL → 桥 evidence → Dart 解码校验。
+    final List<Video3dFrameEvidence> evidence = await preview.captureFrames(
+      <int>[90],
+    );
+    // ignore: avoid_print
+    print(
+      '[webview-video3d-surface] evidence frame=${evidence.single.frame} '
+      'bytes=${evidence.single.byteLength} renderer=${evidence.single.renderer}',
+    );
+    final Video3dFrameEvidence shot = evidence.single;
+    expect(shot.frame, 90);
+    expect(shot.renderer, preview.renderer, reason: '证据渲染器必须与 ready 一致');
+    expect(shot.byteLength, greaterThan(0), reason: '抓到的 PNG 不能是空文件');
+    expect(shot.bytes[0], 0x89, reason: '抓帧结果必须是 PNG（魔数）');
   });
 
   testWidgets('浮层遮挡：Flutter 控件叠在真实 WebView 上仍可点击并驱动页面', (tester) async {

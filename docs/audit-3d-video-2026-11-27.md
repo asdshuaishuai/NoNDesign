@@ -107,19 +107,27 @@ Python / Blender / CadQuery / URDF / moderngl 运行时**均未进入产品**（
 与裁决一致。测试：`video_service_test.dart` / `video_clip_test.dart` /
 `video_clip_surface_test.dart` / `video_project_test.dart` / `video_workspace_test.dart`。
 
-### 3.6 3D 视频（three-live 目标面 / 现状是确定性 Canvas2D）
+### 3.6 3D 视频（真 three 渲染 + 帧证据，2026-11-27 补齐）
 
 - 数据契约：`video3d_contract.dart`（scene3d.json / screenplay3d.json，30fps 整数帧，
   拒绝 NaN/∞）；
 - 编译：`video3d_compile.dart`（同一输入两次编译字节相同）；
-- 播放页：`video3d_player.dart`，**`video3dPreviewRenderer = 'canvas2d_deterministic'`**，
-  `canvas.getContext('2d')` + 页面内**最小 THREE 兼容层**；three-live 运行时文本被内嵌到
-  `<script id="video3d-runtime">`，但 **v1 不做 WebGL 真渲染**（代码注释已明示）。
-- 存储：`video3d_project.dart`（先 `verifyVideo3d` 再落盘，磁盘不出现半成品）；
-- 真机证据：WebView 冒烟里 `Video3dPreviewSurface` 就绪、`totalFrames=150`、
-  `seekFrame(90)` 到位。
+- 播放页：`video3d_player.dart`，**两档渲染面并存且如实回传**：
+  - `webgl_three_r160`：内联 r160 模块（`threeModuleNamespaceSource` 把出口块改写成
+    `const THREE = {…}`）+ 真 `WebGLRenderer(preserveDrawingBuffer)`；
+  - `canvas2d_deterministic`：无 WebGL 时的确定性投影降级面；
+  - 两档都由「场景 + 镜头 + 帧号」决定；像素确定性口径按档位区分（见执行面文档 §3）。
+- 帧证据：页面 `capture(frame)` → `toDataURL` → 桥 `evidence` → Dart 校验（PNG 魔数 /
+  单帧 8 MiB / ≤120 帧 / 64 MiB）→ `artifacts/renders/frame-NNNN.png` + 确定性
+  `renders.json`；工具 `video3d_render_frames` 只在预览面挂着时可用（没挂显性失败）。
+- 存储：`video3d_project.dart`（先 `verifyVideo3d` 再落盘；帧证据只写 `artifacts/`，
+  两份事实源逐字节不变；原子写 + 无临时残留）。
+- 真机证据（Linux WebKitGTK，2026-11-27）：
+  `renderer=webgl_three_r160`、`totalFrames=150`、`seekFrame(90)` 到位、
+  **抓帧 frame=90 → 11,871 字节 PNG**。
 
-结论：**数据/确定性/预览链路完整**；「真 three/WebGL 渲染」按设计文档仍是待后续批次。
+结论：**数据/确定性/渲染/取证链路完整，且真机验证过**；剩余的是 contact sheet 拼图与
+性能预算观测（可选批次）。
 
 ### 3.7 pixelfx VFX 子集（方案定稿·未施工）
 
@@ -158,12 +166,12 @@ Python / Blender / CadQuery / URDF / moderngl 运行时**均未进入产品**（
 
 | 检查 | 结果 |
 | --- | --- |
-| `flutter analyze --no-pub` | **No issues found!（2.2s）** |
+| `flutter analyze --no-pub` | **No issues found!（2.7s）** |
 | 3D/视频/创意定向测试（38 文件，工具面补齐前） | **446 passed / 0 failed（44s）** |
 | 3D/视频/工作台定向回归（54 文件，补齐后） | **615 passed / 0 failed（52s）** |
-| 新增 `video3d_*` 测试 | `video3d_tools_test.dart` 8 条 + 工具面收窄 1 条 + 端到端执行 1 条 + 产物认领 2 条，全绿 |
-| 全量 `flutter test`（补齐后） | **1814 passed / 5 skipped / 1 failed**；唯一失败是 AGENTS.md 已登记的环境限制 `desktop_rpc_host_test`（容器 loopback 观测不到「对端消失 → 取消」） |
-| 真机 WebView 冒烟（Linux WebKitGTK，`scripts/wf/run_webview_smoke.sh`） | **6/6 passed** |
+| 新增渲染/取证测试（2026-11-27） | `video3d_player_test` +1（抓帧命令）、`video3d_evidence_test` 8、`video3d_renders_test` 7、`video3d_preview_surface_test` +3（抓帧/超时/页面报错）、工具面与端到端 +2、工作台注册链 +1，全绿 |
+| 全量 `flutter test`（2026-11-27 真渲染 + 帧证据后） | **1861 passed / 5 skipped / 1 failed**；唯一失败是 AGENTS.md 已登记的环境限制 `desktop_rpc_host_test`（容器 loopback 观测不到「对端消失 → 取消」） |
+| 真机 WebView 冒烟（Linux WebKitGTK，`scripts/wf/run_webview_smoke.sh`） | **6/6 passed**；`renderer=webgl_three_r160`、抓帧 frame=90 → **11,871 字节 PNG** |
 | `flutter build linux --debug` | 见 §7 门禁记录 |
 
 冒烟实测数字：
@@ -184,13 +192,13 @@ Python / Blender / CadQuery / URDF / moderngl 运行时**均未进入产品**（
 
 ## 6. 缺口（按严重度）
 
-1. **✅ 已补齐（2026-11-27）：3D 视频 agent 工具面**。新增 `video3d_list` /
-   `video3d_status` / `video3d_create`；`plugin:video3d` → hint `video3d` 收窄；
-   `video3d_create` 进产物认领链（成功后当前项目跟着切）；`toolLabel` /
-   `toolFailureMessage` 各有映射。剩下 `video3d_render_frames`（帧证据产物）
-   与真渲染批次一起做，不单独伪造。
-2. **🟡 3D 视频预览不是真 three 渲染**。v1 是确定性 Canvas2D 投影 + 最小 THREE 兼容层；
-   保真度（光照/材质/透视正确性）与「3D」名义有落差，属设计文档已登记的后续批次。
+1. **✅ 已补齐（2026-11-27）：3D 视频 agent 工具面**。`video3d_list` / `video3d_status` /
+   `video3d_create` / `video3d_render_frames` 已接线；`plugin:video3d` → hint
+   `video3d` 收窄；`video3d_create` 进产物认领链；抓帧只写 `artifacts/`，不动事实源。
+2. **✅ 已落地（2026-11-27）：真 three 渲染**。页面内联 r160 模块 + `WebGLRenderer`，
+   真机（Linux WebKitGTK）实测 `renderer=webgl_three_r160`；无 WebGL 时如实降级到
+   Canvas2D（两档 `renderer` 都如实回传）。跨设备像素非逐字节一致——口径已写进
+   执行面文档 §3，不再含糊。
 3. **⬜ pixelfx VFX 未施工**。事件 schema 已冻结但零渲染面、零事实源字段、
    `CreativePlanVideo` 无消费者。
 4. **⬜ Phaser 引擎短片未施工**。无依赖无运行时，常规视频维持 v1。
@@ -229,7 +237,18 @@ Python / Blender / CadQuery / URDF / moderngl 运行时**均未进入产品**（
      标识符边界，避免 base64 里的巧合子串误报）；
    - 3D/视频/3D 视频工具全部注册，每条 `video3d_*` 失败码都有 `toolFailureMessage` 分支；
    - SKILL.md + 7 份参考不丢，且蒸馏纪律确实被 `dart_agent.dart` 引用。
-5. 未实现的能力（§6 的 2–5）**不在本轮伪造**：全部按「未施工 / 缺口」记账，
+5. **真 three 渲染 + 帧证据（2026-11-27，本轮）**：
+   - `video3d_player.dart`：新增内联 r160 模块渲染面（`WebGLRenderer(preserveDrawingBuffer)`）
+     + `ready.renderer` 两档如实回传 + `capture(frame)`（`toDataURL` → 桥 `evidence`）；
+     `threeModuleNamespaceSource` 抽成纯 Dart 单点（3D 建模与 3D 视频共用）；
+   - `video3d_evidence.dart`（新）：data URL → PNG 解码 + 魔数/单帧/帧数/总量上限；
+   - `video3d_project.dart`：`writeRenders`（路径只由帧号派生、原子写、确定性清单）；
+   - `video3d_preview_surface.dart`：注入渲染库文本、`captureFrames` 逐帧等待、
+     渲染器如实暴露、抓帧超时可注入；
+   - `dart_agent` / `store` / `video3d_workspace`：`video3d_render_frames` 工具 +
+     抓帧运行器注册/注销（只认当前项目；卸载即失效）；
+   - 测试 35 条（渲染面/取证解码/落盘/桥/工具/注册链）。
+6. 未实现的能力（§6 的 3–5）**不在本轮伪造**：全部按「未施工 / 缺口」记账，
    下一步施工顺序见 §9。
 
 ## 8. 复现命令
@@ -259,10 +278,11 @@ grep -rniI "raea|material-painter|openmotion|hyperframes|remotion|bevy" \
 ## 9. 下一步施工顺序（按缺口严重度）
 
 1. **✅ 已完成（2026-11-27）：3D 视频工具面** `video3d_list` / `video3d_status` /
-   `video3d_create` + `video3d` hint + 产物认领 + 测试。
-2. **3D 视频真 three 渲染**：把 Canvas2D 投影替换为 three-live 场景渲染，保留整数帧
-   seek 与帧证据桥（`video3d_render_frames` 与该批次一起落）。
-3. **pixelfx VFX**：先落 `screenplay.json` 的 `vfx` 字段 + allowlist 编译期硬门，
+   `video3d_create` / `video3d_render_frames` + `video3d` hint + 产物认领 + 测试。
+2. **✅ 已完成（2026-11-27）：真 three/WebGL 渲染** + 帧证据（真机
+   `renderer=webgl_three_r160`、抓帧 PNG 11,871 B）。
+3. **可选续做**：contact sheet 拼帧与性能预算观测（执行面文档 §4/§5）。
+4. **pixelfx VFX**：先落 `screenplay.json` 的 `vfx` 字段 + allowlist 编译期硬门，
    再落特效渲染（只取火焰/冰霜/风/爆炸/闪电，不取人物）。
-4. **Phaser 引擎短片**：按 `docs/plan-creative-workbench.md` §5.0 批次 5a。
-5. **SKILL 完整流程接线**：把 intake/direction/structure 三段做成 run 可调用的阶段门。
+5. **Phaser 引擎短片**：按 `docs/plan-creative-workbench.md` §5.0 批次 5a。
+6. **SKILL 完整流程接线**：把 intake/direction/structure 三段做成 run 可调用的阶段门。

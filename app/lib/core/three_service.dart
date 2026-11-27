@@ -53,6 +53,7 @@ import 'three/three_plan.dart';
 import 'three/three_scene.dart';
 import 'three/three_scene_gates.dart';
 import 'three/three_workspace.dart';
+import 'three_module.dart';
 import 'workbench_pack.dart';
 import 'workbench_pack_io.dart';
 
@@ -67,7 +68,7 @@ const int threeLoopMax = 3;
 const String threePreviewAssetKey = 'assets/three/preview.html';
 
 /// 渲染库资源键（vendored r160，1,272,972 B）。
-const String threeModuleAssetKey = 'assets/three/three.module.js';
+const String threeModuleAssetKey = threeModuleAssetKeyPath;
 
 /// three-live 资源键（vendored 1.4.0，经典脚本，含 file:// 引擎内联补丁）。
 ///
@@ -1939,35 +1940,11 @@ class ThreeService {
 /// 就是一个合法的内联模块：既保留了内部作用域，又把全部 416 个出口聚成一个
 /// 可直接传给场景的对象——不需要 importmap，也不需要取第二个文件。
 String threeModuleAsInlineNamespace(String source) {
-  final matches = RegExp(r'export\s*\{([\s\S]*?)\}\s*;?\s*$')
-      .allMatches(source)
-      .toList();
-  if (matches.isEmpty) {
-    throw ThreeFailure(
-      'asset_missing',
-      'three.module.js: no export block at the end',
-    );
+  try {
+    return threeModuleNamespaceSource(source);
+  } on ThreeModuleRewriteError catch (error) {
+    throw ThreeFailure('asset_missing', error.message);
   }
-  final block = matches.last;
-  final names = block
-      .group(1)!
-      .split(',')
-      .map((name) => name.trim())
-      .where((name) => name.isNotEmpty)
-      .toList();
-  if (names.isEmpty) {
-    throw ThreeFailure('asset_missing', 'three.module.js: empty export block');
-  }
-  final entries = <String>[];
-  for (final name in names) {
-    final alias = name.split(RegExp(r'\s+as\s+'));
-    entries.add(
-      alias.length == 2 ? '${alias[1].trim()}: ${alias[0].trim()}' : name,
-    );
-  }
-  final replacement =
-      'const THREE = {\n${entries.map((e) => '  $e,').join('\n')}\n};\n';
-  return source.replaceRange(block.start, block.end, replacement);
 }
 
 /// 场景源码 → 同一模块作用域里可直接调用的构建函数。

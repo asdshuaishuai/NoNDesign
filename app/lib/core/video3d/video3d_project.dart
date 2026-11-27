@@ -27,6 +27,60 @@ import '../workbench_pack.dart';
 import '../workbench_pack_io.dart';
 import 'video3d_compile.dart';
 import 'video3d_contract.dart';
+import 'video3d_evidence.dart';
+
+/// 帧证据清单的 schema 标识（确定性字节；不含时间戳）。
+const String video3dRendersSchema = 'nan.video3d.renders/1';
+
+/// 清单里的一帧。
+final class Video3dRenderEntry {
+  const Video3dRenderEntry({
+    required this.frame,
+    required this.file,
+    required this.bytes,
+  });
+
+  /// 整数帧号（0 基）。
+  final int frame;
+
+  /// 相对 `artifacts/renders/` 的文件名（由帧号派生，不接受外部路径）。
+  final String file;
+
+  /// PNG 字节数。
+  final int bytes;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'frame': frame,
+    'file': file,
+    'bytes': bytes,
+  };
+}
+
+/// 一次取证的清单（`artifacts/renders/renders.json`）。
+final class Video3dRendersManifest {
+  const Video3dRendersManifest({
+    required this.renderer,
+    required this.frames,
+    required this.totalBytes,
+  });
+
+  /// 产出这批帧的渲染器（页面如实回传；一批只允许一个渲染器）。
+  final String renderer;
+  final List<Video3dRenderEntry> frames;
+  final int totalBytes;
+
+  int get count => frames.length;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'schema': video3dRendersSchema,
+    'renderer': renderer,
+    'count': frames.length,
+    'frames': <Object?>[
+      for (final Video3dRenderEntry entry in frames) entry.toJson(),
+    ],
+    'total_bytes': totalBytes,
+  };
+}
 
 /// 项目名不可用 / 项目不存在 / 磁盘内容损坏时的统一异常。
 ///
@@ -169,6 +223,15 @@ class Video3dProjectStore {
 
   /// 镜头/时间事实源文件名（契约 §1）。
   static const String screenplayFile = 'screenplay3d.json';
+
+  /// 派生内容目录（帧证据等）；**agent 只读**，事实源是两份 JSON。
+  static const String artifactsDir = 'artifacts';
+
+  /// 帧证据目录（相对项目根）。
+  static const String rendersDir = 'artifacts/renders';
+
+  /// 帧证据清单（相对项目根；确定性字节，不含时间戳）。
+  static const String rendersManifestFile = 'artifacts/renders/renders.json';
 
   /// 解析 3D 视频项目根目录（`<用户项目根>/portfolio/video3d`），必要时创建。
   ///
@@ -358,6 +421,101 @@ class Video3dProjectStore {
     }
   }
 
+  // ------------------------------------------------------------------ 帧证据
+
+  /// 写入一次帧证据（PNG 逐帧 + 确定性清单）。
+  ///
+  /// 纪律：
+  ///  * **路径只由帧号派生**（`artifacts/renders/frame-NNNN.png`），不接受任何
+  ///    外部路径，因此没有路径穿越面；
+  ///  * 每个文件先写临时 + flush，再原子改名；清单同样；
+  ///  * 帧号去重后**升序**，清单字节确定（无时间戳/随机数），可复验可 diff；
+  ///  * 帧数/单帧/总量超限或渲染器混用 → 抛 [Video3dEvidenceError]（不静默截断）；
+  ///  * 项目不存在 → [Video3dProjectFailure]（`no_project`）；
+  ///  * 只动 `artifacts/`，两份事实源与其它文件保持原样。
+  Future<Video3dRendersManifest> writeRenders(
+    String name,
+    List<Video3dFrameEvidence> frames,
+  ) async {
+    if (frames.isEmpty) {
+      throw const Video3dEvidenceError(
+        video3dEvidenceEmptyCode,
+        '没有可写入的帧证据',
+      );
+    }
+    final Directory base = await resolveRoot();
+    final Directory dir = _projectDir(base, name);
+    if (!dir.existsSync()) throw Video3dProjectFailure('no_project', name);
+
+    final Map<int, Video3dFrameEvidence> unique = <int, Video3dFrameEvidence>{};
+    for (final Video3dFrameEvidence evidence in frames) {
+      if (unique.containsKey(evidence.frame)) {
+        throw Video3dEvidenceError(
+          video3dEvidenceFormatCode,
+          '同一帧出现了两次',
+          'frame=${evidence.frame}',
+        );
+      }
+      unique[evidence.frame] = evidence;
+    }
+    final List<Video3dFrameEvidence> ordered = unique.values.toList()
+      ..sort(
+        (Video3dFrameEvidence a, Video3dFrameEvidence b) =>
+            a.frame.compareTo(b.frame),
+      );
+    checkVideo3dEvidenceBudget(ordered);
+
+    final String renderer = ordered.first.renderer;
+    for (final Video3dFrameEvidence evidence in ordered) {
+      if (evidence.renderer != renderer) {
+        throw const Video3dEvidenceError(
+          video3dEvidenceFormatCode,
+          '这一批证据来自不同渲染器，不能混写',
+        );
+      }
+    }
+
+    final Directory renders = Directory('${dir.path}/$rendersDir');
+    try {
+      if (!renders.existsSync()) renders.createSync(recursive: true);
+    } on FileSystemException catch (error) {
+      throw Video3dProjectFailure('io_error', '$error');
+    }
+
+    final List<Video3dRenderEntry> entries = <Video3dRenderEntry>[];
+    int totalBytes = 0;
+    for (final Video3dFrameEvidence evidence in ordered) {
+      final Video3dRenderEntry entry = Video3dRenderEntry(
+        frame: evidence.frame,
+        file: 'frame-${evidence.frame.toString().padLeft(4, '0')}.png',
+        bytes: evidence.byteLength,
+      );
+      final File target = File('${renders.path}/${entry.file}');
+      try {
+        _writeBytesAtomically(target, evidence.bytes);
+      } on FileSystemException catch (error) {
+        throw Video3dProjectFailure('io_error', '$error');
+      }
+      entries.add(entry);
+      totalBytes += entry.bytes;
+    }
+
+    final Video3dRendersManifest manifest = Video3dRendersManifest(
+      renderer: renderer,
+      frames: entries,
+      totalBytes: totalBytes,
+    );
+    try {
+      _writeTextAtomically(
+        File('${dir.path}/$rendersManifestFile'),
+        _prettyJson(manifest.toJson()),
+      );
+    } on FileSystemException catch (error) {
+      throw Video3dProjectFailure('io_error', '$error');
+    }
+    return manifest;
+  }
+
   // ------------------------------------------------------------------ 写盘
 
   /// 两份事实源先各自写临时文件（flush 后才改名），把「已写一半」窗口压到
@@ -389,6 +547,36 @@ class Video3dProjectStore {
       handle.flushSync();
     } finally {
       handle.closeSync();
+    }
+  }
+
+  /// 字节内容原子写（帧证据用）：临时文件 + flush + 改名。
+  void _writeBytesAtomically(File target, List<int> bytes) {
+    final String stamp = DateTime.now().microsecondsSinceEpoch.toString();
+    final File tmp = File('${target.path}.$stamp.tmp');
+    try {
+      final RandomAccessFile handle = tmp.openSync(mode: FileMode.writeOnly);
+      try {
+        handle.writeFromSync(bytes);
+        handle.flushSync();
+      } finally {
+        handle.closeSync();
+      }
+      _replaceWithTmp(tmp, target);
+    } finally {
+      _deleteQuietlyFile(tmp);
+    }
+  }
+
+  /// 文本内容原子写（清单用）；口径与 [_writeBytesAtomically] 一致。
+  void _writeTextAtomically(File target, String text) {
+    final String stamp = DateTime.now().microsecondsSinceEpoch.toString();
+    final File tmp = File('${target.path}.$stamp.tmp');
+    try {
+      _writeFlushed(tmp, text);
+      _replaceWithTmp(tmp, target);
+    } finally {
+      _deleteQuietlyFile(tmp);
     }
   }
 

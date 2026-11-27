@@ -129,14 +129,21 @@ String _html({
   Map<String, Object?>? sceneRaw,
   Map<String, Object?>? screenplayRaw,
   String? runtime = _runtimeStub,
+  String three = '',
 }) {
   final models = _models(sceneRaw: sceneRaw, screenplayRaw: screenplayRaw);
   return assembleVideo3dPreview(
     models.scene,
     models.screenplay,
     runtimeSource: runtime,
+    threeSource: three,
   );
 }
+
+/// 最小可改写的「渲染库」文本：形状与 r160 一致（末尾一条出口块）。
+const String _threeStub =
+    'const Vector3 = class Vector3 {};\n'
+    'export { Vector3 };\n';
 
 /// 从内联脚本里取出 `var NAME = <json>;` 的单行 JSON 字面量原文。
 String _jsonLiteral(String html, String name) {
@@ -236,12 +243,13 @@ void main() {
       }
     });
 
-    test('页面自包含：三段内联脚本（运行时/场景/页面），不读本地文件', () {
+    test('页面自包含：四段内联脚本（运行时/模块渲染面/场景/页面），不读本地文件', () {
       final String html = _html();
       expect(html.startsWith('<!doctype html>'), isTrue);
       expect(html, contains('<meta charset="utf-8">'));
-      expect('<script'.allMatches(html).length, 3);
-      expect('</script>'.allMatches(html).length, 3);
+      // 运行时 / 模块渲染面（含渲染库+场景）/ 经典场景 / 页面主脚本。
+      expect('<script'.allMatches(html).length, 4);
+      expect('</script>'.allMatches(html).length, 4);
       expect(html, isNot(contains('<base')));
       expect(html, isNot(contains('file://')));
       // 自包含页的主体必须真有渲染循环/投影代码，而不是只塞 JSON。
@@ -412,6 +420,7 @@ void main() {
         'frame',
         'ended',
         'error',
+        'evidence',
       ]);
       expect(html, contains('window.$video3dPreviewBridge'));
       expect(
@@ -451,13 +460,93 @@ void main() {
       expect(html, isNot(contains('setTimeout')));
     });
 
-    test('ready 消息如实标注最小渲染器（不冒充实拍 three 渲染）', () {
+    test('ready 消息如实标注渲染器：两档都不冒充', () {
       final String html = _html();
       expect(video3dPreviewRenderer, 'canvas2d_deterministic');
+      expect(video3dWebglRenderer, 'webgl_three_r160');
+      // 无渲染库时 RENDERER 保持注入的降级标识；GL 变量存在但不会被赋值。
       expect(html, contains('var RENDERER = "canvas2d_deterministic";'));
+      expect(html, contains('var GL = null;'));
       expect(html, contains('renderer: RENDERER'));
-      expect(html, contains('scene_nodes: meshes.length'));
-      expect(html, contains('scene_metrics: sceneMetrics'));
+      // ready 的节点数/度量按渲染面如实取（GL 优先，降级回落兼容层）。
+      expect(
+        html,
+        contains('scene_nodes: GL ? Number(GL.sceneNodes) || 0 : meshes.length'),
+      );
+      expect(html, contains('scene_metrics: GL ? GL.metrics : sceneMetrics'));
+      // 页面暴露 renderer 查询面，宿主/冒烟可以问「你到底用哪档」。
+      expect(html, contains('renderer: function () { return RENDERER; }'));
+    });
+  });
+
+  group('真 three 渲染面（WebGL）', () {
+    test('threeSource 为空：页面只有 Canvas2D 路径（模块脚本自失活）', () {
+      final String html = _html();
+      // 没有注入命名空间：模块脚本只留 `typeof THREE === 'undefined'` 的早退。
+      expect(html, isNot(contains('const THREE = {')));
+      expect(html, contains("if (typeof THREE === 'undefined')"));
+      // 渲染器标识以注入的降级值为准（GL 未被赋值时不会改写 RENDERER）。
+      expect(html, contains('var RENDERER = "canvas2d_deterministic";'));
+    });
+
+    test('threeSource 非空：命名空间内联进模块作用域 + 如实渲染器标识', () {
+      final String html = _html(three: _threeStub);
+      expect(html, contains('const THREE = {'));
+      // 出口改写按简写条目（`Vector3,`）聚成命名空间对象。
+      expect(html, contains('Vector3,'));
+      expect(html, contains(video3dWebglRenderer));
+      expect(html, contains('new THREE.WebGLRenderer('));
+      // 读回帧证据要靠它：渲染后 canvas 仍可 toDataURL。
+      expect(html, contains('preserveDrawingBuffer: true'));
+      // 场景函数同时进模块与经典脚本（两条执行面共用一份事实源）。
+      expect('<script'.allMatches(html).length, 4);
+    });
+
+    test('threeSource 形状不对（无出口块）→ 显性抛错，不产出半成品', () {
+      final models = _models();
+      expect(
+        () => assembleVideo3dPreview(
+          models.scene,
+          models.screenplay,
+          runtimeSource: _runtimeStub,
+          threeSource: 'const A = 1;',
+        ),
+        throwsA(
+          isA<Video3dPlayerError>().having(
+            (e) => e.code,
+            'code',
+            'video3d_three_module_invalid',
+          ),
+        ),
+      );
+    });
+
+    test('threeSource 里的结束标签被转义，不破坏脚本块', () {
+      final String hostileThree =
+          'const A = 1; // </script> in comment\n'
+          'export { A };\n';
+      final String html = _html(three: hostileThree);
+      expect(html, contains(r'<\/script>'));
+      expect('<script'.allMatches(html).length, 4);
+      expect('</script>'.allMatches(html).length, 4);
+    });
+
+    test('抓帧命令：capture(frame) 渲染后回传 evidence（渲染器 + PNG data URL）', () {
+      final String html = _html(three: _threeStub);
+      expect(html, contains('function captureFrame('));
+      expect(html, contains('capture: captureFrame'));
+      expect(html, contains("postMessage('evidence'"));
+      // 回执里必须带帧号/渲染器/data URL（宿主按帧号配对，不猜）。
+      expect(html, contains('data_url: dataUrl'));
+      expect(html, contains('renderer: RENDERER'));
+      // 没有像素时要如实报错，而不是回一个空白 PNG。
+      expect(html, contains("postMessage('error', { message: 'evidence_empty' })"));
+    });
+
+    test('含 threeSource 时仍是字节确定（同输入两次组装相同）', () {
+      final String first = _html(three: _threeStub);
+      final String second = _html(three: _threeStub);
+      expect(first, second);
     });
   });
 
@@ -494,8 +583,8 @@ void main() {
       // 注入的结束标签被转义，页面不会多出/提前关闭脚本块。
       expect(hostileHtml, isNot(contains('</script><script>')));
       expect(hostileHtml, contains(r'<\/script>'));
-      expect('<script'.allMatches(hostileHtml).length, 3);
-      expect('</script>'.allMatches(hostileHtml).length, 3);
+      expect('<script'.allMatches(hostileHtml).length, 4);
+      expect('</script>'.allMatches(hostileHtml).length, 4);
     });
 
     test('镜头 id 里的 HTML 结束标签被 JSON 转义，不破坏内联脚本', () {
@@ -507,8 +596,8 @@ void main() {
       expect(raw, isNot(contains('</script>')));
       expect(raw, isNot(contains('<script')));
       expect(raw, contains(r'\u003c'));
-      expect('<script'.allMatches(html).length, 3);
-      expect('</script>'.allMatches(html).length, 3);
+      expect('<script'.allMatches(html).length, 4);
+      expect('</script>'.allMatches(html).length, 4);
       final decoded = jsonDecode(raw)! as Map<String, Object?>;
       final decodedShots = decoded['shots']! as List<Object?>;
       final decodedFirst = decodedShots.first! as Map<String, Object?>;

@@ -31,6 +31,7 @@ import '../core/store.dart';
 import '../core/theme.dart';
 import '../core/video3d/video3d_compile.dart';
 import '../core/video3d/video3d_contract.dart';
+import '../core/video3d/video3d_evidence.dart';
 import '../core/video3d/video3d_project.dart';
 import '../core/workbench_docs.dart';
 import '../core/workbench_layout.dart';
@@ -188,6 +189,10 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
   List<double> _shotFractions = const <double>[];
   String _previewError = '';
 
+  /// 抓帧运行器（存进 store 供智能体工具调用）：只对当前打开的项目有效，
+  /// 卸载/切项目/换预览面时注销，绝不把旧页挂成新项目的取证源。
+  Video3dCaptureRunner? _captureRunner;
+
   /// 底部镜头条当前选中的镜头下标（null = 未选中）。
   ///
   /// 只用于检查器属性表与镜头条高亮，不写事实源；保存成功后按项目新快照
@@ -262,6 +267,8 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     if (appStore == null) return;
     _appStore = appStore;
     appStore.setCheckController(_checkController);
+    // provider 晚于 initState 才可读：拿到 store 后把抓帧运行器补注册。
+    _syncCaptureRunner();
   }
 
   /// 可选地取全局 Store：独立工作台/单测没有 provider 时返回 null（不抛）。
@@ -278,9 +285,49 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     // 清空检查控制器注册（只清自己的；控制器不 dispose——右侧面板可能还在
     // 移除监听，ChangeNotifier dispose 后再 removeListener 会断言失败）。
     _clearCheckControllerOnDispose();
+    _unregisterCaptureRunner();
     _preview?.dispose();
     _preview = null;
     super.dispose();
+  }
+
+  /// 注销抓帧运行器（只注销自己注册的那个，别的工作台接管时不动）。
+  void _unregisterCaptureRunner() {
+    final AppStore? appStore = _appStore;
+    final Video3dCaptureRunner? runner = _captureRunner;
+    _captureRunner = null;
+    if (appStore != null && runner != null) {
+      appStore.unregisterVideo3dCaptureRunner(runner);
+    }
+  }
+
+  /// 让抓帧运行器跟上「当前项目 + 当前预览面 + 当前 store」。
+  ///
+  /// 三处会变：绑定新快照、拿到 AppStore（provider 晚于 initState 才可读）、
+  /// 卸载/切项目。任何一处不同步，智能体工具就会抓错项目或者抓不到。
+  void _syncCaptureRunner() {
+    final AppStore? appStore = _appStore;
+    final Video3dPreviewController? preview = _preview;
+    final Video3dProjectSnapshot? snapshot = _snapshot;
+    _unregisterCaptureRunner();
+    if (appStore == null || preview == null || snapshot == null) return;
+    final String project = snapshot.name;
+    Future<List<Video3dFrameEvidence>> runner(
+      String requestedProject,
+      List<int> frames,
+    ) async {
+      if (requestedProject != project) {
+        throw Video3dEvidenceError(
+          video3dCaptureUnavailableCode,
+          '抓帧需要先在工作台打开这个 3D 视频项目',
+          'open=$project requested=$requestedProject',
+        );
+      }
+      return preview.captureFrames(frames);
+    }
+
+    _captureRunner = runner;
+    appStore.registerVideo3dCaptureRunner(runner);
   }
 
   /// 卸载时清空检查控制器注册：只清自己的（别的工作台可能已经接管）。
@@ -339,6 +386,7 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     // 切项目先卸预览面：旧页不能继续对着新项目响。
     final Video3dPreviewController? previous = _preview;
     _preview = null;
+    _unregisterCaptureRunner();
     previous?.dispose();
     setState(() {
       _name = trimmed;
@@ -458,6 +506,9 @@ class _Video3dWorkspaceState extends State<Video3dWorkspace> {
     });
     // 新快照就位 → 检查器重取当前镜头属性值（选中仍按镜头下标保留）。
     _checkController.notifySelectionChanged();
+
+    // 抓帧运行器跟着预览面走：只对当前项目有效；没预览面就注销。
+    _syncCaptureRunner();
     previous?.dispose();
     if (next != null) unawaited(next.start());
   }

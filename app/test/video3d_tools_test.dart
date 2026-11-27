@@ -5,12 +5,19 @@
 //  2. 同名已存在：拒绝覆盖，磁盘逐字节不变；
 //  3. 未通过校验：不落盘（项目目录都不出现），如实回问题清单；
 //  4. 非法名 / 查看 / 列表：失败码与读取路径都可复现。
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nondesign/core/dart_agent.dart';
+import 'package:nondesign/core/video3d/video3d_evidence.dart';
 import 'package:nondesign/core/video3d/video3d_project.dart';
+
+/// 69 字节的合法 1×1 PNG（抓帧回执样本）。
+const String _pngBase64 =
+    'iVBORw0KGgpJSERSAAAADQAAAAEAAAABCAIAAACQd1PeSURBVAAAAAx4nGNgYGAAAAAEAAH2FzhV'
+    'SUVORAAAAACuQmCC';
 
 // ---------------------------------------------------------------------------
 // Fixtures：契约层合法输入（契约语义在 video3d_contract_test 覆盖，这里只验证
@@ -264,5 +271,148 @@ void main() {
     expect(first['shots'], 1);
     expect(first['frames'], 150);
     expect(first['verified'], isTrue);
+  });
+
+  group('抓帧工具（video3d_render_frames）', () {
+    Video3dFrameEvidence png(int frame, {String renderer = 'webgl_three_r160'}) =>
+        Video3dFrameEvidence(
+          frame: frame,
+          bytes: base64Decode(_pngBase64),
+          renderer: renderer,
+        );
+
+    Future<LocalWorkspaceServices> withRunner(
+      Video3dCaptureRunner? runner,
+    ) async {
+      await workspace.video3dCreate(
+        name: 'stage',
+        scene: _scene(),
+        screenplay: _screenplay(),
+      );
+      return LocalWorkspaceServices(
+        model: 'scripted-model',
+        baseUrl: 'https://example.invalid/v1',
+        apiKey: 'k',
+        video3dProjects: store,
+        video3dCaptureRunner: runner,
+      );
+    }
+
+    test('预览已打开：抓帧 → 落 artifacts/renders + 确定性清单', () async {
+      final List<int> seen = <int>[];
+      LocalWorkspaceServices services = await withRunner((
+        String project,
+        List<int> frames,
+      ) async {
+        seen.addAll(frames);
+        return <Video3dFrameEvidence>[
+          for (final int frame in frames) png(frame),
+        ];
+      });
+      final result = await services.video3dRenderFrames(
+        name: 'stage',
+        frames: <int>[90, 0, 90],
+      );
+      expect(result['ok'], isTrue);
+      // 去重 + 升序（同一帧抓两次没有意义，清单也不允许重复）。
+      expect(seen, <int>[0, 90]);
+      expect(result['count'], 2);
+      expect(result['renderer'], 'webgl_three_r160');
+      expect(result['manifest'], 'artifacts/renders/renders.json');
+      expect(
+        File('${root.path}/stage/artifacts/renders/frame-0090.png').existsSync(),
+        isTrue,
+      );
+      final String manifestText = File(
+        '${root.path}/stage/artifacts/renders/renders.json',
+      ).readAsStringSync();
+      expect(manifestText, contains('"schema": "nan.video3d.renders/1"'));
+      expect(manifestText, contains('"count": 2'));
+    });
+
+    test('预览没打开（没有 runner）：显性失败，不写空白文件', () async {
+      final services = await withRunner(null);
+      final result = await services.video3dRenderFrames(
+        name: 'stage',
+        frames: <int>[0],
+      );
+      expect(result['ok'], isFalse);
+      expect(result['error'], 'video3d_capture_unavailable');
+      expect(
+        result['message'],
+        toolFailureMessage('video3d_capture_unavailable'),
+      );
+      expect(
+        Directory('${root.path}/stage/artifacts').existsSync(),
+        isFalse,
+      );
+    });
+
+    test('帧号越界：拒绝（不夹取），也不调用抓帧', () async {
+      bool called = false;
+      final services = await withRunner((
+        String project,
+        List<int> frames,
+      ) async {
+        called = true;
+        return <Video3dFrameEvidence>[];
+      });
+      final result = await services.video3dRenderFrames(
+        name: 'stage',
+        frames: <int>[150],
+      );
+      expect(result['ok'], isFalse);
+      expect(result['error'], 'video3d_frames_out_of_range');
+      expect(called, isFalse, reason: '越界帧不该把请求发到预览面');
+    });
+
+    test('空帧列表：拒绝（不发抓帧命令）', () async {
+      final services = await withRunner(
+        (String project, List<int> frames) async =>
+            <Video3dFrameEvidence>[],
+      );
+      final result = await services.video3dRenderFrames(
+        name: 'stage',
+        frames: const <int>[],
+      );
+      expect(result['ok'], isFalse);
+      expect(result['error'], 'video3d_frames_out_of_range');
+    });
+
+    test('抓帧超时：把 error.code 原样映射到信封', () async {
+      final services = await withRunner((
+        String project,
+        List<int> frames,
+      ) async {
+        throw const Video3dEvidenceError(
+          video3dCaptureTimeoutCode,
+          '这一帧等超时了',
+        );
+      });
+      final result = await services.video3dRenderFrames(
+        name: 'stage',
+        frames: <int>[0],
+      );
+      expect(result['ok'], isFalse);
+      expect(result['error'], video3dCaptureTimeoutCode);
+      expect(result['message'], toolFailureMessage(video3dCaptureTimeoutCode));
+    });
+
+    test('项目不存在：no_project（先读项目再抓帧）', () async {
+      final services = LocalWorkspaceServices(
+        model: 'scripted-model',
+        baseUrl: 'https://example.invalid/v1',
+        apiKey: 'k',
+        video3dProjects: store,
+        video3dCaptureRunner: (String project, List<int> frames) async =>
+            <Video3dFrameEvidence>[],
+      );
+      final result = await services.video3dRenderFrames(
+        name: 'nope',
+        frames: <int>[0],
+      );
+      expect(result['ok'], isFalse);
+      expect(result['error'], 'video3d_no_project');
+    });
   });
 }

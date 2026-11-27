@@ -7,13 +7,17 @@
 ///  * 输入是已经过 `verifyVideo3d` 的两份模型（本层不再做契约校验；调用前
 ///    必须 verified，否则编译时间表会显性抛错，不产出半成品页面）；
 ///  * 页面内嵌**确定性 scene JS**（[compileVideo3dScene] 产物，去掉 `export
-///    default` 后成为可调用的 `build(THREE, scene, camera)`，用页面内的最小
-///    `THREE` 兼容层真正执行一遍场景构建，v1 不做 WebGL/真 three 渲染完整度）
-///    与**整数帧时间表**（[compileVideo3dTimeline] 产物）；
-///  * 最小渲染循环把「场景 + 镜头 + 帧号」投影到 Canvas 2D：帧号只由
-///    `floor(t × fps)` 决定，seek 是「重算目标帧并重绘」；页面无 `Math.random`、
-///    无 `Date.now`/`performance.now`，播放头用 `requestAnimationFrame` 的时间
-///    戳推进，但**像素只由帧号决定**（同输入同帧恒定）；
+///    default` 后成为可调用的 `build(THREE, scene, camera)`）与**整数帧时间表**
+///    （[compileVideo3dTimeline] 产物）。运行时按传入的 [threeSource] 分两档：
+///      - **真 three 渲染**（内联 r160 模块，`WebGLRenderer`）：画面由真实场景
+///        与相机渲染，`ready.renderer = webgl_three_r160`；
+///      - **Canvas2D 确定性投影**（最小 THREE 兼容层 + 透视投影，
+///        `ready.renderer = canvas2d_deterministic`）：无 WebGL 时的降级面；
+///  * 帧号只由 `floor(t × fps)` 决定，seek 是「重算目标帧并重绘」；页面无
+///    `Math.random`、无 `Date.now`/`performance.now`，播放头用
+///    `requestAnimationFrame` 的时间戳推进，**像素只由帧号决定**。注意两档的
+///    确定性口径不同：Canvas2D 是逐字节确定；WebGL 是几何/相机/帧号确定，
+///    像素在同设备同输入下恒定、跨设备可能不同（见执行面文档 §3）；
 ///  * `window.NONVIDEO3D` 回传 `ready` / `frame` / `ended` / `error` 四类消息；
 ///    `window.NONVIDEO3D_PLAYER` 是宿主可经 `runJavaScript` 驱动的 seek/播放面；
 ///  * 固定 CSP：`default-src 'none'; script-src 'unsafe-inline';
@@ -29,6 +33,7 @@ library;
 
 import 'dart:convert';
 
+import '../three_module.dart';
 import 'video3d_compile.dart';
 import 'video3d_contract.dart';
 
@@ -43,11 +48,16 @@ const String video3dPreviewCsp =
     "connect-src 'none'; frame-ancestors 'none'";
 
 /// `window.NONVIDEO3D` 回传桥允许的消息种类（契约逐字对齐）。
+///
+/// `ready` / `frame` / `ended` / `error` 是状态面；`evidence` 只在宿主调
+/// `NONVIDEO3D_PLAYER.capture(frame)` 时出现（单帧 PNG 的 data URL）。
 const List<String> video3dPreviewBridgeMessages = <String>[
   'ready',
   'frame',
   'ended',
   'error',
+  // 抓帧回执：只在宿主显式调 `capture(frame)` 时出现（单帧 PNG data URL）。
+  'evidence',
 ];
 
 /// 出站桥的全局名（宿主 `JavaScriptChannel` 注入同名对象）。
@@ -58,6 +68,13 @@ const String video3dPreviewController = 'NONVIDEO3D_PLAYER';
 
 /// `ready` 消息里如实回传的最小渲染器标识（不冒充实拍 three 渲染）。
 const String video3dPreviewRenderer = 'canvas2d_deterministic';
+
+/// 真 three 渲染面的标识：WebGL 可用时覆盖 [video3dPreviewRenderer]，
+/// `ready` 里如实回传。两档并存（跨设备像素确定性口径见执行面文档 §3）。
+const String video3dWebglRenderer = 'webgl_three_r160';
+
+/// three.js 源码形状不符合 r160 约定（无出口块/出口块为空）时的稳定错误码。
+const String video3dThreeModuleInvalidCode = 'video3d_three_module_invalid';
 
 /// 缺运行时文本时的稳定错误码（不静默降级）。
 const String video3dRuntimeMissingCode = 'video3d_runtime_missing';
@@ -88,12 +105,18 @@ final class Video3dPlayerError implements Exception {
 /// 后传入的字符串）：本层只做字符串内嵌，不读路径/资源键。缺失或空白时抛
 /// [Video3dPlayerError]（`video3d_runtime_missing`），不静默降级。
 ///
+/// [threeSource] 是 three.js r160 渲染库的**原文**（可选）：非空时页面内联一段
+/// 模块脚本（`const THREE = {…}` 命名空间 + 同一份 scene 函数）+ **真 WebGL
+/// 渲染面**；空串时页面只有 Canvas2D 确定性路径（测试与无 WebGL 环境用）。
+/// 渲染库形状不对（无出口块）时抛 `video3d_three_module_invalid`，不产出半成品。
+///
 /// 失败前提：调用方必须先跑 `verifyVideo3d` 且 `verified == true`；模型齐全时
 /// 本层只可能因运行时缺失/模板损坏/时间表不可编译而抛错。
 String assembleVideo3dPreview(
   Video3dScene scene,
   Video3dScreenplay screenplay, {
   String? runtimeSource,
+  String threeSource = '',
 }) {
   if (runtimeSource == null || runtimeSource.trim().isEmpty) {
     throw const Video3dPlayerError(
@@ -124,8 +147,11 @@ String assembleVideo3dPreview(
 
   // 先替换固定槽位、最后才注入不可信运行时文本：runtime 里即使出现槽位字样
   // 也不会把其它注入点顶掉。
+  final String namespaceSource = _inlineThreeNamespace(threeSource);
   var page = _previewTemplate
       .replaceFirst(_cspSlot, video3dPreviewCsp)
+      .replaceFirst(_threeNamespaceSlot, namespaceSource)
+      .replaceFirst(_sceneModuleSlot, sceneJs)
       .replaceFirst(_sceneSlot, sceneJs)
       .replaceFirst(_timelineSlot, timelineJson)
       .replaceFirst(_renderSlot, renderJson)
@@ -149,6 +175,8 @@ String assembleVideo3dPreview(
 
 const String _cspSlot = '/*__PREVIEW_CSP__*/';
 const String _runtimeSlot = '/*__THREE_LIVE_SOURCE__*/';
+const String _threeNamespaceSlot = '/*__THREE_NAMESPACE__*/';
+const String _sceneModuleSlot = '/*__SCENE_MODULE_SOURCE__*/';
 const String _sceneSlot = '/*__SCENE_SOURCE__*/';
 const String _timelineSlot = '/*__TIMELINE_JSON__*/';
 const String _renderSlot = '/*__RENDER_JSON__*/';
@@ -156,6 +184,8 @@ const String _rendererSlot = '/*__RENDERER_NAME__*/';
 const List<String> _templateSlots = <String>[
   _cspSlot,
   _runtimeSlot,
+  _threeNamespaceSlot,
+  _sceneModuleSlot,
   _sceneSlot,
   _timelineSlot,
   _renderSlot,
@@ -197,6 +227,19 @@ String _inlineSceneJs(Video3dScene scene) {
     'function $video3dSceneBuildFunction(',
   );
   return callable;
+}
+
+/// three.js 原文 → 模块脚本里可直接使用的 `const THREE = {…}` 命名空间。
+///
+/// 空串表示「本页不内联渲染库」：页面自行降级到 Canvas2D 确定性路径。
+/// 形状不对时抛 `video3d_three_module_invalid`（不产出只有半块渲染面的页面）。
+String _inlineThreeNamespace(String source) {
+  if (source.trim().isEmpty) return '';
+  try {
+    return _inlineRuntime(threeModuleNamespaceSource(source));
+  } on ThreeModuleRewriteError catch (error) {
+    throw Video3dPlayerError(video3dThreeModuleInvalidCode, error.message);
+  }
 }
 
 /// 不可信文本内嵌到 `<script>` 前的转义：HTML 对脚本结束标签大小写不敏感，
@@ -318,11 +361,15 @@ const String _previewTemplate = r'''<!doctype html>
 
   * 内嵌 three-live 运行时文本（宿主注入；缺失时 Dart 侧显性失败，本页不会
     以「少一块运行时」的形态被产出来）；
-  * 内嵌 compileVideo3dScene 产出的确定性 scene JS：去掉模块导出前缀后由
-    页面内的最小 THREE 兼容层真正执行一次场景构建（v1 不做 WebGL 真渲染）；
+  * 内嵌 compileVideo3dScene 产出的确定性 scene JS（两处引用同一份文本）：
+    一处进模块脚本，由**真 three r160** 构建场景并用 WebGL 渲染；一处进经典
+    脚本，由最小 THREE 兼容层建出对象图，供 Canvas2D 降级面使用；
   * 内嵌 compileVideo3dTimeline 产出的整数帧表：帧号 = floor(秒 × fps)，
     画面只由「场景 + 镜头 + 帧号」决定，页面不调用随机数/墙钟接口；
-  * 出站桥 window.NONVIDEO3D 回传 ready / frame / ended / error；
+  * 渲染面如实两档：WebGL 成功 → ready.renderer = webgl_three_r160；
+    WebGL 不可用/建场景失败 → canvas2d_deterministic（不冒充、不白屏）；
+  * 出站桥 window.NONVIDEO3D 回传 ready / frame / ended / error / evidence；
+    evidence 只在宿主调 `capture(frame)` 时出现（帧证据 PNG 的 data URL）；
   * 零外链：不加载任何远端脚本/样式/图片/字体，不读本地文件，不发起网络请求。
 -->
 </head>
@@ -344,6 +391,82 @@ const String _previewTemplate = r'''<!doctype html>
 </main>
 <script id="video3d-runtime">
 /*__THREE_LIVE_SOURCE__*/
+</script>
+<!-- —— 真 three 渲染面（WebGL）：渲染库与场景函数在同一模块作用域内 ——
+     经典脚本等 DOMContentLoaded 才启动，模块脚本一定先跑完；WebGL 不可用时
+     模块只把 window.__video3d_gl 留空，由经典脚本如实降级到 Canvas2D。 -->
+<script type="module">
+/*__THREE_NAMESPACE__*/
+/*__SCENE_MODULE_SOURCE__*/
+(function () {
+'use strict';
+try {
+  if (typeof THREE === 'undefined') { window.__video3d_gl = null; return; }
+  var det = window.__video3d_det;
+  if (!det) { window.__video3d_gl = null; return; }
+  var width = Math.max(1, Math.floor(Number(det.WIDTH) || 720));
+  var height = Math.max(1, Math.floor(Number(det.HEIGHT) || 1280));
+  var renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: false,
+    preserveDrawingBuffer: true
+  });
+  renderer.setPixelRatio(1);
+  renderer.setSize(width, height, false);
+  if (THREE.SRGBColorSpace && renderer.outputColorSpace !== undefined) {
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+  }
+  var scene = new THREE.Scene();
+  try {
+    scene.background = new THREE.Color(String(det.BACKGROUND || '#0b0d12'));
+  } catch (err) {}
+  var camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 2000);
+  var built = build(THREE, scene, camera);
+  var metrics = (built && built.metrics) ? built.metrics : null;
+  var nodeCount = 0;
+  scene.traverse(function (object) {
+    if (object && object.isMesh) nodeCount += 1;
+  });
+
+  function applyCamera(frame) {
+    var view = det.cameraAt(frame);
+    camera.fov = isFinite(Number(view.fov)) ? Number(view.fov) : 45;
+    camera.aspect = width / height;
+    camera.position.set(
+      Number(view.position.x), Number(view.position.y), Number(view.position.z));
+    camera.lookAt(
+      Number(view.target.x), Number(view.target.y), Number(view.target.z));
+    camera.updateProjectionMatrix();
+  }
+
+  function renderFrame(frame) {
+    var target = det.clampFrame(frame);
+    applyCamera(target);
+    renderer.render(scene, camera);
+    return target;
+  }
+
+  // 先渲染一帧探路：能建上下文但首帧就抛（驱动/上下文问题）同样如实降级。
+  renderer.render(scene, camera);
+
+  var canvas = renderer.domElement;
+  try { canvas.id = 'video3d-gl-canvas'; } catch (err) {}
+
+  window.__video3d_gl = {
+    rendererId: 'webgl_three_r160',
+    renderFrame: renderFrame,
+    // 读回当前帧：preserveDrawingBuffer 下 render 之后 canvas 仍可导出。
+    capture: function () {
+      try { return canvas.toDataURL('image/png'); } catch (err) { return ''; }
+    },
+    canvas: canvas,
+    sceneNodes: nodeCount,
+    metrics: metrics
+  };
+} catch (err) {
+  window.__video3d_gl = null;
+}
+})();
 </script>
 <script>
 /*__SCENE_SOURCE__*/
@@ -374,6 +497,24 @@ var SHOT_CAMERAS = (RENDER.shot_cameras && RENDER.shot_cameras.length)
 var LIGHTS = (RENDER.lights && RENDER.lights.length) ? RENDER.lights : [];
 var RENDERER = /*__RENDERER_NAME__*/;
 var LIGHT_FACTOR = computeLightFactor();
+
+// 真渲染面（上面的模块脚本）需要的确定性输入：模块先于 DOMContentLoaded
+// 执行，此时本经典脚本已同步跑完；cameraAt / clampFrame 是函数声明（提升），
+// 这里只是把引用交出去。
+try {
+  window.__video3d_det = {
+    WIDTH: WIDTH,
+    HEIGHT: HEIGHT,
+    FPS: FPS,
+    TOTAL_FRAMES: TOTAL_FRAMES,
+    BACKGROUND: BACKGROUND,
+    cameraAt: cameraAt,
+    clampFrame: clampFrame
+  };
+} catch (err) {}
+
+// 模块脚本产出的真 three 渲染面；null = 没有 WebGL，走 Canvas2D。
+var GL = null;
 
 var canvas = null;
 var context = null;
@@ -806,6 +947,18 @@ function drawMesh(item) {
 
 function renderFrame(frame) {
   var target = clampFrame(frame);
+  if (GL && typeof GL.renderFrame === 'function') {
+    GL.renderFrame(target);
+    currentFrame = target;
+    updateReadout(target);
+    postMessage('frame', {
+      frame: target,
+      seconds: target / FPS,
+      total_frames: TOTAL_FRAMES,
+      renderer: RENDERER
+    });
+    return target;
+  }
   if (!context) return target;
   var camera = cameraAt(target);
   context.setTransform(1, 0, 0, 1, 0, 0);
@@ -930,6 +1083,42 @@ function seekFrame(frame) {
   var rendered = renderFrame(target);
   setStatus('就绪');
   return rendered;
+}
+
+// —— 帧证据：按帧渲染 → 当前画布导出 PNG → 桥回传（抓完恢复原播放状态） ——
+function captureFrame(frame) {
+  var target = clampFrame(frame);
+  var wasPlaying = playing;
+  if (wasPlaying) pause();
+  var dataUrl = '';
+  try {
+    if (GL && typeof GL.renderFrame === 'function') {
+      GL.renderFrame(target);
+      currentFrame = target;
+      updateReadout(target);
+      dataUrl = typeof GL.capture === 'function'
+        ? String(GL.capture() || '')
+        : '';
+    } else if (context && canvas) {
+      renderFrame(target);
+      dataUrl = String(canvas.toDataURL('image/png'));
+    }
+  } catch (err) {
+    postMessage('error', { message: 'evidence_failed: ' + String(err) });
+    return false;
+  }
+  if (dataUrl.indexOf('data:image/png') !== 0) {
+    // 不产出空白/坏 PNG：没有像素就如实报错，交给宿主显性处理。
+    postMessage('error', { message: 'evidence_empty' });
+    return false;
+  }
+  postMessage('evidence', {
+    frame: target,
+    renderer: RENDERER,
+    data_url: dataUrl
+  });
+  if (wasPlaying) play();
+  return true;
 }
 
 // —— 运输条 / 界面 ——
@@ -1078,8 +1267,39 @@ function applyStyles() {
   }
 }
 
+function resolveRenderer() {
+  try {
+    if (window.__video3d_gl) GL = window.__video3d_gl;
+  } catch (err) {}
+  if (GL && typeof GL.rendererId === 'string' && GL.rendererId) {
+    RENDERER = GL.rendererId;
+  }
+}
+
+// 真渲染面用渲染器自己的 canvas；隐藏 2D 画布，按同一尺寸语义挂上去。
+function attachGlCanvas() {
+  if (!GL || !GL.canvas) return;
+  try { canvas.style.display = 'none'; } catch (err) {}
+  var stage = document.getElementById('video3d-stage');
+  var head = document.getElementById('video3d-head');
+  if (stage) {
+    if (head && head.parentNode === stage) {
+      stage.insertBefore(GL.canvas, head.nextSibling);
+    } else {
+      stage.appendChild(GL.canvas);
+    }
+  }
+  styleById('video3d-gl-canvas', {
+    'max-width': '100%',
+    'max-height': 'calc(100vh - 150px)',
+    'border-radius': '12px',
+    display: 'block'
+  });
+}
+
 function boot() {
   try {
+    resolveRenderer();
     applyStyles();
     canvas = document.getElementById('video3d-canvas');
     if (!canvas) throw new Error('画布元素缺失');
@@ -1087,9 +1307,10 @@ function boot() {
     canvas.height = HEIGHT;
     context = canvas.getContext('2d');
     if (!context) throw new Error('画布上下文不可用');
+    attachGlCanvas();
     updateHeader();
     bindTransport();
-    meshes = buildSceneGraph();
+    meshes = GL ? [] : buildSceneGraph();
     if (TOTAL_FRAMES <= 0) {
       reportError('帧表为空：检查 screenplay3d.json 的镜头时长');
       return;
@@ -1101,8 +1322,8 @@ function boot() {
       width: WIDTH,
       height: HEIGHT,
       shots: SHOTS.length,
-      scene_nodes: meshes.length,
-      scene_metrics: sceneMetrics,
+      scene_nodes: GL ? Number(GL.sceneNodes) || 0 : meshes.length,
+      scene_metrics: GL ? GL.metrics : sceneMetrics,
       renderer: RENDERER,
       runtime: 'embedded'
     });
@@ -1133,7 +1354,9 @@ try {
     renderFrame: renderFrame,
     state: function () { return playing ? 'playing' : 'idle'; },
     frame: function () { return currentFrame; },
-    totalFrames: function () { return TOTAL_FRAMES; }
+    totalFrames: function () { return TOTAL_FRAMES; },
+    renderer: function () { return RENDERER; },
+    capture: captureFrame
   };
 } catch (err) {}
 })();

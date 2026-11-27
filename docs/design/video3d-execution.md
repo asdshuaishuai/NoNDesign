@@ -1,6 +1,9 @@
 # 3D 视频执行面设计（three-live）
 
-> 状态：**设计草案（D2）已落项目层/预览页编译器/工作台（2026-11-25，v1 为确定性 Canvas2D 预览，真 three 渲染与真机 smoke 待后续）**。目标是把 `scene3d.json` +
+> 状态：**已落地（D2 设计 + 2026-11-27 真 three 渲染与帧证据）**。项目层/预览页编译器/工作台
+> 于 2026-11-25 落地；2026-11-27 补上**真 three.js r160 WebGL 渲染面**（无 WebGL 时如实降级到
+> Canvas2D）与**帧证据**（`video3d_render_frames` → `artifacts/renders/`），并在 Linux WebKitGTK
+> 实跑（`renderer=webgl_three_r160`、抓帧 PNG 11,871 B）。目标是把 `scene3d.json` +
 > `screenplay3d.json` 确定性渲染成可审阅的 3D 短片，**不引入新引擎**。
 >
 > 关联：[video-tracks-adr.md](video-tracks-adr.md) · [video3d-contract.md](video3d-contract.md) ·
@@ -35,16 +38,23 @@ artifacts/renders/*.png（帧证据；contact sheet）+ artifacts/measurement.js
   position/target，也可以是按关键帧/参数曲线的简单路径（v1 只做固定+直线/缓动）。
 * 固定 30fps；`frameIndex = floor(t*30)`；`seek(t)` = 重置场景 + 按 1/30s 步进到目标帧；
   所有随机必须种子化，禁止 wall clock/Date.now。
-* 画面只由「场景 + 镜头 + 帧号」决定；同输入同帧是硬验收。
+* 画面只由「场景 + 镜头 + 帧号」决定。**确定性口径按渲染面分两档**（页面 `ready.renderer` 如实回传）：
+  * `canvas2d_deterministic`：几何 + 投影都在 Dart/JS 数值路径上，**逐字节确定**；
+  * `webgl_three_r160`：几何/相机/帧号确定，**同一设备同一输入同帧恒定**；像素受
+    GPU/驱动影响，跨设备**不承诺逐字节一致**——这是 WebGL 的物理事实，不能写成硬验收。
 * 词级时间/beat grid 作为可选的 cue 对齐语义，来自 raea/story-short 的契约参考，
   不引入其运行时。
 
 ## 4. 预览与取证
 
 * 预览 = 应用内 WebView（`webview_all`）；与 3D 建模共用 WebView 纪律，但控制器/页面独立。
-* 帧证据：通过现有截图桥在目标帧抓 PNG；帧数上限、单帧体积上限照 3D 证据纪律；
-  落 `artifacts/renders/`，失败显性（不静默给空白）。
-* contact sheet：Dart 侧拼帧（或按镜头序号命名），不引入 ffmpeg/Imagemagick。
+* 帧证据：页面暴露 `NONVIDEO3D_PLAYER.capture(frame)`：暂停 → 渲染目标帧 →
+  `canvas.toDataURL('image/png')` → 桥 `evidence` 回传 → Dart 解码校验（PNG 魔数、
+  单帧 ≤8 MiB、≤120 帧、总量 ≤64 MiB）→ `artifacts/renders/frame-NNNN.png` +
+  `artifacts/renders/renders.json`（确定性清单，无时间戳）。失败显性
+  （`video3d_capture_*` / `video3d_evidence_*`），**绝不写空白 PNG**。
+* 抓帧只产证据：两份事实源不动；预览没打开（没有活动运行器）时工具显性失败。
+* contact sheet：暂未做（按镜头序号命名已可核对）；不做 ffmpeg/Imagemagick。
 
 ## 5. 性能与平台
 

@@ -43,6 +43,7 @@ import 'music/music_project.dart';
 import 'nonapp_library.dart';
 import 'portfolio_entries.dart';
 import 'toast_service.dart';
+import 'video3d/video3d_evidence.dart';
 import 'video3d/video3d_project.dart';
 import 'video_project.dart';
 import 'workbench_pack.dart';
@@ -1265,6 +1266,37 @@ class AppStore extends ChangeNotifier {
     if (video3dProjectName == name) return;
     video3dProjectName = name;
     notifyListeners();
+  }
+
+  /// 3D 视频抓帧运行器：工作台在预览面就绪时注册、卸载/切项目时注销。
+  ///
+  /// 工具侧只能通过这里拿到「活着的预览」，所以没注册 = 预览没打开 =
+  /// 显性失败（`video3d_capture_unavailable`），绝不静默返回空证据。
+  Video3dCaptureRunner? _video3dCaptureRunner;
+
+  void registerVideo3dCaptureRunner(Video3dCaptureRunner runner) {
+    _video3dCaptureRunner = runner;
+  }
+
+  void unregisterVideo3dCaptureRunner(Video3dCaptureRunner runner) {
+    if (identical(_video3dCaptureRunner, runner)) {
+      _video3dCaptureRunner = null;
+    }
+  }
+
+  /// 抓帧入口（工具/工作台按钮共用）：没注册就显性失败。
+  Future<List<Video3dFrameEvidence>> captureVideo3dFrames(
+    String project,
+    List<int> frames,
+  ) {
+    final Video3dCaptureRunner? runner = _video3dCaptureRunner;
+    if (runner == null) {
+      throw const Video3dEvidenceError(
+        video3dCaptureUnavailableCode,
+        '抓帧需要先在工作台打开这个 3D 视频项目',
+      );
+    }
+    return runner(project, frames);
   }
 
   // ---------------------------------------------------------------------------
@@ -4610,6 +4642,7 @@ class AppStore extends ChangeNotifier {
                       flows: flows,
                     ),
                 threeWorkspaceEvent: applyThreeWorkspaceEvent,
+                video3dCaptureRunner: captureVideo3dFrames,
                 creativeJudgeRunner:
                     ({
                       required String brief,

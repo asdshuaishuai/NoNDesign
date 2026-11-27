@@ -326,6 +326,18 @@ class _FakeWorkspace implements AgentWorkspaceServices {
   String? lastVideo3dName;
   Map<String, dynamic>? lastVideo3dScene;
   Map<String, dynamic>? lastVideo3dScreenplay;
+  List<int>? lastVideo3dFrames;
+  Map<String, dynamic> video3dRenderFramesResult = <String, dynamic>{
+    'ok': true,
+    'project': 'stage',
+    'renderer': 'webgl_three_r160',
+    'count': 1,
+    'total_bytes': 69,
+    'manifest': 'artifacts/renders/renders.json',
+    'frames': <dynamic>[
+      <String, dynamic>{'frame': 0, 'file': 'frame-0000.png', 'bytes': 69},
+    ],
+  };
   Map<String, dynamic> video3dCreateResult = <String, dynamic>{
     'ok': true,
     'project': 'stage',
@@ -743,6 +755,17 @@ class _FakeWorkspace implements AgentWorkspaceServices {
     lastVideo3dScene = scene;
     lastVideo3dScreenplay = screenplay;
     return Map<String, dynamic>.from(video3dCreateResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> video3dRenderFrames({
+    required String name,
+    required List<int> frames,
+  }) async {
+    calls.add('video3d_render_frames:$name:${frames.join(',')}');
+    lastVideo3dName = name;
+    lastVideo3dFrames = List<int>.from(frames);
+    return Map<String, dynamic>.from(video3dRenderFramesResult);
   }
 
   @override
@@ -2236,6 +2259,7 @@ void main() {
           'video3d_list',
           'video3d_status',
           'video3d_create',
+          'video3d_render_frames',
         ]),
       );
       // `video3d_…` 不以 `video_` 开头：`video` 收窄不会误纳它，反过来
@@ -2565,6 +2589,44 @@ void main() {
       expect(workspace.lastVideo3dScreenplay, isNotNull);
       final end = events.firstWhere(
         (e) => e['type'] == 'tool_end' && e['tool'] == 'video3d_create',
+      );
+      expect(end['ok'], isTrue);
+    });
+
+    test('3D 视频工作台 run：video3d_render_frames 真执行（抓帧取证）', () async {
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      final model = ScriptedAgentModel(<List<Part>>[
+        <Part>[
+          scriptToolCall(
+            toolName: 'video3d_render_frames',
+            input: <String, dynamic>{
+              'name': 'stage',
+              'frames': <int>[0, 90],
+            },
+          ),
+        ],
+        <Part>[
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '完成'},
+          ),
+        ],
+      ]);
+      final result = await runDartAgent(
+        request: workspaceRequest('video3d'),
+        modelOverride: model.model,
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      expect(result.ok, isTrue);
+      expect(
+        workspace.calls,
+        contains('video3d_render_frames:stage:0,90'),
+      );
+      expect(workspace.lastVideo3dFrames, <int>[0, 90]);
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'video3d_render_frames',
       );
       expect(end['ok'], isTrue);
     });

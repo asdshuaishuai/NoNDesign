@@ -327,12 +327,21 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   详见 `docs/research/line-art-animation.md`、`docs/research/pixelfx.md`、
   `docs/research/awesome-opus5-5-videos.md`。
 - **3D 视频工具（2026-11-27 补齐）**：`video3d_list` / `video3d_status` /
-  `video3d_create` 已接线，事实源是 `scene3d.json` + `screenplay3d.json`；
-  **先校验后落盘**（未通过不碰磁盘、回问题清单），**同名拒绝覆盖**；
+  `video3d_create` / `video3d_render_frames` 已接线，事实源是 `scene3d.json` +
+  `screenplay3d.json`；**先校验后落盘**（未通过不碰磁盘、回问题清单），**同名拒绝覆盖**；
   `plugin:video3d` 经 `AppStore.workspaceHintForView` 收窄到 `video3d_*`
   （`video` 的 `video_` 前缀收窄不会误纳 `video3d_…`）；`video3d_create` 成功后走产物
-  认领把当前 3D 视频项目换成新项目。`video3d_render_frames`（帧证据）与真 three 渲染
-  仍待后续批次，不要把它们当作现状。
+  认领把当前 3D 视频项目换成新项目。
+  **抓帧**：`video3d_render_frames` 只对**工作台已打开**的项目可用（工作台把抓帧运行器
+  注册进 `AppStore`，卸载/切项目即注销；没注册 = 显性失败 `video3d_capture_unavailable`）。
+  页面 `capture(frame)` 渲染后 `toDataURL` 回桥，Dart 校验 PNG 魔数/单帧 8 MiB/≤120 帧/
+  64 MiB 后原子写 `artifacts/renders/frame-NNNN.png` + 确定性 `renders.json`；**只动
+  `artifacts/`，两份事实源逐字节不变，绝不写空白 PNG**。
+  **渲染面两档如实回传**：`ready.renderer` = `webgl_three_r160`（内联 r160 模块 +
+  `WebGLRenderer(preserveDrawingBuffer)`，真机 Linux WebKitGTK 实测命中）或
+  `canvas2d_deterministic`（无 WebGL 时的确定性降级面）。**像素确定性口径分档**：
+  Canvas2D 逐字节确定；WebGL 几何/相机/帧号确定、同设备同帧恒定、跨设备像素可能不同——
+  不要把它写成逐字节硬验收。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
   成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
 - **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，

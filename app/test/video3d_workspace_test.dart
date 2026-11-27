@@ -13,6 +13,7 @@
 // video3d_preview_surface_test.dart 覆盖）。
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,6 +27,7 @@ import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/core/toast_service.dart';
 import 'package:nondesign/core/video3d/video3d_compile.dart';
 import 'package:nondesign/core/video3d/video3d_contract.dart';
+import 'package:nondesign/core/video3d/video3d_evidence.dart';
 import 'package:nondesign/core/video3d/video3d_project.dart';
 import 'package:nondesign/core/workbench_layout.dart';
 import 'package:nondesign/plugins/registry.dart';
@@ -203,6 +205,22 @@ class _FakePreview extends Video3dPreviewController {
     seekFrameCalls.add(frame);
     _frame = frame;
     notifyListeners();
+  }
+
+  /// 抓帧：记录帧号并回一份假 PNG（测试不构造真 WebView）。
+  final List<int> captureFramesCalls = <int>[];
+
+  @override
+  Future<List<Video3dFrameEvidence>> captureFrames(List<int> frames) async {
+    captureFramesCalls.addAll(frames);
+    return <Video3dFrameEvidence>[
+      for (final int frame in frames)
+        Video3dFrameEvidence(
+          frame: frame,
+          bytes: Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 0x0D]),
+          renderer: 'webgl_three_r160',
+        ),
+    ];
   }
 
   @override
@@ -1157,6 +1175,66 @@ void main() {
       await tester.pumpWidget(_titleBarApp(store));
       expect(find.text('3D 视频工作台'), findsOneWidget);
       expect(find.byIcon(Icons.movie_creation_outlined), findsWidgets);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('抓帧运行器（存进 store，供智能体工具调用）', () {
+    testWidgets('打开项目后注册；只认当前项目；卸载后注销', (tester) async {
+      _viewport(tester);
+      await projectStore.save(
+        'stage',
+        scene: _validScene(),
+        screenplay: _validScreenplay(),
+      );
+      final _FakePreview fake = _FakePreview(fps: 30, totalFrames: 150);
+      final AppStore appStore = _store();
+      video3dLoadOnOpen = 'stage';
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppStore>.value(
+          value: appStore,
+          child: _app(
+            Video3dWorkspace(
+              projectStore: projectStore,
+              previewFactory: (_, _) => fake,
+            ),
+          ),
+        ),
+      );
+      await _settleIo(tester);
+      expect(fake.ready, isTrue);
+
+      final List<Video3dFrameEvidence> evidence = await appStore
+          .captureVideo3dFrames('stage', <int>[0]);
+      expect(evidence.single.frame, 0);
+      expect(fake.captureFramesCalls, <int>[0], reason: '抓帧落到当前预览面');
+
+      // 换成别的项目名：必须显性失败（不能拿当前项目冒充）。
+      await expectLater(
+        appStore.captureVideo3dFrames('other', <int>[0]),
+        throwsA(
+          isA<Video3dEvidenceError>().having(
+            (e) => e.code,
+            'code',
+            video3dCaptureUnavailableCode,
+          ),
+        ),
+      );
+
+      // 卸载工作台：运行器必须注销，工具侧立刻变成显性失败。
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(
+        () => appStore.captureVideo3dFrames('stage', <int>[0]),
+        throwsA(
+          isA<Video3dEvidenceError>().having(
+            (e) => e.code,
+            'code',
+            video3dCaptureUnavailableCode,
+          ),
+        ),
+        reason: '卸载后还挂着旧页 = 会抓错项目的假成功',
+      );
       expect(tester.takeException(), isNull);
     });
   });

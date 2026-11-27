@@ -134,6 +134,16 @@ void main() {
       expect(store.video3dProjectName, 'keep-me');
     });
 
+    test('video3d_render_frames 只是取证 → 不动当前项目、不认领', () async {
+      store.video3dProjectName = 'keep-me';
+      await start('video3d_render_frames', <String, dynamic>{
+        'name': 'other',
+        'frames': <int>[0, 1],
+      });
+      await end('video3d_render_frames');
+      expect(store.video3dProjectName, 'keep-me');
+    });
+
     test('无 name 参数的调用不认领（读类工具不抢当前项目）', () async {
       await start('three_list', <String, dynamic>{});
       await end('three_list');
