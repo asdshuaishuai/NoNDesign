@@ -163,6 +163,9 @@ flutter:
     - assets/three/vendor/
     # vendored ThreeUI Community 组件页面（画廊；catalog.json + LICENSE/NOTICE）。
     - assets/three/threeui/
+    # Babylon.js 降级渲染面（third_party/babylon_web 的 tree-shaken 产物 +
+    # build-manifest.json 锁 sha256/字节；3D 视频预览在 three 不可用时用它兜底）。
+    - assets/babylon/
     # A2UI 官方 Web 渲染器的自包含页面（release 依赖 asset 声明，debug 回退
     # 仓库路径只用于测试）。
     - assets/a2ui_web/

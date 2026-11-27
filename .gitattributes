@@ -15,3 +15,7 @@ app/assets/three/** -text
 
 # wasm 二进制同理（字节数与 manifest 对账）。
 app/assets/engine/*.wasm -text
+
+# Babylon 降级渲染面按字节锁定（build-manifest.json 的 sha256/字节是硬校验）：
+# 换行符漂移会让内联产物与清单对不上。
+app/assets/babylon/** -text

@@ -130,6 +130,7 @@ String _html({
   Map<String, Object?>? screenplayRaw,
   String? runtime = _runtimeStub,
   String three = '',
+  String babylon = '',
 }) {
   final models = _models(sceneRaw: sceneRaw, screenplayRaw: screenplayRaw);
   return assembleVideo3dPreview(
@@ -137,8 +138,14 @@ String _html({
     models.screenplay,
     runtimeSource: runtime,
     threeSource: three,
+    babylonSource: babylon,
   );
 }
+
+/// 极小 Babylon 兜底样本：经典脚本 + 全局 NAN_BABYLON + 唯一标记。
+const String _babylonStub =
+    'var __BABYLON_STUB_MARKER__ = true;\n'
+    'window.NAN_BABYLON = { createVideoRenderer: function () { return null; } };\n';
 
 /// 最小可改写的「渲染库」文本：形状与 r160 一致（末尾一条出口块）。
 const String _threeStub =
@@ -243,13 +250,13 @@ void main() {
       }
     });
 
-    test('页面自包含：四段内联脚本（运行时/模块渲染面/场景/页面），不读本地文件', () {
+    test('页面自包含：五段内联脚本（运行时/Babylon/模块渲染面/场景/页面），不读本地文件', () {
       final String html = _html();
       expect(html.startsWith('<!doctype html>'), isTrue);
       expect(html, contains('<meta charset="utf-8">'));
       // 运行时 / 模块渲染面（含渲染库+场景）/ 经典场景 / 页面主脚本。
-      expect('<script'.allMatches(html).length, 4);
-      expect('</script>'.allMatches(html).length, 4);
+      expect('<script'.allMatches(html).length, 5);
+      expect('</script>'.allMatches(html).length, 5);
       expect(html, isNot(contains('<base')));
       expect(html, isNot(contains('file://')));
       // 自包含页的主体必须真有渲染循环/投影代码，而不是只塞 JSON。
@@ -464,16 +471,15 @@ void main() {
       final String html = _html();
       expect(video3dPreviewRenderer, 'canvas2d_deterministic');
       expect(video3dWebglRenderer, 'webgl_three_r160');
+      expect(video3dBabylonRenderer, 'babylon_webgl_v9');
       // 无渲染库时 RENDERER 保持注入的降级标识；GL 变量存在但不会被赋值。
       expect(html, contains('var RENDERER = "canvas2d_deterministic";'));
       expect(html, contains('var GL = null;'));
       expect(html, contains('renderer: RENDERER'));
-      // ready 的节点数/度量按渲染面如实取（GL 优先，降级回落兼容层）。
-      expect(
-        html,
-        contains('scene_nodes: GL ? Number(GL.sceneNodes) || 0 : meshes.length'),
-      );
-      expect(html, contains('scene_metrics: GL ? GL.metrics : sceneMetrics'));
+      // ready 的节点数/度量按渲染面如实取（three → Babylon → 兼容层）。
+      expect(html, contains('scene_nodes: GL'));
+      expect(html, contains('Number(BABYLON_RENDERER.meshCount) || 0'));
+      expect(html, contains('scene_metrics: GL ? GL.metrics : null'));
       // 页面暴露 renderer 查询面，宿主/冒烟可以问「你到底用哪档」。
       expect(html, contains('renderer: function () { return RENDERER; }'));
     });
@@ -499,7 +505,7 @@ void main() {
       // 读回帧证据要靠它：渲染后 canvas 仍可 toDataURL。
       expect(html, contains('preserveDrawingBuffer: true'));
       // 场景函数同时进模块与经典脚本（两条执行面共用一份事实源）。
-      expect('<script'.allMatches(html).length, 4);
+      expect('<script'.allMatches(html).length, 5);
     });
 
     test('threeSource 形状不对（无出口块）→ 显性抛错，不产出半成品', () {
@@ -527,8 +533,8 @@ void main() {
           'export { A };\n';
       final String html = _html(three: hostileThree);
       expect(html, contains(r'<\/script>'));
-      expect('<script'.allMatches(html).length, 4);
-      expect('</script>'.allMatches(html).length, 4);
+      expect('<script'.allMatches(html).length, 5);
+      expect('</script>'.allMatches(html).length, 5);
     });
 
     test('抓帧命令：capture(frame) 渲染后回传 evidence（渲染器 + PNG data URL）', () {
@@ -542,6 +548,31 @@ void main() {
       // 没有像素时要如实报错，而不是回一个空白 PNG。
       expect(html, contains("postMessage('error', { message: 'evidence_empty' })"));
     });
+
+  group('Babylon 共同托底（第三档渲染面）', () {
+    test('babylonSource 为空：页面不内联 Babylon（只有 three/Canvas2D 两档）', () {
+      final String html = _html();
+      expect(html, isNot(contains('__BABYLON_STUB_MARKER__')));
+      // 页面仍然认识这个兜底入口（只是没有产物可装）。
+      expect(html, contains('typeof window.NAN_BABYLON.createVideoRenderer'));
+    });
+
+    test('babylonSource 非空：逐字内联 + 如实标识 + 选择顺序 three→Babylon→2D', () {
+      final String html = _html(babylon: _babylonStub);
+      expect(html, contains('__BABYLON_STUB_MARKER__'));
+      expect(html, contains(video3dBabylonRenderer));
+      // three 先、Babylon 次、Canvas2D 最后：同一 canvas 必须在取 2d 上下文前决定。
+      expect(html, contains('if (!activeRenderer()) tryCreateBabylon();'));
+      expect(html, contains('function activeRenderer()'));
+      expect(html, contains('var BABYLON_RENDERER = null;'));
+    });
+
+    test('含 babylonSource 时仍是字节确定（同输入两次组装相同）', () {
+      final String first = _html(babylon: _babylonStub);
+      final String second = _html(babylon: _babylonStub);
+      expect(first, second);
+    });
+  });
 
     test('含 threeSource 时仍是字节确定（同输入两次组装相同）', () {
       final String first = _html(three: _threeStub);
@@ -583,8 +614,8 @@ void main() {
       // 注入的结束标签被转义，页面不会多出/提前关闭脚本块。
       expect(hostileHtml, isNot(contains('</script><script>')));
       expect(hostileHtml, contains(r'<\/script>'));
-      expect('<script'.allMatches(hostileHtml).length, 4);
-      expect('</script>'.allMatches(hostileHtml).length, 4);
+      expect('<script'.allMatches(hostileHtml).length, 5);
+      expect('</script>'.allMatches(hostileHtml).length, 5);
     });
 
     test('镜头 id 里的 HTML 结束标签被 JSON 转义，不破坏内联脚本', () {
@@ -596,8 +627,8 @@ void main() {
       expect(raw, isNot(contains('</script>')));
       expect(raw, isNot(contains('<script')));
       expect(raw, contains(r'\u003c'));
-      expect('<script'.allMatches(html).length, 4);
-      expect('</script>'.allMatches(html).length, 4);
+      expect('<script'.allMatches(html).length, 5);
+      expect('</script>'.allMatches(html).length, 5);
       final decoded = jsonDecode(raw)! as Map<String, Object?>;
       final decodedShots = decoded['shots']! as List<Object?>;
       final decodedFirst = decodedShots.first! as Map<String, Object?>;

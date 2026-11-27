@@ -70,8 +70,15 @@ const String video3dPreviewController = 'NONVIDEO3D_PLAYER';
 const String video3dPreviewRenderer = 'canvas2d_deterministic';
 
 /// 真 three 渲染面的标识：WebGL 可用时覆盖 [video3dPreviewRenderer]，
-/// `ready` 里如实回传。两档并存（跨设备像素确定性口径见执行面文档 §3）。
+/// `ready` 里如实回传。三档按序选择（three → Babylon → Canvas2D；跨设备像素
+/// 确定性口径见执行面文档 §3）。
 const String video3dWebglRenderer = 'webgl_three_r160';
+
+/// Babylon.js 降级渲染面的标识（three 不可用时的**共同托底**，2026-11-28 裁决）。
+///
+/// 与 three 共用同一个 `cameraAt(frame)` 与同一份渲染模型；外观相近但**不承诺**
+/// 与 three 逐字节一致（材质/抗锯齿实现不同），`ready.renderer` 如实区分。
+const String video3dBabylonRenderer = 'babylon_webgl_v9';
 
 /// three.js 源码形状不符合 r160 约定（无出口块/出口块为空）时的稳定错误码。
 const String video3dThreeModuleInvalidCode = 'video3d_three_module_invalid';
@@ -110,6 +117,10 @@ final class Video3dPlayerError implements Exception {
 /// 渲染面**；空串时页面只有 Canvas2D 确定性路径（测试与无 WebGL 环境用）。
 /// 渲染库形状不对（无出口块）时抛 `video3d_three_module_invalid`，不产出半成品。
 ///
+/// [babylonSource] 是第三档渲染面（Babylon.js 最小子集）的**原文**（可选）：
+/// 非空时页面多一条 `babylon` 降级路径（three 不可用时接管），`ready.renderer`
+/// 如实回传 `babylon_webgl_v9`；空串表示不提供这一档兜底。
+///
 /// 失败前提：调用方必须先跑 `verifyVideo3d` 且 `verified == true`；模型齐全时
 /// 本层只可能因运行时缺失/模板损坏/时间表不可编译而抛错。
 String assembleVideo3dPreview(
@@ -117,6 +128,7 @@ String assembleVideo3dPreview(
   Video3dScreenplay screenplay, {
   String? runtimeSource,
   String threeSource = '',
+  String babylonSource = '',
 }) {
   if (runtimeSource == null || runtimeSource.trim().isEmpty) {
     throw const Video3dPlayerError(
@@ -148,10 +160,14 @@ String assembleVideo3dPreview(
   // 先替换固定槽位、最后才注入不可信运行时文本：runtime 里即使出现槽位字样
   // 也不会把其它注入点顶掉。
   final String namespaceSource = _inlineThreeNamespace(threeSource);
+  final String babylonBundle = babylonSource.trim().isEmpty
+      ? ''
+      : _inlineRuntime(babylonSource);
   var page = _previewTemplate
       .replaceFirst(_cspSlot, video3dPreviewCsp)
       .replaceFirst(_threeNamespaceSlot, namespaceSource)
       .replaceFirst(_sceneModuleSlot, sceneJs)
+      .replaceFirst(_babylonSlot, babylonBundle)
       .replaceFirst(_sceneSlot, sceneJs)
       .replaceFirst(_timelineSlot, timelineJson)
       .replaceFirst(_renderSlot, renderJson)
@@ -177,6 +193,7 @@ const String _cspSlot = '/*__PREVIEW_CSP__*/';
 const String _runtimeSlot = '/*__THREE_LIVE_SOURCE__*/';
 const String _threeNamespaceSlot = '/*__THREE_NAMESPACE__*/';
 const String _sceneModuleSlot = '/*__SCENE_MODULE_SOURCE__*/';
+const String _babylonSlot = '/*__BABYLON_SOURCE__*/';
 const String _sceneSlot = '/*__SCENE_SOURCE__*/';
 const String _timelineSlot = '/*__TIMELINE_JSON__*/';
 const String _renderSlot = '/*__RENDER_JSON__*/';
@@ -186,6 +203,7 @@ const List<String> _templateSlots = <String>[
   _runtimeSlot,
   _threeNamespaceSlot,
   _sceneModuleSlot,
+  _babylonSlot,
   _sceneSlot,
   _timelineSlot,
   _renderSlot,
@@ -392,6 +410,11 @@ const String _previewTemplate = r'''<!doctype html>
 <script id="video3d-runtime">
 /*__THREE_LIVE_SOURCE__*/
 </script>
+<!-- —— Babylon 降级渲染面（tree-shaken 最小子集，全局 NAN_BABYLON）——
+     只在 three 渲染面不可用时接管（共同托底）；同样零外链、只由帧号驱动。 -->
+<script>
+/*__BABYLON_SOURCE__*/
+</script>
 <!-- —— 真 three 渲染面（WebGL）：渲染库与场景函数在同一模块作用域内 ——
      经典脚本等 DOMContentLoaded 才启动，模块脚本一定先跑完；WebGL 不可用时
      模块只把 window.__video3d_gl 留空，由经典脚本如实降级到 Canvas2D。 -->
@@ -515,6 +538,8 @@ try {
 
 // 模块脚本产出的真 three 渲染面；null = 没有 WebGL，走 Canvas2D。
 var GL = null;
+// Babylon 降级渲染面（three 不可用时接管；null = 这一档也没装上）。
+var BABYLON_RENDERER = null;
 
 var canvas = null;
 var context = null;
@@ -945,10 +970,49 @@ function drawMesh(item) {
     item.x - radius, item.y - radius, radius * 2, radius * 2);
 }
 
+// —— 渲染面选择：three（真 three r160）→ Babylon（共同托底）→ Canvas2D ——
+function activeRenderer() {
+  if (GL && typeof GL.renderFrame === 'function') return GL;
+  if (BABYLON_RENDERER && typeof BABYLON_RENDERER.renderFrame === 'function') {
+    return BABYLON_RENDERER;
+  }
+  return null;
+}
+
+// Babylon 用**同一个 canvas**（不另建），所以必须在取 2d 上下文之前决定。
+function tryCreateBabylon() {
+  if (activeRenderer()) return;
+  if (!canvas) return;
+  if (!window.NAN_BABYLON ||
+      typeof window.NAN_BABYLON.createVideoRenderer !== 'function') {
+    return;
+  }
+  try {
+    var renderer = window.NAN_BABYLON.createVideoRenderer({
+      canvas: canvas,
+      width: WIDTH,
+      height: HEIGHT,
+      background: BACKGROUND,
+      nodes: (RENDER.nodes || []),
+      lights: (RENDER.lights || []),
+      cameras: (RENDER.cameras || []),
+      cameraAt: cameraAt,
+      clampFrame: clampFrame
+    });
+    if (!renderer || typeof renderer.renderFrame !== 'function') return;
+    BABYLON_RENDERER = renderer;
+    RENDERER = String(renderer.rendererId || 'babylon_webgl_v9');
+  } catch (err) {
+    // 兜底失败不假装：保持 null，由下一档（Canvas2D）接手。
+    BABYLON_RENDERER = null;
+  }
+}
+
 function renderFrame(frame) {
   var target = clampFrame(frame);
-  if (GL && typeof GL.renderFrame === 'function') {
-    GL.renderFrame(target);
+  var active = activeRenderer();
+  if (active) {
+    active.renderFrame(target);
     currentFrame = target;
     updateReadout(target);
     postMessage('frame', {
@@ -1092,12 +1156,13 @@ function captureFrame(frame) {
   if (wasPlaying) pause();
   var dataUrl = '';
   try {
-    if (GL && typeof GL.renderFrame === 'function') {
-      GL.renderFrame(target);
+    var active = activeRenderer();
+    if (active) {
+      active.renderFrame(target);
       currentFrame = target;
       updateReadout(target);
-      dataUrl = typeof GL.capture === 'function'
-        ? String(GL.capture() || '')
+      dataUrl = typeof active.capture === 'function'
+        ? String(active.capture() || '')
         : '';
     } else if (context && canvas) {
       renderFrame(target);
@@ -1305,12 +1370,16 @@ function boot() {
     if (!canvas) throw new Error('画布元素缺失');
     canvas.width = WIDTH;
     canvas.height = HEIGHT;
-    context = canvas.getContext('2d');
-    if (!context) throw new Error('画布上下文不可用');
+    // three 用自己的 canvas；Babylon 复用本 canvas → 必须在取 2d 上下文之前尝试。
+    if (!activeRenderer()) tryCreateBabylon();
+    if (!activeRenderer()) {
+      context = canvas.getContext('2d');
+      if (!context) throw new Error('画布上下文不可用');
+    }
     attachGlCanvas();
     updateHeader();
     bindTransport();
-    meshes = GL ? [] : buildSceneGraph();
+    meshes = activeRenderer() ? [] : buildSceneGraph();
     if (TOTAL_FRAMES <= 0) {
       reportError('帧表为空：检查 screenplay3d.json 的镜头时长');
       return;
@@ -1322,8 +1391,12 @@ function boot() {
       width: WIDTH,
       height: HEIGHT,
       shots: SHOTS.length,
-      scene_nodes: GL ? Number(GL.sceneNodes) || 0 : meshes.length,
-      scene_metrics: GL ? GL.metrics : sceneMetrics,
+      scene_nodes: GL
+        ? Number(GL.sceneNodes) || 0
+        : (BABYLON_RENDERER
+            ? Number(BABYLON_RENDERER.meshCount) || 0
+            : meshes.length),
+      scene_metrics: GL ? GL.metrics : null,
       renderer: RENDERER,
       runtime: 'embedded'
     });

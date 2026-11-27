@@ -341,6 +341,10 @@ const String _threeStub =
     'const Vector3 = class Vector3 {};\n'
     'export { Vector3 };\n';
 
+/// 极小 Babylon 兜底样本（形状与真实产物一致：经典脚本、全局 NAN_BABYLON）。
+const String _babylonStub =
+    'window.NAN_BABYLON = { createVideoRenderer: function () { return null; } };\n';
+
 /// 69 字节的合法 1×1 PNG（IHDR + IDAT + IEND），抓帧回执样本。
 const String _pngBase64 =
     'iVBORw0KGgpJSERSAAAADQAAAAEAAAABCAIAAACQd1PeSURBVAAAAAx4nGNgYGAAAAAEAAH2FzhV'
@@ -359,6 +363,7 @@ Video3dWebPreview _preview({
     host: host,
     runtimeLoader: () async => runtime,
     threeLoader: () async => _threeStub,
+    babylonLoader: () async => _babylonStub,
   );
 }
 
@@ -634,6 +639,7 @@ void main() {
         timeline: models.timeline,
         runtimeLoader: () async => runtime,
         threeLoader: () async => _threeStub,
+        babylonLoader: () async => _babylonStub,
       );
       await playback.start();
       expect(playback.ready, isTrue, reason: '真实运行时文本可以组装并载入');
@@ -647,8 +653,8 @@ void main() {
       expect(html, contains(inlined));
       expect(
         RegExp('</script', caseSensitive: false).allMatches(html).length,
-        4,
-        reason: '模板四个脚本块 + 运行时零个裸结束标签',
+        5,
+        reason: '模板五个脚本块（含 Babylon 兜底面）+ 运行时零个裸结束标签',
       );
       playback.dispose();
     });
@@ -706,6 +712,7 @@ void main() {
         timeline: models.timeline,
         runtimeLoader: () async => '/* rt */',
         threeLoader: () async => _threeStub,
+        babylonLoader: () async => _babylonStub,
         captureTimeout: const Duration(milliseconds: 120),
       );
       await playback.start();
@@ -747,24 +754,63 @@ void main() {
 
     test('渲染库读取失败 / 空文本：组装前显性降级（不悄悄退成 2D）', () async {
       await _installFakePlatform();
+      await _installFakePlatform();
       final models = _models();
       final List<Future<String> Function()> loaders = <Future<String> Function()>[
         () async => throw StateError('bundle missing'),
         () async => '   ',
       ];
       for (final Future<String> Function() loader in loaders) {
+        // 两档真渲染面都缺 → 显性失败（不许只剩 2D 还装作 3D 视频）。
         final Video3dWebPreview playback = Video3dWebPreview(
           scene: models.scene,
           screenplay: models.screenplay,
           timeline: models.timeline,
           runtimeLoader: () async => '/* rt */',
           threeLoader: loader,
+          babylonLoader: () async => throw StateError('babylon missing'),
         );
         await playback.start();
         expect(playback.ready, isFalse);
         expect(playback.loadError, contains('3D 渲染文件'));
+        expect(playback.html, isNull, reason: '失败时不产出半成品页面');
         playback.dispose();
       }
+    });
+
+    test('three 缺失但 Babylon 在场：降级到 Babylon 兜底，并记进技术详情', () async {
+      await _installFakePlatform();
+      final models = _models();
+      final Video3dWebPreview playback = Video3dWebPreview(
+        scene: models.scene,
+        screenplay: models.screenplay,
+        timeline: models.timeline,
+        runtimeLoader: () async => '/* rt */',
+        threeLoader: () async => throw StateError('three missing'),
+        babylonLoader: () async => _babylonStub,
+      );
+      await playback.start();
+      expect(playback.ready, isTrue, reason: 'Babylon 在场时 three 缺失不致命');
+      expect(playback.html, isNotNull);
+      // 样本独有文本（页面自身代码里不会出现这一整句）。
+      expect(
+        playback.html!,
+        contains('createVideoRenderer: function () { return null; }'),
+      );
+      // 降级事实进技术详情（折叠区），主文案不吓人。
+      final _FakeWebViewPlatform platform =
+          WebViewPlatform.instance! as _FakeWebViewPlatform;
+      platform.lastController!.fireBridge(
+        jsonEncode(<String, Object?>{
+          'kind': 'ready',
+          'fps': 30,
+          'total_frames': 150,
+          'renderer': video3dBabylonRenderer,
+        }),
+      );
+      expect(playback.renderer, video3dBabylonRenderer);
+      expect(playback.technicalDetail, contains('Babylon'));
+      playback.dispose();
     });
 
     test('WebView 不可用：显性降级，不假装可播', () async {

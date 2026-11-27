@@ -112,11 +112,13 @@ Python / Blender / CadQuery / URDF / moderngl 运行时**均未进入产品**（
 - 数据契约：`video3d_contract.dart`（scene3d.json / screenplay3d.json，30fps 整数帧，
   拒绝 NaN/∞）；
 - 编译：`video3d_compile.dart`（同一输入两次编译字节相同）；
-- 播放页：`video3d_player.dart`，**两档渲染面并存且如实回传**：
+- 播放页：`video3d_player.dart`，**三档渲染面按序选择且如实回传**：
   - `webgl_three_r160`：内联 r160 模块（`threeModuleNamespaceSource` 把出口块改写成
     `const THREE = {…}`）+ 真 `WebGLRenderer(preserveDrawingBuffer)`；
-  - `canvas2d_deterministic`：无 WebGL 时的确定性投影降级面；
-  - 两档都由「场景 + 镜头 + 帧号」决定；像素确定性口径按档位区分（见执行面文档 §3）。
+  - `babylon_webgl_v9`：Babylon.js 9.38.0 tree-shaken 子集（`third_party/babylon_web`
+    构建、`app/assets/babylon/` 入库、manifest 锁 sha256），three 不可用时**共同托底**；
+  - `canvas2d_deterministic`：两档真渲染面都不可用时的确定性投影降级面；
+  - 三档都由「场景 + 镜头 + 帧号」决定；像素确定性口径按档位区分（见执行面文档 §3）。
 - 帧证据：页面 `capture(frame)` → `toDataURL` → 桥 `evidence` → Dart 校验（PNG 魔数 /
   单帧 8 MiB / ≤120 帧 / 64 MiB）→ `artifacts/renders/frame-NNNN.png` + 确定性
   `renders.json`；工具 `video3d_render_frames` 只在预览面挂着时可用（没挂显性失败）。

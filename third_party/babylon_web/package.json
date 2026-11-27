@@ -1,0 +1,17 @@
+{
+  "name": "nondesign-babylon-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Build-time bundling of a minimal Babylon.js renderer (tree-shaken @babylonjs/core) into a self-contained offline bundle for the NoNDesign 3D-video fallback render face.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@babylonjs/core": "9.38.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

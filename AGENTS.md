@@ -67,9 +67,10 @@ plugins/             独立插件资产（视频制作说明）
 - **外部创作工具只参考、不引入（2026-11-21 用户裁决；下列「创作线引入例外」优先）**：OpenMotion、HyperFrames
   及同类第三方创作产品/运行时**不做依赖、不内置进程、不套壳、不设导出适配器**；
   只借鉴它们的规范、协议与交互（如 Motion.md、版本/导出/MCP 纪律）。我们是做
-  自己的产品，不是别人的工作台。**3D 栈（three.js / three-live）是明确例外**；
-  视频工作台此前已裁决的 Phaser 3 引擎选型不因这次调研改变（若用户进一步收紧，
-  再单独改方案）。**代码/技能包同理**：`JDhruv14/line-art-animation`（MIT）只作为
+  自己的产品，不是别人的工作台。**3D 栈是明确例外：three.js / three-live 之外，
+  2026-11-28 用户裁决新增 Babylon.js 作为「共同托底」**（three 不可用时接管 3D
+  视频预览，见下文「创作线引入例外」①b）。**Phaser 引擎选型按 2026-11-28 裁决升级为
+  4.x**（版本研究见 `docs/plan-creative-workbench.md` §5.0）。**代码/技能包同理**：`JDhruv14/line-art-animation`（MIT）只作为
   `ink_line` 墨线手绘风格的规则参考，不复制其代码、不依赖其 TypeScript/SVG 运行时；
   方案线的风格包渲染走自研 Canvas2D 矢量笔触（未施工，I0 spike 验证）。
   `mromidev/claude-animated-shorts`（MIT 代码/文档）同样只参考：只借 8 段脚本、
@@ -93,6 +94,18 @@ plugins/             独立插件资产（视频制作说明）
   工作区）。**不引 Python/Blender/CadQuery/URDF/moderngl 运行时**；检查器用 Dart/JS
   等价实现；3DCodeVerse-2M 数据集（CC-BY-NC-SA）不随产品分发。3D 项目双 authoring：
   `scene`（`scene.json` 事实源）/ `code`（`src/*.js` 事实源，3dcodeverse harness）。
+  ①b **3D 第二引擎 = Babylon.js（2026-11-28 用户裁决，共同托底）**：
+  `@babylonjs/core` **9.38.0** 的 tree-shaken 最小子集（Engine/Scene/FreeCamera/
+  MeshBuilder 四种几何/StandardMaterial/三种灯光），经 `third_party/babylon_web`
+  用 esbuild 打包成 `app/assets/babylon/babylon.min.js`（约 1.6 MB + `build-manifest.json`
+  锁 sha256/字节 + Apache-2.0 许可 + NOTICE）。
+  **页面渲染面选择顺序固定为 three → Babylon → Canvas2D**：three 可用时永远优先 three；
+  Babylon 只在 three 不可用（或真机 WebGL 异常）时接管，`ready.renderer` 如实回传
+  `webgl_three_r160` / `babylon_webgl_v9` / `canvas2d_deterministic`。
+  **两档真渲染面都缺 → 显性失败**，不许只剩 Canvas2D 还装作「3D 视频」。
+  Babylon 与 three **外观相近但不承诺逐字节一致**（材质/抗锯齿实现不同）。
+  **不引入完整 Babylon UMD（9.x 约 8.9 MB，会让预览页不可用）**，也不引入其物理/PBR/
+  后处理/GLTF 加载器。
   ② **视频 VFX 直接引入** `pixelfx` **特效子集**（MIT）：火焰/冰霜/风/爆炸/闪电等；
   **不引人物**——`actor.js`/`rig.js`/`poses.js`/`act.js`/`moves/` 与 `meta.actor`/
   `o.actor`/on-body 特效一律不引入，角色仍用我们自己的 rig。
@@ -315,7 +328,7 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   （`video_render` 只回 `video_export_disabled`，不落 mp4）。
   **方案线（未施工）**：视频新增第三种风格 `ink_line`（墨线手绘，2026-11-22 用户裁决）——
   只借 line-art-animation 的笔宽/开放双笔触/步态求解/昼夜/帧条验收规则，不引入其
-  TS/SVG 库；`silly_skit` / `line_toon` 与 Phaser 3 裁决不变。VFX 层直接引入
+  TS/SVG 库；`silly_skit` / `line_toon` 与 Phaser 4 裁决不变。VFX 层直接引入
   **pixelfx 特效子集**（只取火焰/冰霜/风/爆炸等，不取人物/stock actor/moves），
   以 `{f,type:"vfx",cue,...}` 事件接入 `screenplay.json`；cue 走 allowlist。
   统一创作流程见 `docs/skills/creative-workbench/SKILL.md`。
@@ -337,11 +350,13 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   页面 `capture(frame)` 渲染后 `toDataURL` 回桥，Dart 校验 PNG 魔数/单帧 8 MiB/≤120 帧/
   64 MiB 后原子写 `artifacts/renders/frame-NNNN.png` + 确定性 `renders.json`；**只动
   `artifacts/`，两份事实源逐字节不变，绝不写空白 PNG**。
-  **渲染面两档如实回传**：`ready.renderer` = `webgl_three_r160`（内联 r160 模块 +
-  `WebGLRenderer(preserveDrawingBuffer)`，真机 Linux WebKitGTK 实测命中）或
-  `canvas2d_deterministic`（无 WebGL 时的确定性降级面）。**像素确定性口径分档**：
-  Canvas2D 逐字节确定；WebGL 几何/相机/帧号确定、同设备同帧恒定、跨设备像素可能不同——
-  不要把它写成逐字节硬验收。
+  **三档渲染面如实回传**（选择顺序 three → Babylon → Canvas2D）：`ready.renderer` =
+  `webgl_three_r160`（内联 r160 模块 + `WebGLRenderer(preserveDrawingBuffer)`，
+  真机 Linux WebKitGTK 实测命中）→ `babylon_webgl_v9`（three 不可用时接管，真机实测
+  抓帧 11,859 B PNG）→ `canvas2d_deterministic`（两档真渲染面都不可用时的确定性降级）。
+  **像素确定性口径分档**：Canvas2D 逐字节确定；WebGL 各档几何/相机/帧号确定、
+  同设备同帧恒定、跨设备像素可能不同，three 与 Babylon **也互不逐字节一致**——
+  不要把它们写成逐字节硬验收。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
   成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
 - **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，

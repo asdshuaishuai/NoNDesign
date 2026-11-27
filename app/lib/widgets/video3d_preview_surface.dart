@@ -46,10 +46,17 @@ const String video3dPreviewBridgeChannel = video3dPreviewBridge;
 /// 页面宿主命令面（`video3d_player.dart` 页面侧的 `window.NONVIDEO3D_PLAYER`）。
 const String video3dPreviewHostObject = 'window.$video3dPreviewController';
 
-/// 预览页内嵌的运行时文本资源（与 `three_service.dart` 的
-/// `threeLiveAssetKey` 同一份资源；`.gitattributes` 对该目录做了 `-text`
-/// 字节锁定）。本文件不依赖 3D 场景服务，只读这一份文本。
+/// 预览页内嵌的运行时文本资源（与 `three_service.dart` 的 `threeLiveAssetKey`
+/// 同一份资源；`.gitattributes` 对该目录做了 `-text` 字节锁定）。本文件不依赖
+/// 3D 场景服务，只读这一份文本。
 const String video3dRuntimeAssetKey = 'assets/three/vendor/three-live.min.js';
+
+/// Babylon 降级渲染面资源键（`third_party/babylon_web` 的构建产物；同目录有
+/// `build-manifest.json` 锁 sha256/字节，`.gitattributes` 标 `-text`）。
+///
+/// 这是 three 不可用时的**共同托底**：缺失不致命（three 仍是主路径），但会记进
+/// 技术详情，不让「少一档兜底」悄悄发生。
+const String video3dBabylonAssetKey = 'assets/babylon/babylon.min.js';
 
 /// 预览页就绪等待上限：内联单文件页面很小（含运行时文本），3s 足够；超时按
 /// 「没启动」处理（显性降级，不假装成功）。
@@ -171,6 +178,7 @@ class Video3dWebPreview extends Video3dPreviewController {
     this.host,
     this.runtimeLoader,
     this.threeLoader,
+    this.babylonLoader,
     this.captureTimeout = video3dCaptureTimeout,
     this.readyTimeout = video3dPreviewReadyTimeout,
   });
@@ -192,6 +200,11 @@ class Video3dWebPreview extends Video3dPreviewController {
   /// [threeModuleAssetKeyPath]）。测试注入小样本可避免读 1.2MB 资产。
   final Future<String> Function()? threeLoader;
 
+  /// Babylon 兜底渲染面文本读取器；生产为 null（[rootBundle] 读
+  /// [video3dBabylonAssetKey]）。缺失**不致命**（three 仍是主路径），
+  /// 但会记进技术详情，不让「少一档兜底」悄悄发生。
+  final Future<String> Function()? babylonLoader;
+
   /// 单帧抓帧等待上限（测试可压短）。
   final Duration captureTimeout;
 
@@ -209,6 +222,9 @@ class Video3dWebPreview extends Video3dPreviewController {
   String _loadError = '';
   String _technicalDetail = '';
   String _renderer = '';
+
+  /// Babylon 兜底面缺失的原因（ready 时回填进技术详情，不让少一档兜底静默）。
+  String _babylonFallbackNote = '';
 
   /// 抓帧等待者：同一时刻只允许一帧在飞；超时/页面报错都会清空。
   Completer<Video3dFrameEvidence>? _captureWaiter;
@@ -292,23 +308,55 @@ class Video3dWebPreview extends Video3dPreviewController {
     }
     if (_disposed) return;
 
-    // 1b) 渲染库文本：同样随包发布，读不到就显性失败（不悄悄降级成 2D，
-    //     否则用户看到的是「3D 视频不 3D」而没有任何提示）。
-    String threeSource;
+    // 1b) 渲染库文本：three 是主路径。缺失时**先记住原因**，如果 Babylon 兜底
+    //     在场就降级到它（`ready.renderer` 会如实回传 babylon）；两档都缺才
+    //     显性失败——不许只剩 Canvas2D 还装作「3D 视频」。
+    String threeSource = '';
+    String threeNote = '';
     try {
       final Future<String> Function() load =
           threeLoader ??
           () => rootBundle.loadString(threeModuleAssetKeyPath, cache: false);
-      threeSource = await load();
+      final String loaded = await load();
+      if (loaded.trim().isEmpty) {
+        threeNote = 'three 渲染库是空文件';
+      } else {
+        threeSource = loaded;
+      }
     } catch (error) {
-      _fail('预览需要的 3D 渲染文件没有找到，请重新安装后再试', '$error');
-      return;
+      threeNote = 'three 渲染库没有读到：$error';
     }
     if (_disposed) return;
-    if (threeSource.trim().isEmpty) {
-      // 空文件同样是坏包：不许悄悄退成 2D（用户会看到「3D 视频不 3D」）。
-      _fail('预览需要的 3D 渲染文件不完整，请重新安装后再试', 'three module is blank');
+
+    // 1c) Babylon 兜底渲染面：可选。读不到不致命（three 仍是主路径），
+    //     但把原因记进技术详情——「少一档兜底」要能被看见，不是静默。
+    String babylonSource = '';
+    try {
+      final Future<String> Function() load =
+          babylonLoader ??
+          () => rootBundle.loadString(video3dBabylonAssetKey, cache: false);
+      final String loaded = await load();
+      if (loaded.trim().isNotEmpty) babylonSource = loaded;
+    } catch (error) {
+      _babylonFallbackNote = 'Babylon 兜底渲染面没有读到：$error';
+    }
+    if (_disposed) return;
+
+    // 1d) 至少一档**真渲染面**必须在场：three 或 Babylon。两档都缺 → 显性失败，
+    //     绝不悄悄做成 Canvas2D 预览（那等于把「3D」降成 2D 投影却不告诉用户）。
+    if (threeSource.isEmpty && babylonSource.isEmpty) {
+      _fail(
+        '预览需要的 3D 渲染文件没有找到，请重新安装后再试',
+        <String>[
+          if (threeNote.isNotEmpty) threeNote,
+          if (_babylonFallbackNote.isNotEmpty) _babylonFallbackNote,
+        ].join(' / '),
+      );
       return;
+    }
+    if (threeSource.isEmpty && _babylonFallbackNote.isEmpty) {
+      _babylonFallbackNote = 'three 渲染库缺失，已降级到 Babylon 兜底面'
+          '${threeNote.isEmpty ? '' : '（$threeNote）'}';
     }
 
     // 2) 组装页面：契约/模板/时间表问题都显性降级，不静默。
@@ -319,6 +367,7 @@ class Video3dWebPreview extends Video3dPreviewController {
         screenplay,
         runtimeSource: runtimeSource,
         threeSource: threeSource,
+        babylonSource: babylonSource,
       );
     } on Video3dPlayerError catch (error) {
       _fail(video3dPreviewFailureMessage(error), error.toString());
@@ -664,7 +713,8 @@ class Video3dWebPreview extends Video3dPreviewController {
         _playing = false;
         _ready = true;
         _loadError = '';
-        _technicalDetail = '';
+        // 兜底面缺失属于「技术详情」：主路径照常可用，但不能悄悄少一档。
+        _technicalDetail = _babylonFallbackNote;
         notifyListeners();
       case 'frame':
         final int? frame = _readInt(decoded['frame']);

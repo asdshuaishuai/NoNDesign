@@ -634,6 +634,90 @@ export default function build(THREE, scene, camera, controls, renderer) {
     expect(shot.bytes[0], 0x89, reason: '抓帧结果必须是 PNG（魔数）');
   });
 
+  testWidgets('Babylon 共同托底：three 缺失时真机用 babylon 渲染 + 可抓帧', (
+    tester,
+  ) async {
+    final Directory dir = await Directory.systemTemp.createTemp(
+      'nan-it-video3d-babylon',
+    );
+    addTearDown(() async {
+      if (dir.existsSync()) await dir.delete(recursive: true);
+    });
+    final Video3dProjectStore store = Video3dProjectStore(root: dir);
+    final Video3dVerification saved = await store.save(
+      'smoke',
+      scene: _sceneRaw(),
+      screenplay: _screenplayRaw(),
+    );
+    expect(saved.verified, isTrue, reason: '${saved.toJson()}');
+    final Video3dProjectSnapshot snapshot = await store.read('smoke');
+    final Video3dTimeline timeline = compileVideo3dTimeline(
+      snapshot.screenplay!,
+    );
+
+    // 人为让 three 缺失（模拟主渲染面不可用）；Babylon 走真实随包资产。
+    final Video3dPreviewController preview = Video3dWebPreview(
+      scene: snapshot.scene!,
+      screenplay: snapshot.screenplay!,
+      timeline: timeline,
+      threeLoader: () async => throw StateError('three unavailable (smoke)'),
+    );
+    addTearDown(preview.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: Video3dPreviewSurface(preview: preview)),
+      ),
+    );
+    await preview.start();
+
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
+    while (DateTime.now().isBefore(deadline) && !preview.ready) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await tester.pump();
+    }
+    expect(
+      preview.ready,
+      isTrue,
+      reason:
+          'Babylon 兜底面没就绪：${preview.loadError} / ${preview.technicalDetail}',
+    );
+
+    // ignore: avoid_print
+    print(
+      '[webview-video3d-babylon] ready=${preview.ready} '
+      'totalFrames=${preview.totalFrames} renderer=${preview.renderer} '
+      'detail=${preview.technicalDetail}',
+    );
+    expect(
+      preview.renderer,
+      video3dBabylonRenderer,
+      reason: 'three 缺失时应由 Babylon 接管，实得「${preview.renderer}」',
+    );
+
+    await preview.seekFrame(90);
+    final DateTime seekDeadline = DateTime.now().add(
+      const Duration(seconds: 10),
+    );
+    while (DateTime.now().isBefore(seekDeadline) && preview.frame != 90) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await tester.pump();
+    }
+    expect(preview.frame, 90, reason: 'Babylon 面 seekFrame 未同步');
+
+    final List<Video3dFrameEvidence> evidence = await preview.captureFrames(
+      <int>[90],
+    );
+    // ignore: avoid_print
+    print(
+      '[webview-video3d-babylon] evidence frame=${evidence.single.frame} '
+      'bytes=${evidence.single.byteLength} renderer=${evidence.single.renderer}',
+    );
+    expect(evidence.single.renderer, video3dBabylonRenderer);
+    expect(evidence.single.byteLength, greaterThan(0));
+    expect(evidence.single.bytes[0], 0x89, reason: 'Babylon 抓帧也必须是 PNG');
+  });
+
   testWidgets('浮层遮挡：Flutter 控件叠在真实 WebView 上仍可点击并驱动页面', (tester) async {
     final String template = await rootBundle.loadString(
       'assets/three/preview.html',

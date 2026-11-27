@@ -122,6 +122,60 @@ void main() {
     });
   });
 
+  group('Babylon 降级渲染面（共同托底）', () {
+    test('产物与构建清单逐文件对账（版本/字节/sha256）', () async {
+      final File manifestFile = _file('assets/babylon/build-manifest.json');
+      expect(manifestFile.existsSync(), isTrue);
+      final Map<String, dynamic> manifest =
+          jsonDecode(manifestFile.readAsStringSync()) as Map<String, dynamic>;
+      expect(manifest['schema'], 'nan.babylon_web/1');
+      final Map<String, dynamic> versions =
+          manifest['versions'] as Map<String, dynamic>;
+      expect(versions['@babylonjs/core'], '9.38.0');
+      expect(versions['esbuild'], '0.28.2');
+
+      // 每份产物：字节数 + sha256 必须与清单逐字一致（改产物不重建 = 红）。
+      final List<dynamic> files = manifest['files'] as List<dynamic>;
+      expect(files, isNotEmpty);
+      for (final dynamic raw in files) {
+        final Map<String, dynamic> entry = raw as Map<String, dynamic>;
+        final File file = _file('assets/babylon/${entry['file']}');
+        expect(file.existsSync(), isTrue, reason: '${entry['file']} 不在库');
+        expect(file.lengthSync(), entry['bytes'], reason: '${entry['file']} 字节数漂移');
+        final String digest = await _sha256Hex(file.readAsBytesSync());
+        expect(digest, entry['sha256'], reason: '${entry['file']} sha256 漂移');
+      }
+
+      // 构建入口也要对账：entry.js 改了不重建 = 红（避免“源码与产物脱节”）。
+      final Map<String, dynamic> entry =
+          manifest['entry'] as Map<String, dynamic>;
+      final File entryFile = _file('../third_party/babylon_web/entry.js');
+      expect(entryFile.existsSync(), isTrue);
+      final String entryDigest = await _sha256Hex(entryFile.readAsBytesSync());
+      expect(entryDigest, entry['sha256'], reason: '构建入口与清单不符');
+    });
+
+    test('产物可内联且暴露真实入口；许可在场', () {
+      final File bundle = _file('assets/babylon/babylon.min.js');
+      final String text = bundle.readAsStringSync();
+      // 会被内联进单文件页面的 <script>：出现结束标签序列就会切断页面。
+      expect(
+        RegExp('</script', caseSensitive: false).hasMatch(text),
+        isFalse,
+        reason: 'Babylon 产物含 </script 序列，不能内联',
+      );
+      expect(text, contains('NAN_BABYLON'));
+      expect(text, contains('createVideoRenderer'));
+      expect(_file('assets/babylon/LICENSE').existsSync(), isTrue);
+      expect(_file('assets/babylon/NOTICE.md').existsSync(), isTrue);
+      // Apache-2.0 许可原文必须在库（不能只写一行“见上游”）。
+      expect(
+        _file('assets/babylon/LICENSE').readAsStringSync(),
+        contains('Apache License'),
+      );
+    });
+  });
+
   group('ThreeUI 目录一致性', () {
     test('组件数在硬边界内，且每个 catalog 条目都有页面文件', () {
       final Map<String, dynamic> catalog =

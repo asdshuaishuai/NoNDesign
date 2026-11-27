@@ -1,7 +1,7 @@
 # 视频模块契约（screenplay.json 唯一事实源 · 引擎短片 + 三风格 + VFX + TTS）
 
 > 状态：**草案（R0 契约冻结，2026-11-23）· 未施工**。本文只写视频模块的契约增量：
-> 事实源、时间模型、TimingCompiler、rig/clip、Phaser 锁版本、pixelfx 子集、TTS、桥 v2、导出与 v1 兼容。
+> 事实源、时间模型、TimingCompiler、rig/clip、Phaser 4.x 锁版本、pixelfx 子集、TTS、桥 v2、导出与 v1 兼容。
 >
 > 相关：[plan-creative-workbench.md](plan-creative-workbench.md) §5（方案事实源）·
 > [video-clip-contract.md](video-clip-contract.md)（**v1 契约为现状，保留**）·
@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | 矢量算式动画 | `VideoDocument.frameSvg(t)` 纯 Dart | **现状**，不动 |
 | DOM 动效合成（v1 短片） | `app/assets/video/clip/engine.js` + `ND.scene({duration, render})` | **v1 契约保留**（[video-clip-contract.md](video-clip-contract.md) 全部规则继续生效） |
-| 引擎短片（新） | `screenplay.json` 编译成 Phaser 播放页 | **规划**，本文契约 |
+| 引擎短片（新） | `screenplay.json` 编译成 Phaser 4.x 播放页 | **规划**，本文契约 |
 
 v1 两种渲染面现状保留；引擎短片按本契约规划，最终三种渲染面**并存**；新事实源是 `screenplay.json`，但 v1 短片（`clips.json` + `<id>.html` + 桥 v1）**不被取代、不迁移**，`?t=` 逐帧审查与质量线照旧。桥 v1（`ready`/`state` + `window.__ndClip` 命令面）在引擎短片里原样保留，新消息只在 v2 扩展（§8）。plan §5.0 提到的 `docs/video-engine-contract.md` 是否另立待 5a 冻结（decisions §3）。
 
@@ -69,7 +69,7 @@ video/<project>/
 * 规模：`silly_skit` 8–12 部件，`line_toon` 15–25 部件；表情 = 眼×眉×嘴贴片组合，厚描边**预烘焙进图集**（不做运行时描边、不用每部件 filter/mask）。
 * **不把 Spine / DragonBones / Live2D / Rive 当事实源或 v1 主方案**；不做完整骨骼/IK/mesh 编辑器；父级非均匀缩放 + 子级旋转的 shear 用 Phaser 表达不了，squash 只作用单部件。完整字段见 [research/video-animation-howto.md](research/video-animation-howto.md) §2.2/§2.3。
 
-## 6. 引擎短片：Phaser 锁版本 + vendored manifest
+## 6. 引擎短片：Phaser 4.x 锁版本 + vendored manifest
 
 * 版本：**锁定单一版本，不浮动升级**；R0 建议 **4.2.1**、**3.90** 回退，最终由 5a spike 定（decisions §1）。角色/关键帧/引擎边界见 research §4.3。
 * vendoring：`app/assets/video/engine/phaser.min.js` + `manifest.json`（版本 + SHA256 + 字节数 + 来源）；按仓库字节锁定纪律加 `.gitattributes`，不手改哈希产物。
@@ -123,7 +123,7 @@ video/<project>/
 | 时间确定性 | `video_determinism_test.dart` | 同帧同像素/姿态；`seek = reset+replay`；无 Math.random |
 | TimingCompiler | `timing_compiler_test.dart` | 句级真实时长→帧、gap、幂等 |
 | 桥 v2 | `video_bridge_v2_test.dart` | v1 消息兼容 + shot/markers/audio；命令面不变 |
-| Phaser 锁版本 | `phaser_manifest_test.dart` | manifest 版本/SHA256/字节数与文件一致，不浮动 |
+| Phaser 4.x 锁版本 | `phaser_manifest_test.dart` | manifest 版本/SHA256/字节数与文件一致，不浮动 |
 | VFX 子集 | `pixelfx_allowlist_test.dart` | allowlist 命中/拒绝、无人形依赖、种子确定性 |
 | 自检页 | `video_verify_page_test.dart` | `?verify=1` markers 回传、时长和 |
 | 项目兼容 | `video_project_migration_test.dart` | 旧 timeline/spec/video.json 可读；clip v1 不受影响 |

@@ -1,9 +1,11 @@
 # 3D 视频执行面设计（three-live）
 
-> 状态：**已落地（D2 设计 + 2026-11-27 真 three 渲染与帧证据）**。项目层/预览页编译器/工作台
+> 状态：**已落地（D2 设计 + 2026-11-27 真 three 渲染与帧证据 + 2026-11-28 Babylon 共同托底）**。项目层/预览页编译器/工作台
 > 于 2026-11-25 落地；2026-11-27 补上**真 three.js r160 WebGL 渲染面**（无 WebGL 时如实降级到
 > Canvas2D）与**帧证据**（`video3d_render_frames` → `artifacts/renders/`），并在 Linux WebKitGTK
-> 实跑（`renderer=webgl_three_r160`、抓帧 PNG 11,871 B）。目标是把 `scene3d.json` +
+> 实跑（`renderer=webgl_three_r160`、抓帧 PNG 11,871 B）；2026-11-28 按用户裁决引入
+> Babylon.js 9.38.0 作**共同托底**，真机（three 人为缺失）实测 `renderer=babylon_webgl_v9`、
+> 抓帧 PNG 11,859 B。目标是把 `scene3d.json` +
 > `screenplay3d.json` 确定性渲染成可审阅的 3D 短片，**不引入新引擎**。
 >
 > 关联：[video-tracks-adr.md](video-tracks-adr.md) · [video3d-contract.md](video3d-contract.md) ·
@@ -38,10 +40,17 @@ artifacts/renders/*.png（帧证据；contact sheet）+ artifacts/measurement.js
   position/target，也可以是按关键帧/参数曲线的简单路径（v1 只做固定+直线/缓动）。
 * 固定 30fps；`frameIndex = floor(t*30)`；`seek(t)` = 重置场景 + 按 1/30s 步进到目标帧；
   所有随机必须种子化，禁止 wall clock/Date.now。
-* 画面只由「场景 + 镜头 + 帧号」决定。**确定性口径按渲染面分两档**（页面 `ready.renderer` 如实回传）：
-  * `canvas2d_deterministic`：几何 + 投影都在 Dart/JS 数值路径上，**逐字节确定**；
-  * `webgl_three_r160`：几何/相机/帧号确定，**同一设备同一输入同帧恒定**；像素受
-    GPU/驱动影响，跨设备**不承诺逐字节一致**——这是 WebGL 的物理事实，不能写成硬验收。
+* 画面只由「场景 + 镜头 + 帧号」决定。**渲染面选择顺序固定 three → Babylon → Canvas2D**，
+  `ready.renderer` 如实回传实际命中的那一档（不许冒充）：
+  * `webgl_three_r160`：内联 three r160 模块 + `WebGLRenderer(preserveDrawingBuffer)`，
+    **主路径**（three 可用时永远优先）；
+  * `babylon_webgl_v9`：Babylon.js 9.38.0 的 tree-shaken 最小子集（`third_party/babylon_web`
+    构建、约 1.6 MB），three 不可用时**共同托底**；与 three 用同一个 `cameraAt(frame)`，
+    外观相近但**不承诺逐字节一致**（材质/抗锯齿实现不同）；
+  * `canvas2d_deterministic`：两档真渲染面都不可用时的确定性投影降级面。
+  **两档真渲染面都缺 → 显性失败**（不许只剩 Canvas2D 还装作「3D 视频」）。
+  确定性口径：Canvas2D **逐字节确定**；WebGL 各档几何/相机/帧号确定、**同一设备同一输入
+  同帧恒定**，跨设备像素可能不同——这是 WebGL 的物理事实，不能写成逐字节硬验收。
 * 词级时间/beat grid 作为可选的 cue 对齐语义，来自 raea/story-short 的契约参考，
   不引入其运行时。
 

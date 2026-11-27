@@ -21,7 +21,7 @@
 | 4 | 视频 = 用代码创造视频与动漫；新增两种场景风格（**沙雕短剧** / **美式线条漫画**）；引入**导演台**、**剧本标准**、**TTS**；**联动音乐工作台制作配乐**（继「设计→热应用」之后的第二个跨模块联动，显式裁决）；2026-11-22 增补第三种风格，见 #8 |
 | 5 | 音乐 = 编曲工作台（详见 plan-music-module.md），承担视频配乐联动 |
 | 6 | **所有工作台必须强绑定且强规范**（结构性纪律，见 §1） |
-| 7 | 视频渲染**引入游戏引擎**（2026-11-20 补充裁决）：选定 **Phaser 3**（vendored 运行时），`screenplay.json` 编译为引擎短片（见 §5.0） |
+| 7 | 视频渲染**引入游戏引擎**（2026-11-20 补充裁决）：选定 **Phaser 4.x**（vendored 运行时，2026-11-28 升级），`screenplay.json` 编译为引擎短片（见 §5.0） |
 | 8 | 视频新增**第三种风格 `ink_line`（墨线手绘）**（2026-11-22 用户裁决）：参考 `JDhruv14/line-art-animation` 的线稿/步态/昼夜规则，**不引入其 TypeScript/SVG 运行时**；`silly_skit` / `line_toon` 保留 |
 | 9 | 3D **直接引入 threejs-live + 3dcodeverse**（2026-11-22 用户裁决）：采用 3dcodeverse 的 skill/harness 契约（Apache-2.0）与 three-live 执行面；Python/Blender/CadQuery/URDF 运行时不进入产品进程，检查器按 Dart/JS 等价实现（见 §4） |
 | 10 | 视频 **直接引入 pixelfx 特效子集**（2026-11-22 用户裁决）：只取火焰/冰霜/风/爆炸/闪电等**特效**，**不含人物/角色**；`actor`/`rig`/`poses`/`act`/`moves` 与 on-body 特效一律不引入（见 §5.3、§5.6） |
@@ -207,16 +207,16 @@ pixelfx 子集；Python/Blender/headless Chrome 只在开发期参考。
 > 属于常规视频方案线，不自动套到 3D 视频轨；排期与设计门见
 > [plan-next-iterations.md](plan-next-iterations.md)。
 
-### 5.0 引擎选型：Phaser 3（2026-11-20 裁决「引入游戏引擎」）
+### 5.0 引擎选型：Phaser 4.x（2026-11-20 裁决「引入游戏引擎」，2026-11-28 版本升级为 4.x）
 
-**结论**：引入 **Phaser 3.x**（MIT，单文件可 vendored，WebGL/Canvas 双渲染面）作为「引擎短片」的
+**结论**：引入 **Phaser 4.x**（MIT，单文件可 vendored，WebGL/Canvas 双渲染面；2026-11-28 用户裁决把版本从 3.x 升级到 4.x）作为「引擎短片」的
 2D 游戏引擎运行时；沿用现有沙箱——自包含 HTML + `file://` WebView + `VideoClipBridge` 桥，零外联。
 
 **候选对比（为什么不选别的）**：
 
 | 候选 | 结论 | 理由 |
 | --- | --- | --- |
-| Phaser 3 | ✅ 采用 | 完整 2D 引擎：Scene / Tween / Timeline / Arcade+Matter 物理 / 粒子 / 相机（闪白、震屏、变焦）/ 遮罩 / 滤镜 / 声音；单文件约 1.2MB 可 vendored；有 HEADLESS 模式可做确定性自检；与 `assets/video/clip/` 沙箱同构 |
+| Phaser 4 | ✅ 采用 | 完整 2D 引擎：Scene / Tween / Timeline / Arcade+Matter 物理 / 粒子 / 相机（闪白、震屏、变焦）/ 遮罩 / 滤镜 / 声音；单文件约 1.2MB 可 vendored；有 HEADLESS 模式可做确定性自检；与 `assets/video/clip/` 沙箱同构 |
 | PixiJS 8 | ❌ | 只是渲染器：tween / 物理 / 场景 / 时间线全部要自建，等于自造半个引擎 |
 | Godot 4 web export | ❌ | 单项目 wasm+pck ≥ 20–40MB；`file://` 下 fetch/wasm MIME 与 COOP/COEP 线程限制，需要本地 HTTP 服务（违背零端口纪律）；构建 pck 需要 Godot 工具链（违背零外部工具链纪律） |
 | Unity WebGL | ❌ | 许可、体积、加载器三面全不可行 |
@@ -255,7 +255,7 @@ pixelfx 子集；Python/Blender/headless Chrome 只在开发期参考。
 > **OpenMotion / HyperFrames 对照调研（2026-11-21，用户裁决）**：两者都是
 > Apache-2.0 的“HTML-as-video”工具，但**只参考、不引入**——不做依赖、不内置
 > 进程、不套壳、不设导出适配器；只借 Motion.md/版本/导出纪律。3D 栈
-> （three.js / three-live）是明确例外；本方案 **Phaser 3 裁决不变**。
+> （three.js / three-live / Babylon.js）是明确例外；本方案 **Phaser 4 裁决**（2026-11-28 版本升级）。
 > 完整结论见 [research/openmotion-hyperframes.md](research/openmotion-hyperframes.md)。
 >
 > **`ink_line` 的渲染分支（2026-11-22）**：墨线手绘是第三种风格包，不走 Phaser

@@ -1,0 +1,20 @@
+{
+  "schema": "nan.babylon_web/1",
+  "source": "npm:@babylonjs/core (tree-shaken minimal renderer)",
+  "versions": {
+    "@babylonjs/core": "9.38.0",
+    "esbuild": "0.28.2",
+    "babylonReported": "9.38.0"
+  },
+  "entry": {
+    "file": "third_party/babylon_web/entry.js",
+    "sha256": "ddbf09f7cf14ecead2565fa305e7036f6962003f7330556c6dae11b67820c9c7"
+  },
+  "files": [
+    {
+      "file": "babylon.min.js",
+      "bytes": 1648767,
+      "sha256": "7042eaf6296fcc5546a784cfe86f972c06dfca2db71eb1c85696e0c1abbc12db"
+    }
+  ]
+}
