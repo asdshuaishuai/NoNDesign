@@ -387,8 +387,15 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   `textures.addCanvas` 上屏；`ready.vfx` 如实回传 `pixelfx_pixels` 或
   `placeholder_markers`（没有该包时诚实降级）。真机实测：frame14 与 frame20 像素哈希不同
   （特效真的画出来）、同帧重放哈希完全一致（确定性）。
-  **仍未施工**：`screenplay.json` 项目存储与 `video_*` 工具、风格包
-  （palette/type/motion）、TTS、导出。
+  **项目库 + 工具已落地（2026-11-28）**：`app/lib/core/video/video_short_project.dart`
+  是 `<项目根>/portfolio/video_short/<name>/screenplay.json` 的**单一事实源存储**——
+  先 `verifyVideoScreenplay` 再原子落盘（未通过不落盘）、默认**拒绝同名覆盖**、
+  坏项目在列表里标 `corrupt` 不拖垮整表、项目名白名单 + 符号链接拒绝；
+  工具 `video_short_list` / `video_short_status` / `video_short_create` 已接线
+  （`video_` 前缀，属视频工作区收窄面），失败码 `video_short_*` 全部有
+  `toolFailureMessage` 分支，**不进产物认领**（不冒充 v1 视频项目）。
+  **仍未施工**：引擎短片的工作台预览面（播放页已有组装器，但还没有 UI 宿主与
+  `render_frames` 抓帧工具）、风格包（palette/type/motion）、TTS、导出。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
   成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
 - **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，

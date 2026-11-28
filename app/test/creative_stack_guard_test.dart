@@ -530,10 +530,31 @@ void main() {
         'video3d_status',
         'video3d_create',
         'video3d_render_frames',
+        'video_short_list',
+        'video_short_status',
+        'video_short_create',
         'creative_judge',
       ];
       for (final String name in tools) {
         expect(agentSource, contains("'$name'"), reason: '工具 $name 没注册');
+      }
+    });
+
+    test('每条 video_short 失败码都有 toolFailureMessage 分支', () {
+      for (final String code in <String>[
+        'video_short_invalid_name',
+        'video_short_path_escape',
+        'video_short_no_project',
+        'video_short_corrupt',
+        'video_short_exists',
+        'video_short_unverified',
+        'video_short_io_error',
+      ]) {
+        expect(
+          agentSource,
+          contains("case '$code':"),
+          reason: '失败码 $code 没有 toolFailureMessage 分支',
+        );
       }
     });
 

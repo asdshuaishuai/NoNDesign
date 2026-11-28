@@ -75,6 +75,8 @@ import 'three_service.dart';
 import 'video_project.dart';
 import 'video_samples.dart';
 import 'video_service.dart';
+import 'video/video_short_project.dart';
+import 'video/video_screenplay.dart';
 import 'video3d/video3d_compile.dart';
 import 'video3d/video3d_evidence.dart';
 import 'video3d/video3d_project.dart';
@@ -511,6 +513,12 @@ String toolLabel(String tool) {
       return '3D 视频 · 新建';
     case 'video3d_render_frames':
       return '3D 视频 · 抓帧';
+    case 'video_short_list':
+      return '视频 · 引擎短片列表';
+    case 'video_short_status':
+      return '视频 · 引擎短片查看';
+    case 'video_short_create':
+      return '视频 · 引擎短片新建';
     case 'nonapp_list':
       return '应用包';
     case 'nonapp_inspect':
@@ -725,6 +733,22 @@ String toolFailureMessage(String? rawError) {
       return '一次抓帧的数量或总量超过上限，分几批再抓';
     case 'video3d_evidence_format':
       return '帧证据数据不完整，请重试';
+
+    // 常规视频「引擎短片」项目库的稳定失败码。
+    case 'video_short_invalid_name':
+      return '项目名不可用：只能小写字母、数字、短横线或下划线';
+    case 'video_short_path_escape':
+      return '这个项目名指向了项目库之外，已拒绝';
+    case 'video_short_no_project':
+      return '找不到这个引擎短片项目，请先创建或换一个项目名';
+    case 'video_short_corrupt':
+      return '这个引擎短片项目的剧本文件损坏了，需要修复或删除';
+    case 'video_short_exists':
+      return '同名引擎短片项目已存在，请换一个名字';
+    case 'video_short_unverified':
+      return '剧本没有通过校验，按问题清单改好再保存';
+    case 'video_short_io_error':
+      return '引擎短片项目没有保存成功，请检查磁盘空间后重试';
     case 'nonapp_unavailable':
       return '应用包暂时不可用';
     case 'figma_unavailable':
@@ -938,6 +962,18 @@ abstract class AgentWorkspaceServices {
     required List<int> frames,
   });
 
+  /// 引擎短片：列出 `screenplay.json` 项目（元数据 + 校验状态）。
+  Future<Map<String, dynamic>> videoShortList();
+
+  /// 引擎短片：读一个项目（原始剧本 + 校验 + 整数帧/事件摘要）。
+  Future<Map<String, dynamic>> videoShortStatus(String name);
+
+  /// 引擎短片：**先校验后落盘**创建项目；同名已存在则拒绝（不静默覆盖）。
+  Future<Map<String, dynamic>> videoShortCreate({
+    required String name,
+    required Map<String, dynamic> screenplay,
+  });
+
   // -- 音乐编曲（score.json 是唯一事实源；契约见 docs/music-contract.md §7）--
   /// 列本机音乐项目（名称/标题/轨道数/小节数/校验状态）。
   Future<Map<String, dynamic>> musicList();
@@ -994,6 +1030,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
     VideoService? video,
     VideoProjectStore? videoProjects,
     Video3dProjectStore? video3dProjects,
+    VideoShortProjectStore? videoShortProjects,
     this.video3dCaptureRunner,
     MusicProjectStore? musicProjects,
     FigmaExporter? figma,
@@ -1006,6 +1043,8 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
        _video = video ?? VideoService.instance,
        _videoProjects = videoProjects ?? VideoProjectStore.instance,
        _video3dProjects = video3dProjects ?? Video3dProjectStore.instance,
+      _videoShortProjects =
+          videoShortProjects ?? VideoShortProjectStore.instance,
        _musicProjects = musicProjects ?? MusicProjectStore.instance,
        _figma = figma ?? FigmaExporter();
 
@@ -1030,6 +1069,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
 
   /// 3D 视频项目库（scene3d.json + screenplay3d.json；测试注入临时根）。
   final Video3dProjectStore _video3dProjects;
+  final VideoShortProjectStore _videoShortProjects;
 
   /// 音乐项目的本地库（默认生产 instance；测试注入 `MusicProjectStore(root:)`
   /// 临时目录，绝不落用户文档目录）。
@@ -1719,6 +1759,116 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
         '$error',
       );
     }
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoShortList() async {
+    try {
+      final List<VideoShortProjectEntry> entries =
+          await _videoShortProjects.list();
+      return <String, dynamic>{
+        'ok': true,
+        'projects': <dynamic>[
+          for (final VideoShortProjectEntry entry in entries) entry.toJson(),
+        ],
+        'count': entries.length,
+      };
+    } on VideoShortProjectFailure catch (error) {
+      final String code = 'video_short_${error.code}';
+      return _failure(code, toolFailureMessage(code), error.detail);
+    } catch (error) {
+      return _failure(
+        'video_short_io_error',
+        toolFailureMessage('video_short_io_error'),
+        '$error',
+      );
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoShortStatus(String name) async {
+    try {
+      final VideoShortProjectSnapshot snapshot = await _videoShortProjects.read(
+        name,
+      );
+      final VideoScreenplayVerification verification = snapshot.verification;
+      final VideoScreenplay? screenplay = verification.screenplay;
+      return <String, dynamic>{
+        'ok': true,
+        'project': snapshot.name,
+        'verified': verification.verified,
+        'checks': verification.checks
+            .map((VideoScreenplayIssue issue) => issue.toJson())
+            .toList(growable: false),
+        'shots': screenplay?.shots.length ?? 0,
+        'frames': screenplay?.totalFrames ?? 0,
+        'width': screenplay?.width ?? 0,
+        'height': screenplay?.height ?? 0,
+        'events': screenplay == null
+            ? 0
+            : screenplay.events.length,
+        'vfx_events': screenplay == null
+            ? 0
+            : screenplay.events
+                  .where((VideoScreenplayEvent e) => e.type == 'vfx')
+                  .length,
+        'screenplay': snapshot.raw,
+      };
+    } on VideoShortProjectFailure catch (error) {
+      final String code = 'video_short_${error.code}';
+      return _failure(code, toolFailureMessage(code), error.detail);
+    } catch (error) {
+      return _failure(
+        'video_short_io_error',
+        toolFailureMessage('video_short_io_error'),
+        '$error',
+      );
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoShortCreate({
+    required String name,
+    required Map<String, dynamic> screenplay,
+  }) async {
+    final VideoScreenplayVerification verification;
+    try {
+      verification = await _videoShortProjects.save(name, screenplay);
+    } on VideoShortProjectFailure catch (error) {
+      final String code = 'video_short_${error.code}';
+      return _failure(code, toolFailureMessage(code), error.detail);
+    } catch (error) {
+      return _failure(
+        'video_short_io_error',
+        toolFailureMessage('video_short_io_error'),
+        '$error',
+      );
+    }
+    if (!verification.verified) {
+      // 未通过校验：不落盘，如实回问题清单。
+      return <String, dynamic>{
+        'ok': false,
+        'error': 'video_short_unverified',
+        'message': toolFailureMessage('video_short_unverified'),
+        'checks': verification.checks
+            .map((VideoScreenplayIssue issue) => issue.toJson())
+            .toList(growable: false),
+      };
+    }
+    final VideoScreenplay screenplayModel = verification.screenplay!;
+    return <String, dynamic>{
+      'ok': true,
+      'project': name,
+      'shots': screenplayModel.shots.length,
+      'frames': screenplayModel.totalFrames,
+      'width': screenplayModel.width,
+      'height': screenplayModel.height,
+      'events': screenplayModel.events.length,
+      'vfx_events': screenplayModel.events
+          .where((VideoScreenplayEvent e) => e.type == 'vfx')
+          .length,
+      'verified': true,
+    };
   }
 
   @override
@@ -5359,6 +5509,57 @@ ToolSet _buildTools(_Ctx ctx, Genkit ai) {
         return workspace.video3dRenderFrames(
           name: str(args, 'name'),
           frames: frames,
+        );
+      },
+    );
+
+    addWorkspaceTool(
+      'video_short_list',
+      'List engine-short screenplay projects (nan.screenplay/1) stored on disk. '
+          'Each entry reports shots/frames/verified, and whether the screenplay is corrupt.',
+      const <String, dynamic>{},
+      const <String>[],
+      (args) => workspace.videoShortList(),
+    );
+
+    addWorkspaceTool(
+      'video_short_status',
+      'Read one engine-short screenplay project: raw screenplay JSON, verification checks, '
+          'integer frame count and vfx event count. Use it before editing or when a create was refused.',
+      const <String, dynamic>{
+        'name': {'type': 'string', 'description': 'Project name (a-z0-9_-)'},
+      },
+      const <String>['name'],
+      (args) => workspace.videoShortStatus(str(args, 'name')),
+    );
+
+    addWorkspaceTool(
+      'video_short_create',
+      'Create an engine-short screenplay project from nan.screenplay/1 JSON. The screenplay is '
+          'validated FIRST (flat shots with id/start/duration/events, 30fps integer frames, event '
+          'types vfx/sfx/camera.shake/caption, and every vfx cue must be in the vendored pixelfx '
+          'allowlist). On any check failure nothing is written to disk and the problem list is '
+          'returned. An existing project name is refused (no silent overwrite).',
+      const <String, dynamic>{
+        'name': {'type': 'string', 'description': 'Project name (a-z0-9_-)'},
+        'screenplay': {
+          'type': 'object',
+          'description': 'Complete nan.screenplay/1 document',
+        },
+      },
+      const <String>['name', 'screenplay'],
+      (args) {
+        final raw = args['screenplay'];
+        if (raw is! Map) {
+          return Future.value(<String, dynamic>{
+            'ok': false,
+            'error': 'video_short_unverified',
+            'message': toolFailureMessage('video_short_unverified'),
+          });
+        }
+        return workspace.videoShortCreate(
+          name: str(args, 'name'),
+          screenplay: raw.cast<String, dynamic>(),
         );
       },
     );

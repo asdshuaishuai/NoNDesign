@@ -323,6 +323,31 @@ class _FakeWorkspace implements AgentWorkspaceServices {
   };
 
   // -- 3D 视频（video3d_list / video3d_status / video3d_create）--
+  String? lastVideoShortName;
+  Map<String, dynamic>? lastVideoShortScreenplay;
+  Map<String, dynamic> videoShortListResult = <String, dynamic>{
+    'ok': true,
+    'count': 0,
+    'projects': <dynamic>[],
+  };
+  Map<String, dynamic> videoShortStatusResult = <String, dynamic>{
+    'ok': true,
+    'project': 'short',
+    'verified': true,
+    'shots': 1,
+    'frames': 60,
+    'events': 2,
+    'vfx_events': 1,
+  };
+  Map<String, dynamic> videoShortCreateResult = <String, dynamic>{
+    'ok': true,
+    'project': 'short',
+    'shots': 1,
+    'frames': 60,
+    'events': 2,
+    'vfx_events': 1,
+    'verified': true,
+  };
   String? lastVideo3dName;
   Map<String, dynamic>? lastVideo3dScene;
   Map<String, dynamic>? lastVideo3dScreenplay;
@@ -755,6 +780,29 @@ class _FakeWorkspace implements AgentWorkspaceServices {
     lastVideo3dScene = scene;
     lastVideo3dScreenplay = screenplay;
     return Map<String, dynamic>.from(video3dCreateResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoShortList() async {
+    calls.add('video_short_list');
+    return Map<String, dynamic>.from(videoShortListResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoShortStatus(String name) async {
+    calls.add('video_short_status:$name');
+    return Map<String, dynamic>.from(videoShortStatusResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoShortCreate({
+    required String name,
+    required Map<String, dynamic> screenplay,
+  }) async {
+    calls.add('video_short_create:$name');
+    lastVideoShortName = name;
+    lastVideoShortScreenplay = screenplay;
+    return Map<String, dynamic>.from(videoShortCreateResult);
   }
 
   @override
@@ -2238,6 +2286,10 @@ void main() {
           'video_sample',
           'video_create',
           'video_review',
+          // 引擎短片（nan.screenplay/1）也是 `video_` 前缀：同属视频工作区。
+          'video_short_list',
+          'video_short_status',
+          'video_short_create',
         ]),
       );
       expect(
@@ -2627,6 +2679,62 @@ void main() {
       expect(workspace.lastVideo3dFrames, <int>[0, 90]);
       final end = events.firstWhere(
         (e) => e['type'] == 'tool_end' && e['tool'] == 'video3d_render_frames',
+      );
+      expect(end['ok'], isTrue);
+    });
+
+    test('video 工作台 run：video_short_create 真执行（剧本先校验后落盘）', () async {
+      final workspace = _FakeWorkspace();
+      final events = <Map<String, dynamic>>[];
+      final model = ScriptedAgentModel(<List<Part>>[
+        <Part>[
+          scriptToolCall(
+            toolName: 'video_short_create',
+            input: <String, dynamic>{
+              'name': 'short',
+              'screenplay': <String, dynamic>{
+                'schema': 'nan.screenplay/1',
+                'width': 320,
+                'height': 180,
+                'shots': <dynamic>[
+                  <String, dynamic>{
+                    'id': 's1',
+                    'start': 0.0,
+                    'duration': 2.0,
+                    'events': <dynamic>[
+                      <String, dynamic>{
+                        'f': 15,
+                        'type': 'vfx',
+                        'cue': 'fire.campfire',
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          ),
+        ],
+        <Part>[
+          scriptToolCall(
+            toolName: 'finish',
+            input: <String, dynamic>{'summary': '完成'},
+          ),
+        ],
+      ]);
+      final result = await runDartAgent(
+        request: workspaceRequest('video'),
+        modelOverride: model.model,
+        workspace: workspace,
+        onEvent: events.add,
+      );
+      expect(result.ok, isTrue);
+      expect(workspace.calls, contains('video_short_create:short'));
+      expect(
+        workspace.lastVideoShortScreenplay,
+        containsPair('schema', 'nan.screenplay/1'),
+      );
+      final end = events.firstWhere(
+        (e) => e['type'] == 'tool_end' && e['tool'] == 'video_short_create',
       );
       expect(end['ok'], isTrue);
     });
