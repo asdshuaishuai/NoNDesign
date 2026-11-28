@@ -400,9 +400,14 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   就绪轮询/状态轮询）+ 舞台（真 `WebViewWidget`，宿主一律 `ClipRRect`）+ 控制条
   （播放/暂停切换、停止、整数帧拖动、时钟）+ 失败面（人话主文案 + 折叠技术详情 +
   重试）；渲染器/VFX 面如实展示（`phaser4_canvas` / `pixelfx_pixels`）。
-  **仍未施工**：把它挂进视频工作台的四栏目（需要「短片项目列表 + 打开 + 呈现效果
-  栏目切换」一整批状态改造，单独批次做）、`video_short_render_frames` 抓帧工具、
-  风格包（palette/type/motion）、TTS、导出。
+  **已挂进视频工作台（2026-11-28）**：工作台新增 `shortProjectStore` /
+  `shortPreviewFactory` 注入与短片段状态；「打开引擎短片…」入口在**宽屏工具条**
+  （`video-short-open-wide`）与**窄屏「更多」菜单**（`video-more-menu` → `short`）
+  都有；打开后**呈现效果栏目整体换成** `VideoShortPreviewSurface`（项目名 +
+  分辨率·帧数 + 换一个/关闭），关闭回落 v1 呈现面。与 v1 生成项目**互斥**
+  （短片段打开时不构建 v1 导演台）。坏项目在对话框里灰显不可点、不静默隐藏。
+  **仍未施工**：`video_short_render_frames` 抓帧工具、风格包
+  （palette/type/motion）、TTS、导出。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
   成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
 - **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，

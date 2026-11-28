@@ -40,6 +40,8 @@ import '../core/workbench_docs.dart';
 import '../core/workbench_layout.dart';
 import '../core/toast_service.dart';
 import '../core/video_clip.dart';
+import '../core/video/video_screenplay.dart';
+import '../core/video/video_short_project.dart';
 import '../core/video_project.dart';
 import '../core/video_service.dart';
 import 'aqua.dart';
@@ -47,6 +49,7 @@ import 'video_animation_surface.dart';
 import 'video_clip_surface.dart';
 import 'video_workbench_panels.dart';
 import 'video_player_surface.dart';
+import 'video_short_preview_surface.dart';
 import 'workbench_views.dart';
 
 /// 视频工作区。
@@ -66,6 +69,8 @@ class VideoWorkspace extends StatefulWidget {
     this.clips,
     this.clipPlaybackFactory,
     this.projectStore,
+    this.shortProjectStore,
+    this.shortPreviewFactory,
   });
 
   /// 测试注入（生产用 [VideoService.instance]，示例与文档在进程内）。
@@ -81,6 +86,13 @@ class VideoWorkspace extends StatefulWidget {
   ///
   /// 注入时指向临时目录，工作台测试因此不会去扫真实用户项目目录。
   final VideoProjectStore? projectStore;
+
+  /// 测试注入：引擎短片项目库（生产用 [VideoShortProjectStore.instance]）。
+  final VideoShortProjectStore? shortProjectStore;
+
+  /// 测试注入：不构造真 WebView 的短片预览控制器工厂（生产为 null）。
+  final VideoShortPreviewController Function(VideoScreenplay screenplay)?
+  shortPreviewFactory;
 
   @override
   State<VideoWorkspace> createState() => _VideoWorkspaceState();
@@ -114,6 +126,14 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   bool _previewPlaying = false;
   final VideoAnimationController _previewController =
       VideoAnimationController();
+
+  // ---- 引擎短片（nan.screenplay/1）——与 v1 生成项目互斥的第二种呈现面 ----
+  /// 当前打开的引擎短片项目名（null = 没打开；打开时呈现效果栏目换成短片预览）。
+  String? _shortProjectName;
+  VideoShortProjectSnapshot? _shortSnapshot;
+  VideoShortPreviewController? _shortPreview;
+  bool _shortBusy = false;
+  String _shortFailure = '';
 
   /// 通用检查器控制器（导演台选中镜头 → 右侧「检查」tab 的可编辑属性表）。
   ///
@@ -283,6 +303,8 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     _clearCheckControllerOnDispose();
     _appStore = null;
     _releaseClipPlayback();
+    _shortPreview?.dispose();
+    _shortPreview = null;
     _previewController.dispose();
     super.dispose();
   }
@@ -924,6 +946,9 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
         await _editScript();
       case 'delete':
         await _deleteProject();
+      case 'short':
+        // 引擎短片是第二种呈现面；打开入口固定在「更多」里，不依赖空态。
+        if (mounted) await _pickShortProject(context);
     }
   }
 
@@ -1270,7 +1295,211 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   ///
   /// 矢量动画与动效合成共用同一块留边：主区 14 边距，播放面自己圆角；
   /// 动效合成在播放面下方多一条运输条（它不抢画面，只是控制条）。
+  // ---------------------------------------------------------- 引擎短片
+
+  VideoShortProjectStore get _shortStore =>
+      widget.shortProjectStore ?? VideoShortProjectStore.instance;
+
+  /// 打开引擎短片项目：读盘 → 校验 → 建预览控制器 → 起播（与 v1 项目互斥）。
+  Future<void> _openShortProject(String name) async {
+    final String trimmed = name.trim();
+    if (trimmed.isEmpty || _shortBusy) return;
+    setState(() {
+      _shortBusy = true;
+      _shortFailure = '';
+      _shortProjectName = trimmed;
+    });
+    VideoShortProjectSnapshot snapshot;
+    try {
+      snapshot = await _shortStore.read(trimmed);
+    } on VideoShortProjectFailure catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _shortBusy = false;
+        _shortFailure = videoShortProjectFailureMessage(error.code);
+      });
+      return;
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _shortBusy = false;
+        _shortFailure = '引擎短片项目打不开，可以重试';
+      });
+      return;
+    }
+    if (!mounted) return;
+    final VideoScreenplay? screenplay = snapshot.verification.verified
+        ? snapshot.verification.screenplay
+        : null;
+    if (screenplay == null) {
+      setState(() {
+        _shortBusy = false;
+        _shortFailure = '剧本没有通过校验，先在「规范」栏目改好再打开';
+      });
+      return;
+    }
+    _shortPreview?.dispose();
+    final VideoShortPreviewController preview =
+        widget.shortPreviewFactory?.call(screenplay) ??
+        VideoShortWebPreview(screenplay: screenplay);
+    setState(() {
+      _shortSnapshot = snapshot;
+      _shortPreview = preview;
+      _shortBusy = false;
+    });
+    unawaited(preview.start());
+  }
+
+  /// 关闭引擎短片：释放预览控制器（WebView 随之卸载），回到 v1 空态。
+  void _closeShortProject() {
+    final VideoShortPreviewController? preview = _shortPreview;
+    _shortPreview = null;
+    preview?.dispose();
+    if (!mounted) return;
+    setState(() {
+      _shortProjectName = null;
+      _shortSnapshot = null;
+      _shortFailure = '';
+    });
+  }
+
+  /// 选一个引擎短片项目打开（列不出来的坏项目如实标出、不静默隐藏）。
+  Future<void> _pickShortProject(BuildContext context) async {
+    List<VideoShortProjectEntry> entries;
+    try {
+      entries = await _shortStore.list();
+    } catch (_) {
+      entries = const <VideoShortProjectEntry>[];
+    }
+    if (!mounted) return;
+    if (entries.isEmpty) {
+      _toasts.warn('还没有引擎短片项目', '可以让 NaN 用 video_short_create 建一个。');
+      return;
+    }
+    final String? picked = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('打开引擎短片'),
+        content: SizedBox(
+          width: 360,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: entries.length,
+            itemBuilder: (BuildContext context, int index) {
+              final VideoShortProjectEntry entry = entries[index];
+              final String detail = entry.corrupt
+                  ? '剧本损坏'
+                  : '${entry.shots} 镜头 · ${entry.frames} 帧'
+                      '${entry.verified ? '' : ' · 未通过校验'}';
+              return ListTile(
+                title: Text(entry.name),
+                subtitle: Text(detail),
+                enabled: !entry.corrupt,
+                onTap: () => Navigator.of(dialogContext).pop(entry.name),
+              );
+            },
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+    if (picked == null || !mounted) return;
+    await _openShortProject(picked);
+  }
+
+  /// 呈现效果栏目里的短片面（项目名 + 关闭 + 预览面/失败面）。
+  Widget _shortAuthoringBody(BuildContext context) {
+    final p = context.palette;
+    final VideoShortPreviewController? preview = _shortPreview;
+    return Column(
+      key: const ValueKey('video-short-authoring'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            NonSpace.lg,
+            NonSpace.sm,
+            NonSpace.sm,
+            NonSpace.xs,
+          ),
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.auto_awesome_motion_outlined, size: 14, color: p.ink4),
+              const SizedBox(width: NonSpace.sm),
+              Flexible(
+                child: Text(
+                  '引擎短片 · ${_shortProjectName ?? ''}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: NonType.bodyStrong,
+                    fontWeight: FontWeight.w600,
+                    color: p.ink,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              if (_shortSnapshot?.screenplay != null)
+                Text(
+                  '${_shortSnapshot!.screenplay!.width}×'
+                  '${_shortSnapshot!.screenplay!.height} · '
+                  '${_shortSnapshot!.screenplay!.totalFrames} 帧',
+                  style: TextStyle(fontSize: NonType.micro, color: p.ink4),
+                ),
+              TextButton(
+                key: const ValueKey('video-short-open-another'),
+                onPressed: () => _pickShortProject(context),
+                child: const Text('换一个'),
+              ),
+              TextButton(
+                key: const ValueKey('video-short-close'),
+                onPressed: _closeShortProject,
+                child: const Text('关闭'),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              NonSpace.lg,
+              NonSpace.xs,
+              NonSpace.lg,
+              NonSpace.lg,
+            ),
+            child: _shortBusy
+                ? Center(
+                    child: Text(
+                      '正在打开…',
+                      style: TextStyle(fontSize: NonType.body, color: p.ink4),
+                    ),
+                  )
+                : _shortFailure.isNotEmpty
+                ? Center(
+                    child: Text(
+                      _shortFailure,
+                      key: const ValueKey('video-short-open-failure'),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: NonType.body, color: p.warn),
+                    ),
+                  )
+                : preview == null
+                ? const SizedBox.shrink()
+                : VideoShortPreviewSurface(preview: preview),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _authoringBody(BuildContext context) {
+    // 引擎短片是第二种呈现面：打开时直接替换整个呈现效果栏目。
+    if (_shortProjectName != null) return _shortAuthoringBody(context);
     final clip = _clip;
     if (clip != null) return _clipAuthoringBody(context, clip);
     final doc = _doc;
@@ -1676,6 +1905,23 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                   const SizedBox(width: NonSpace.xs),
                   _reviewChip(context, showLabel: true),
                   const SizedBox(width: NonSpace.xs),
+                  // 引擎短片入口（宽屏分支）：与窄屏「更多」菜单里的同一动作。
+                  IconButton(
+                    key: const ValueKey('video-short-open-wide'),
+                    tooltip: '打开引擎短片',
+                    iconSize: 18,
+                    padding: EdgeInsets.zero,
+                    color: p.ink2,
+                    icon: const Icon(
+                      Icons.auto_awesome_motion_outlined,
+                      size: 18,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
+                    ),
+                    onPressed: () => _pickShortProject(context),
+                  ),
                   if (_projectName == null) _loadSampleButton(context),
                 ] else ...[
                   Flexible(
@@ -1702,6 +1948,17 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                         height: 40,
                         child: Text(
                           '帧率 $_fps',
+                          style: TextStyle(
+                            fontSize: NonType.body,
+                            color: p.ink2,
+                          ),
+                        ),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'short',
+                        height: 40,
+                        child: Text(
+                          '打开引擎短片…',
                           style: TextStyle(
                             fontSize: NonType.body,
                             color: p.ink2,
@@ -2401,6 +2658,17 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                 fontSize: NonType.caption,
                 color: p.ink3,
                 height: NonType.lineBody,
+              ),
+            ),
+            const SizedBox(height: NonSpace.md),
+            // 引擎短片（nan.screenplay/1）是第二种呈现面，与 v1 生成项目互斥。
+            OutlinedButton.icon(
+              key: const ValueKey('video-short-open-picker'),
+              onPressed: () => _pickShortProject(context),
+              icon: const Icon(Icons.auto_awesome_motion_outlined, size: 15),
+              label: const Text(
+                '打开引擎短片…',
+                style: TextStyle(fontSize: NonType.body),
               ),
             ),
           ],

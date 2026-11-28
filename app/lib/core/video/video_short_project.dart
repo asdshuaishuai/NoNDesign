@@ -266,3 +266,17 @@ class VideoShortProjectStore {
     }
   }
 }
+
+/// 项目库失败码 → 人话（UI/工具共用；原始诊断只进折叠的技术详情）。
+String videoShortProjectFailureMessage(String code) {
+  return switch (code) {
+    'invalid_name' => '项目名不可用：只能小写字母、数字、短横线或下划线',
+    'path_escape' => '这个项目名指向了项目库之外，已拒绝',
+    'no_project' => '找不到这个引擎短片项目',
+    'corrupt' => '这个引擎短片项目的剧本文件损坏了',
+    'unverified' => '剧本没有通过校验',
+    'exists' => '同名引擎短片项目已存在，请换一个名字',
+    'io_error' => '磁盘读写失败，请稍后重试',
+    _ => '引擎短片项目打不开，可以重试',
+  };
+}
