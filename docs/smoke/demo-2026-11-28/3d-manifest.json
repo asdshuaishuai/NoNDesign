@@ -1,0 +1,28 @@
+{
+  "kind": "video3d",
+  "renderer": "webgl_three_r160",
+  "totalFrames": 150,
+  "fps": 30,
+  "frames": [
+    {
+      "frame": 0,
+      "file": "3d-frame-0.png",
+      "bytes": 11871
+    },
+    {
+      "frame": 90,
+      "file": "3d-frame-90.png",
+      "bytes": 11871
+    },
+    {
+      "frame": 120,
+      "file": "3d-frame-120.png",
+      "bytes": 9268
+    },
+    {
+      "frame": 149,
+      "file": "3d-frame-149.png",
+      "bytes": 9094
+    }
+  ]
+}

@@ -647,6 +647,203 @@ export default function build(THREE, scene, camera, controls, renderer) {
     expect(shot.bytes[0], 0x89, reason: '抓帧结果必须是 PNG（魔数）');
   });
 
+  // ---------------------------------------------------------------- demo 生成
+  // 真机生成两份 demo 证据（PNG + manifest）到 docs/smoke/demo-2026-11-28/。
+  // 用 `--plain-name demo` 可只跑这两条（不必跑完整冒烟）。
+
+  testWidgets('demo：3D 视频真机渲染并抓帧（three WebGL）', (tester) async {
+    final Directory dir = await Directory.systemTemp.createTemp('nan-demo-3d');
+    addTearDown(() async {
+      if (dir.existsSync()) await dir.delete(recursive: true);
+    });
+    final Video3dProjectStore store = Video3dProjectStore(root: dir);
+    final Video3dVerification saved = await store.save(
+      'demo3d',
+      scene: _sceneRaw(),
+      screenplay: _screenplayRaw(),
+    );
+    expect(saved.verified, isTrue, reason: '${saved.toJson()}');
+    final Video3dProjectSnapshot snapshot = await store.read('demo3d');
+    final Video3dTimeline timeline = compileVideo3dTimeline(
+      snapshot.screenplay!,
+    );
+
+    final Video3dPreviewController preview = createDefaultVideo3dPreview(
+      snapshot,
+      timeline,
+    );
+    addTearDown(preview.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 640,
+            height: 480,
+            child: Video3dPreviewSurface(preview: preview),
+          ),
+        ),
+      ),
+    );
+    await preview.start();
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
+    while (DateTime.now().isBefore(deadline) && !preview.ready) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await tester.pump();
+    }
+    expect(preview.ready, isTrue, reason: preview.loadError);
+
+    final Directory out = Directory('../docs/smoke/demo-2026-11-28');
+    if (!out.existsSync()) out.createSync(recursive: true);
+    // s1（0–89）是静态相机，s2（90–149）才有相机运动：跨镜头抓帧才能真正
+    // 证明「帧号驱动画面」，只抓 s1 的帧本来就该字节相同。
+    final List<Video3dFrameEvidence> shots = await preview.captureFrames(
+      <int>[0, 90, 120, 149],
+    );
+    final List<Map<String, Object?>> manifest = <Map<String, Object?>>[];
+    for (final Video3dFrameEvidence shot in shots) {
+      final File file = File('${out.path}/3d-frame-${shot.frame}.png');
+      file.writeAsBytesSync(shot.bytes);
+      manifest.add(<String, Object?>{
+        'frame': shot.frame,
+        'file': file.uri.pathSegments.last,
+        'bytes': shot.byteLength,
+      });
+    }
+    File('${out.path}/3d-manifest.json').writeAsStringSync(
+      '${const JsonEncoder.withIndent('  ').convert(<String, Object?>{
+        'kind': 'video3d',
+        'renderer': preview.renderer,
+        'totalFrames': preview.totalFrames,
+        'fps': preview.fps,
+        'frames': manifest,
+      })}\n',
+    );
+    // ignore: avoid_print
+    print(
+      '[demo-3d] renderer=${preview.renderer} frames=${shots.map((e) => '${e.frame}:${e.byteLength}B').join(',')}',
+    );
+    expect(shots, hasLength(4));
+    expect(shots.first.bytes[0], 0x89);
+    // 注意：s2 的 move.from 与 s1 的 hero 机位相同（[6,3,6]，续接同一机位），
+    // 所以「s2 第一帧 == s1 画面」是**正确行为**，不是 bug——这里断言的是
+    // **s2 内部相机确实在推进**：起始帧 vs 结束帧像素必须不同。
+    expect(
+      _bytesEqual(shots[3].bytes, shots[1].bytes),
+      isFalse,
+      reason: 's2 相机运动没体现在像素上（帧号没有驱动画面）',
+    );
+    // ignore: avoid_print
+    print(
+      '[demo-3d] s1==s2first=${_bytesEqual(shots[1].bytes, shots[0].bytes)}'
+      ' s2moving=${!_bytesEqual(shots[3].bytes, shots[1].bytes)}',
+    );
+  });
+
+  testWidgets('demo：引擎短片真机渲染 + VFX + 风格包并抓帧', (tester) async {
+    final VideoScreenplayVerification verified = verifyVideoScreenplay(
+      <String, Object?>{
+        'schema': 'nan.screenplay/1',
+        'width': 320,
+        'height': 180,
+        'shots': <Object?>[
+          <String, Object?>{
+            'id': 'open',
+            'start': 0.0,
+            'duration': 1.5,
+            'events': <Object?>[
+              <String, Object?>{
+                'f': 10,
+                'type': 'vfx',
+                'cue': 'fire.campfire',
+                'x': 0,
+                'y': 0,
+              },
+              <String, Object?>{'f': 20, 'type': 'caption'},
+            ],
+          },
+          <String, Object?>{
+            'id': 'impact',
+            'start': 1.5,
+            'duration': 1.5,
+            'events': <Object?>[
+              <String, Object?>{
+                'f': 5,
+                'type': 'vfx',
+                'cue': 'lightning.lightning-strike',
+                'x': 10,
+                'y': -6,
+              },
+              <String, Object?>{'f': 8, 'type': 'camera.shake'},
+            ],
+          },
+        ],
+      },
+    );
+    expect(verified.verified, isTrue, reason: '${verified.toJson()}');
+    final VideoStylePack? style = videoStylePackPreset('warm_amber');
+    expect(style, isNotNull);
+
+    final VideoShortWebPreview preview = VideoShortWebPreview(
+      screenplay: verified.screenplay!,
+      stylePack: style,
+    );
+    addTearDown(preview.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 640,
+            height: 480,
+            child: VideoShortPreviewSurface(preview: preview),
+          ),
+        ),
+      ),
+    );
+    await preview.start();
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
+    while (DateTime.now().isBefore(deadline) && !preview.ready) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await tester.pump();
+    }
+    expect(preview.ready, isTrue, reason: preview.loadError);
+
+    final Directory out = Directory('../docs/smoke/demo-2026-11-28');
+    if (!out.existsSync()) out.createSync(recursive: true);
+    final List<VideoShortFrameEvidence> shots = await preview.captureFrames(
+      <int>[0, 20, 50, 80],
+    );
+    final List<Map<String, Object?>> manifest = <Map<String, Object?>>[];
+    for (final VideoShortFrameEvidence shot in shots) {
+      final File file = File('${out.path}/short-frame-${shot.frame}.png');
+      file.writeAsBytesSync(shot.bytes);
+      manifest.add(<String, Object?>{
+        'frame': shot.frame,
+        'file': file.uri.pathSegments.last,
+        'bytes': shot.byteLength,
+      });
+    }
+    File('${out.path}/short-manifest.json').writeAsStringSync(
+      '${const JsonEncoder.withIndent('  ').convert(<String, Object?>{
+        'kind': 'engine_short',
+        'renderer': preview.renderer,
+        'vfx': preview.vfxRenderer,
+        'style': preview.styleId,
+        'totalFrames': preview.totalFrames,
+        'fps': preview.fps,
+        'frames': manifest,
+      })}\n',
+    );
+    // ignore: avoid_print
+    print(
+      '[demo-short] renderer=${preview.renderer} vfx=${preview.vfxRenderer} '
+      'style=${preview.styleId} frames=${shots.map((e) => '${e.frame}:${e.byteLength}B').join(',')}',
+    );
+    expect(shots, hasLength(4));
+    expect(shots.first.bytes[0], 0x89);
+    expect(preview.vfxRenderer, videoShortVfxPixelRenderer);
+    expect(preview.styleId, 'warm_amber');
+  });
+
   testWidgets('引擎短片风格包：不同风格真机像素不同、同风格字节一致、id 如实回传', (
     tester,
   ) async {

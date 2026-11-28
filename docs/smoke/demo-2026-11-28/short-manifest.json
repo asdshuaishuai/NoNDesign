@@ -1,0 +1,30 @@
+{
+  "kind": "engine_short",
+  "renderer": "phaser4_canvas",
+  "vfx": "pixelfx_pixels",
+  "style": "warm_amber",
+  "totalFrames": 90,
+  "fps": 30,
+  "frames": [
+    {
+      "frame": 0,
+      "file": "short-frame-0.png",
+      "bytes": 735
+    },
+    {
+      "frame": 20,
+      "file": "short-frame-20.png",
+      "bytes": 12497
+    },
+    {
+      "frame": 50,
+      "file": "short-frame-50.png",
+      "bytes": 741
+    },
+    {
+      "frame": 80,
+      "file": "short-frame-80.png",
+      "bytes": 742
+    }
+  ]
+}
