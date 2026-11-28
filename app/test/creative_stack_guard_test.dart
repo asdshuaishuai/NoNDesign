@@ -378,6 +378,27 @@ void main() {
     });
   });
 
+  group('引擎短片预览面纪律', () {
+    test('预览面在场且遵守 WebView 宿主纪律（ClipRRect，非任意路径裁剪）', () {
+      final File surface = _file('lib/widgets/video_short_preview_surface.dart');
+      expect(surface.existsSync(), isTrue, reason: '引擎短片预览面缺失');
+      final String text = surface.readAsStringSync();
+      // 真 WebView：舞台必须挂 WebViewWidget（不是自绘假画面）。
+      expect(text, contains('WebViewWidget(controller: controller)'));
+      // WebKitGTK 纪律：WebView 宿主一律 ClipRRect；任意路径 ClipPath 会隐藏 WebView。
+      expect(text, contains('ClipRRect'));
+      expect(
+        text.contains('clipBehavior: Clip'),
+        isFalse,
+        reason: '预览面用了 Container(clipBehavior)（任意路径裁剪会隐藏 WebView）',
+      );
+      // 页面命令面/桥名与组装器同源（不自造第二套契约）。
+      expect(text, contains('videoShortPreviewBridgeChannel'));
+      expect(text, contains('videoShortPreviewHostObject'));
+      expect(text, contains('assembleVideoShortPage'));
+    });
+  });
+
   group('ThreeUI 目录一致性', () {
     test('组件数在硬边界内，且每个 catalog 条目都有页面文件', () {
       final Map<String, dynamic> catalog =

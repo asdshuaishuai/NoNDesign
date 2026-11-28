@@ -394,8 +394,15 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   工具 `video_short_list` / `video_short_status` / `video_short_create` 已接线
   （`video_` 前缀，属视频工作区收窄面），失败码 `video_short_*` 全部有
   `toolFailureMessage` 分支，**不进产物认领**（不冒充 v1 视频项目）。
-  **仍未施工**：引擎短片的工作台预览面（播放页已有组装器，但还没有 UI 宿主与
-  `render_frames` 抓帧工具）、风格包（palette/type/motion）、TTS、导出。
+  **预览面已落地（2026-11-28）**：`app/lib/widgets/video_short_preview_surface.dart`
+  ——`VideoShortPreviewController`（生产 = `VideoShortWebPreview`：rootBundle 内联
+  Phaser/pixelfx → 组装自包含页 → `NONSHORT` 桥 + `NONSHORT_PLAYER` 命令面 +
+  就绪轮询/状态轮询）+ 舞台（真 `WebViewWidget`，宿主一律 `ClipRRect`）+ 控制条
+  （播放/暂停切换、停止、整数帧拖动、时钟）+ 失败面（人话主文案 + 折叠技术详情 +
+  重试）；渲染器/VFX 面如实展示（`phaser4_canvas` / `pixelfx_pixels`）。
+  **仍未施工**：把它挂进视频工作台的四栏目（需要「短片项目列表 + 打开 + 呈现效果
+  栏目切换」一整批状态改造，单独批次做）、`video_short_render_frames` 抓帧工具、
+  风格包（palette/type/motion）、TTS、导出。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
   成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
 - **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，
