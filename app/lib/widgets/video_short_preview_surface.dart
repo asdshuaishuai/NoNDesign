@@ -19,6 +19,7 @@ import 'package:webview_all/webview_all.dart';
 import '../core/platform_capabilities.dart';
 import '../core/theme.dart';
 import '../core/video/video_screenplay.dart';
+import '../core/video/video_style_pack.dart';
 import '../core/video/video_short_evidence.dart';
 import '../core/video/video_short_player.dart';
 
@@ -72,6 +73,12 @@ abstract class VideoShortPreviewController extends ChangeNotifier {
   /// VFX 渲染面标识：`pixelfx_pixels` / `placeholder_markers`。
   String get vfxRenderer => '';
 
+  /// 页面如实回传的风格包 id（空串 = 内置默认风格）。
+  String get styleId => '';
+
+  /// 被风格包白名单收窄跳过的特效事件数。
+  int get vfxSkipped => 0;
+
   Future<void> start();
   Future<void> play();
   Future<void> pause();
@@ -103,6 +110,7 @@ abstract class VideoShortPreviewController extends ChangeNotifier {
 class VideoShortWebPreview extends VideoShortPreviewController {
   VideoShortWebPreview({
     required this.screenplay,
+    this.stylePack,
     this.host,
     this.phaserLoader,
     this.pixelfxLoader,
@@ -110,6 +118,9 @@ class VideoShortWebPreview extends VideoShortPreviewController {
   });
 
   final VideoScreenplay screenplay;
+
+  /// 可选风格包（palette/typography/motion）；null = 页面内置暗色默认。
+  final VideoStylePack? stylePack;
   final PlatformCapabilities? host;
 
   /// Phaser 文本读取器；生产为 null（rootBundle 读 [videoShortRuntimeAssetKey]）。
@@ -134,6 +145,8 @@ class VideoShortWebPreview extends VideoShortPreviewController {
   String _technicalDetail = '';
   String _renderer = '';
   String _vfxRenderer = '';
+  String _styleId = '';
+  int _vfxSkipped = 0;
   String _pixelfxNote = '';
   Completer<VideoShortFrameEvidence>? _captureWaiter;
   int _captureExpectedFrame = -1;
@@ -166,6 +179,12 @@ class VideoShortWebPreview extends VideoShortPreviewController {
 
   @override
   String get vfxRenderer => _vfxRenderer;
+
+  /// 页面如实回传的风格包 id（空串 = 用了内置默认）。
+  String get styleId => _styleId;
+
+  /// 被风格包白名单收窄跳过的特效事件数（如实回报，不静默）。
+  int get vfxSkipped => _vfxSkipped;
 
   /// 已组装的页面（失败前为 null）。
   String? get html => _html;
@@ -229,6 +248,7 @@ class VideoShortWebPreview extends VideoShortPreviewController {
         screenplay,
         phaserSource: phaserSource,
         pixelfxSource: pixelfxSource,
+        stylePack: stylePack,
       );
     } on VideoShortPlayerError catch (error) {
       _fail(videoShortFailureMessage(error.code), error.detail);
@@ -499,6 +519,10 @@ class VideoShortWebPreview extends VideoShortPreviewController {
         if (reportedRenderer.isNotEmpty) _renderer = reportedRenderer;
         final String reportedVfx = '${decoded['vfx'] ?? ''}'.trim();
         if (reportedVfx.isNotEmpty) _vfxRenderer = reportedVfx;
+        final String reportedStyle = '${decoded['style'] ?? ''}'.trim();
+        if (reportedStyle.isNotEmpty) _styleId = reportedStyle;
+        final int? skipped = _readInt(decoded['vfx_skipped']);
+        if (skipped != null && skipped > 0) _vfxSkipped = skipped;
         _frame = 0;
         _playing = false;
         _ready = true;

@@ -37,6 +37,7 @@ import 'package:nondesign/core/video3d/video3d_project.dart';
 import 'package:nondesign/core/three_service.dart';
 import 'package:nondesign/core/video/video_screenplay.dart';
 import 'package:nondesign/core/video/video_short_evidence.dart';
+import 'package:nondesign/core/video/video_style_pack.dart';
 import 'package:nondesign/core/video/video_short_player.dart';
 import 'package:nondesign/widgets/music_playback_surface.dart';
 import 'package:nondesign/widgets/video3d_preview_surface.dart';
@@ -644,6 +645,103 @@ export default function build(THREE, scene, camera, controls, renderer) {
     expect(shot.renderer, preview.renderer, reason: '证据渲染器必须与 ready 一致');
     expect(shot.byteLength, greaterThan(0), reason: '抓到的 PNG 不能是空文件');
     expect(shot.bytes[0], 0x89, reason: '抓帧结果必须是 PNG（魔数）');
+  });
+
+  testWidgets('引擎短片风格包：不同风格真机像素不同、同风格字节一致、id 如实回传', (
+    tester,
+  ) async {
+    VideoStylePack style(String id, String accent) {
+      final VideoStylePackVerification verified = verifyVideoStylePack(
+        <String, Object?>{
+          'schema': 'nan.style_pack/1',
+          'id': id,
+          'palette': <String, Object?>{
+            'background': '#101010',
+            'band': '#202020',
+            'accent': accent,
+            'text': '#ffffff',
+          },
+          'typography': <String, Object?>{'caption': 'lg'},
+          'motion': <String, Object?>{'progress': 'ease_out'},
+        },
+        globalVfxAllowlist: videoVfxCueAllowlist,
+      );
+      expect(verified.verified, isTrue, reason: '${verified.toJson()}');
+      return verified.stylePack!;
+    }
+
+    final VideoScreenplayVerification verified = verifyVideoScreenplay(
+      <String, Object?>{
+        'schema': 'nan.screenplay/1',
+        'width': 320,
+        'height': 180,
+        'shots': <Object?>[
+          <String, Object?>{
+            'id': 's1',
+            'start': 0.0,
+            'duration': 2.0,
+            'events': <Object?>[
+              <String, Object?>{
+                'f': 5,
+                'type': 'vfx',
+                'cue': 'fire.campfire',
+              },
+            ],
+          },
+        ],
+      },
+    );
+    expect(verified.verified, isTrue, reason: '${verified.toJson()}');
+
+    Future<List<VideoShortFrameEvidence>> captureWith(
+      VideoStylePack pack,
+    ) async {
+      final VideoShortWebPreview preview = VideoShortWebPreview(
+        screenplay: verified.screenplay!,
+        stylePack: pack,
+      );
+      addTearDown(preview.dispose);
+      await preview.start();
+      final DateTime deadline = DateTime.now().add(
+        const Duration(seconds: 30),
+      );
+      while (DateTime.now().isBefore(deadline) && !preview.ready) {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+        await tester.pump();
+      }
+      expect(
+        preview.ready,
+        isTrue,
+        reason: '风格包预览没就绪：${preview.loadError} / ${preview.technicalDetail}',
+      );
+      expect(preview.styleId, pack.id, reason: '页面没有如实回传风格 id');
+      final VideoShortFrameEvidence a = await preview.captureFrame(20);
+      final VideoShortFrameEvidence b = await preview.captureFrame(20);
+      expect(
+        _bytesEqual(a.bytes, b.bytes),
+        isTrue,
+        reason: '同一风格同一帧两次抓取不一致',
+      );
+      return <VideoShortFrameEvidence>[a];
+    }
+
+    final VideoShortFrameEvidence warm = (await captureWith(
+      style('warm', '#ff8800'),
+    )).single;
+    final VideoShortFrameEvidence cool = (await captureWith(
+      style('cool', '#0088ff'),
+    )).single;
+    // ignore: avoid_print
+    print(
+      '[webview-short-style] warm=${warm.byteLength}B cool=${cool.byteLength}B '
+      'equal=${_bytesEqual(warm.bytes, cool.bytes)}',
+    );
+    expect(warm.bytes[0], 0x89);
+    expect(
+      _bytesEqual(warm.bytes, cool.bytes),
+      isFalse,
+      reason: '两种风格抓到相同像素（风格包没生效）',
+    );
   });
 
   testWidgets('引擎短片预览面：真 WebView 就绪 + seekFrame + 真像素抓帧（特效/确定性）', (

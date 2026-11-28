@@ -417,7 +417,18 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   真机实测：`ready=true renderer=phaser4_canvas vfx=pixelfx_pixels total=60`；
   `evidence f20=12518B f14=739B`（有特效帧与无特效帧字节差异巨大）且同帧重抓
   **字节完全一致**（确定性）。
-  **仍未施工**：风格包（palette/type/motion）、TTS、导出。
+  **风格包 v1 已落地（2026-11-28）**：`app/lib/core/video/video_style_pack.dart` 是
+  `nan.style_pack/1` 的唯一硬门——`palette{background,band,accent,text}`（只接受
+  `#rrggbb`，且 `text` 与 `background` 亮度差有下限，不做「看不见的字」）、
+  `typography.caption`（sm/md/lg 白名单）、`motion.progress`
+  （linear/ease_out/stepped 确定性曲线）、`vfxAllowlist`（**只能是全局
+  `videoVfxCueAllowlist` 的子集**，借风格包放大能力面一律拒绝）；未知字段保留、
+  失败给 JSON Pointer。播放页按数据应用（底色/色带/进度条/caption 色与字号档位/
+  进度曲线），风格包白名单收窄时**跳过并如实回报 `vfx_skipped` 条数**，`ready.style`
+  回传风格 id。
+  真机实测：`warm=12559B` vs `cool=12650B`（`equal=false`，风格真的改变像素）、
+  同一风格同一帧两次抓取字节一致、`styleId` 如实回传。
+  **仍未施工**：风格包的工作台选择/持久化（目前由 API 传入）、TTS、导出。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
   成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
 - **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，

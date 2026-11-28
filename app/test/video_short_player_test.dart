@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nondesign/core/video/video_screenplay.dart';
 import 'package:nondesign/core/video/video_short_player.dart';
+import 'package:nondesign/core/video/video_style_pack.dart';
 
 const String _phaserStub = 'var Phaser = { VERSION: "4.2.1" };\n';
 const String _pixelfxStub =
@@ -42,11 +43,33 @@ String _page({
   String phaser = _phaserStub,
   String pixelfx = '',
   List<Object?>? events,
+  VideoStylePack? style,
 }) => assembleVideoShortPage(
   _screenplay(events: events),
   phaserSource: phaser,
   pixelfxSource: pixelfx,
+  stylePack: style,
 );
+
+VideoStylePack _stylePack() {
+  final VideoStylePackVerification result = verifyVideoStylePack(
+    <String, Object?>{
+      'schema': 'nan.style_pack/1',
+      'id': 'warm',
+      'palette': <String, Object?>{
+        'background': '#101010',
+        'band': '#202020',
+        'accent': '#ff8800',
+        'text': '#ffffff',
+      },
+      'typography': <String, Object?>{'caption': 'lg'},
+      'motion': <String, Object?>{'progress': 'ease_out'},
+    },
+    globalVfxAllowlist: videoVfxCueAllowlist,
+  );
+  expect(result.verified, isTrue, reason: '${result.toJson()}');
+  return result.stylePack!;
+}
 
 void main() {
   group('页面结构', () {
@@ -176,6 +199,49 @@ void main() {
       final String a = _page(pixelfx: _pixelfxStub);
       final String b = _page(pixelfx: _pixelfxStub);
       expect(a, b);
+    });
+  });
+
+  group('风格包（palette / typography / motion）', () {
+    test('不传风格包：timeline.style 为 null（页面用内置默认）', () {
+      final String html = _page();
+      expect(html, contains('"style":null'));
+    });
+
+    test('传风格包：id/调色板/动效进页面，页面按数据应用', () {
+      final String html = _page(style: _stylePack());
+      expect(html, contains('"style":{"schema":"nan.style_pack/1"'));
+      expect(html, contains('"id":"warm"'));
+      expect(html, contains('"accent":"#ff8800"'));
+      expect(html, contains('"progress":"ease_out"'));
+      // 页面侧应用逻辑在场（不是只把 JSON 塞进去）。
+      expect(html, contains('function applyStyle()'));
+      expect(html, contains('function easeProgress(value)'));
+      expect(html, contains('STYLE_VFX'));
+      // ready 回执如实带风格 id 与被跳过特效数。
+      expect(html, contains("style: STYLE ? String(STYLE.id || '') : ''"));
+      expect(html, contains('vfx_skipped: SKIPPED_VFX'));
+    });
+
+    test('含风格包时仍字节确定；不同风格包产出不同页面', () {
+      final String a = _page(style: _stylePack());
+      final String b = _page(style: _stylePack());
+      expect(a, b);
+      final VideoStylePackVerification other = verifyVideoStylePack(
+        <String, Object?>{
+          'schema': 'nan.style_pack/1',
+          'id': 'cool',
+          'palette': <String, Object?>{
+            'background': '#101020',
+            'band': '#202030',
+            'accent': '#0088ff',
+            'text': '#ffffff',
+          },
+        },
+        globalVfxAllowlist: videoVfxCueAllowlist,
+      );
+      expect(other.verified, isTrue);
+      expect(_page(style: other.stylePack!), isNot(a));
     });
   });
 

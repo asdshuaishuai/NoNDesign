@@ -13,6 +13,7 @@ library;
 import 'dart:convert';
 
 import 'video_screenplay.dart';
+import 'video_style_pack.dart';
 
 /// Phaser 4 vendored 运行时资源键（`build-manifest.json` 锁 sha256/字节）。
 const String videoShortPhaserAssetKey = 'assets/phaser/phaser.min.js';
@@ -99,6 +100,7 @@ String assembleVideoShortPage(
   VideoScreenplay screenplay, {
   required String phaserSource,
   String pixelfxSource = '',
+  VideoStylePack? stylePack,
 }) {
   final String phaser = phaserSource.trim();
   if (phaser.isEmpty) {
@@ -116,6 +118,7 @@ String assembleVideoShortPage(
 
   final String timelineJson = _embeddedJson(<String, Object?>{
     'schema': videoScreenplaySchema,
+    'style': stylePack?.toJson(),
     'fps': videoScreenplayFps,
     'width': screenplay.width,
     'height': screenplay.height,
@@ -209,6 +212,7 @@ const String _playerTemplate = '''
   var RENDERER_PIXELS = /*__PIXELS_RENDERER__*/;
   var RENDERER_PLACEHOLDER = /*__PLACEHOLDER_RENDERER__*/;
   var TIMELINE = /*__TIMELINE_JSON__*/;
+  var STYLE = TIMELINE.style || null;
   var WIDTH = /*__WIDTH__*/;
   var HEIGHT = /*__HEIGHT__*/;
   var FPS = TIMELINE.fps || 30;
@@ -235,6 +239,7 @@ const String _playerTemplate = '''
   var tmpCtx = null;
   var pxTexture = null;
   var currentShotColor = null;
+  var SKIPPED_VFX = 0;
 
   function post(kind, payload) {
     try {
@@ -265,6 +270,59 @@ const String _playerTemplate = '''
     return null;
   }
 
+  // 风格包颜色（缺省 = 内置暗色）。
+  var PALETTE = {
+    background: 0x06080c,
+    band: 0x141a24,
+    accent: 0xffffff,
+    text: 0xffffff
+  };
+  var FONT_SCALE = 1.0;
+  var MOTION = 'linear';
+  var STYLE_VFX = null;
+
+  function hexToInt(text) {
+    return parseInt(String(text).replace('#', ''), 16) || 0;
+  }
+
+  function applyStyle() {
+    if (!STYLE) return;
+    var palette = STYLE.palette || {};
+    if (palette.background) PALETTE.background = hexToInt(palette.background);
+    if (palette.band) PALETTE.band = hexToInt(palette.band);
+    if (palette.accent) PALETTE.accent = hexToInt(palette.accent);
+    if (palette.text) PALETTE.text = hexToInt(palette.text);
+    var typography = STYLE.typography || {};
+    if (typography.caption === 'sm') FONT_SCALE = 0.75;
+    else if (typography.caption === 'lg') FONT_SCALE = 1.35;
+    else FONT_SCALE = 1.0;
+    var motion = STYLE.motion || {};
+    if (motion.progress === 'ease_out') MOTION = 'ease_out';
+    else if (motion.progress === 'stepped') MOTION = 'stepped';
+    else MOTION = 'linear';
+    if (STYLE.vfxAllowlist && STYLE.vfxAllowlist.length) {
+      STYLE_VFX = {};
+      for (var i = 0; i < STYLE.vfxAllowlist.length; i++) {
+        STYLE_VFX[STYLE.vfxAllowlist[i]] = true;
+      }
+    }
+  }
+
+  // 进度曲线的确定性实现（同帧号必然同位置，不看墙钟）。
+  function easeProgress(value) {
+    if (MOTION === 'ease_out') return 1 - Math.pow(1 - value, 2);
+    if (MOTION === 'stepped') return Math.floor(value * 8) / 8;
+    return value;
+  }
+
+  function rgbOfColor(value) {
+    return {
+      r: (value >> 16) & 0xff,
+      g: (value >> 8) & 0xff,
+      b: value & 0xff
+    };
+  }
+
   // 确定性调色：HSL -> RGB 手算（不依赖引擎内部状态，同输入必然同色）。
   function shotRgb(index) {
     var hue = (index * 47) % 360;
@@ -287,15 +345,16 @@ const String _playerTemplate = '''
   }
 
   function drawBackgroundPixels(shot, index, local) {
-    var bg = shotRgb(index);
-    var band = shotRgbLight(index);
+    var bg = rgbOfColor(PALETTE.background);
+    var band = rgbOfColor(PALETTE.band);
+    var accent = rgbOfColor(PALETTE.accent);
     pxCtx.fillStyle = 'rgb(' + bg.r + ',' + bg.g + ',' + bg.b + ')';
     pxCtx.fillRect(0, 0, WIDTH, HEIGHT);
     pxCtx.fillStyle = 'rgb(' + band.r + ',' + band.g + ',' + band.b + ')';
     pxCtx.fillRect(0, Math.floor(HEIGHT * 0.62), WIDTH, Math.floor(HEIGHT * 0.38));
-    var progress = shot.frames > 1 ? local / (shot.frames - 1) : 0;
+    var progress = shot.frames > 1 ? easeProgress(local / (shot.frames - 1)) : 0;
     var barWidth = Math.max(2, Math.floor(WIDTH * 0.2));
-    pxCtx.fillStyle = 'rgba(255,255,255,0.85)';
+    pxCtx.fillStyle = 'rgb(' + accent.r + ',' + accent.g + ',' + accent.b + ')';
     pxCtx.fillRect(Math.floor(progress * (WIDTH - barWidth)), Math.floor(HEIGHT * 0.62) - 3, barWidth, 3);
   }
 
@@ -315,6 +374,12 @@ const String _playerTemplate = '''
         if (event.type !== 'vfx') continue;
         if (event.f > local) continue;
         if (!HAS_PIXELFX) continue;
+        // 风格包可以**收窄**允许的 cue（不能放大）：不在白名单里的特效跳过，
+        // 并在 ready 回执里如实报数量（不静默）。
+        if (STYLE_VFX && !STYLE_VFX[event.cue]) {
+          SKIPPED_VFX += 1;
+          continue;
+        }
         var advance = local - event.f;
         try {
           tmpCtx.clearRect(0, 0, WIDTH, HEIGHT);
@@ -339,8 +404,13 @@ const String _playerTemplate = '''
         var marker = shot.events[j];
         if (marker.f > local) continue;
         if (marker.type === 'caption') {
-          pxCtx.fillStyle = 'rgba(255,255,255,0.18)';
-          pxCtx.fillRect(Math.floor(WIDTH * 0.1), Math.floor(HEIGHT * 0.82), Math.floor(WIDTH * 0.8), 3);
+          var text = rgbOfColor(PALETTE.text);
+          pxCtx.fillStyle = 'rgba(' + text.r + ',' + text.g + ',' + text.b + ',0.18)';
+          pxCtx.fillRect(
+            Math.floor(WIDTH * 0.1),
+            Math.floor(HEIGHT * 0.82),
+            Math.floor(WIDTH * 0.8),
+            Math.max(2, Math.floor(3 * FONT_SCALE)));
         } else if (marker.type === 'camera.shake') {
           pxCtx.fillStyle = 'rgba(255,255,255,0.10)';
           pxCtx.fillRect(0, 0, WIDTH, HEIGHT);
@@ -506,6 +576,7 @@ const String _playerTemplate = '''
   };
 
   try {
+    applyStyle();
     game = new Phaser.Game({
       type: Phaser.CANVAS,
       width: WIDTH,
@@ -549,6 +620,8 @@ const String _playerTemplate = '''
             height: HEIGHT,
             renderer: RENDERER,
             vfx: VFX_RENDERER,
+            style: STYLE ? String(STYLE.id || '') : '',
+            vfx_skipped: SKIPPED_VFX,
             phaser: String(Phaser.VERSION || '')
           });
         }
