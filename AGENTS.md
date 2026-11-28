@@ -428,7 +428,13 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   回传风格 id。
   真机实测：`warm=12559B` vs `cool=12650B`（`equal=false`，风格真的改变像素）、
   同一风格同一帧两次抓取字节一致、`styleId` 如实回传。
-  **仍未施工**：风格包的工作台选择/持久化（目前由 API 传入）、TTS、导出。
+  **风格包选择与持久化已落地（2026-11-28）**：内置三个预设
+  （`default_dark` / `warm_amber` / `cool_blue`，全部过同一套硬门）；
+  工作台短片工具条加「风格包」下拉（`video-short-style`），选中即
+  `VideoShortProjectStore.saveStyle` 原子写 `<项目>/style.json` 并**重建预览面**
+  （风格是页面组装期输入，不是运行时改色）；打开项目时自动 `readStyle`
+  （缺失回内置默认，坏包不拦打开但记失败行）；`list()` 元数据带 `styleId`。
+  **仍未施工**：TTS、导出（导出按既有裁决保持屏蔽）。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
   成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
 - **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，

@@ -9,6 +9,8 @@
 /// 本层纯 Dart：播放页组装在 `video_short_player.dart`，应用在工作台是后续。
 library;
 
+import 'video_screenplay.dart' show videoVfxCueAllowlist;
+
 /// 风格包 schema 标识（强制）。
 const String videoStylePackSchema = 'nan.style_pack/1';
 
@@ -321,4 +323,67 @@ double _luma(int rgb) {
   final double g = ((rgb >> 8) & 0xff) / 255.0;
   final double b = (rgb & 0xff) / 255.0;
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/// 内置风格预设（id → 原始 JSON）。都过同一套硬门；新增预设必须能通过
+/// `verifyVideoStylePack`（守卫测试会逐个校验）。
+const Map<String, Map<String, Object?>> videoStylePackPresets =
+    <String, Map<String, Object?>>{
+      'default_dark': <String, Object?>{
+        'schema': 'nan.style_pack/1',
+        'id': 'default_dark',
+        'palette': <String, Object?>{
+          'background': '#06080c',
+          'band': '#141a24',
+          'accent': '#7ad7ff',
+          'text': '#ffffff',
+        },
+        'typography': <String, Object?>{'caption': 'md'},
+        'motion': <String, Object?>{'progress': 'linear'},
+      },
+      'warm_amber': <String, Object?>{
+        'schema': 'nan.style_pack/1',
+        'id': 'warm_amber',
+        'palette': <String, Object?>{
+          'background': '#100c08',
+          'band': '#241a10',
+          'accent': '#ffaa33',
+          'text': '#fff4e0',
+        },
+        'typography': <String, Object?>{'caption': 'lg'},
+        'motion': <String, Object?>{'progress': 'ease_out'},
+      },
+      'cool_blue': <String, Object?>{
+        'schema': 'nan.style_pack/1',
+        'id': 'cool_blue',
+        'palette': <String, Object?>{
+          'background': '#080c14',
+          'band': '#101a2c',
+          'accent': '#4da3ff',
+          'text': '#e8f2ff',
+        },
+        'typography': <String, Object?>{'caption': 'sm'},
+        'motion': <String, Object?>{'progress': 'stepped'},
+      },
+    };
+
+/// 按 id 取内置预设（未知名返回 null，调用方显性处理，不猜）。
+VideoStylePack? videoStylePackPreset(String id) {
+  final Map<String, Object?>? raw = videoStylePackPresets[id];
+  if (raw == null) return null;
+  final VideoStylePackVerification verified = verifyVideoStylePack(
+    raw,
+    globalVfxAllowlist: videoVfxCueAllowlist,
+  );
+  return verified.verified ? verified.stylePack : null;
+}
+
+/// 内置预设的显示名（UI 用；不在表里就回 id）。
+String videoStylePackLabel(String id) {
+  return switch (id) {
+    'default_dark' => '默认暗色',
+    'warm_amber' => '暖琥珀',
+    'cool_blue' => '冷蓝',
+    _ => id,
+  };
 }

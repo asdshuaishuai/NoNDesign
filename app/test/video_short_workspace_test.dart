@@ -15,6 +15,7 @@ import 'dart:typed_data';
 import 'package:nondesign/core/video/video_short_evidence.dart';
 import 'package:nondesign/core/video/video_screenplay.dart';
 import 'package:nondesign/core/video/video_short_project.dart';
+import 'package:nondesign/core/video/video_style_pack.dart';
 import 'package:nondesign/core/video_project.dart';
 import 'package:nondesign/widgets/video_short_preview_surface.dart';
 import 'package:nondesign/widgets/video_workspace.dart';
@@ -101,6 +102,9 @@ class _FakeShortPreview extends VideoShortPreviewController {
   @override
   String get vfxRenderer => 'pixelfx_pixels';
 
+  /// 创建时收到的风格包（null = 内置默认）。
+  VideoStylePack? appliedStyle;
+
   @override
   Future<void> start() async {
     _ready = true;
@@ -181,7 +185,9 @@ void main() {
     );
     await shortStore.save('short', _screenplayMap());
 
-    final _FakeShortPreview fake = _FakeShortPreview();
+    // 工厂每次返回**新**控制器（生产也是每次重建）；记录最新一个用于断言。
+    final List<_FakeShortPreview> created = <_FakeShortPreview>[];
+    _FakeShortPreview latest() => created.last;
     final AppStore appStore = _store();
     await tester.pumpWidget(
       ChangeNotifierProvider<AppStore>.value(
@@ -190,7 +196,13 @@ void main() {
           VideoWorkspace(
             projectStore: projectStore,
             shortProjectStore: shortStore,
-            shortPreviewFactory: (VideoScreenplay _) => fake,
+            shortPreviewFactory:
+                (VideoScreenplay _, VideoStylePack? style) {
+                  final _FakeShortPreview next = _FakeShortPreview()
+                    ..appliedStyle = style;
+                  created.add(next);
+                  return next;
+                },
           ),
         ),
       ),
@@ -217,14 +229,28 @@ void main() {
       find.byKey(const ValueKey('video-short-preview-surface')),
       findsOneWidget,
     );
-    expect(fake.ready, isTrue, reason: '打开后没有 start 预览控制器');
+    expect(latest().ready, isTrue, reason: '打开后没有 start 预览控制器');
+    expect(latest().appliedStyle, isNull, reason: '项目没有 style.json 时应回内置默认');
+
+    // 切风格：选「暖琥珀」→ 存进项目 style.json → 重建预览面（带新风格）。
+    await tester.tap(find.byKey(const ValueKey('video-short-style')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('暖琥珀'));
+    await tester.pumpAndSettle();
+    await _settleIo(tester);
+    expect(latest().appliedStyle?.id, 'warm_amber', reason: '风格没有传到预览面');
+    final File styleFile = File(
+      '${temp.path}/short/short/${VideoShortProjectStore.styleFile}',
+    );
+    expect(styleFile.existsSync(), isTrue, reason: '风格包没有落盘');
+    expect(styleFile.readAsStringSync(), contains('"id": "warm_amber"'));
 
     // 抓帧注册链：workbench 打开短片后，AppStore 的抓帧入口必须落到这个预览面；
     // 别的项目名必须显性失败（不许拿当前项目冒充取证源）。
     final List<VideoShortFrameEvidence> captured = await appStore
         .captureVideoShortFrames('short', <int>[0]);
     expect(captured.single.frame, 0);
-    expect(fake.capturedFrames, <int>[0]);
+    expect(latest().capturedFrames, <int>[0]);
     expect(
       () => appStore.captureVideoShortFrames('other', <int>[0]),
       throwsA(
@@ -238,6 +264,8 @@ void main() {
 
     // 关闭：回到空态入口。
     await tester.tap(find.byKey(const ValueKey('video-short-close')));
+    await tester.pumpAndSettle();
+    await _settleIo(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('video-short-authoring')), findsNothing);
     expect(

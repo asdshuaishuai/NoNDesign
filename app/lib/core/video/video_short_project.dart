@@ -19,6 +19,7 @@ import '../app_paths.dart';
 import '../creative/creative_schema.dart';
 import 'video_screenplay.dart';
 import 'video_short_evidence.dart';
+import 'video_style_pack.dart';
 
 /// 项目名不可用 / 不存在 / 内容损坏时的统一异常。
 final class VideoShortProjectFailure implements Exception {
@@ -43,6 +44,7 @@ final class VideoShortProjectEntry {
     required this.corrupt,
     this.width = 0,
     this.height = 0,
+    this.styleId = '',
   });
 
   final String name;
@@ -53,6 +55,9 @@ final class VideoShortProjectEntry {
   final int width;
   final int height;
 
+  /// 项目风格包 id（空串 = 没设，用内置默认）。
+  final String styleId;
+
   Map<String, Object?> toJson() => <String, Object?>{
     'name': name,
     'shots': shots,
@@ -61,6 +66,7 @@ final class VideoShortProjectEntry {
     if (corrupt) 'corrupt': true,
     'width': width,
     'height': height,
+    if (styleId.isNotEmpty) 'style': styleId,
   };
 }
 
@@ -142,6 +148,9 @@ class VideoShortProjectStore {
   /// 事实源文件名。
   static const String screenplayFile = 'screenplay.json';
 
+  /// 风格包文件名（可选派生配置；缺失 = 用内置默认风格）。
+  static const String styleFile = 'style.json';
+
   /// 派生内容目录（帧证据）；**agent 只读**，事实源是 screenplay.json。
   static const String artifactsDir = 'artifacts';
 
@@ -217,6 +226,17 @@ class VideoShortProjectStore {
     }
     final VideoScreenplayVerification verification = verifyVideoScreenplay(raw);
     final VideoScreenplay? screenplay = verification.screenplay;
+    final Map<String, Object?>? styleRaw = _decodeObject(
+      File('${dir.path}/$styleFile'),
+    );
+    String styleId = '';
+    if (styleRaw != null) {
+      final VideoStylePackVerification style = verifyVideoStylePack(
+        styleRaw,
+        globalVfxAllowlist: videoVfxCueAllowlist,
+      );
+      if (style.verified) styleId = style.stylePack!.id;
+    }
     return VideoShortProjectEntry(
       name: name,
       shots: screenplay?.shots.length ?? 0,
@@ -225,6 +245,7 @@ class VideoShortProjectStore {
       corrupt: false,
       width: screenplay?.width ?? 0,
       height: screenplay?.height ?? 0,
+      styleId: styleId,
     );
   }
 
@@ -272,6 +293,49 @@ class VideoShortProjectStore {
       throw VideoShortProjectFailure('io_error', '$error');
     }
     return verification;
+  }
+
+  /// 读项目风格包；文件缺失 = 返回 null（用内置默认，不算错）。
+  Future<VideoStylePack?> readStyle(String name) async {
+    final Directory base = await resolveRoot();
+    final Directory dir = _projectDir(base, name);
+    if (!dir.existsSync()) throw VideoShortProjectFailure('no_project', name);
+    final Map<String, Object?>? raw = _decodeObject(
+      File('${dir.path}/$styleFile'),
+    );
+    if (raw == null) return null;
+    final VideoStylePackVerification verified = verifyVideoStylePack(
+      raw,
+      globalVfxAllowlist: videoVfxCueAllowlist,
+    );
+    if (!verified.verified) {
+      throw VideoShortProjectFailure('unverified', '$styleFile');
+    }
+    return verified.stylePack;
+  }
+
+  /// 写项目风格包：先校验（含 VFX 子集检查）再原子落盘；只写 style.json。
+  Future<VideoStylePackVerification> saveStyle(
+    String name,
+    Map<String, Object?> style,
+  ) async {
+    final VideoStylePackVerification verified = verifyVideoStylePack(
+      style,
+      globalVfxAllowlist: videoVfxCueAllowlist,
+    );
+    if (!verified.verified) return verified;
+    final Directory base = await resolveRoot();
+    final Directory dir = _projectDir(base, name);
+    if (!dir.existsSync()) throw VideoShortProjectFailure('no_project', name);
+    try {
+      _writeTextAtomically(
+        File('${dir.path}/$styleFile'),
+        _prettyJson(style),
+      );
+    } on FileSystemException catch (error) {
+      throw VideoShortProjectFailure('io_error', '$error');
+    }
+    return verified;
   }
 
   /// 写入一次帧证据（PNG 逐帧 + 确定性清单）。

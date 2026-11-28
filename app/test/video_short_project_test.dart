@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nondesign/core/video/video_screenplay.dart';
 import 'package:nondesign/core/video/video_short_evidence.dart';
 import 'package:nondesign/core/video/video_short_project.dart';
+import 'package:nondesign/core/video/video_style_pack.dart';
 
 Map<String, Object?> _screenplay({String cue = 'fire.campfire'}) =>
     <String, Object?>{
@@ -181,6 +182,59 @@ void main() {
         ),
       ),
     );
+  });
+
+  group('风格包读写（style.json）', () {
+    Map<String, Object?> style(String id) => <String, Object?>{
+      'schema': 'nan.style_pack/1',
+      'id': id,
+      'palette': <String, Object?>{
+        'background': '#101010',
+        'band': '#202020',
+        'accent': '#ff8800',
+        'text': '#ffffff',
+      },
+    };
+
+    test('没存过：readStyle 返回 null（用内置默认，不算错）', () async {
+      await store.save('short', _screenplay());
+      expect(await store.readStyle('short'), isNull);
+    });
+
+    test('存→读回环；列表带 styleId；只写 style.json', () async {
+      await store.save('short', _screenplay());
+      final VideoStylePackVerification saved = await store.saveStyle(
+        'short',
+        style('warm'),
+      );
+      expect(saved.verified, isTrue, reason: '${saved.toJson()}');
+      final VideoStylePack? read = await store.readStyle('short');
+      expect(read?.id, 'warm');
+      final List<VideoShortProjectEntry> entries = await store.list();
+      expect(entries.single.styleId, 'warm');
+      // 事实源不动。
+      final File screenplay = File(
+        '${root.path}/short/${VideoShortProjectStore.screenplayFile}',
+      );
+      expect(screenplay.readAsStringSync(), contains('"schema": "nan.screenplay/1"'));
+    });
+
+    test('非法风格包：不落盘', () async {
+      await store.save('short', _screenplay());
+      final Map<String, Object?> bad = style('bad');
+      (bad['palette'] as Map<String, Object?>)['accent'] = 'orange';
+      final VideoStylePackVerification saved = await store.saveStyle(
+        'short',
+        bad,
+      );
+      expect(saved.verified, isFalse);
+      expect(
+        File(
+          '${root.path}/short/${VideoShortProjectStore.styleFile}',
+        ).existsSync(),
+        isFalse,
+      );
+    });
   });
 
   group('帧证据落盘', () {

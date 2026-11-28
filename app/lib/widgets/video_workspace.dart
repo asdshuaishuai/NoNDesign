@@ -42,6 +42,7 @@ import '../core/toast_service.dart';
 import '../core/video_clip.dart';
 import '../core/video/video_screenplay.dart';
 import '../core/video/video_short_evidence.dart';
+import '../core/video/video_style_pack.dart';
 import '../core/video/video_short_project.dart';
 import '../core/video_project.dart';
 import '../core/video_service.dart';
@@ -92,7 +93,10 @@ class VideoWorkspace extends StatefulWidget {
   final VideoShortProjectStore? shortProjectStore;
 
   /// 测试注入：不构造真 WebView 的短片预览控制器工厂（生产为 null）。
-  final VideoShortPreviewController Function(VideoScreenplay screenplay)?
+  final VideoShortPreviewController Function(
+    VideoScreenplay screenplay,
+    VideoStylePack? style,
+  )?
   shortPreviewFactory;
 
   @override
@@ -135,6 +139,9 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   VideoShortPreviewController? _shortPreview;
   bool _shortBusy = false;
   String _shortFailure = '';
+
+  /// 当前短片风格包（null = 内置默认；存进项目 `style.json`）。
+  VideoStylePack? _shortStyle;
 
   /// 短片抓帧运行器（注册进 AppStore 供 `video_short_render_frames` 用）；
   /// 只对当前打开的项目有效，关闭/卸载即注销。
@@ -1377,16 +1384,77 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       });
       return;
     }
+    // 风格包：读不到/坏了不拦打开（回默认风格），但如实记进失败行。
+    VideoStylePack? style;
+    String styleNote = '';
+    try {
+      style = await _shortStore.readStyle(trimmed);
+    } on VideoShortProjectFailure catch (error) {
+      styleNote = '风格包不可用：${videoShortProjectFailureMessage(error.code)}';
+    }
+    if (!mounted) return;
     _shortPreview?.dispose();
     final VideoShortPreviewController preview =
-        widget.shortPreviewFactory?.call(screenplay) ??
-        VideoShortWebPreview(screenplay: screenplay);
+        widget.shortPreviewFactory?.call(screenplay, style) ??
+        VideoShortWebPreview(screenplay: screenplay, stylePack: style);
     setState(() {
       _shortSnapshot = snapshot;
       _shortPreview = preview;
       _shortBusy = false;
+      _shortStyle = style;
+      if (styleNote.isNotEmpty) _shortFailure = '';
     });
     _registerShortCapture(trimmed, preview);
+    unawaited(preview.start());
+  }
+
+  /// 切换短片风格包：存进项目 `style.json`，再用新风格重建预览面。
+  Future<void> _applyShortStyle(VideoStylePack? style) async {
+    final String? name = _shortProjectName;
+    final VideoShortProjectSnapshot? snapshot = _shortSnapshot;
+    if (name == null || snapshot == null || _shortBusy) return;
+    final VideoScreenplay? screenplay = snapshot.verification.screenplay;
+    if (screenplay == null) return;
+    setState(() => _shortBusy = true);
+    if (style != null) {
+      try {
+        final VideoStylePackVerification saved = await _shortStore.saveStyle(
+          name,
+          style.raw,
+        );
+        if (!saved.verified) {
+          if (!mounted) return;
+          setState(() {
+            _shortBusy = false;
+            _shortFailure = '风格包没有通过校验';
+          });
+          return;
+        }
+      } on VideoShortProjectFailure catch (error) {
+        if (!mounted) return;
+        setState(() {
+          _shortBusy = false;
+          _shortFailure = videoShortProjectFailureMessage(error.code);
+        });
+        return;
+      }
+    }
+    if (!mounted) return;
+    // 重建预览面：风格是页面组装期输入，改了必须重挂（不是运行时改色）。
+    _unregisterShortCapture();
+    final VideoShortPreviewController? previous = _shortPreview;
+    _shortPreview = null;
+    previous?.dispose();
+    final VideoShortPreviewController preview =
+        widget.shortPreviewFactory?.call(screenplay, style) ??
+        VideoShortWebPreview(screenplay: screenplay, stylePack: style);
+    setState(() {
+      _shortStyle = style;
+      _shortPreview = preview;
+      _shortBusy = false;
+      _shortFailure = '';
+    });
+    _registerShortCapture(name, preview);
     unawaited(preview.start());
   }
 
@@ -1395,13 +1463,17 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     _unregisterShortCapture();
     final VideoShortPreviewController? preview = _shortPreview;
     _shortPreview = null;
+    // 先清状态再释放控制器：dispose 会触发监听者重建，若先 dispose 后 setState，
+    // 期间任何异常都会把「回到 v1 呈现面」这一步吞掉（真机/测试都出现过）。
+    if (mounted) {
+      setState(() {
+        _shortProjectName = null;
+        _shortSnapshot = null;
+        _shortStyle = null;
+        _shortFailure = '';
+      });
+    }
     preview?.dispose();
-    if (!mounted) return;
-    setState(() {
-      _shortProjectName = null;
-      _shortSnapshot = null;
-      _shortFailure = '';
-    });
   }
 
   /// 选一个引擎短片项目打开（列不出来的坏项目如实标出、不静默隐藏）。
@@ -1492,15 +1564,76 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
                   '${_shortSnapshot!.screenplay!.totalFrames} 帧',
                   style: TextStyle(fontSize: NonType.micro, color: p.ink4),
                 ),
-              TextButton(
+              // 风格包选择（内置预设）：改了就存进项目并重建预览面。
+              PopupMenuButton<String>(
+                key: const ValueKey('video-short-style'),
+                tooltip: '风格包',
+                initialValue: _shortStyle?.id ?? 'default_dark',
+                onSelected: (String id) {
+                  unawaited(_applyShortStyle(videoStylePackPreset(id)));
+                },
+                itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                  for (final String id in videoStylePackPresets.keys)
+                    PopupMenuItem<String>(
+                      value: id,
+                      height: 38,
+                      child: Text(
+                        videoStylePackLabel(id),
+                        style: TextStyle(
+                          fontSize: NonType.body,
+                          color: p.ink2,
+                        ),
+                      ),
+                    ),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: NonSpace.sm,
+                    vertical: NonSpace.xxs,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Icon(Icons.palette_outlined, size: 14, color: p.ink3),
+                      const SizedBox(width: NonSpace.xxs),
+                      Text(
+                        videoStylePackLabel(
+                          _shortStyle?.id ?? 'default_dark',
+                        ),
+                        style: TextStyle(
+                          fontSize: NonType.caption,
+                          color: p.ink2,
+                        ),
+                      ),
+                      Icon(Icons.arrow_drop_down, size: 16, color: p.ink4),
+                    ],
+                  ),
+                ),
+              ),
+              // 紧凑图标按钮：窄屏工具条也要放得下（文字按钮会溢出把按钮挤出屏幕）。
+              IconButton(
                 key: const ValueKey('video-short-open-another'),
                 onPressed: () => _pickShortProject(context),
-                child: const Text('换一个'),
+                tooltip: '换一个',
+                iconSize: 16,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(
+                  minWidth: 30,
+                  minHeight: 30,
+                ),
+                icon: const Icon(Icons.swap_horiz),
               ),
-              TextButton(
+              IconButton(
                 key: const ValueKey('video-short-close'),
                 onPressed: _closeShortProject,
-                child: const Text('关闭'),
+                tooltip: '关闭',
+                iconSize: 16,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(
+                  minWidth: 30,
+                  minHeight: 30,
+                ),
+                icon: const Icon(Icons.close),
               ),
             ],
           ),
