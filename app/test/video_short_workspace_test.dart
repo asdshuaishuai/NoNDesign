@@ -9,6 +9,10 @@ import 'package:nondesign/core/models.dart';
 import 'package:nondesign/core/store.dart';
 import 'package:nondesign/core/theme.dart';
 import 'package:nondesign/core/toast_service.dart';
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:nondesign/core/video/video_short_evidence.dart';
 import 'package:nondesign/core/video/video_screenplay.dart';
 import 'package:nondesign/core/video/video_short_project.dart';
 import 'package:nondesign/core/video_project.dart';
@@ -130,6 +134,27 @@ class _FakeShortPreview extends VideoShortPreviewController {
     _frame = frame.clamp(0, 59);
     notifyListeners();
   }
+
+  /// 抓帧：返回合法 1×1 PNG（测试证明注册链把命令送到了预览面）。
+  final List<int> capturedFrames = <int>[];
+
+  @override
+  Future<List<VideoShortFrameEvidence>> captureFrames(List<int> frames) async {
+    capturedFrames.addAll(frames);
+    final Uint8List png = base64Decode(
+      'iVBORw0KGgpJSERSAAAADQAAAAEAAAABCAIAAACQd1PeSURBVAAAAAx4nGNgYGAAAAAEAAH2FzhV'
+      'SUVORAAAAACuQmCC',
+    );
+    return <VideoShortFrameEvidence>[
+      for (final int frame in frames)
+        VideoShortFrameEvidence(
+          frame: frame,
+          bytes: png,
+          renderer: 'phaser4_canvas',
+          vfx: 'pixelfx_pixels',
+        ),
+    ];
+  }
 }
 
 void main() {
@@ -194,6 +219,23 @@ void main() {
     );
     expect(fake.ready, isTrue, reason: '打开后没有 start 预览控制器');
 
+    // 抓帧注册链：workbench 打开短片后，AppStore 的抓帧入口必须落到这个预览面；
+    // 别的项目名必须显性失败（不许拿当前项目冒充取证源）。
+    final List<VideoShortFrameEvidence> captured = await appStore
+        .captureVideoShortFrames('short', <int>[0]);
+    expect(captured.single.frame, 0);
+    expect(fake.capturedFrames, <int>[0]);
+    expect(
+      () => appStore.captureVideoShortFrames('other', <int>[0]),
+      throwsA(
+        isA<VideoShortEvidenceError>().having(
+          (VideoShortEvidenceError e) => e.code,
+          'code',
+          videoShortCaptureUnavailableCode,
+        ),
+      ),
+    );
+
     // 关闭：回到空态入口。
     await tester.tap(find.byKey(const ValueKey('video-short-close')));
     await tester.pumpAndSettle();
@@ -201,6 +243,17 @@ void main() {
     expect(
       find.byKey(const ValueKey('video-more-menu')),
       findsOneWidget,
+    );
+    // 关闭后运行器必须注销（否则工具会抓着已释放的预览面）。
+    expect(
+      () => appStore.captureVideoShortFrames('short', <int>[0]),
+      throwsA(
+        isA<VideoShortEvidenceError>().having(
+          (VideoShortEvidenceError e) => e.code,
+          'code',
+          videoShortCaptureUnavailableCode,
+        ),
+      ),
     );
     expect(tester.takeException(), isNull);
   });

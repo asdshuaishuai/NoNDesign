@@ -36,9 +36,11 @@ import 'package:nondesign/core/video3d/video3d_player.dart';
 import 'package:nondesign/core/video3d/video3d_project.dart';
 import 'package:nondesign/core/three_service.dart';
 import 'package:nondesign/core/video/video_screenplay.dart';
+import 'package:nondesign/core/video/video_short_evidence.dart';
 import 'package:nondesign/core/video/video_short_player.dart';
 import 'package:nondesign/widgets/music_playback_surface.dart';
 import 'package:nondesign/widgets/video3d_preview_surface.dart';
+import 'package:nondesign/widgets/video_short_preview_surface.dart';
 
 /// 24 帧的总片长（4×1 秒）。
 MusicScore _score() => MusicScore(
@@ -164,6 +166,14 @@ class _Bridge {
 
   List<Map<String, dynamic>> ofKind(String kind) =>
       messages.where((m) => m['kind'] == kind).toList();
+}
+
+bool _bytesEqual(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (int i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
 
 Future<WebViewController> _mount(
@@ -634,6 +644,95 @@ export default function build(THREE, scene, camera, controls, renderer) {
     expect(shot.renderer, preview.renderer, reason: '证据渲染器必须与 ready 一致');
     expect(shot.byteLength, greaterThan(0), reason: '抓到的 PNG 不能是空文件');
     expect(shot.bytes[0], 0x89, reason: '抓帧结果必须是 PNG（魔数）');
+  });
+
+  testWidgets('引擎短片预览面：真 WebView 就绪 + seekFrame + 真像素抓帧（特效/确定性）', (
+    tester,
+  ) async {
+    final VideoScreenplayVerification verified = verifyVideoScreenplay(
+      <String, Object?>{
+        'schema': 'nan.screenplay/1',
+        'width': 320,
+        'height': 180,
+        'shots': <Object?>[
+          <String, Object?>{
+            'id': 's1',
+            'start': 0.0,
+            'duration': 2.0,
+            'events': <Object?>[
+              <String, Object?>{
+                'f': 15,
+                'type': 'vfx',
+                'cue': 'fire.campfire',
+                'x': 0,
+                'y': 0,
+              },
+            ],
+          },
+        ],
+      },
+    );
+    expect(verified.verified, isTrue, reason: '${verified.toJson()}');
+
+    final VideoShortWebPreview preview = VideoShortWebPreview(
+      screenplay: verified.screenplay!,
+    );
+    addTearDown(preview.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 640,
+            height: 480,
+            child: VideoShortPreviewSurface(preview: preview),
+          ),
+        ),
+      ),
+    );
+    await preview.start();
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
+    while (DateTime.now().isBefore(deadline) && !preview.ready) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await tester.pump();
+    }
+    // ignore: avoid_print
+    print(
+      '[webview-short-surface] ready=${preview.ready} '
+      'renderer=${preview.renderer} vfx=${preview.vfxRenderer} '
+      'total=${preview.totalFrames} error=${preview.loadError}',
+    );
+    expect(
+      preview.ready,
+      isTrue,
+      reason: '短片预览面没就绪：${preview.loadError} / ${preview.technicalDetail}',
+    );
+    expect(preview.renderer, videoShortRenderer);
+    expect(preview.vfxRenderer, videoShortVfxPixelRenderer);
+    expect(preview.totalFrames, 60);
+
+    await preview.seekFrame(20);
+    expect(preview.frame, 20, reason: 'seekFrame(20) 后帧号未同步');
+
+    // 真像素抓帧：f=20（特效已推进）与 f=14（未触发）字节必须不同；
+    // 同一帧抓两次必须字节完全一致（确定性）。
+    final VideoShortFrameEvidence withVfx = await preview.captureFrame(20);
+    final VideoShortFrameEvidence replay = await preview.captureFrame(20);
+    final VideoShortFrameEvidence before = await preview.captureFrame(14);
+    // ignore: avoid_print
+    print(
+      '[webview-short-surface] evidence f20=${withVfx.byteLength}B '
+      'f14=${before.byteLength}B equal=${_bytesEqual(withVfx.bytes, replay.bytes)}',
+    );
+    expect(withVfx.frame, 20);
+    expect(withVfx.renderer, videoShortRenderer);
+    expect(withVfx.vfx, videoShortVfxPixelRenderer);
+    expect(withVfx.bytes[0], 0x89, reason: '抓帧结果必须是 PNG（魔数）');
+    expect(replay.bytes, withVfx.bytes, reason: '同一帧两次抓取不一致（非确定性）');
+    expect(
+      _bytesEqual(before.bytes, withVfx.bytes),
+      isFalse,
+      reason: 'f14 与 f20 抓帧字节相同（特效没画出来）',
+    );
   });
 
   testWidgets('Babylon 共同托底：three 缺失时真机用 babylon 渲染 + 可抓帧', (

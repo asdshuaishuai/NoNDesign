@@ -406,8 +406,18 @@ node scripts/engine_web_probe.mjs     # classic wasm JS 宿主契约（与 WebVi
   都有；打开后**呈现效果栏目整体换成** `VideoShortPreviewSurface`（项目名 +
   分辨率·帧数 + 换一个/关闭），关闭回落 v1 呈现面。与 v1 生成项目**互斥**
   （短片段打开时不构建 v1 导演台）。坏项目在对话框里灰显不可点、不静默隐藏。
-  **仍未施工**：`video_short_render_frames` 抓帧工具、风格包
-  （palette/type/motion）、TTS、导出。
+  **抓帧证据已落地（2026-11-28）**：页面命令面新增 `capture(frame)`（渲染目标帧 →
+  **像素画布**同步 `toDataURL`，不从 Phaser 合成画布截屏冒充）→ 桥第 5 类消息
+  `evidence`；`app/lib/core/video/video_short_evidence.dart` 做 PNG 魔数/单帧 8 MiB/
+  ≤120 帧/64 MiB 校验；`VideoShortProjectStore.writeRenders` 只写
+  `artifacts/renders/frame-NNNN.png` + 确定性 `renders.json`（**screenplay.json
+  逐字节不变**）；工具 `video_short_render_frames` 只在工作台打开短片时可用
+  （工作台把运行器注册进 `AppStore`，关闭/卸载即注销；没注册 = 显性失败），
+  越界帧拒绝、重复帧折叠。
+  真机实测：`ready=true renderer=phaser4_canvas vfx=pixelfx_pixels total=60`；
+  `evidence f20=12518B f14=739B`（有特效帧与无特效帧字节差异巨大）且同帧重抓
+  **字节完全一致**（确定性）。
+  **仍未施工**：风格包（palette/type/motion）、TTS、导出。
 - **终态诚实**：`done.stopReason == 'text_only'`（模型只回文字、零操作）不算
   成功——不做假「已更新」；failed/done 到达即收进度卡与在途工具行，不留转圈。
 - **卡死锁自愈**：`agentBusy` 超过 35 分钟自动解锁（`_clearStaleAgentLock`，

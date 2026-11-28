@@ -39,6 +39,8 @@ const List<String> videoShortBridgeMessages = <String>[
   'frame',
   'ended',
   'error',
+  // 抓帧回执：只在宿主显式调 `capture(frame)` 时出现（单帧 PNG data URL）。
+  'evidence',
 ];
 
 /// 页面侧命令面对象名。
@@ -458,6 +460,36 @@ const String _playerTemplate = '''
     return target;
   }
 
+  // —— 帧证据：渲染目标帧 → 从像素画布导出 PNG → 桥回传 ——
+  // 只从像素画布导出（同步、确定）；没有 pixelfx 像素面时如实报错，
+  // 不去截 Phaser 的合成画布冒充「帧证据」。
+  function captureFrame(frame) {
+    if (!pxCanvas || !pxCtx) {
+      post('error', { message: 'evidence_unavailable: 没有像素渲染面' });
+      return false;
+    }
+    var target = clampFrame(frame);
+    renderFrame(target);
+    var dataUrl = '';
+    try {
+      dataUrl = String(pxCanvas.toDataURL('image/png'));
+    } catch (err) {
+      post('error', { message: 'evidence_failed: ' + String(err) });
+      return false;
+    }
+    if (dataUrl.indexOf('data:image/png') !== 0) {
+      post('error', { message: 'evidence_empty' });
+      return false;
+    }
+    post('evidence', {
+      frame: target,
+      renderer: RENDERER,
+      vfx: VFX_RENDERER,
+      data_url: dataUrl
+    });
+    return true;
+  }
+
   window[CONTROLLER] = {
     state: function () { return playing ? 'playing' : 'idle'; },
     frame: function () { return currentFrame; },
@@ -469,7 +501,8 @@ const String _playerTemplate = '''
     pause: function () { pause(); return true; },
     stop: function () { stopPlayback(); return true; },
     seekFrame: function (frame) { return seekFrame(frame); },
-    renderFrame: function (frame) { renderFrame(frame); return true; }
+    renderFrame: function (frame) { renderFrame(frame); return true; },
+    capture: captureFrame
   };
 
   try {

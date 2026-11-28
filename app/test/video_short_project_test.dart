@@ -1,9 +1,11 @@
 // 引擎短片项目存储：先校验后落盘 / 拒绝同名覆盖 / 坏项目隔离 / 原子写。
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nondesign/core/video/video_screenplay.dart';
+import 'package:nondesign/core/video/video_short_evidence.dart';
 import 'package:nondesign/core/video/video_short_project.dart';
 
 Map<String, Object?> _screenplay({String cue = 'fire.campfire'}) =>
@@ -179,6 +181,103 @@ void main() {
         ),
       ),
     );
+  });
+
+  group('帧证据落盘', () {
+    const String pngBase64 =
+        'iVBORw0KGgpJSERSAAAADQAAAAEAAAABCAIAAACQd1PeSURBVAAAAAx4nGNgYGAAAAAEAAH2FzhV'
+        'SUVORAAAAACuQmCC';
+
+    List<VideoShortFrameEvidence> evidenceAt(List<int> frames) => <VideoShortFrameEvidence>[
+      for (final int frame in frames)
+        VideoShortFrameEvidence(
+          frame: frame,
+          bytes: base64Decode(pngBase64),
+          renderer: 'phaser4_canvas',
+          vfx: 'pixelfx_pixels',
+        ),
+    ];
+
+    test('PNG + 确定性清单；事实源逐字节不变；无临时残留', () async {
+      await store.save('short', _screenplay());
+      final File screenplay = File(
+        '${root.path}/short/${VideoShortProjectStore.screenplayFile}',
+      );
+      final String before = screenplay.readAsStringSync();
+
+      final VideoShortRendersManifest manifest = await store.writeRenders(
+        'short',
+        evidenceAt(<int>[20, 0]),
+      );
+      expect(manifest.count, 2);
+      expect(manifest.renderer, 'phaser4_canvas');
+      expect(manifest.vfx, 'pixelfx_pixels');
+      expect(manifest.totalBytes, 138);
+      // 升序 + 补零文件名。
+      expect(manifest.frames.map((e) => e.file).toList(), <String>[
+        'frame-0000.png',
+        'frame-0020.png',
+      ]);
+      final File png = File(
+        '${root.path}/short/artifacts/renders/frame-0020.png',
+      );
+      expect(png.readAsBytesSync(), base64Decode(pngBase64));
+      final String manifestText = File(
+        '${root.path}/short/artifacts/renders/renders.json',
+      ).readAsStringSync();
+      expect(manifestText, contains('"schema": "nan.video_short.renders/1"'));
+      expect(manifestText, contains('"count": 2'));
+      // 不写时间戳（确定性字节）。
+      expect(RegExp(r'\d{4}-\d{2}-\d{2}T').hasMatch(manifestText), isFalse);
+      // 事实源不动。
+      expect(screenplay.readAsStringSync(), before);
+      // 无临时残留。
+      final List<String> leftovers = Directory('${root.path}/short')
+          .listSync(recursive: true)
+          .whereType<File>()
+          .map((File f) => f.path)
+          .where((String path) => path.endsWith('.tmp'))
+          .toList();
+      expect(leftovers, isEmpty);
+    });
+
+    test('同帧重复 / 渲染面混用：拒绝且不写文件', () async {
+      await store.save('short', _screenplay());
+      await expectLater(
+        store.writeRenders('short', evidenceAt(<int>[1, 1])),
+        throwsA(isA<VideoShortEvidenceError>()),
+      );
+      await expectLater(
+        store.writeRenders('short', <VideoShortFrameEvidence>[
+          evidenceAt(<int>[1]).first,
+          VideoShortFrameEvidence(
+            frame: 2,
+            bytes: base64Decode(pngBase64),
+            renderer: 'phaser4_canvas',
+            vfx: 'placeholder_markers',
+          ),
+        ]),
+        throwsA(isA<VideoShortEvidenceError>()),
+      );
+      expect(
+        Directory('${root.path}/short/artifacts').existsSync(),
+        isFalse,
+        reason: '校验失败不应留下 artifacts 目录',
+      );
+    });
+
+    test('项目不存在：no_project', () async {
+      await expectLater(
+        store.writeRenders('nope', evidenceAt(<int>[0])),
+        throwsA(
+          isA<VideoShortProjectFailure>().having(
+            (VideoShortProjectFailure e) => e.code,
+            'code',
+            'no_project',
+          ),
+        ),
+      );
+    });
   });
 
   test('删除：递归删掉；不存在 = no_project', () async {

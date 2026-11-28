@@ -18,6 +18,7 @@ import 'dart:io';
 import '../app_paths.dart';
 import '../creative/creative_schema.dart';
 import 'video_screenplay.dart';
+import 'video_short_evidence.dart';
 
 /// 项目名不可用 / 不存在 / 内容损坏时的统一异常。
 final class VideoShortProjectFailure implements Exception {
@@ -78,6 +79,56 @@ final class VideoShortProjectSnapshot {
   VideoScreenplay? get screenplay => verification.screenplay;
 }
 
+/// 清单里的一帧。
+final class VideoShortRenderEntry {
+  const VideoShortRenderEntry({
+    required this.frame,
+    required this.file,
+    required this.bytes,
+  });
+
+  final int frame;
+  final String file;
+  final int bytes;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'frame': frame,
+    'file': file,
+    'bytes': bytes,
+  };
+}
+
+/// 一次取证的清单（`artifacts/renders/renders.json`）。
+final class VideoShortRendersManifest {
+  const VideoShortRendersManifest({
+    required this.renderer,
+    required this.vfx,
+    required this.frames,
+    required this.totalBytes,
+  });
+
+  final String renderer;
+  final String vfx;
+  final List<VideoShortRenderEntry> frames;
+  final int totalBytes;
+
+  int get count => frames.length;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'schema': videoShortRendersSchema,
+    'renderer': renderer,
+    'vfx': vfx,
+    'count': frames.length,
+    'frames': <Object?>[
+      for (final VideoShortRenderEntry entry in frames) entry.toJson(),
+    ],
+    'total_bytes': totalBytes,
+  };
+}
+
+/// 帧证据清单 schema。
+const String videoShortRendersSchema = 'nan.video_short.renders/1';
+
 /// 引擎短片项目库。
 class VideoShortProjectStore {
   /// [root] 显式给定时不碰平台目录（测试/嵌入式宿主）。
@@ -90,6 +141,15 @@ class VideoShortProjectStore {
 
   /// 事实源文件名。
   static const String screenplayFile = 'screenplay.json';
+
+  /// 派生内容目录（帧证据）；**agent 只读**，事实源是 screenplay.json。
+  static const String artifactsDir = 'artifacts';
+
+  /// 帧证据目录（相对项目根）。
+  static const String rendersDir = 'artifacts/renders';
+
+  /// 帧证据清单（相对项目根；确定性字节，不含时间戳）。
+  static const String rendersManifestFile = 'artifacts/renders/renders.json';
 
   /// 解析项目根目录（`<用户项目根>/portfolio/video_short`），必要时创建。
   Future<Directory> resolveRoot() async {
@@ -214,6 +274,102 @@ class VideoShortProjectStore {
     return verification;
   }
 
+  /// 写入一次帧证据（PNG 逐帧 + 确定性清单）。
+  ///
+  /// 纪律（与 3D 视频 `writeRenders` 同族）：
+  ///  * 路径只由帧号派生（`artifacts/renders/frame-NNNN.png`），无路径穿越面；
+  ///  * 每个文件临时写 + flush + 原子改名；清单同样；
+  ///  * 帧号去重后升序，清单字节确定（无时间戳/随机数）；
+  ///  * 帧数/单帧/总量超限或渲染面混用 → 抛 [VideoShortEvidenceError]；
+  ///  * **只动 `artifacts/`，`screenplay.json` 逐字节不变**。
+  Future<VideoShortRendersManifest> writeRenders(
+    String name,
+    List<VideoShortFrameEvidence> frames,
+  ) async {
+    if (frames.isEmpty) {
+      throw const VideoShortEvidenceError(
+        videoShortEvidenceEmptyCode,
+        '没有可写入的帧证据',
+      );
+    }
+    final Directory base = await resolveRoot();
+    final Directory dir = _projectDir(base, name);
+    if (!dir.existsSync()) throw VideoShortProjectFailure('no_project', name);
+
+    final Map<int, VideoShortFrameEvidence> unique =
+        <int, VideoShortFrameEvidence>{};
+    for (final VideoShortFrameEvidence evidence in frames) {
+      if (unique.containsKey(evidence.frame)) {
+        throw VideoShortEvidenceError(
+          videoShortEvidenceFormatCode,
+          '同一帧出现了两次',
+          'frame=${evidence.frame}',
+        );
+      }
+      unique[evidence.frame] = evidence;
+    }
+    final List<VideoShortFrameEvidence> ordered = unique.values.toList()
+      ..sort(
+        (VideoShortFrameEvidence a, VideoShortFrameEvidence b) =>
+            a.frame.compareTo(b.frame),
+      );
+    checkVideoShortEvidenceBudget(ordered);
+
+    final String renderer = ordered.first.renderer;
+    final String vfx = ordered.first.vfx;
+    for (final VideoShortFrameEvidence evidence in ordered) {
+      if (evidence.renderer != renderer || evidence.vfx != vfx) {
+        throw const VideoShortEvidenceError(
+          videoShortEvidenceFormatCode,
+          '这一批证据来自不同渲染面，不能混写',
+        );
+      }
+    }
+
+    final Directory renders = Directory('${dir.path}/$rendersDir');
+    try {
+      if (!renders.existsSync()) renders.createSync(recursive: true);
+    } on FileSystemException catch (error) {
+      throw VideoShortProjectFailure('io_error', '$error');
+    }
+
+    final List<VideoShortRenderEntry> entries = <VideoShortRenderEntry>[];
+    int totalBytes = 0;
+    for (final VideoShortFrameEvidence evidence in ordered) {
+      final VideoShortRenderEntry entry = VideoShortRenderEntry(
+        frame: evidence.frame,
+        file: 'frame-${evidence.frame.toString().padLeft(4, '0')}.png',
+        bytes: evidence.byteLength,
+      );
+      try {
+        _writeBytesAtomically(
+          File('${renders.path}/${entry.file}'),
+          evidence.bytes,
+        );
+      } on FileSystemException catch (error) {
+        throw VideoShortProjectFailure('io_error', '$error');
+      }
+      entries.add(entry);
+      totalBytes += entry.bytes;
+    }
+
+    final VideoShortRendersManifest manifest = VideoShortRendersManifest(
+      renderer: renderer,
+      vfx: vfx,
+      frames: entries,
+      totalBytes: totalBytes,
+    );
+    try {
+      _writeTextAtomically(
+        File('${dir.path}/$rendersManifestFile'),
+        _prettyJson(manifest.toJson()),
+      );
+    } on FileSystemException catch (error) {
+      throw VideoShortProjectFailure('io_error', '$error');
+    }
+    return manifest;
+  }
+
   /// 删除项目（递归）；不存在 = `no_project`。
   Future<void> delete(String name) async {
     final Directory base = await resolveRoot();
@@ -230,6 +386,56 @@ class VideoShortProjectStore {
 
   /// 原子写：临时文件 + flush + rename（失败重试一次先删目标）。
   void _writeAtomically(File target, String text) {
+    final String stamp = DateTime.now().microsecondsSinceEpoch.toString();
+    final File tmp = File('${target.path}.$stamp.tmp');
+    try {
+      final RandomAccessFile handle = tmp.openSync(mode: FileMode.writeOnly);
+      try {
+        handle.writeStringSync(text);
+        handle.flushSync();
+      } finally {
+        handle.closeSync();
+      }
+      try {
+        tmp.renameSync(target.path);
+      } on FileSystemException {
+        if (target.existsSync()) target.deleteSync();
+        tmp.renameSync(target.path);
+      }
+    } finally {
+      try {
+        if (tmp.existsSync()) tmp.deleteSync();
+      } catch (_) {}
+    }
+  }
+
+  /// 字节内容原子写（帧证据用）。
+  void _writeBytesAtomically(File target, List<int> bytes) {
+    final String stamp = DateTime.now().microsecondsSinceEpoch.toString();
+    final File tmp = File('${target.path}.$stamp.tmp');
+    try {
+      final RandomAccessFile handle = tmp.openSync(mode: FileMode.writeOnly);
+      try {
+        handle.writeFromSync(bytes);
+        handle.flushSync();
+      } finally {
+        handle.closeSync();
+      }
+      try {
+        tmp.renameSync(target.path);
+      } on FileSystemException {
+        if (target.existsSync()) target.deleteSync();
+        tmp.renameSync(target.path);
+      }
+    } finally {
+      try {
+        if (tmp.existsSync()) tmp.deleteSync();
+      } catch (_) {}
+    }
+  }
+
+  /// 文本内容原子写（清单用）。
+  void _writeTextAtomically(File target, String text) {
     final String stamp = DateTime.now().microsecondsSinceEpoch.toString();
     final File tmp = File('${target.path}.$stamp.tmp');
     try {

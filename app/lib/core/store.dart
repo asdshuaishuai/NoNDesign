@@ -43,6 +43,7 @@ import 'music/music_project.dart';
 import 'nonapp_library.dart';
 import 'portfolio_entries.dart';
 import 'toast_service.dart';
+import 'video/video_short_evidence.dart';
 import 'video3d/video3d_evidence.dart';
 import 'video3d/video3d_project.dart';
 import 'video_project.dart';
@@ -1282,6 +1283,34 @@ class AppStore extends ChangeNotifier {
     if (identical(_video3dCaptureRunner, runner)) {
       _video3dCaptureRunner = null;
     }
+  }
+
+  /// 引擎短片抓帧运行器：视频工作台在短片预览面就绪时注册、关闭/卸载即注销。
+  VideoShortCaptureRunner? _videoShortCaptureRunner;
+
+  void registerVideoShortCaptureRunner(VideoShortCaptureRunner runner) {
+    _videoShortCaptureRunner = runner;
+  }
+
+  void unregisterVideoShortCaptureRunner(VideoShortCaptureRunner runner) {
+    if (identical(_videoShortCaptureRunner, runner)) {
+      _videoShortCaptureRunner = null;
+    }
+  }
+
+  /// 短片抓帧入口（工具用）：没注册 = 没有打开的短片预览 → 显性失败。
+  Future<List<VideoShortFrameEvidence>> captureVideoShortFrames(
+    String project,
+    List<int> frames,
+  ) {
+    final VideoShortCaptureRunner? runner = _videoShortCaptureRunner;
+    if (runner == null) {
+      throw const VideoShortEvidenceError(
+        videoShortCaptureUnavailableCode,
+        '抓帧需要先在视频工作台打开这个引擎短片',
+      );
+    }
+    return runner(project, frames);
   }
 
   /// 抓帧入口（工具/工作台按钮共用）：没注册就显性失败。
@@ -4643,6 +4672,7 @@ class AppStore extends ChangeNotifier {
                     ),
                 threeWorkspaceEvent: applyThreeWorkspaceEvent,
                 video3dCaptureRunner: captureVideo3dFrames,
+                videoShortCaptureRunner: captureVideoShortFrames,
                 creativeJudgeRunner:
                     ({
                       required String brief,

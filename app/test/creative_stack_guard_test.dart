@@ -554,6 +554,7 @@ void main() {
         'video_short_list',
         'video_short_status',
         'video_short_create',
+        'video_short_render_frames',
         'creative_judge',
       ];
       for (final String name in tools) {
@@ -570,6 +571,14 @@ void main() {
         'video_short_exists',
         'video_short_unverified',
         'video_short_io_error',
+        'video_short_capture_unavailable',
+        'video_short_capture_timeout',
+        'video_short_capture_failed',
+        'video_short_frames_out_of_range',
+        'video_short_evidence_empty',
+        'video_short_evidence_format',
+        'video_short_evidence_too_large',
+        'video_short_evidence_limit',
       ]) {
         expect(
           agentSource,

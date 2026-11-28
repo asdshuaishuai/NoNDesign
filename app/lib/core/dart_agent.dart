@@ -75,6 +75,7 @@ import 'three_service.dart';
 import 'video_project.dart';
 import 'video_samples.dart';
 import 'video_service.dart';
+import 'video/video_short_evidence.dart';
 import 'video/video_short_project.dart';
 import 'video/video_screenplay.dart';
 import 'video3d/video3d_compile.dart';
@@ -519,6 +520,8 @@ String toolLabel(String tool) {
       return '视频 · 引擎短片查看';
     case 'video_short_create':
       return '视频 · 引擎短片新建';
+    case 'video_short_render_frames':
+      return '视频 · 引擎短片抓帧';
     case 'nonapp_list':
       return '应用包';
     case 'nonapp_inspect':
@@ -749,6 +752,23 @@ String toolFailureMessage(String? rawError) {
       return '剧本没有通过校验，按问题清单改好再保存';
     case 'video_short_io_error':
       return '引擎短片项目没有保存成功，请检查磁盘空间后重试';
+    // 引擎短片抓帧（帧证据）的稳定失败码。
+    case 'video_short_capture_unavailable':
+      return '抓帧需要先在视频工作台打开这个引擎短片';
+    case 'video_short_capture_timeout':
+      return '这一帧等超时了，请重试';
+    case 'video_short_capture_failed':
+      return '抓帧没有完成，请重试';
+    case 'video_short_frames_out_of_range':
+      return '要抓的帧号不在这个项目的范围内';
+    case 'video_short_evidence_empty':
+      return '这一帧没有画面数据，请重试';
+    case 'video_short_evidence_format':
+      return '帧证据数据不完整，请重试';
+    case 'video_short_evidence_too_large':
+      return '这一帧的画面数据太大';
+    case 'video_short_evidence_limit':
+      return '一次抓帧的数量或总量超过上限，分几批再抓';
     case 'nonapp_unavailable':
       return '应用包暂时不可用';
     case 'figma_unavailable':
@@ -974,6 +994,13 @@ abstract class AgentWorkspaceServices {
     required Map<String, dynamic> screenplay,
   });
 
+  /// 引擎短片抓帧：调工作台已打开的短片预览面渲染目标帧 → PNG →
+  /// 写 `artifacts/renders/` + 清单。预览没打开时显性失败（不写空白文件）。
+  Future<Map<String, dynamic>> videoShortRenderFrames({
+    required String name,
+    required List<int> frames,
+  });
+
   // -- 音乐编曲（score.json 是唯一事实源；契约见 docs/music-contract.md §7）--
   /// 列本机音乐项目（名称/标题/轨道数/小节数/校验状态）。
   Future<Map<String, dynamic>> musicList();
@@ -1031,6 +1058,7 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
     VideoProjectStore? videoProjects,
     Video3dProjectStore? video3dProjects,
     VideoShortProjectStore? videoShortProjects,
+    this.videoShortCaptureRunner,
     this.video3dCaptureRunner,
     MusicProjectStore? musicProjects,
     FigmaExporter? figma,
@@ -1058,6 +1086,9 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
 
   /// 3D 视频抓帧运行器：由工作台在预览面就绪时注册；null = 预览没打开。
   final Video3dCaptureRunner? video3dCaptureRunner;
+
+  /// 引擎短片抓帧运行器：由视频工作台在短片预览就绪时注册；null = 没打开。
+  final VideoShortCaptureRunner? videoShortCaptureRunner;
 
   final Future<ThreeService> Function() _threeFactory;
   final Future<HotAppService> Function() _hotAppFactory;
@@ -1897,6 +1928,98 @@ class LocalWorkspaceServices implements AgentWorkspaceServices {
       return _failure(
         'video3d_io_error',
         toolFailureMessage('video3d_io_error'),
+        '$error',
+      );
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoShortRenderFrames({
+    required String name,
+    required List<int> frames,
+  }) async {
+    if (frames.isEmpty) {
+      return _failure(
+        videoShortFramesOutOfRangeCode,
+        toolFailureMessage(videoShortFramesOutOfRangeCode),
+      );
+    }
+    final List<int> requested = frames.toSet().toList()..sort();
+    if (requested.length > videoShortEvidenceMaxFrames) {
+      return _failure(
+        videoShortEvidenceLimitCode,
+        toolFailureMessage(videoShortEvidenceLimitCode),
+        '${requested.length} > $videoShortEvidenceMaxFrames',
+      );
+    }
+    final VideoShortCaptureRunner? runner = videoShortCaptureRunner;
+    if (runner == null) {
+      return _failure(
+        videoShortCaptureUnavailableCode,
+        toolFailureMessage(videoShortCaptureUnavailableCode),
+      );
+    }
+    int totalFrames;
+    try {
+      final VideoShortProjectSnapshot snapshot = await _videoShortProjects.read(
+        name,
+      );
+      totalFrames = snapshot.verification.verified
+          ? snapshot.screenplay!.totalFrames
+          : 0;
+    } on VideoShortProjectFailure catch (error) {
+      final String code = 'video_short_${error.code}';
+      return _failure(code, toolFailureMessage(code), error.detail);
+    }
+    if (totalFrames <= 0) {
+      return _failure(
+        videoShortEvidenceFormatCode,
+        toolFailureMessage(videoShortEvidenceFormatCode),
+        '项目还没有可编译的帧表',
+      );
+    }
+    for (final int frame in requested) {
+      if (frame < 0 || frame > totalFrames - 1) {
+        return _failure(
+          videoShortFramesOutOfRangeCode,
+          toolFailureMessage(videoShortFramesOutOfRangeCode),
+          'frame=$frame 不在 0..${totalFrames - 1}',
+        );
+      }
+    }
+    try {
+      final List<VideoShortFrameEvidence> evidence = await runner(
+        name,
+        requested,
+      );
+      final VideoShortRendersManifest manifest = await _videoShortProjects
+          .writeRenders(name, evidence);
+      return <String, dynamic>{
+        'ok': true,
+        'project': name,
+        'renderer': manifest.renderer,
+        'vfx': manifest.vfx,
+        'count': manifest.count,
+        'total_bytes': manifest.totalBytes,
+        'manifest': VideoShortProjectStore.rendersManifestFile,
+        'frames': <dynamic>[
+          for (final VideoShortRenderEntry entry in manifest.frames)
+            <String, dynamic>{
+              'frame': entry.frame,
+              'file': entry.file,
+              'bytes': entry.bytes,
+            },
+        ],
+      };
+    } on VideoShortEvidenceError catch (error) {
+      return _failure(error.code, toolFailureMessage(error.code), error.detail);
+    } on VideoShortProjectFailure catch (error) {
+      final String code = 'video_short_${error.code}';
+      return _failure(code, toolFailureMessage(code), error.detail);
+    } catch (error) {
+      return _failure(
+        videoShortCaptureFailedCode,
+        toolFailureMessage(videoShortCaptureFailedCode),
         '$error',
       );
     }
@@ -5560,6 +5683,54 @@ ToolSet _buildTools(_Ctx ctx, Genkit ai) {
         return workspace.videoShortCreate(
           name: str(args, 'name'),
           screenplay: raw.cast<String, dynamic>(),
+        );
+      },
+    );
+
+    addWorkspaceTool(
+      'video_short_render_frames',
+      'Capture PNG frame evidence from the OPEN engine-short preview (video workbench): '
+          'renders the exact integer frames you name and writes '
+          'artifacts/renders/frame-NNNN.png plus a deterministic manifest '
+          '(artifacts/renders/renders.json). Frames are validated against this project '
+          '(out-of-range refused, duplicates collapsed). Evidence only — screenplay.json '
+          'is never modified. If no short project preview is open it fails explicitly, '
+          'so open that project in the video workbench first.',
+      const <String, dynamic>{
+        'name': {'type': 'string', 'description': 'Project name (a-z0-9_-)'},
+        'frames': {
+          'type': 'array',
+          'items': {'type': 'integer'},
+          'description': 'Integer frame indices (0-based), at most 120',
+        },
+      },
+      const <String>['name', 'frames'],
+      (args) {
+        final raw = args['frames'];
+        if (raw is! List || raw.isEmpty) {
+          return Future.value(<String, dynamic>{
+            'ok': false,
+            'error': videoShortFramesOutOfRangeCode,
+            'message': toolFailureMessage(videoShortFramesOutOfRangeCode),
+          });
+        }
+        final List<int> frames = <int>[];
+        for (final Object? item in raw) {
+          final int? value = item is int
+              ? item
+              : (item is num ? item.toInt() : int.tryParse('$item'));
+          if (value == null || value < 0) {
+            return Future.value(<String, dynamic>{
+              'ok': false,
+              'error': videoShortFramesOutOfRangeCode,
+              'message': toolFailureMessage(videoShortFramesOutOfRangeCode),
+            });
+          }
+          frames.add(value);
+        }
+        return workspace.videoShortRenderFrames(
+          name: str(args, 'name'),
+          frames: frames,
         );
       },
     );

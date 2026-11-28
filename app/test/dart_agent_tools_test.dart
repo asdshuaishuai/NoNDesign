@@ -324,6 +324,19 @@ class _FakeWorkspace implements AgentWorkspaceServices {
 
   // -- 3D 视频（video3d_list / video3d_status / video3d_create）--
   String? lastVideoShortName;
+  List<int>? lastVideoShortFrames;
+  Map<String, dynamic> videoShortRenderFramesResult = <String, dynamic>{
+    'ok': true,
+    'project': 'short',
+    'renderer': 'phaser4_canvas',
+    'vfx': 'pixelfx_pixels',
+    'count': 1,
+    'total_bytes': 69,
+    'manifest': 'artifacts/renders/renders.json',
+    'frames': <dynamic>[
+      <String, dynamic>{'frame': 0, 'file': 'frame-0000.png', 'bytes': 69},
+    ],
+  };
   Map<String, dynamic>? lastVideoShortScreenplay;
   Map<String, dynamic> videoShortListResult = <String, dynamic>{
     'ok': true,
@@ -792,6 +805,17 @@ class _FakeWorkspace implements AgentWorkspaceServices {
   Future<Map<String, dynamic>> videoShortStatus(String name) async {
     calls.add('video_short_status:$name');
     return Map<String, dynamic>.from(videoShortStatusResult);
+  }
+
+  @override
+  Future<Map<String, dynamic>> videoShortRenderFrames({
+    required String name,
+    required List<int> frames,
+  }) async {
+    calls.add('video_short_render_frames:$name:${frames.join(',')}');
+    lastVideoShortName = name;
+    lastVideoShortFrames = List<int>.from(frames);
+    return Map<String, dynamic>.from(videoShortRenderFramesResult);
   }
 
   @override

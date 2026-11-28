@@ -41,6 +41,7 @@ import '../core/workbench_layout.dart';
 import '../core/toast_service.dart';
 import '../core/video_clip.dart';
 import '../core/video/video_screenplay.dart';
+import '../core/video/video_short_evidence.dart';
 import '../core/video/video_short_project.dart';
 import '../core/video_project.dart';
 import '../core/video_service.dart';
@@ -134,6 +135,10 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   VideoShortPreviewController? _shortPreview;
   bool _shortBusy = false;
   String _shortFailure = '';
+
+  /// 短片抓帧运行器（注册进 AppStore 供 `video_short_render_frames` 用）；
+  /// 只对当前打开的项目有效，关闭/卸载即注销。
+  VideoShortCaptureRunner? _shortCaptureRunner;
 
   /// 通用检查器控制器（导演台选中镜头 → 右侧「检查」tab 的可编辑属性表）。
   ///
@@ -303,6 +308,7 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
     _clearCheckControllerOnDispose();
     _appStore = null;
     _releaseClipPlayback();
+    _unregisterShortCapture();
     _shortPreview?.dispose();
     _shortPreview = null;
     _previewController.dispose();
@@ -1300,6 +1306,39 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
   VideoShortProjectStore get _shortStore =>
       widget.shortProjectStore ?? VideoShortProjectStore.instance;
 
+  /// 注册短片抓帧运行器：只认当前打开的项目名（别拿别的项目冒充取证源）。
+  void _registerShortCapture(String name, VideoShortPreviewController preview) {
+    final AppStore? appStore = _appStore;
+    _unregisterShortCapture();
+    if (appStore == null) return;
+    Future<List<VideoShortFrameEvidence>> runner(
+      String project,
+      List<int> frames,
+    ) async {
+      if (project != name) {
+        throw VideoShortEvidenceError(
+          videoShortCaptureUnavailableCode,
+          '抓帧需要先在视频工作台打开这个引擎短片',
+          'open=$name requested=$project',
+        );
+      }
+      return preview.captureFrames(frames);
+    }
+
+    _shortCaptureRunner = runner;
+    appStore.registerVideoShortCaptureRunner(runner);
+  }
+
+  /// 注销抓帧运行器（只注销自己注册的那个）。
+  void _unregisterShortCapture() {
+    final AppStore? appStore = _appStore;
+    final VideoShortCaptureRunner? runner = _shortCaptureRunner;
+    _shortCaptureRunner = null;
+    if (appStore != null && runner != null) {
+      appStore.unregisterVideoShortCaptureRunner(runner);
+    }
+  }
+
   /// 打开引擎短片项目：读盘 → 校验 → 建预览控制器 → 起播（与 v1 项目互斥）。
   Future<void> _openShortProject(String name) async {
     final String trimmed = name.trim();
@@ -1347,11 +1386,13 @@ class _VideoWorkspaceState extends State<VideoWorkspace> {
       _shortPreview = preview;
       _shortBusy = false;
     });
+    _registerShortCapture(trimmed, preview);
     unawaited(preview.start());
   }
 
   /// 关闭引擎短片：释放预览控制器（WebView 随之卸载），回到 v1 空态。
   void _closeShortProject() {
+    _unregisterShortCapture();
     final VideoShortPreviewController? preview = _shortPreview;
     _shortPreview = null;
     preview?.dispose();

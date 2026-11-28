@@ -19,6 +19,7 @@ import 'package:webview_all/webview_all.dart';
 import '../core/platform_capabilities.dart';
 import '../core/theme.dart';
 import '../core/video/video_screenplay.dart';
+import '../core/video/video_short_evidence.dart';
 import '../core/video/video_short_player.dart';
 
 /// 预览页内嵌的 Phaser 运行时（`build-manifest.json` 锁 sha256/字节）。
@@ -81,6 +82,21 @@ abstract class VideoShortPreviewController extends ChangeNotifier {
 
   /// 按整数帧 seek（页面 `renderFrame` 只由帧号决定）。
   Future<void> seekFrame(int frame);
+
+  /// 抓一帧证据（PNG）。默认实现 = 不支持抓帧（测试 Fake）；
+  /// 生产实现走页面 `capture(frame)` + 桥 `evidence`。
+  Future<List<VideoShortFrameEvidence>> captureFrames(List<int> frames) async {
+    throw const VideoShortEvidenceError(
+      videoShortCaptureUnavailableCode,
+      '当前预览面不支持抓帧',
+    );
+  }
+
+  /// 抓单帧；失败码与 [captureFrames] 相同。
+  Future<VideoShortFrameEvidence> captureFrame(int frame) async {
+    final List<VideoShortFrameEvidence> one = await captureFrames(<int>[frame]);
+    return one.single;
+  }
 }
 
 /// 生产实现：`webview_all` 控制器 + `NONSHORT` 桥 + 就绪/状态轮询。
@@ -119,6 +135,8 @@ class VideoShortWebPreview extends VideoShortPreviewController {
   String _renderer = '';
   String _vfxRenderer = '';
   String _pixelfxNote = '';
+  Completer<VideoShortFrameEvidence>? _captureWaiter;
+  int _captureExpectedFrame = -1;
   Timer? _stateTimer;
   DateTime _lastFrameNotify = DateTime.now();
 
@@ -257,6 +275,17 @@ class VideoShortWebPreview extends VideoShortPreviewController {
       await controller.loadHtmlString(html);
       await _waitUntilPlayerReady();
       if (_disposed) return;
+      // 命令面出现 ≠ bridge ready 已解析：渲染器/VFX/总帧数都在 ready 回执里，
+      // 等它到达再置 ready（否则宿主会读到空字符串/0 帧，等于撒谎）。
+      await _waitUntilBridgeReady();
+      if (_disposed) return;
+      if (_totalFrames <= 0) {
+        // 桥没回执也不能永远 0：总帧数有事实源（已校验剧本），据实兜底并留痕。
+        _totalFrames = screenplay.totalFrames;
+        _pixelfxNote = _pixelfxNote.isEmpty
+            ? '页面 ready 回执没有到达，帧数按剧本事实源兜底'
+            : _pixelfxNote;
+      }
       _ready = true;
       _playing = false;
       _loadError = '';
@@ -283,6 +312,16 @@ class VideoShortWebPreview extends VideoShortPreviewController {
       await Future<void>.delayed(videoShortPreviewReadyPollInterval);
     }
     throw StateError('预览页脚本没有在限定时间内就绪');
+  }
+
+  /// 等桥的 `ready` 回执（渲染器/VFX 面/总帧数都由它携带）。
+  Future<void> _waitUntilBridgeReady() async {
+    final DateTime deadline = DateTime.now().add(readyTimeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (_disposed) return;
+      if (_totalFrames > 0 || _renderer.isNotEmpty) return;
+      await Future<void>.delayed(videoShortPreviewReadyPollInterval);
+    }
   }
 
   void _startStatePolling() {
@@ -354,6 +393,87 @@ class VideoShortWebPreview extends VideoShortPreviewController {
     await _run('$videoShortPreviewHostObject.seekFrame($_frame)');
   }
 
+  @override
+  Future<List<VideoShortFrameEvidence>> captureFrames(List<int> frames) async {
+    if (frames.isEmpty) {
+      throw const VideoShortEvidenceError(
+        videoShortEvidenceEmptyCode,
+        '没有要抓的帧',
+      );
+    }
+    if (frames.length > videoShortEvidenceMaxFrames) {
+      throw VideoShortEvidenceError(
+        videoShortEvidenceLimitCode,
+        '一次抓帧数量超过上限',
+        '${frames.length} > $videoShortEvidenceMaxFrames',
+      );
+    }
+    if (!ready || _controller == null) {
+      throw const VideoShortEvidenceError(
+        videoShortCaptureUnavailableCode,
+        '预览还没有就绪，不能抓帧',
+      );
+    }
+    final List<VideoShortFrameEvidence> collected = <VideoShortFrameEvidence>[];
+    for (final int frame in frames) {
+      collected.add(await _captureOne(frame));
+    }
+    checkVideoShortEvidenceBudget(collected);
+    return collected;
+  }
+
+  Future<VideoShortFrameEvidence> _captureOne(int frame) async {
+    final WebViewController? controller = _controller;
+    final int target = _clampFrame(frame);
+    if (controller == null) {
+      throw const VideoShortEvidenceError(
+        videoShortCaptureUnavailableCode,
+        '预览还没有就绪，不能抓帧',
+      );
+    }
+    if (_captureWaiter != null && !_captureWaiter!.isCompleted) {
+      throw const VideoShortEvidenceError(
+        videoShortCaptureFailedCode,
+        '上一帧还没抓完，不能并发抓帧',
+      );
+    }
+    final Completer<VideoShortFrameEvidence> completer =
+        Completer<VideoShortFrameEvidence>();
+    // 页面可能同步回执：先标记已处理，真正的抛出仍走下面的 await。
+    completer.future.ignore();
+    _captureWaiter = completer;
+    _captureExpectedFrame = target;
+    try {
+      await controller.runJavaScript(
+        '$videoShortPreviewHostObject && '
+        '$videoShortPreviewHostObject.capture && '
+        '$videoShortPreviewHostObject.capture($target)',
+      );
+    } catch (error) {
+      _clearCaptureWaiter();
+      throw VideoShortEvidenceError(
+        videoShortCaptureFailedCode,
+        '抓帧命令没有发出去',
+        '$error',
+      );
+    }
+    try {
+      return await completer.future.timeout(videoShortCaptureTimeout);
+    } on TimeoutException {
+      _clearCaptureWaiter();
+      throw VideoShortEvidenceError(
+        videoShortCaptureTimeoutCode,
+        '这一帧等超时了，可以重试',
+        'frame=$target',
+      );
+    }
+  }
+
+  void _clearCaptureWaiter() {
+    _captureWaiter = null;
+    _captureExpectedFrame = -1;
+  }
+
   void _handleBridgeMessage(JavaScriptMessage message) {
     handleBridgePayload(message.message);
   }
@@ -404,12 +524,51 @@ class VideoShortWebPreview extends VideoShortPreviewController {
         notifyListeners();
       case 'error':
         final String raw = '${decoded['message'] ?? ''}';
+        // 抓帧等待中收到页面错误：立刻失败，不让工具侧干等到超时。
+        final Completer<VideoShortFrameEvidence>? waiter = _captureWaiter;
+        if (waiter != null && !waiter.isCompleted) {
+          _clearCaptureWaiter();
+          waiter.completeError(
+            VideoShortEvidenceError(
+              videoShortCaptureFailedCode,
+              '页面没能给出这一帧',
+              raw.isEmpty ? 'page error' : raw,
+            ),
+          );
+        }
         _stateTimer?.cancel();
         _stateTimer = null;
         _playing = false;
         _loadError = videoShortPageErrorMessage(raw);
         _technicalDetail = raw.isEmpty ? '页面报告了未知错误' : raw;
         notifyListeners();
+      case 'evidence':
+        final int? frame = _readInt(decoded['frame']);
+        final Completer<VideoShortFrameEvidence>? waiter = _captureWaiter;
+        if (frame == null ||
+            waiter == null ||
+            waiter.isCompleted ||
+            frame != _captureExpectedFrame) {
+          // 没有等待者 / 帧号对不上（可能是超时后的迟到消息）：忽略，不猜。
+          return;
+        }
+        final String renderer = '${decoded['renderer'] ?? ''}';
+        final String vfx = '${decoded['vfx'] ?? ''}';
+        _clearCaptureWaiter();
+        try {
+          waiter.complete(
+            VideoShortFrameEvidence(
+              frame: frame,
+              bytes: decodeVideoShortEvidenceDataUrl(
+                '${decoded['data_url'] ?? ''}',
+              ),
+              renderer: renderer,
+              vfx: vfx,
+            ),
+          );
+        } on VideoShortEvidenceError catch (error) {
+          waiter.completeError(error);
+        }
       default:
         return;
     }
